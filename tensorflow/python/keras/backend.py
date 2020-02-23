@@ -257,9 +257,29 @@ def reset_uids():
 
 @keras_export('keras.backend.clear_session')
 def clear_session():
-  """Destroys the current TF graph and creates a new one.
+  """Destroys the current TF graph and session, and creates a new one.
 
-  Useful to avoid clutter from old models / layers.
+  Calling clear_session() releases the global graph state that Keras is
+  holding on to; resets the counters used for naming layers and
+  variables in Keras; and resets the learning phase. This helps avoid clutter
+  from old models and layers, especially when memory is limited, and a
+  common use-case for clear_session is releasing memory when building models
+  and layers in a loop.
+
+  >>> import tensorflow as tf
+  >>> layers = [tf.keras.layers.Dense(10) for _ in range(10)]
+  >>> new_layer = tf.keras.layers.Dense(10)
+  >>> print(new_layer.name)
+  dense_10
+  >>> tf.keras.backend.set_learning_phase(1)
+  >>> print(tf.keras.backend.learning_phase())
+  1
+  >>> tf.keras.backend.clear_session()
+  >>> new_layer = tf.keras.layers.Dense(10)
+  >>> print(new_layer.name)
+  dense
+  >>> print(tf.keras.backend.learning_phase())
+  0
   """
   global _SESSION
   global _GRAPH_LEARNING_PHASES  # pylint: disable=global-variable-not-assigned
@@ -5644,16 +5664,21 @@ def bias_add(x, bias, data_format=None):
 def random_normal(shape, mean=0.0, stddev=1.0, dtype=None, seed=None):
   """Returns a tensor with normal distribution of values.
 
+  It is an alias to `tf.random.normal`.
+
   Arguments:
       shape: A tuple of integers, the shape of tensor to create.
-      mean: A float, mean of the normal distribution to draw samples.
-      stddev: A float, standard deviation of the normal distribution
-          to draw samples.
-      dtype: String, dtype of returned tensor.
-      seed: Integer, random seed.
+      mean: A float, the mean value of the normal distribution to draw samples.
+        Default to 0.0.
+      stddev: A float, the standard deviation of the normal distribution
+        to draw samples. Default to 1.0.
+      dtype: `tf.dtypes.DType`, dtype of returned tensor. Default to use Keras
+        backend dtype which is float32.
+      seed: Integer, random seed. Will use a random numpy integer when not
+        specified.
 
   Returns:
-      A tensor.
+      A tensor with normal distribution of values.
   """
   if dtype is None:
     dtype = floatx()
