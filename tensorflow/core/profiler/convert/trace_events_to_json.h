@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The TensorFlow Authors All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,23 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PROFILER_CONVERT_XPLANE_TO_TRACE_EVENTS_H_
-#define TENSORFLOW_CORE_PROFILER_CONVERT_XPLANE_TO_TRACE_EVENTS_H_
+#ifndef TENSORFLOW_CORE_PROFILER_CONVERT_TRACE_EVENTS_TO_JSON_H_
+#define TENSORFLOW_CORE_PROFILER_CONVERT_TRACE_EVENTS_TO_JSON_H_
 
-#include "absl/strings/str_split.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow/core/profiler/protobuf/xplane.pb.h"
 #include "tensorflow/core/protobuf/trace_events.pb.h"
 
 namespace tensorflow {
 namespace profiler {
 
-void ConvertXSpaceToTraceEvents(const XSpace& xspace, Trace* trace);
-
-// Not Public API, Testing only.
-void MaybeDropEventsForTraceViewer(Trace* trace, uint32 limit);
+// Converts trace events in the trace proto to a JSON string that can be
+// consumed by catapult trace viewer.
+string TraceEventsToJson(const Trace &trace);
 
 }  // namespace profiler
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_CORE_PROFILER_CONVERT_XPLANE_TO_TRACE_EVENTS_H_
+#endif  // TENSORFLOW_CORE_PROFILER_CONVERT_TRACE_EVENTS_TO_JSON_H_
