@@ -27,118 +27,6 @@ limitations under the License.
 
 namespace tensorflow {
 
-Status GetWindowedOutputSizeVerboseV2(int64 input_size, int64 filter_size,
-                                      int64 dilation_rate, int64 stride,
-                                      Padding padding_type, int64* output_size,
-                                      int64* padding_before,
-                                      int64* padding_after) {
-  if (stride <= 0) {
-    return errors::InvalidArgument("Stride must be > 0, but got ", stride);
-  }
-  if (dilation_rate < 1) {
-    return errors::InvalidArgument("Dilation rate must be >= 1, but got ",
-                                   dilation_rate);
-  }
-
-  // See also the parallel implementation in GetWindowedOutputSizeFromDimsV2.
-  int64 effective_filter_size = (filter_size - 1) * dilation_rate + 1;
-  switch (padding_type) {
-    case Padding::VALID:
-      *output_size = (input_size - effective_filter_size + stride) / stride;
-      *padding_before = *padding_after = 0;
-      break;
-    case Padding::EXPLICIT:
-      *output_size = (input_size + *padding_before + *padding_after -
-                      effective_filter_size + stride) /
-                     stride;
-      break;
-    case Padding::SAME:
-      *output_size = (input_size + stride - 1) / stride;
-      const int64 padding_needed =
-          std::max(int64{0}, (*output_size - 1) * stride +
-                                 effective_filter_size - input_size);
-      // For odd values of total padding, add more padding at the 'right'
-      // side of the given dimension.
-      *padding_before = padding_needed / 2;
-      *padding_after = padding_needed - *padding_before;
-      break;
-  }
-  if (*output_size < 0) {
-    return errors::InvalidArgument(
-        "Computed output size would be negative: ", *output_size,
-        " [input_size: ", input_size,
-        ", effective_filter_size: ", effective_filter_size,
-        ", stride: ", stride, "]");
-  }
-  return Status::OK();
-}
-
-Status GetWindowedOutputSizeVerbose(int64 input_size, int64 filter_size,
-                                    int64 stride, Padding padding_type,
-                                    int64* output_size, int64* padding_before,
-                                    int64* padding_after) {
-  return GetWindowedOutputSizeVerboseV2(input_size, filter_size,
-                                        /*dilation_rate=*/1, stride,
-                                        padding_type, output_size,
-                                        padding_before, padding_after);
-}
-
-Status GetWindowedOutputSize(int64 input_size, int64 filter_size, int64 stride,
-                             Padding padding_type, int64* output_size,
-                             int64* padding_size) {
-  if (padding_type == Padding::EXPLICIT) {
-    return errors::Internal(
-        "GetWindowedOutputSize does not handle EXPLICIT padding; call "
-        "GetWindowedOutputSizeVerbose instead");
-  }
-  int64 padding_after_unused;
-  return GetWindowedOutputSizeVerbose(input_size, filter_size, stride,
-                                      padding_type, output_size, padding_size,
-                                      &padding_after_unused);
-}
-
-Status GetWindowedOutputSizeV2(int64 input_size, int64 filter_size,
-                               int64 dilation_rate, int64 stride,
-                               Padding padding_type, int64* output_size,
-                               int64* padding_size) {
-  if (padding_type == Padding::EXPLICIT) {
-    return errors::Internal(
-        "GetWindowedOutputSizeV2 does not handle EXPLICIT padding; call "
-        "GetWindowedOutputSizeVerboseV2 instead");
-  }
-  int64 padding_after_unused;
-  return GetWindowedOutputSizeVerboseV2(input_size, filter_size, dilation_rate,
-                                        stride, padding_type, output_size,
-                                        padding_size, &padding_after_unused);
-}
-
-Status Get3dOutputSize(const std::array<int64, 3>& input,
-                       const std::array<int64, 3>& window,
-                       const std::array<int64, 3>& strides,
-                       Padding padding_type, std::array<int64, 3>* output_ptr,
-                       std::array<int64, 3>* padding_ptr) {
-  for (size_t i = 0; i < input.size(); ++i) {
-    TF_RETURN_IF_ERROR(GetWindowedOutputSize(input[i], window[i], strides[i],
-                                             padding_type, &(*output_ptr)[i],
-                                             &(*padding_ptr)[i]));
-  }
-  return Status::OK();
-}
-
-Status Get3dOutputSizeV2(const std::array<int64, 3>& input,
-                         const std::array<int64, 3>& window,
-                         const std::array<int64, 3>& dilations,
-                         const std::array<int64, 3>& strides,
-                         Padding padding_type, std::array<int64, 3>* output_ptr,
-                         std::array<int64, 3>* padding_ptr) {
-  for (size_t i = 0; i < input.size(); ++i) {
-    TF_RETURN_IF_ERROR(GetWindowedOutputSizeV2(
-        input[i], window[i], dilations[i], strides[i], padding_type,
-        &(*output_ptr)[i], &(*padding_ptr)[i]));
-  }
-  return Status::OK();
-}
-
 namespace shape_inference {
 
 // The V2 version computes windowed output size with arbitrary dilation_rate,
@@ -931,6 +819,78 @@ Status Conv3DShape(shape_inference::InferenceContext* c) {
                                  output_cols, output_depth_dim});
   }
   c->set_output(0, output_shape);
+  return Status::OK();
+}
+
+Status Conv2DBackpropInputShape(shape_inference::InferenceContext* c) {
+  string data_format_str;
+  if (!c->GetAttr("data_format", &data_format_str).ok()) {
+    data_format_str = "NHWC";
+  }
+  TensorFormat data_format;
+  if (!FormatFromString(data_format_str, &data_format)) {
+    return errors::InvalidArgument("Invalid data format string: ",
+                                   data_format_str);
+  }
+
+  // For the rest of this function, output_grad_* describes out_backprop and
+  // input_grad_* describes in_backprop.
+  ShapeHandle output_grad_shape = c->input(2);
+  TF_RETURN_IF_ERROR(c->WithRank(output_grad_shape, 4, &output_grad_shape));
+  ShapeHandle filter_shape = c->input(1);
+  TF_RETURN_IF_ERROR(c->WithRank(filter_shape, 4, &filter_shape));
+
+  DimensionHandle batch_size_dim;
+  DimensionHandle output_grad_depth_dim;
+  gtl::InlinedVector<DimensionHandle, 2> output_grad_spatial_dims(2);
+  TF_RETURN_IF_ERROR(DimensionsFromShape(
+      output_grad_shape, data_format, &batch_size_dim,
+      absl::MakeSpan(output_grad_spatial_dims), &output_grad_depth_dim, c));
+  DimensionHandle unused;
+  TF_RETURN_IF_ERROR(
+      c->Merge(output_grad_depth_dim, c->Dim(filter_shape, 3), &unused));
+
+  ShapeHandle specified_input_grad_shape;
+  TF_RETURN_IF_ERROR(
+      c->MakeShapeFromShapeTensor(0, &specified_input_grad_shape));
+  if (c->Rank(specified_input_grad_shape) == InferenceContext::kUnknownRank) {
+    TF_RETURN_IF_ERROR(c->WithRank(specified_input_grad_shape, 4,
+                                   &specified_input_grad_shape));
+  }
+
+  // input_grad_depth_dim doesn't equal c->Dim(filter_shape,2) when the number
+  // of groups is larger than 1. If input_sizes is a 4D shape, we collect
+  // input_grad_depth_dim from input_sizes; otherwise we compute it as
+  // c->Dim(filter_shape,2).
+  DimensionHandle input_grad_depth_dim;
+  gtl::InlinedVector<DimensionHandle, 2> specified_input_grad_spatial_dims(2);
+  int specified_input_grad_rank = c->Rank(specified_input_grad_shape);
+  if (specified_input_grad_rank == 4) {
+    DimensionHandle specified_batch_size_dim;
+    TF_RETURN_IF_ERROR(DimensionsFromShape(
+        specified_input_grad_shape, data_format, &specified_batch_size_dim,
+        absl::MakeSpan(specified_input_grad_spatial_dims),
+        &input_grad_depth_dim, c));
+    TF_RETURN_IF_ERROR(
+        c->Merge(specified_batch_size_dim, batch_size_dim, &unused));
+  } else if (specified_input_grad_rank == 2) {
+    specified_input_grad_spatial_dims[0] =
+        c->Dim(specified_input_grad_shape, 0);
+    specified_input_grad_spatial_dims[1] =
+        c->Dim(specified_input_grad_shape, 1);
+    input_grad_depth_dim = c->Dim(filter_shape, 2);
+  } else {
+    return errors::InvalidArgument(
+        "Conv2DBackpropInput requires input_sizes to contain 4 values or 2 "
+        "values, but got: ",
+        specified_input_grad_rank);
+  }
+
+  ShapeHandle input_grad_shape;
+  TF_RETURN_IF_ERROR(ShapeFromDimensions(
+      batch_size_dim, specified_input_grad_spatial_dims, input_grad_depth_dim,
+      data_format, c, &input_grad_shape));
+  c->set_output(0, input_grad_shape);
   return Status::OK();
 }
 
