@@ -52,6 +52,9 @@ std::unique_ptr<OpPassBase<FuncOp>> CreateBatchMatMulToEinsumPass();
 // Optimizes Tensorflow graph.
 std::unique_ptr<OpPassBase<FuncOp>> CreateTFOptimizePass();
 
+// Performs specific fusion for GPU targets.
+std::unique_ptr<OpPassBase<FuncOp>> CreateGpuOpFusionPass();
+
 struct LayoutOptimizationPipelineOptions
     : public PassPipelineOptions<LayoutOptimizationPipelineOptions> {
   Option<std::string> force_data_format{
@@ -246,6 +249,9 @@ namespace tf_saved_model {
 
 // Creates a pass that optimizes tf_saved_model.global_tensor ops.
 std::unique_ptr<OpPassBase<ModuleOp>> CreateOptimizeGlobalTensorsPass();
+
+// Creates a pass that freezes tf_saved_model.global_tensor ops.
+std::unique_ptr<OpPassBase<ModuleOp>> CreateFreezeGlobalTensorsPass();
 
 // Creates a pass that uses tf_saved_model dialect linkage information
 // to mark function visibility. That is, exported functions are marked with
