@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""An internal class for representing the partition in a ragged tensor."""
+"""A class used to partition a sequence into contiguous subsequences ("rows").
+"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -32,54 +33,66 @@ from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops.ragged import segment_id_ops
 
-# pylint: disable=protected-access
-_eval_using_default_session = ops._eval_using_default_session
-# pylint: enable=protected-access
-
 #===============================================================================
 # RowPartition
 #===============================================================================
 
 
 class RowPartition(object):
-  """Represents the partition of a ragged tensor.
+  """Partitioning of a sequence of values into contiguous subsequences ("rows").
 
-  In particular, this provides a ragged representation to a flat list,
-  or a deeper ragged representation of a ragged tensor. However, it does
-  not store the values or the substructure: only the top-level representation
-  is represented.
+  A `RowPartition` describes how a sequence with `nvals` items should be
+  divided into `nrows` contiguous subsequences ("rows").  For example, a
+  `RowPartition` could be used to partition the vector `[1, 2, 3, 4, 5]` into
+  subsequences `[[1, 2], [3], [], [4, 5]]`.  Note that `RowPartition` stores
+  information about how values are partitioned, but does not include the
+  partitioned values themselves.  `tf.RaggedTensor` is used to pair a `values`
+  tensor with one or more `RowPartition`s, providing a complete encoding for a
+  ragged tensor (i.e. a tensor with variable-length dimensions).
 
-  The canonical representation of a partition is row_splits, which indicates how
-  the flat values are divided into rows.  In particular, the values for row
-  `rt[i]` are stored in the slice
-  `rt.values[rt.row_splits[i]:rt.row_splits[i+1]]`.
+  `RowPartition`s may be defined using several different schemes:
 
-  ### Alternative Row-Partitioning Schemes
+    * `row_lengths`: an integer vector with shape `[nrows]`, which specifies
+      the length of each row.
 
-  In addition to `row_splits`, row partitions provide support for five other
-  partitioning schemes:
+    * `row_splits`: an integer vector with shape `[nrows+1]`, specifying the
+      "split points" between each row.
 
-    * `row_lengths`: a vector with shape `[nrows]`, which specifies the length
-      of each row.
+    * `row_starts`: an integer vector with shape `[nrows]`, which specifies
+      the start offset for each row.  Equivalent to `row_splits[:-1]`.
 
-    * `value_rowids` and `nrows`: `value_rowids` is a vector with shape
-      `[nvals]`, corresponding one-to-one with `values`, which specifies
-      each value's row index.  In particular, the row `rt[row]` consists of the
-      values `rt.values[j]` where `value_rowids[j]==row`.  `nrows` is an
-      integer scalar that specifies the number of rows in the
-      `RowPartition`. (`nrows` is used to indicate trailing empty rows.)
+    * `row_limits`: an integer vector with shape `[nrows]`, which specifies
+      the stop offset for each row.  Equivalent to `row_splits[1:]`.
 
-    * `row_starts` (and nvals): a vector with shape `[nrows]`, which specifies
-      the start offset of each row.  Equivalent to `row_splits[:-1]`.
+    * `value_rowids` is an integer vector with shape `[nvals]`, corresponding
+      one-to-one with sequence values, which specifies the row that each value
+      belongs to.  If the partition has empty trailing rows, then `nrows`
+      must also be specified.
 
-    * `row_limits`: a vector with shape `[nrows]`, which specifies the stop
-      offset of each row.  Equivalent to `row_splits[1:]`.
+    * `uniform_row_length` is an integer scalar, specifying the length of every
+      row.  This scheme may only be used if all rows have the same length.
 
-    * `uniform_row_length` (and nvals): A scalar tensor, specifying the length
-      of every row.  This row-partitioning scheme may only be used if all rows
-      have the same length.
+  For example, the following `RowPartition`s all represent the partitioning of
+  8 values into 5 sublists as follows: `[[*, *, *, *], [], [*, *, *], [*], []]`.
 
-  For examples, please see the documentation on RaggedTensor.
+  >>> p1 = RowPartition.from_row_lengths([4, 0, 3, 1, 0])
+  >>> p2 = RowPartition.from_row_splits([0, 4, 4, 7, 8, 8])
+  >>> p3 = RowPartition.from_row_starts([0, 4, 4, 7, 8], nvals=8)
+  >>> p4 = RowPartition.from_row_limits([4, 4, 7, 8, 8])
+  >>> p5 = RowPartition.from_value_rowids([0, 0, 0, 0, 2, 2, 2, 3], nrows=5)
+
+  For more information about each scheme, see the documentation for the
+  its factory method.  For additional examples, see the documentation on
+  `tf.RaggedTensor`.
+
+  ### Precomputed Encodings
+
+  `RowPartition` always stores at least one encoding of the partitioning, but
+  it can be configured to cache additional encodings as well.  This can
+  avoid unnecessary recomputation in eager mode.  (In graph mode, optimizations
+  such as common subexpression elimination will typically prevent these
+  unnecessary recomputations.)  To check which encodings are precomputed, use
+  `RowPartition.has_precomputed_<encoding>`.
   """
 
   #=============================================================================
@@ -87,12 +100,12 @@ class RowPartition(object):
   #=============================================================================
   def __init__(self,
                row_splits,
-               cached_row_lengths=None,
-               cached_value_rowids=None,
-               cached_nrows=None,
-               internal=False,
-               uniform_row_length=None):
-    """Creates a `RowPartition` with a specified partitioning for `values`.
+               row_lengths=None,
+               value_rowids=None,
+               nrows=None,
+               uniform_row_length=None,
+               internal=False):
+    """Creates a `RowPartition` from the specified encoding tensor(s).
 
     This constructor is private -- please use one of the following ops to
     build `RowPartition`s:
@@ -105,12 +118,12 @@ class RowPartition(object):
 
     Args:
       row_splits: A 1-D integer tensor with shape `[nrows+1]`.
-      cached_row_lengths: A 1-D integer tensor with shape `[nrows]`
-      cached_value_rowids: A 1-D integer tensor with shape `[nvals]`.
-      cached_nrows: A 1-D integer scalar tensor.
-      internal: True if the constructor is being called by one of the factory
-        methods.  If false, an exception will be raised.
+      row_lengths: A 1-D integer tensor with shape `[nrows]`
+      value_rowids: A 1-D integer tensor with shape `[nvals]`.
+      nrows: A 1-D integer scalar tensor.
       uniform_row_length: A scalar tensor.
+      internal: Private key value, required to ensure that this private
+        constructor is *only* called from the factory methods.
 
     Raises:
       TypeError: If a row partitioning tensor has an inappropriate dtype.
@@ -119,7 +132,7 @@ class RowPartition(object):
       ValueError: If multiple partitioning arguments are specified.
       ValueError: If nrows is specified but value_rowids is not None.
     """
-    if not internal:
+    if internal is not _row_partition_factory_key:
       raise ValueError("RaggedTensor constructor is private; please use one "
                        "of the factory methods instead (e.g., "
                        "RaggedTensor.from_row_lengths())")
@@ -139,15 +152,15 @@ class RowPartition(object):
     # Store any cached tensors.  These are used to avoid unnecessary
     # round-trip conversions when a RaggedTensor is constructed from
     # lengths or rowids, and we later want those lengths/rowids back.
-    for tensor in [cached_row_lengths, cached_value_rowids, cached_nrows]:
+    for tensor in [row_lengths, value_rowids, nrows]:
       if tensor is not None:
         if not isinstance(tensor, ops.Tensor):
           raise TypeError("Cached value must be a Tensor or None.")
         elif tensor.dtype not in (dtypes.int32, dtypes.int64):
           raise TypeError("Cached value must be int32 or int64.")
-    self._cached_row_lengths = cached_row_lengths
-    self._cached_value_rowids = cached_value_rowids
-    self._cached_nrows = cached_nrows
+    self._row_lengths = row_lengths
+    self._value_rowids = value_rowids
+    self._nrows = nrows
 
     if uniform_row_length is not None:
       if not isinstance(uniform_row_length, ops.Tensor):
@@ -164,27 +177,28 @@ class RowPartition(object):
   def from_value_rowids(cls,
                         value_rowids,
                         nrows=None,
-                        name=None,
                         validate=True,
                         preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `value_rowids`.
 
-    The implied `RaggedTensor` corresponds with the python list defined by:
+    This `RowPartition` divides a sequence `values` into rows by specifying
+    which row each value should be added to:
 
     ```python
-    result = [[values[i] for i in range(len(values)) if value_rowids[i] == row]
-              for row in range(nrows)]
-    ```
+    rows = [[] for _ in nrows]
+    for (value, rowid) in zip(values, value_rowids):
+      rows[rowid].append(value)
+    ``
 
     Args:
       value_rowids: A 1-D integer tensor with shape `[nvals]`, which corresponds
         one-to-one with `values`, and specifies each value's row index.  Must be
         nonnegative, and must be sorted in ascending order.
       nrows: An integer scalar specifying the number of rows.  This should be
-        specified if the `RaggedTensor` may containing empty training rows. Must
-        be greater than `value_rowids[-1]` (or zero if `value_rowids` is empty).
-        Defaults to `value_rowids[-1]` (or zero if `value_rowids` is empty).
-      name: A name prefix for the RaggedTensor (optional).
+        specified if the `RowPartition` may containing empty training rows. Must
+        be greater than `value_rowids[-1]` (or greater than or equal to zero if
+        `value_rowids` is empty). Defaults to `value_rowids[-1]` (or zero if
+        `value_rowids` is empty).
       validate: If true, then use assertions to check that the arguments form a
         valid `RowPartition`.
       preferred_dtype: The dtype to encode value_rowids if it doesn't already
@@ -205,7 +219,7 @@ class RowPartition(object):
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
-    with ops.name_scope(name, "RowPartitionFromValueRowIds",
+    with ops.name_scope(None, "RowPartitionFromValueRowIds",
                         [value_rowids, nrows]):
       value_rowids = cls._convert_row_partition(value_rowids, "value_rowids",
                                                 preferred_dtype)
@@ -264,33 +278,31 @@ class RowPartition(object):
         row_splits.set_shape([const_nrows + 1])
 
       return cls(
-          row_splits,
-          cached_row_lengths=row_lengths,
-          cached_value_rowids=value_rowids,
-          cached_nrows=nrows,
-          internal=True)
+          row_splits=row_splits,
+          row_lengths=row_lengths,
+          value_rowids=value_rowids,
+          nrows=nrows,
+          internal=_row_partition_factory_key)
 
   @classmethod
-  def from_row_splits(cls,
-                      row_splits,
-                      name=None,
-                      validate=True,
-                      preferred_dtype=None):
+  def from_row_splits(cls, row_splits, validate=True, preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `row_splits`.
 
-    A `RaggedTensor` constructed with this corresponds with the python list
-    defined by:
+    This `RowPartition` divides a sequence `values` into rows by indicating
+    where each row begins and ends:
 
     ```python
-    result = [values[row_splits[i]:row_splits[i + 1]]
-              for i in range(len(row_splits) - 1)]
+    rows = []
+    for i in range(len(row_splits) - 1):
+      row_start = row_splits[i]
+      row_end = row_splits[i + 1]
+      rows.append(values[row_start:row_end])
     ```
 
     Args:
       row_splits: A 1-D integer tensor with shape `[nrows+1]`.  Must not be
         empty, and must be sorted in ascending order.  `row_splits[0]` must be
         zero.
-      name: A name prefix for the RaggedTensor (optional).
       validate: If true, then use assertions to check that the arguments form a
         valid `RowPartition`.
       preferred_dtype: If row_splits has an unspecified type, use this one. If
@@ -301,16 +313,15 @@ class RowPartition(object):
 
     Raises:
       ValueError: If `row_splits` is an empty list.
-
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
     if isinstance(row_splits, (list, tuple)) and not row_splits:
       raise ValueError("row_splits tensor may not be empty.")
     if isinstance(row_splits, tensor_spec.TensorSpec):
-      return cls(row_splits=row_splits, internal=True)
+      return cls(row_splits=row_splits, internal=_row_partition_factory_key)
 
-    with ops.name_scope(name, "RowPartitionFromRowSplits", [row_splits]):
+    with ops.name_scope(None, "RowPartitionFromRowSplits", [row_splits]):
       row_splits = cls._convert_row_partition(row_splits, "row_splits",
                                               preferred_dtype)
       row_splits.shape.assert_has_rank(1)
@@ -325,28 +336,23 @@ class RowPartition(object):
         ]
         row_splits = control_flow_ops.with_dependencies(checks, row_splits)
 
-      return cls(row_splits=row_splits, internal=True)
+      return cls(row_splits=row_splits, internal=_row_partition_factory_key)
 
   @classmethod
-  def from_row_lengths(cls,
-                       row_lengths,
-                       name=None,
-                       validate=True,
-                       preferred_dtype=None):
+  def from_row_lengths(cls, row_lengths, validate=True, preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `row_lengths`.
 
-    A `RaggedTensor` constructed with this corresponds with the python list
-     defined by:
+    This `RowPartition` divides a sequence `values` into rows by indicating
+    the length of each row:
 
     ```python
-    result = [[values.pop(0) for i in range(length)]
-              for length in row_lengths]
+    rows = [[values.pop(0) for _ in range(length)]
+            for length in row_lengths]
     ```
 
     Args:
       row_lengths: A 1-D integer tensor with shape `[nrows]`.  Must be
         nonnegative.
-      name: A name prefix for the RowPartition (optional).
       validate: If true, then use assertions to check that the arguments form a
         valid `RowPartition`.
       preferred_dtype: If row_lengths has an unspecified type, use this one. If
@@ -357,7 +363,7 @@ class RowPartition(object):
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
-    with ops.name_scope(name, "RowPartitionFromRowLengths", [row_lengths]):
+    with ops.name_scope(None, "RowPartitionFromRowLengths", [row_lengths]):
       row_lengths = cls._convert_row_partition(row_lengths, "row_lengths",
                                                preferred_dtype)
       row_lengths.shape.assert_has_rank(1)
@@ -373,25 +379,25 @@ class RowPartition(object):
       row_limits = math_ops.cumsum(row_lengths)
       row_splits = array_ops.concat([[0], row_limits], axis=0)
       return cls(
-          row_splits=row_splits, cached_row_lengths=row_lengths, internal=True)
+          row_splits=row_splits,
+          row_lengths=row_lengths,
+          internal=_row_partition_factory_key)
 
   @classmethod
   def from_row_starts(cls,
                       row_starts,
                       nvals,
-                      name=None,
                       validate=True,
                       preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `row_starts`.
 
-    Equivalent to: `from_row_splits(concat([row_starts, nvals]))`.
+    Equivalent to: `from_row_splits(concat([row_starts, nvals], axis=0))`.
 
     Args:
       row_starts: A 1-D integer tensor with shape `[nrows]`.  Must be
         nonnegative and sorted in ascending order.  If `nrows>0`, then
         `row_starts[0]` must be zero.
       nvals: A scalar tensor indicating the number of values.
-      name: A name prefix for the RowPartition (optional).
       validate: If true, then use assertions to check that the arguments form a
         valid `RowPartition`.
       preferred_dtype: If row_limits has an unspecified type, use this one. If
@@ -402,7 +408,7 @@ class RowPartition(object):
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
-    with ops.name_scope(name, "RowPartitionFromRowStarts", [row_starts]):
+    with ops.name_scope(None, "RowPartitionFromRowStarts", [row_starts]):
       row_starts = cls._convert_row_partition(row_starts, "row_starts",
                                               preferred_dtype)
       row_starts.shape.assert_has_rank(1)
@@ -418,35 +424,28 @@ class RowPartition(object):
         row_starts = control_flow_ops.with_dependencies(checks, row_starts)
 
       row_splits = array_ops.concat([row_starts, [nvals]], axis=0)
-      return cls(row_splits=row_splits, internal=True)
-
-  def has_cached_value_rowids(self):
-    return self._cached_value_rowids is not None
+      return cls(row_splits=row_splits, internal=_row_partition_factory_key)
 
   @classmethod
-  def from_row_limits(cls,
-                      row_limits,
-                      name=None,
-                      validate=True,
-                      preferred_dtype=None):
+  def from_row_limits(cls, row_limits, validate=True, preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `row_limits`.
 
-    Equivalent to: `from_row_splits(values, concat([0, row_limits]))`.
+    Equivalent to: `from_row_splits(values, concat([0, row_limits], axis=0))`.
 
     Args:
       row_limits: A 1-D integer tensor with shape `[nrows]`.  Must be sorted in
         ascending order.
-      name: A name prefix for the RaggedTensor (optional).
       validate: If true, then use assertions to check that the arguments form a
         valid `RowPartition`.
       preferred_dtype: If row_limits has an unspecified type, use this one. If
         preferred_dtype is None, defaults to dtypes.int64.
+
     Returns:
       A `RowPartition`.
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
-    with ops.name_scope(name, "RowPartitionFromRowLimits", [row_limits]):
+    with ops.name_scope(None, "RowPartitionFromRowLimits", [row_limits]):
       row_limits = cls._convert_row_partition(row_limits, "row_limits",
                                               preferred_dtype)
       row_limits.shape.assert_has_rank(1)
@@ -462,44 +461,37 @@ class RowPartition(object):
 
       zero = array_ops.zeros([1], row_limits.dtype)
       row_splits = array_ops.concat([zero, row_limits], axis=0)
-      return cls(row_splits=row_splits, internal=True)
+      return cls(row_splits=row_splits, internal=_row_partition_factory_key)
 
   @classmethod
   def from_uniform_row_length(cls,
-                              nvals,
                               uniform_row_length,
+                              nvals,
                               nrows=None,
                               validate=True,
-                              name=None,
                               preferred_dtype=None):
     """Creates a `RowPartition` with rows partitioned by `uniform_row_length`.
 
-    A `RaggedTensor` constructed with this corresponds with the python list
-    defined by (assuming uniform_row_length and nvals nonzero):
+    This `RowPartition` divides a sequence `values` into rows that all have
+    the same length:
 
     ```python
-    result = [[values.pop(0) for _ in range(uniform_row_length)]
-              for _ in range(nrows)]
+    nrows = [[values.pop(0) for _ in range(uniform_row_length)]
+             for _ in range(nrows)]
     ```
 
-
-    Note that `rt1` only contains one ragged dimension (the innermost
-    dimension). In contrast, if `from_row_splits` is used to construct a similar
-    `RaggedTensor`, then that `RaggedTensor` will have two ragged dimensions:
-
     Args:
-      nvals: a non-negative scalar integer tensor for the number of values.
       uniform_row_length: A scalar integer tensor.  Must be nonnegative. The
         size of the outer axis of `values` must be evenly divisible by
         `uniform_row_length`.
-      nrows: The number of rows in the constructed RaggedTensor.  If not
+      nvals: a non-negative scalar integer tensor for the number of values.
+      nrows: The number of rows in the constructed RowPartition.  If not
         specified, then it defaults to `nvals/uniform_row_length` (or `0` if
         `uniform_row_length==0`).  `nrows` only needs to be specified if
         `uniform_row_length` might be zero.  `uniform_row_length*nrows` must be
         `nvals`.
       validate: If true, then use assertions to check that the arguments form a
-        valid `RaggedTensor`.
-      name: A name prefix for the RaggedTensor (optional)
+        valid `RowPartition`.
       preferred_dtype: if uniform_row_length has no dtype, use this one.
 
     Returns:
@@ -507,7 +499,7 @@ class RowPartition(object):
     """
     if not isinstance(validate, bool):
       raise TypeError("validate must have type bool")
-    with ops.name_scope(name, "RowPartitionFromUniformRowLength",
+    with ops.name_scope(None, "RowPartitionFromUniformRowLength",
                         [uniform_row_length, nrows]):
       uniform_row_length = cls._convert_row_partition(uniform_row_length,
                                                       "uniform_row_length",
@@ -519,10 +511,9 @@ class RowPartition(object):
       if nrows is None:
         if const_row_length is None:
           # Avoid division by zero if uniform_row_length==0 (and nvals==0).
-          rowlen_or_1 = control_flow_ops.cond(
-              math_ops.equal(uniform_row_length, 0),
-              lambda: constant_op.constant(1, uniform_row_length.dtype),
-              lambda: uniform_row_length)
+          rowlen_or_1 = math_ops.maximum(
+              uniform_row_length,
+              constant_op.constant(1, uniform_row_length.dtype))
           nrows = nvals // rowlen_or_1
         elif const_row_length == 0:
           nrows = 0
@@ -579,8 +570,8 @@ class RowPartition(object):
       return cls(
           row_splits=row_splits,
           uniform_row_length=uniform_row_length,
-          cached_nrows=nrows,
-          internal=True)
+          nrows=nrows,
+          internal=_row_partition_factory_key)
 
   @classmethod
   def _convert_row_partition(cls, partition, name, preferred_dtype):
@@ -628,11 +619,11 @@ class RowPartition(object):
                                                         self._row_splits)
     return RowPartition(
         row_splits=new_row_splits,
-        cached_row_lengths=self._cached_row_lengths,
-        cached_value_rowids=self._cached_value_rowids,
-        cached_nrows=self._cached_nrows,
-        internal=True,
-        uniform_row_length=self._uniform_row_length)
+        row_lengths=self._row_lengths,
+        value_rowids=self._value_rowids,
+        nrows=self._nrows,
+        uniform_row_length=self._uniform_row_length,
+        internal=_row_partition_factory_key)
 
   #=============================================================================
   # Accessors
@@ -640,139 +631,187 @@ class RowPartition(object):
 
   @property
   def dtype(self):
-    """The `DType` of the row partition."""
+    """The `DType` used to encode the row partition (either int32 or int64)."""
     return self._row_splits.dtype
 
-  @property
   def row_splits(self):
-    """The row-split indices for this row partition.
+    """Returns the row-split indices for this row partition.
 
-    `rt.row_splits` specifies where the values for each row begin and end in
-    `rt.values`.  In particular, the values for row `rt[i]` are stored in
-    the slice `rt.values[rt.row_splits[i]:rt.row_splits[i+1]]`.
+    `row_splits` specifies where the values for each row begin and end.
+    In particular, the values for row `i` are stored in the slice
+    `values[row_splits[i]:row_splits[i+1]]`.
 
     Returns:
       A 1-D integer `Tensor` with shape `[self.nrows+1]`.
       The returned tensor is non-empty, and is sorted in ascending order.
-      `self.row_splits[0]` is zero, and `self.row_splits[-1]` is equal to
-      `self.values.shape[0]`.
-
+      `self.row_splits()[0] == 0`.
+      `self.row_splits()[-1] == self.nvals()`.
     """
     return self._row_splits
 
-  def value_rowids(self, name=None):
+  def value_rowids(self):
     """Returns the row indices for this row partition.
 
-    Returns a vector with a number of entries equal to nvals, where
-    the ith value in the tensor indicates the row of the ith value.
-
-    Args:
-      name: A name prefix for the returned tensor (optional).
+    `value_rowids` specifies the row index fo reach value.  In particular,
+    `value_rowids[i]` is the row index for `values[i]`.
 
     Returns:
-      A 1-D integer `Tensor` with shape `self.values.shape[:1]`.
+      A 1-D integer `Tensor` with shape `[self.nvals()]`.
       The returned tensor is nonnegative, and is sorted in ascending order.
-
     """
-    if self._cached_value_rowids is not None:
-      return self._cached_value_rowids
+    if self._value_rowids is not None:
+      return self._value_rowids
+    return segment_id_ops.row_splits_to_segment_ids(self._row_splits)
 
-    with ops.name_scope(name, "RaggedValueRowIds", [self]):
-      return segment_id_ops.row_splits_to_segment_ids(self.row_splits)
+  def nvals(self, out_type=None):
+    """Returns the number of values partitioned by this `RowPartition`.
 
-  def nrows_as_dimension(self):
-    """Returns the first dimension of the shape as a `tf.Dimension`."""
-    return tensor_shape.dimension_at_index(self._row_splits.shape, 0) - 1
-
-  def nvals(self, out_type=None, name=None):
-    """Returns the number of values in this row partition.
-
-       Specifically, should be equal to the outermost dimension of the
-       values associated with this row partition.
+    If the sequence partitioned by this `RowPartition` is a tensor, then
+    `nvals` is the size of that tensor's outermost dimension -- i.e.,
+    `nvals == values.shape[0]`.
 
     Args:
       out_type: `dtype` for the returned tensor.  Defaults to
-        `self.row_splits.dtype`.
-      name: A name prefix for the returned tensor (optional).
+        `self.dtype`.
 
     Returns:
-      the number of values in this row partition as a tensor scalar.
+      scalar integer Tensor
     """
     if out_type is None:
-      return self.row_splits[-1]
+      return self._row_splits[-1]
     else:
       out_type = dtypes.as_dtype(out_type)
-      return math_ops.cast(self.row_splits[-1], name=name, dtype=out_type)
+      return math_ops.cast(self._row_splits[-1], dtype=out_type)
 
-  def nrows(self, out_type=None, name=None):
-    """Returns the number of rows in this ragged tensor.
-
-    I.e., the size of the outermost dimension of the tensor.
+  def nrows(self, out_type=None):
+    """Returns the number of rows created by this `RowPartition`.
 
     Args:
       out_type: `dtype` for the returned tensor.  Defaults to
-        `self.row_splits.dtype`.
-      name: A name prefix for the returned tensor (optional).
+        `self.dtype`.
 
     Returns:
-      A scalar `Tensor` with dtype `out_type`.
-
+      scalar integer Tensor
     """
     if out_type is None:
-      out_type = self._row_splits.dtype
+      out_type = self.dtype
     else:
       out_type = dtypes.as_dtype(out_type)
-    if self._cached_nrows is not None:
-      return math_ops.cast(self._cached_nrows, out_type)
-    with ops.name_scope(name, "RaggedNRows", [self]):
-      nsplits = tensor_shape.dimension_at_index(self.row_splits.shape, 0)
-      if nsplits.value is None:
-        return array_ops.shape(self.row_splits, out_type=out_type)[0] - 1
-      else:
-        return constant_op.constant(nsplits.value - 1, dtype=out_type)
+    if self._nrows is not None:
+      return math_ops.cast(self._nrows, out_type)
+    nsplits = tensor_shape.dimension_at_index(self._row_splits.shape, 0)
+    if nsplits.value is None:
+      return array_ops.shape(self._row_splits, out_type=out_type)[0] - 1
+    else:
+      return constant_op.constant(nsplits.value - 1, dtype=out_type)
 
   def uniform_row_length(self):
-    """Returns the uniform row length, or `None` if unspecified."""
+    """Returns the length of each row in this partition, if rows are uniform.
+
+    If all rows in this `RowPartition` have the same length, then this returns
+    that length as a scalar integer `Tensor`.  Otherwise, it returns `None`.
+
+    Returns:
+      scalar Tensor with `type=self.dtype`, or `None`.
+    """
     return self._uniform_row_length
 
-  def row_starts(self, name=None):
+  def row_starts(self):
     """Returns the start indices for rows in this row partition.
 
-    These indices specify where the values for each row begin in
-    `self.values`.  `rt.row_starts()` is equal to `rt.row_splits[:-1]`.
-
-    Args:
-      name: A name prefix for the returned tensor (optional).
+    These indices specify where the values for each row begin.
+    `partition.row_starts()` is equal to `partition.row_splits()[:-1]`.
 
     Returns:
-      A 1-D integer Tensor with shape `[nrows]`.
+      A 1-D integer Tensor with shape `[self.nrows()]`.
       The returned tensor is nonnegative, and is sorted in ascending order.
+      `self.row_starts()[0] == 0`.
+      `self.row_starts()[-1] <= self.nvals()`.
     """
-    with ops.name_scope(name, "RaggedRowStarts", [self]):
-      return self.row_splits[:-1]
+    return self._row_splits[:-1]
 
-  def row_limits(self, name=None):
+  def row_limits(self):
     """Returns the limit indices for rows in this row partition.
 
-    These indices specify where the values for each row end in
-    `self.values`.  `rt.row_limits(self)` is equal to `rt.row_splits[:-1]`.
-
-    Args:
-      name: A name prefix for the returned tensor (optional).
+    These indices specify where the values for each row end.
+    `partition.row_limits()` is equal to `partition.row_splits()[:-1]`.
 
     Returns:
-      A 1-D integer Tensor with shape `[nrows]`.
+      A 1-D integer Tensor with shape `[self.nrows]`.
       The returned tensor is nonnegative, and is sorted in ascending order.
+      `self.row_limits()[-1] == self.nvals()`.
     """
-    with ops.name_scope(name, "RaggedRowLimits", [self]):
-      return self.row_splits[1:]
+    return self._row_splits[1:]
 
-  def row_lengths(self, name=None):
-    if self._cached_row_lengths is not None:
-      return self._cached_row_lengths
-    splits = self.row_splits
-    with ops.name_scope(name, "RaggedRowLengths", [self]):
-      return splits[1:] - splits[:-1]
+  def row_lengths(self):
+    """Returns the lengths of rows in this `RowPartition`.
+
+    Returns:
+      A 1-D integer Tensor with shape `[self.nrows]`.
+      The returned tensor is nonnegative.
+      `tf.reduce_sum(self.row_lengths) == self.nvals()`.
+    """
+    if self._row_lengths is not None:
+      return self._row_lengths
+    splits = self._row_splits
+    return splits[1:] - splits[:-1]
+
+  @property
+  def static_nrows(self):
+    """The number of rows in this partition, if statically known.
+
+    ```python
+    self.row_lengths().shape == [self.static_nrows]
+    self.row_starts().shape == [self.static_nrows]
+    self.row_limits().shape == [self.static_nrows]
+    self.row_splits().shape == [self.static_nrows + 1]
+    ```
+
+    Returns:
+      The number of rows in this partition as an `int` (if statically known);
+      or `None` (otherwise).
+    """
+    if self._row_splits is not None:
+      nrows = tensor_shape.dimension_at_index(self._row_splits.shape, 0) - 1
+      if nrows.value is not None:
+        return nrows
+    if self._row_lengths is not None:
+      nrows = tensor_shape.dimension_at_index(self._row_lengths.shape, 0)
+      if nrows.value is not None:
+        return nrows
+    if self._nrows is not None:
+      return tensor_shape.Dimension(tensor_util.constant_value(self._nrows))
+    return None
+
+  @property
+  def static_nvals(self):
+    """The number of values in this partition, if statically known.
+
+    ```python
+    self.value_rowids().shape == [self.static_vals]
+    ```
+
+    Returns:
+      The number of values in this partition as an `int` (if statically known);
+      or `None` (otherwise).
+    """
+    if self._value_rowids is not None:
+      nvals = tensor_shape.dimension_at_index(self._value_rowids.shape, 0)
+      if nvals.value is not None:
+        return nvals.value
+    return None
+
+  @property
+  def static_uniform_row_length(self):
+    """The number of values in each row of this partition, if statically known.
+
+    Returns:
+      The number of values in each row of this partition as an `int` (if
+      statically known); or `None` (otherwise).
+    """
+    if self._uniform_row_length is not None:
+      return tensor_util.constant_value(self._uniform_row_length)
+    return None
 
   #=============================================================================
   # Transformation
@@ -794,38 +833,59 @@ class RowPartition(object):
     dtype = dtypes.as_dtype(dtype)
     if dtype not in (dtypes.int32, dtypes.int64):
       raise ValueError("dtype must be int32 or int64")
-    if self._row_splits.dtype == dtype:
+    if self.dtype == dtype:
       return self
 
-    row_splits = math_ops.cast(self._row_splits, dtype)
-
-    cached_row_lengths = self._cached_row_lengths
-    if cached_row_lengths is not None:
-      cached_row_lengths = math_ops.cast(cached_row_lengths, dtype)
-    cached_value_rowids = self._cached_value_rowids
-    if cached_value_rowids is not None:
-      cached_value_rowids = math_ops.cast(cached_value_rowids, dtype)
-    cached_nrows = self._cached_nrows
-    if cached_value_rowids is not None:
-      cached_value_rowids = math_ops.cast(cached_value_rowids, dtype)
-    uniform_row_length = self._uniform_row_length
-    if uniform_row_length is not None:
-      uniform_row_length = math_ops.cast(uniform_row_length, dtype)
-
     return RowPartition(
-        row_splits,
-        cached_row_lengths,
-        cached_value_rowids,
-        cached_nrows,
-        internal=True,
-        uniform_row_length=uniform_row_length)
+        row_splits=_cast_if_not_none(self._row_splits, dtype),
+        row_lengths=_cast_if_not_none(self._row_lengths, dtype),
+        value_rowids=_cast_if_not_none(self._value_rowids, dtype),
+        nrows=_cast_if_not_none(self._nrows, dtype),
+        uniform_row_length=_cast_if_not_none(self._uniform_row_length, dtype),
+        internal=_row_partition_factory_key)
 
-#=============================================================================
-# String Encoding
-#=============================================================================
+  #=============================================================================
+  # String Encoding
+  #=============================================================================
 
   def __repr__(self):
     return "tf.RowPartition(row_splits=%s)" % (self._row_splits)
+
+  #=============================================================================
+  # Precomputed Encodings
+  #=============================================================================
+
+  def has_precomputed_row_splits(self):
+    """Returns true if `row_splits` has already been computed.
+
+    If true, then `self.row_splits()` will return its value without calling
+    any TensorFlow ops.
+    """
+    return self._row_splits is not None
+
+  def has_precomputed_row_lengths(self):
+    """Returns true if `row_lengths` has already been computed.
+
+    If true, then `self.row_lengths()` will return its value without calling
+    any TensorFlow ops.
+    """
+    return self._row_lengths is not None
+
+  def has_precomputed_value_rowids(self):
+    """Returns true if `value_rowids` has already been computed.
+
+    If true, then `self.value_rowids()` will return its value without calling
+    any TensorFlow ops.
+    """
+    return self._value_rowids is not None
+
+  def has_precomputed_nrows(self):
+    """Returns true if `nrows` has already been computed.
+
+    If true, then `self.nrows()` will return its value without calling
+    any TensorFlow ops.
+    """
+    return self._nrows is not None
 
 
 #===============================================================================
@@ -841,3 +901,10 @@ def _assert_monotonic_increasing(tensor, message=None):
 def _assert_zero(tensor, message=None):
   return check_ops.assert_equal(
       tensor, constant_op.constant(0, dtype=tensor.dtype), message=message)
+
+
+def _cast_if_not_none(tensor, dtype):
+  return None if tensor is None else math_ops.cast(tensor, dtype)
+
+
+_row_partition_factory_key = object()  # unique private object

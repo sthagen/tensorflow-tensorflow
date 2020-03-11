@@ -39,6 +39,7 @@ load(
     "//tensorflow:tensorflow.bzl",
     "if_chromiumos",
     "if_not_android",
+    "if_windows",
     "tf_cc_test",
     "tf_cc_tests",
     "tf_copts",  # @unused
@@ -60,6 +61,9 @@ package(
     ],
     licenses = ["notice"],  # Apache 2.0
 )
+
+# Authorized users go here.
+package_group(name = "friends")
 
 exports_files(
     [
@@ -347,7 +351,9 @@ filegroup(
         "platform.h",
         "tstring.h",
         "types.h",
-    ],
+    ] + if_windows([
+        "//tensorflow/core/platform/windows:xla_cpu_runtime_srcs",
+    ]),
 )
 
 cc_library(
