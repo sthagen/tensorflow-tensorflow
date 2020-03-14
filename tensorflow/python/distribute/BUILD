@@ -118,17 +118,9 @@ cuda_py_test(
     name = "device_util_test",
     srcs = ["device_util_test.py"],
     deps = [
-        ":combinations",
         ":device_util",
-        ":multi_worker_test_base",
-        ":multi_worker_util",
-        "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
-        "//tensorflow/python:extra_py_tests_deps",
         "//tensorflow/python:framework_ops",
-        "//tensorflow/python:training_server_lib",
-        "//tensorflow/python/eager:context",
-        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -800,7 +792,9 @@ distribute_py_test(
     main = "input_lib_test.py",
     shard_count = 10,
     tags = [
+        "manual",
         "multi_and_single_gpu",
+        "notap",  # TODO(b/151467526)
     ],
     deps = [
         ":collective_all_reduce_strategy",
