@@ -42,7 +42,6 @@ from tensorflow.compiler.xla.python.xla_extension import ops
 # consistency with XLA.
 # pylint: disable=invalid-name
 
-
 profiler = _xla.profiler
 
 
@@ -454,8 +453,8 @@ def transfer_to_infeed(value, device=None):
   Args:
     value: the value that the caller would like to enqueue into the XLA infeed
       queue
-    device: the device to infeed the value to. Each device has a
-      distinct infeed queue.
+    device: the device to infeed the value to. Each device has a distinct infeed
+      queue.
   """
   # TODO(phawkins): support non-default backends.
   backend = get_local_backend()
@@ -500,7 +499,6 @@ def replica_count():
 def computation_count():
   '''Returns the number of computations per replica.'''
 """
-
 
 Device = _xla.Device
 
@@ -633,7 +631,8 @@ def execute_with_python_values(executable, arguments=(), backend=None):
         arg, device=executable.local_devices()[0], backend=backend)
 
   arguments = [put(arg) for arg in arguments]
-  return executable.Execute(arguments).to_py()
+  outputs = executable.Execute(arguments, tuple_arguments=False)
+  return [x.to_py() for x in outputs]
 
 
 def execute_with_python_values_replicated(executable, arguments, backend=None):
@@ -641,8 +640,8 @@ def execute_with_python_values_replicated(executable, arguments, backend=None):
 
   Arguments:
     executable: the program to run.
-    arguments: a list of lists of Python values indexed by
-      `[replica][arg_num]` to pass as inputs.
+    arguments: a list of lists of Python values indexed by `[replica][arg_num]`
+      to pass as inputs.
     backend: the backend we are targeting.
 
   Returns:
@@ -661,7 +660,8 @@ def execute_with_python_values_replicated(executable, arguments, backend=None):
   for replica_args in arguments:
     arg_buffers.append(flat_arg_buffers[:len(replica_args)])
     flat_arg_buffers = flat_arg_buffers[len(replica_args):]
-  return [out.to_py() for out in executable.ExecuteOnLocalDevices(arg_buffers)]
+  return [[x.to_py() for x in xs] for xs in executable.ExecuteOnLocalDevices(
+      arg_buffers, tuple_arguments=False)]
 
 
 class PaddingType(enum.Enum):
@@ -787,6 +787,7 @@ class ComputationBuilder(object):
       shape: a `Shape` describing the shape of the infed value.
       token: an optional `XlaOp` representing a token after which the infeed
         effect should be sequenced.
+
     Returns:
       An XlaOp, representing a (value, token) pair.
     """
@@ -805,6 +806,7 @@ class ComputationBuilder(object):
       operand: an `XlaOp` representing the data to outfeed.
       token: an `XlaOp` representing a token after which the outfeed should be
         sequenced.
+
     Returns:
       An `XlaOp` representing a token.
     """
@@ -880,7 +882,10 @@ class ComputationBuilder(object):
     """
     return self.Constant(np.array(value, dtype=np.bool))
 
-  def ParameterWithShape(self, shape, name=None, parameter_num=None,
+  def ParameterWithShape(self,
+                         shape,
+                         name=None,
+                         parameter_num=None,
                          replicated=False):
     """Enqueues a Parameter op onto the computation, given a shape.
 
@@ -891,8 +896,8 @@ class ComputationBuilder(object):
         next linear parameter number is used. The default value capability can
         be used for auto-numbering. If you're using auto-numbering for some
         parameters, use it for *all* parameters to avoid clashes.
-      replicated: whether to mark the parameter's leaves as replicated. May be
-        a bool, in which case it applies to all leaves, or an iterable of bools.
+      replicated: whether to mark the parameter's leaves as replicated. May be a
+        bool, in which case it applies to all leaves, or an iterable of bools.
 
     Returns:
       An XlaOp.
@@ -1192,6 +1197,8 @@ class ComputationBuilder(object):
     return ops.Call(self._builder, computation_to_apply.computation,
                     list(operands))
 
+  # TODO(skyewm): remove CustomCallWithLayout after callers are updated to use
+  # CustomCall.
   def CustomCallWithLayout(self,
                            call_target_name,
                            operands,
@@ -1213,13 +1220,35 @@ class ComputationBuilder(object):
       An XlaOp representing the added custom call op.
     """
     opaque = opaque or b''
-    return ops.CustomCall(self._builder, call_target_name,
-                          list(operands), shape_with_layout,
-                          list(operand_shapes_with_layout), opaque)
+    return ops.CustomCallWithLayout(
+        self._builder, call_target_name, list(operands), shape_with_layout,
+        list(operand_shapes_with_layout), opaque)
 
-  # TODO(phawkins): remove CustomCall after callers are updated to use
-  # CustomCallWithLayout.
-  CustomCall = CustomCallWithLayout
+  def CustomCall(self, call_target_name, operands, shape,
+                 operand_shapes_with_layout=None, opaque=None):
+    """Enqueues a custom call operation onto the computation.
+
+    Args:
+      call_target_name: the name of the function to call.
+      operands: an iterable of XlaOp. The number and types of operands must
+        match the arity of `operand_shapes_with_layout`.
+      shape: the shape of the operator's output. Must have layout if
+        `operand_shapes_with_layout` is provided.
+      operand_shapes_with_layout: optional, the shapes of `operands` including
+        the expected layouts.
+      opaque: an opaque string passed to the backend.
+
+    Returns:
+      An XlaOp representing the added custom call op.
+    """
+    opaque = opaque or b''
+    if operand_shapes_with_layout is None:
+      return ops.CustomCall(self._builder, call_target_name, list(operands),
+                            shape, opaque)
+    else:
+      return ops.CustomCallWithLayout(
+          self._builder, call_target_name, list(operands), shape,
+          list(operand_shapes_with_layout), opaque)
 
   def Map(self, operands, computation_to_apply, dimensions):
     """Enqueues a map operation onto the computation.
@@ -1766,6 +1795,7 @@ def register_custom_call_target(name, fn, platform='cpu'):
     platform: the target platform.
   """
   _xla.RegisterCustomCallTarget(name, fn, xla_platform_names[platform])
+
 
 # Deprecated. Use register_custom_call_target instead.
 register_cpu_custom_call_target = register_custom_call_target
