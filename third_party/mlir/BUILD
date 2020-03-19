@@ -1145,23 +1145,6 @@ gentbl(
 )
 
 gentbl(
-    name = "StandardToSPIRVGen",
-    strip_include_prefix = "lib/Conversion/StandardToSPIRV",
-    tbl_outs = [
-        (
-            "-gen-rewriters",
-            "lib/Conversion/StandardToSPIRV/StandardToSPIRV.cpp.inc",
-        ),
-    ],
-    tblgen = ":mlir-tblgen",
-    td_file = "lib/Conversion/StandardToSPIRV/StandardToSPIRV.td",
-    td_srcs = [
-        ":SPIRVOpsTdFiles",
-        ":StdOpsTdFiles",
-    ],
-)
-
-gentbl(
     name = "SPIRVAvailabilityIncGen",
     strip_include_prefix = "include",
     tbl_outs = [
@@ -1327,10 +1310,30 @@ cc_library(
         ":SPIRVDialect",
         ":SPIRVLowering",
         ":StandardOps",
-        ":StandardToSPIRVGen",
         ":Support",
         ":Transforms",
         "@llvm-project//llvm:support",
+    ],
+)
+
+cc_library(
+    name = "StandardToStandard",
+    srcs = glob([
+        "lib/Conversion/StandardToStandard/*.cpp",
+        "lib/Conversion/StandardToStandard/*.h",
+    ]),
+    hdrs = glob([
+        "include/mlir/Conversion/StandardToStandard/*.h",
+    ]),
+    includes = [
+        "include",
+        "lib/Conversion/StandardToStandard",
+    ],
+    deps = [
+        ":IR",
+        ":Pass",
+        ":StandardOps",
+        ":Transforms",
     ],
 )
 
@@ -1961,6 +1964,7 @@ cc_library(
         ":Pass",
         ":QuantizerTransforms",
         ":StandardToSPIRVConversions",
+        ":StandardToStandard",
         ":Support",
         ":Transforms",
         ":VectorToLLVM",
@@ -2053,6 +2057,7 @@ cc_library(
         ":Shape",
         ":StandardOps",
         ":StandardToSPIRVConversions",
+        ":StandardToStandard",
         ":Transforms",
         ":VectorOps",
     ],
