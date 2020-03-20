@@ -46,6 +46,30 @@ tf_proto_library(
 )
 
 cc_library(
+    name = "grpc_util",
+    srcs = ["grpc_util.cc"],
+    hdrs = [
+        "grpc_util.h",
+    ],
+    deps = [
+        "//tensorflow:grpc++",
+        "//tensorflow/core:lib",
+    ],
+)
+
+tf_cc_test(
+    name = "grpc_util_test",
+    srcs = ["grpc_util_test.cc"],
+    deps = [
+        ":grpc_util",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+cc_library(
     name = "compression_utils",
     srcs = ["compression_utils.cc"],
     hdrs = [
@@ -74,6 +98,59 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+        "//tensorflow/core/kernels/data:dataset_test_base",
+    ],
+)
+
+cc_library(
+    name = "credentials_factory",
+    srcs = ["credentials_factory.cc"],
+    hdrs = ["credentials_factory.h"],
+    deps = [
+        "//tensorflow:grpc++",
+        "//tensorflow/core:lib",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+tf_cc_test(
+    name = "credentials_factory_test",
+    srcs = ["credentials_factory_test.cc"],
+    deps = [
+        ":credentials_factory",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+cc_library(
+    name = "test_util",
+    testonly = True,
+    srcs = ["test_util.cc"],
+    hdrs = [
+        "test_util.h",
+    ],
+    data = glob(["testdata/*.pbtxt"]),
+    deps = [
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core/framework:protos_all_cc",
+        "//tensorflow/core/kernels/data:dataset_test_base",
+    ],
+)
+
+tf_cc_test(
+    name = "test_util_test",
+    srcs = ["test_util_test.cc"],
+    deps = [
+        ":test_util",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/data:standalone",
         "//tensorflow/core/kernels/data:dataset_test_base",
     ],
 )
