@@ -935,8 +935,10 @@ py_library(
 
 distribute_py_test(
     name = "values_test",
+    size = "medium",
     srcs = ["values_test.py"],
     main = "values_test.py",
+    shard_count = 5,
     tags = [
         # "multi_and_single_gpu",  # b/151865826
     ],
@@ -1206,7 +1208,7 @@ cuda_py_test(
     srcs = ["mirrored_strategy_test.py"],
     shard_count = 5,
     tags = [
-        # "multi_and_single_gpu",  # b/151862653
+        "multi_and_single_gpu",
         "no_windows_gpu",  # TODO(b/130551176)
     ],
     deps = [

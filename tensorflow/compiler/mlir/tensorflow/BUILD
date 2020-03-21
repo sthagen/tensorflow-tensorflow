@@ -17,6 +17,13 @@ package_group(
     ],
 )
 
+exports_files([
+    "ir/tf_generated_ops.td",
+    "ir/tf_op_base.td",
+    "ir/tf_op_interfaces.td",
+    "ir/tf_ops.td",
+])
+
 filegroup(
     name = "tensorflow_ops_td_files",
     srcs = [
@@ -1051,6 +1058,7 @@ cc_library(
         ":error_util",
         ":tensorflow_dialect_registration",
         ":tensorflow_passes",
+        ":tf_dialect_passes",
         ":translate_utils",
         "//tensorflow/compiler/mlir/xla:hlo",
         "//tensorflow/compiler/mlir/xla:mlir_hlo_to_hlo",
