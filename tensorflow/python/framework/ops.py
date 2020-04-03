@@ -91,7 +91,9 @@ _USE_C_SHAPES = True
 _api_usage_gauge = monitoring.BoolGauge(
     "/tensorflow/api/ops_eager_execution",
     "Whether ops.enable_eager_execution() is called.")
-
+_control_flow_api_gauge = monitoring.BoolGauge(
+    "/tensorflow/api/enable_control_flow_v2",
+    "Whether enable_control_flow_v2() is called.")
 
 # pylint: disable=protected-access
 _DTYPES_INTERN_TABLE = dtypes._INTERN_TABLE
@@ -340,7 +342,7 @@ class Tensor(tensor_like.TensorLike):
   shape of a tensor at execution time.
 
   A number of specialized tensors are available: see `tf.Variable`,
-  `tf.constant`, `tf.placeholder`, `tf.SparseTensor`, and
+  `tf.constant`, `tf.placeholder`, `tf.sparse.SparseTensor`, and
   `tf.RaggedTensor`.
 
   For more on Tensors, see the [guide](https://tensorflow.org/guide/tensor).
