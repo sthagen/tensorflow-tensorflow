@@ -1581,6 +1581,13 @@ op {
       b: false
     }
   }
+  attr {
+    name: "multiply_linear_by_lr"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
 }
 op {
   name: "ApplyFtrlV2"
@@ -1655,6 +1662,13 @@ op {
   }
   attr {
     name: "use_locking"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
+  attr {
+    name: "multiply_linear_by_lr"
     type: "bool"
     default_value {
       b: false
@@ -2139,6 +2153,7 @@ op {
         type: DT_HALF
         type: DT_UINT32
         type: DT_UINT64
+        type: DT_BOOL
       }
     }
   }
@@ -2205,6 +2220,7 @@ op {
         type: DT_HALF
         type: DT_UINT32
         type: DT_UINT64
+        type: DT_BOOL
       }
     }
   }
@@ -36486,6 +36502,13 @@ op {
       b: false
     }
   }
+  attr {
+    name: "multiply_linear_by_lr"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
   is_stateful: true
 }
 op {
@@ -36553,6 +36576,13 @@ op {
   }
   attr {
     name: "use_locking"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
+  attr {
+    name: "multiply_linear_by_lr"
     type: "bool"
     default_value {
       b: false
@@ -38069,6 +38099,13 @@ op {
       b: false
     }
   }
+  attr {
+    name: "multiply_linear_by_lr"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
   is_stateful: true
 }
 op {
@@ -38150,6 +38187,13 @@ op {
   }
   attr {
     name: "use_locking"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
+  attr {
+    name: "multiply_linear_by_lr"
     type: "bool"
     default_value {
       b: false
@@ -43827,6 +43871,13 @@ op {
       b: false
     }
   }
+  attr {
+    name: "multiply_linear_by_lr"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
 }
 op {
   name: "SparseApplyFtrlV2"
@@ -43915,6 +43966,13 @@ op {
   }
   attr {
     name: "use_locking"
+    type: "bool"
+    default_value {
+      b: false
+    }
+  }
+  attr {
+    name: "multiply_linear_by_lr"
     type: "bool"
     default_value {
       b: false

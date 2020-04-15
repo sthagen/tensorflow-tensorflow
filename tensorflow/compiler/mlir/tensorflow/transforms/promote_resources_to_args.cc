@@ -70,21 +70,6 @@ struct ResourceInfo {
 using ArgOrName = llvm::PointerUnion<BlockArgument, Attribute>;
 using ResourceMap = llvm::SmallDenseMap<ArgOrName, ResourceInfo>;
 
-LogicalResult VerifyNoPotentialNestedResourceAccesses(ModuleOp module) {
-  auto result = module.walk([&](FuncOp func) -> WalkResult {
-    // Skip main function as resources can be passed in as arguments.
-    if (func.getName() == "main") return WalkResult::advance();
-
-    for (auto type : func.getType().getInputs())
-      if (getElementTypeOrSelf(type).isa<TF::ResourceType>())
-        return func.emitError("potential nested resource accesses in function");
-
-    return WalkResult::advance();
-  });
-
-  return failure(result.wasInterrupted());
-}
-
 LogicalResult PromoteResourcesToArguments(FuncOp function) {
   Block& block = function.front();
 
@@ -258,7 +243,7 @@ LogicalResult PromoteResourcesToArguments(FuncOp function) {
 }
 
 class PromoteResourcesToArgsPass
-    : public OperationPass<PromoteResourcesToArgsPass, ModuleOp> {
+    : public PassWrapper<PromoteResourcesToArgsPass, OperationPass<ModuleOp>> {
  public:
   void runOnOperation() override;
 };
@@ -271,21 +256,20 @@ void PromoteResourcesToArgsPass::runOnOperation() {
   // This routine should only be called when control flow operations are still
   // represented with TF IfOp and WhileOp operations. In this case, there should
   // be only one basic blocks in the MLIR representation.
-  if (!has_single_element(main_func.getBlocks())) {
+  if (!hasSingleElement(main_func.getBlocks())) {
     main_func.emitError() << "expects 'main' function to have 1 block, got "
                           << main_func.getBlocks().size();
     return signalPassFailure();
   }
 
   if (failed(ResourceLiftingForFunctionalControlFlow(main_func)) ||
-      failed(VerifyNoPotentialNestedResourceAccesses(module)) ||
       failed(PromoteResourcesToArguments(main_func)))
     return signalPassFailure();
 }
 
 }  // namespace
 
-std::unique_ptr<OpPassBase<ModuleOp>> CreatePromoteResourcesToArgsPass() {
+std::unique_ptr<OperationPass<ModuleOp>> CreatePromoteResourcesToArgsPass() {
   return std::make_unique<PromoteResourcesToArgsPass>();
 }
 

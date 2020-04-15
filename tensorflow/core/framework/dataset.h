@@ -59,6 +59,8 @@ namespace data {
 
 using TraceMeMetadata = std::vector<std::pair<StringPiece, string>>;
 
+constexpr char kTFDataFunction[] = "_tf_data_function";
+
 constexpr int kInfiniteCardinality = -1;
 constexpr int kUnknownCardinality = -2;
 
@@ -250,7 +252,7 @@ class GraphDefBuilderWrapper {
   bool HasAttr(const string& op_type_name, const string& attr_name) const;
 
   bool HasAttr(const OpDef* op_def, const string& attr_name) const {
-    for (auto attr : op_def->attr()) {
+    for (const auto& attr : op_def->attr()) {
       if (attr.name() == attr_name) {
         return true;
       }
@@ -337,7 +339,9 @@ class IteratorContext {
       if (thread_pool) {
         runner_threadpool_size = thread_pool->NumThreads();
       } else {
-        runner_threadpool_size = port::MaxParallelism();
+        static const int32 kDefaultRunnerThreadpoolSize =
+            port::MaxParallelism();
+        runner_threadpool_size = kDefaultRunnerThreadpoolSize;
       }
 
       // NOTE: Wrap every runner invocation in a call to Runner()->Run(), so
@@ -664,6 +668,11 @@ class IteratorBase {
   virtual Status RestoreInternal(IteratorContext* ctx,
                                  IteratorStateReader* reader) = 0;
 
+  // Returns a pointer to the node representing this iterator in the performance
+  // model. It may be null, if performance modeling is not enabled for this
+  // iterator.
+  std::shared_ptr<model::Node> model_node() const { return node_; }
+
   // Returns the number of elements produced by this iterator.
   int64 num_elements() const {
     if (node_) return node_->num_elements();
@@ -680,7 +689,7 @@ class IteratorBase {
                         const string& output_prefix);
 
   std::vector<std::function<void()>> cleanup_fns_;
-  model::Node* node_ = nullptr;  // Not owned.
+  std::shared_ptr<model::Node> node_ = nullptr;
   const IteratorBase* parent_ = nullptr;  // Not owned.
   int64 id_ = 0;
   int64 parent_id_ = 0;

@@ -44,6 +44,7 @@ from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.keras.utils import version_utils
 from tensorflow.python.keras.utils.data_utils import Sequence
 from tensorflow.python.keras.utils.generic_utils import Progbar
+from tensorflow.python.keras.utils.io_utils import path_to_string
 from tensorflow.python.keras.utils.mode_keys import ModeKeys
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.ops import array_ops
@@ -190,6 +191,7 @@ def make_logs(model, logs, outputs, mode, prefix=''):
   return logs
 
 
+@keras_export('keras.callbacks.CallbackList')
 class CallbackList(object):
   """Container abstracting a list of callbacks."""
 
@@ -199,15 +201,19 @@ class CallbackList(object):
                add_progbar=False,
                model=None,
                **params):
-    """Creates a container for `Callbacks`.
+    """Container for `Callback` instances.
+
+    This object wraps a list of `Callback` instances, making it possible
+    to call them all at once via a single endpoint
+    (e.g. `callback_list.on_epoch_end(...)`).
 
     Arguments:
       callbacks: List of `Callback` instances.
       add_history: Whether a `History` callback should be added, if one does not
-        already exist in `callback`s.
+        already exist in the `callbacks` list.
       add_progbar: Whether a `ProgbarLogger` callback should be added, if one
-        does not already exist in `callback`s.
-      model: The `Model` these `Callback`s are used with.`
+        does not already exist in the `callbacks` list.
+      model: The `Model` these callbacks are used with.
       **params: If provided, parameters will be passed to each `Callback` via
         `Callback.set_params`.
     """
@@ -863,6 +869,7 @@ class ProgbarLogger(Callback):
 
   def __init__(self, count_mode='samples', stateful_metrics=None):
     super(ProgbarLogger, self).__init__()
+    self._supports_tf_logs = True
     if count_mode == 'samples':
       self.use_steps = False
     elif count_mode == 'steps':
@@ -931,8 +938,7 @@ class ProgbarLogger(Callback):
     self.seen = 0
     self.progbar = None
 
-  def _batch_update_progbar(self, batch, logs=None):
-    """Updates the progbar."""
+  def _maybe_init_progbar(self):
     if self.stateful_metrics is None:
       if self.model:
         self.stateful_metrics = (set(m.name for m in self.model.metrics))
@@ -946,22 +952,33 @@ class ProgbarLogger(Callback):
           stateful_metrics=self.stateful_metrics,
           unit_name='step' if self.use_steps else 'sample')
 
-    logs = copy.copy(logs) if logs else {}
-    batch_size = logs.pop('size', 0)
-    num_steps = logs.pop('num_steps', 1)  # DistStrat can run >1 steps.
-    logs.pop('batch', None)
+  def _batch_update_progbar(self, batch, logs=None):
+    """Updates the progbar."""
+    logs = logs or {}
+    self._maybe_init_progbar()
     if self.use_steps:
       self.seen = batch + 1  # One-indexed.
     else:
+      # v1 path only.
+      logs = copy.copy(logs)
+      batch_size = logs.pop('size', 0)
+      num_steps = logs.pop('num_steps', 1)
+      logs.pop('batch', None)
       add_seen = num_steps * batch_size
       self.seen += add_seen
-    self.progbar.update(self.seen, list(logs.items()), finalize=False)
+
+    if self.verbose == 1:
+      # Only block async when verbose = 1.
+      logs = tf_utils.to_numpy_or_python_type(logs)
+      self.progbar.update(self.seen, list(logs.items()), finalize=False)
 
   def _finalize_progbar(self, logs):
+    logs = logs or {}
+    self._maybe_init_progbar()
     if self.target is None:
       self.target = self.seen
       self.progbar.target = self.seen
-    logs = logs or {}
+    logs = tf_utils.to_numpy_or_python_type(logs)
     self.progbar.update(self.seen, list(logs.items()), finalize=True)
 
 
@@ -1033,12 +1050,12 @@ class ModelCheckpoint(Callback):
   ```
 
   Arguments:
-      filepath: string, path to save the model file. `filepath` can contain
-        named formatting options, which will be filled the value of `epoch` and
-        keys in `logs` (passed in `on_epoch_end`). For example: if `filepath` is
-        `weights.{epoch:02d}-{val_loss:.2f}.hdf5`, then the model checkpoints
-        will be saved with the epoch number and the validation loss in the
-        filename.
+      filepath: string or `PathLike`, path to save the model file. `filepath`
+        can contain named formatting options, which will be filled the value of
+        `epoch` and keys in `logs` (passed in `on_epoch_end`). For example: if
+        `filepath` is `weights.{epoch:02d}-{val_loss:.2f}.hdf5`, then the model
+        checkpoints will be saved with the epoch number and the validation loss
+        in the filename.
       monitor: quantity to monitor.
       verbose: verbosity mode, 0 or 1.
       save_best_only: if `save_best_only=True`, the latest best model according
@@ -1079,7 +1096,7 @@ class ModelCheckpoint(Callback):
     self._supports_tf_logs = True
     self.monitor = monitor
     self.verbose = verbose
-    self.filepath = filepath
+    self.filepath = path_to_string(filepath)
     self.save_best_only = save_best_only
     self.save_weights_only = save_weights_only
     self.save_freq = save_freq
@@ -1769,7 +1786,7 @@ class TensorBoard(Callback, version_utils.TensorBoardVersionSelector):
     self._supports_tf_logs = True
     self._validate_kwargs(kwargs)
 
-    self.log_dir = log_dir
+    self.log_dir = path_to_string(log_dir)
     self.histogram_freq = histogram_freq
     self.write_graph = write_graph
     self.write_images = write_images
@@ -2121,9 +2138,6 @@ class TensorBoard(Callback, version_utils.TensorBoardVersionSelector):
                                    'keras_embedding.ckpt-{}'.format(epoch))
     self.model.save_weights(embeddings_ckpt)
 
-  def _implements_train_batch_hooks(self):
-    return not (self._start_batch == 0 and self._stop_batch == 0)
-
 
 @keras_export('keras.callbacks.ReduceLROnPlateau')
 class ReduceLROnPlateau(Callback):
@@ -2272,7 +2286,7 @@ class CSVLogger(Callback):
 
   def __init__(self, filename, separator=',', append=False):
     self.sep = separator
-    self.filename = filename
+    self.filename = path_to_string(filename)
     self.append = append
     self.writer = None
     self.keys = None

@@ -72,7 +72,7 @@ bool IsPyFloat(PyObject* obj) {
 
 struct ConverterState {
   // The inferred tensor shape.
-  gtl::InlinedVector<ssize_t, 4> inferred_shape;
+  gtl::InlinedVector<int64, 4> inferred_shape;
 
   // The inferred tensor data type.
   DataType inferred_dtype;
@@ -320,8 +320,8 @@ struct ConverterTraits<int64> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateInt64Tensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_INT64, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, int64* out) {
@@ -360,8 +360,8 @@ struct ConverterTraits<uint64> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateUint64Tensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_UINT64, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, uint64* out) {
@@ -397,8 +397,8 @@ struct ConverterTraits<int32> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateInt32Tensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_INT32, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, int32* out) {
@@ -504,8 +504,8 @@ struct ConverterTraits<float> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateFloatTensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_FLOAT, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, float* out) {
@@ -520,8 +520,8 @@ struct ConverterTraits<double> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateDoubleTensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_DOUBLE, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, double* out) {
@@ -540,8 +540,8 @@ struct ConverterTraits<Eigen::half> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateHalfTensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_HALF, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, Eigen::half* out) {
@@ -561,8 +561,8 @@ struct ConverterTraits<tstring> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateStringTensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_STRING, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, tstring* out) {
@@ -628,8 +628,8 @@ struct ConverterTraits<complex128> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateComplex128Tensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_COMPLEX128, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, complex128* out) {
@@ -656,8 +656,8 @@ struct ConverterTraits<bool> {
   }
 
   static AbstractTensorInterface* CreateTensor(
-      TFE_Context* ctx, absl::Span<const ssize_t> dim_sizes) {
-    return ctx->context->CreateBoolTensor(dim_sizes);
+      TFE_Context* ctx, absl::Span<const int64> dim_sizes) {
+    return ctx->context->CreateTensor(DT_BOOL, dim_sizes);
   }
 
   static const char* ConvertScalar(PyObject* v, bool* out) {
