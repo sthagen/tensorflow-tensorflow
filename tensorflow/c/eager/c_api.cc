@@ -611,13 +611,12 @@ tensorflow::Status UpdateTFE_ContextWithServerDef(
     }
   }
 
-  tensorflow::RemoteRendezvous* r =
-      grpc_server->worker_env()->rendezvous_mgr->Find(context_id);
   auto session_name = tensorflow::strings::StrCat("eager_", context_id);
-  auto* device_mgr = grpc_server->worker_env()->device_mgr;
-  std::shared_ptr<tensorflow::WorkerSession> worker_session;
-
   if (reset_context) {
+    tensorflow::RemoteRendezvous* r =
+        grpc_server->worker_env()->rendezvous_mgr->Find(context_id);
+    auto* device_mgr = grpc_server->worker_env()->device_mgr;
+    std::shared_ptr<tensorflow::WorkerSession> worker_session;
     TF_RETURN_IF_ERROR(grpc_server->worker_env()->session_mgr->CreateSession(
         session_name, server_def, base_request.cluster_device_attributes(),
         true));
@@ -647,10 +646,10 @@ tensorflow::Status UpdateTFE_ContextWithServerDef(
     LOG_AND_RETURN_IF_ERROR(
         grpc_server->worker_env()->session_mgr->UpdateSession(
             session_name, server_def, base_request.cluster_device_attributes(),
-            true));
-    LOG_AND_RETURN_IF_ERROR(context->UpdateRemoteMaster(
-        grpc_server->worker_env(), std::move(remote_eager_workers),
-        added_workers, removed_workers, context_id, r));
+            /*isolate_session_state=*/true));
+    LOG_AND_RETURN_IF_ERROR(
+        context->UpdateRemoteMaster(context_id, std::move(remote_eager_workers),
+                                    added_workers, removed_workers));
   }
 #undef LOG_AND_RETURN_IF_ERROR
 
@@ -1389,45 +1388,10 @@ TFE_TensorHandle* TFE_TensorHandleCopyToDevice(TFE_TensorHandle* h,
     return nullptr;
   }
 
-  tensorflow::TensorHandle* handle = nullptr;
-  tensorflow::Device* device;
-  tensorflow::EagerContext* context =
-      tensorflow::ContextFromInterface(ctx->context);
-  status->status = context->FindDeviceFromName(device_name, &device);
-  if (!status->status.ok()) {
-    tensorflow::CustomDevice* dev;
-    status->status = context->FindCustomDeviceFromName(device_name, &dev);
-    if (status->status.ok()) {
-      status->status = dev->CopyTensorToDevice(
-          tensorflow::TensorHandleFromInterface(h->handle), &handle);
-      if (status->status.ok()) {
-        return new TFE_TensorHandle{handle};
-      }
-    }
-    return nullptr;
-  }
-  // Handle tensor handles currently in custom devices
-  const char* handle_device_name = h->handle->DeviceName(&status->status);
-  if (!status->status.ok()) {
-    return nullptr;
-  }
-  tensorflow::CustomDevice* dev;
-  status->status = context->FindCustomDeviceFromName(handle_device_name, &dev);
+  auto* result = ctx->context->CopyTensorHandleToDevice(h->handle, device_name,
+                                                        &status->status);
   if (status->status.ok()) {
-    status->status = dev->CopyTensorFromDevice(
-        tensorflow::TensorHandleFromInterface(h->handle), device_name, &handle);
-    if (status->status.ok()) {
-      return new TFE_TensorHandle{handle};
-    }
-    return nullptr;
-  }
-
-  // Handle regular case.
-  status->status = tensorflow::EagerCopyToDevice(
-      tensorflow::TensorHandleFromInterface(h->handle), context,
-      &context->Executor(), device, false, &handle);
-  if (status->status.ok()) {
-    return new TFE_TensorHandle{handle};
+    return new TFE_TensorHandle{result};
   }
   return nullptr;
 }
