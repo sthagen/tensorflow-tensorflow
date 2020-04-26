@@ -71,6 +71,25 @@ class TF_Op<string mnemonic, list<OpTrait> traits = []> :
     Op<TF_Dialect, mnemonic, traits>;
 
 //===----------------------------------------------------------------------===//
+// TensorFlow attribute definitions
+//===----------------------------------------------------------------------===//
+
+class TF_TensorFlowAttr <string name, string description> :
+    Attr<CPred<"$_self.isa<mlir::TF::" # name # "Attr>()">,
+         "TensorFlow " # description # " attribute">;
+
+def TF_ShapeAttr : TF_TensorFlowAttr<"Shape", "shape"> {
+  let returnType = "llvm::Optional<llvm::ArrayRef<int64_t>>";
+  let convertFromStorage = "$_self.cast<mlir::TF::ShapeAttr>().getValue()";
+
+  // Create a ranked shape attr by default.
+  let constBuilderCall = "mlir::TF::ShapeAttr::get($_builder.getContext(), $0)";
+}
+
+def TF_ShapeAttrArray :
+    TypedArrayAttrBase<TF_ShapeAttr, "tensorflow shape attribute array">;
+
+//===----------------------------------------------------------------------===//
 // TensorFlow type definitions
 //===----------------------------------------------------------------------===//
 
@@ -273,8 +292,15 @@ class TF_DerivedOperandShapeListAttr<int idx> : DerivedAttr<
   "auto values = getODSOperands(" # idx # ");\n"
   "return {mlir::TF::OperandShapeIterator(values.begin()), "
           "mlir::TF::OperandShapeIterator(values.end())};",
-  // TODO(jpienaar): Update post TensorShapeAttr landing.
-  [{ nullptr }]
+  [{
+    ArrayAttr::get(
+      [&](){
+        llvm::SmallVector<Attribute, 4> ret;
+        for (auto shape : $_self)
+          ret.push_back(mlir::TF::ShapeAttr::get($_ctx, shape));
+        return ret;
+      }(), $_ctx)
+  }]
 >;
 
 // A derived attribute that returns the size of `idx`-th ODS-declared variadic
@@ -322,8 +348,15 @@ class TF_DerivedResultShapeListAttr<int idx> : DerivedAttr<
   "auto values = getODSResults(" # idx # ");\n"
   "return {mlir::TF::ResultShapeIterator(values.begin()), "
           "mlir::TF::ResultShapeIterator(values.end())};",
-  // TODO(jpienaar): Update post TensorShapeAttr landing.
-  [{ nullptr }]
+  [{
+    ArrayAttr::get(
+      [&](){
+        llvm::SmallVector<Attribute, 4> ret;
+        for (auto shape : $_self)
+          ret.push_back(mlir::TF::ShapeAttr::get($_ctx, shape));
+        return ret;
+      }(), $_ctx)
+  }]
 >;
 
 // A derived attribute that returns the shape of the first result type.

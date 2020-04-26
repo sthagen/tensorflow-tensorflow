@@ -77,17 +77,9 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
     tf_repositories(path_prefix, tf_repo_name)
     tf_bind()
 
-# Toolchains & platforms required by Tensorflow to build.
-def tf_toolchains():
-    native.register_execution_platforms("@local_execution_config_platform//:platform")
-    native.register_toolchains("@local_execution_config_python//:py_toolchain")
-
 # Define all external repositories required by TensorFlow
 def tf_repositories(path_prefix = "", tf_repo_name = ""):
     """All external dependencies for TF builds."""
-
-    # Initialize toolchains and platforms.
-    tf_toolchains()
 
     # Loads all external repos to configure RBE builds.
     initialize_rbe_configs()
@@ -666,8 +658,8 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     )
 
     # Check out LLVM and MLIR from llvm-project.
-    LLVM_COMMIT = "35cf2f42dda4d708741e06570b2dbe91cec4dc41"
-    LLVM_SHA256 = "c522ae8860a3cc5807d195d521cc1fc5ef3d27c4598762ea7e38185cef71fe05"
+    LLVM_COMMIT = "79702dd349f31c0c67bf35f36435fdc843fcd052"
+    LLVM_SHA256 = "7c14719fa6622e4eec656015c6502c47ddae78f15da76558ce5d3ffa34cb39c5"
     LLVM_URLS = [
         "https://storage.googleapis.com/mirror.tensorflow.org/github.com/llvm/llvm-project/archive/{commit}.tar.gz".format(commit = LLVM_COMMIT),
         "https://github.com/llvm/llvm-project/archive/{commit}.tar.gz".format(commit = LLVM_COMMIT),
