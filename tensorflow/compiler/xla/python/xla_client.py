@@ -130,36 +130,29 @@ class LocalBackend(Backend):
     return self.client.host_id()
 
   def buffer_from_pyval(self, pyval, device=None, force_copy=False):
-    if device is None:
-      device = self.local_devices()[0]
-    return _xla.PyLocalBuffer.from_python(pyval, self.client, device,
-                                          force_copy)
+    return self.client.buffer_from_pyval(pyval, device, force_copy)
 
   def compile(self, c_computation, compile_options=None):
     compile_options = compile_options or CompileOptions()
-    options = _xla.ExecutableBuildOptions()
-    options.num_replicas = compile_options.num_replicas
-    options.num_partitions = compile_options.num_partitions
+    options = _xla.CompileOptions()
+    options.argument_layouts = compile_options.argument_layouts
+    options.parameter_is_tupled_arguments = compile_options.tuple_arguments
+    build_options = options.executable_build_options
+    build_options.num_replicas = compile_options.num_replicas
+    build_options.num_partitions = compile_options.num_partitions
     if compile_options.result_layout:
-      options.result_layout = compile_options.result_layout
-    options.debug_options.xla_cpu_fast_math_honor_infs = True
-    options.debug_options.xla_cpu_fast_math_honor_nans = True
-    options.debug_options.xla_cpu_fast_math_honor_division = True
-    options.debug_options.xla_cpu_fast_math_honor_functions = True
-    options.debug_options.xla_gpu_enable_fast_min_max = False
-    return _xla.LocalExecutable.Compile(c_computation,
-                                        compile_options.argument_layouts,
-                                        options, self.client,
-                                        compile_options.device_assignment,
-                                        compile_options.tuple_arguments)
+      build_options.result_layout = compile_options.result_layout
+    if compile_options.device_assignment:
+      build_options.device_assignment = compile_options.device_assignment
+    return self.client.compile(c_computation, options)
 
   def get_default_device_assignment(self, num_replicas, num_partitions=None):
     if num_partitions is not None:
-      return self.client.GetDefaultDeviceAssignment(num_replicas,
-                                                    num_partitions)
+      return self.client.get_default_device_assignment(num_replicas,
+                                                       num_partitions)
     else:
       # TODO(skye): delete this case after all callers can handle 2D output
-      return self.client.GetDefaultDeviceAssignment(num_replicas)
+      return self.client.get_default_device_assignment(num_replicas)
 
 
 xla_platform_names = {
@@ -445,7 +438,7 @@ def transfer_to_infeed(value, device=None):
   # TODO(phawkins): support non-default backends.
   backend = get_local_backend()
   device = device or backend.local_devices()[0]
-  device.TransferToInfeed(value)
+  device.transfer_to_infeed(value)
 
 
 def transfer_from_outfeed(shape, device=None):
@@ -462,7 +455,7 @@ def transfer_from_outfeed(shape, device=None):
   # TODO(phawkins): support non-default backends.
   backend = get_local_backend()
   device = device or backend.local_devices()[0]
-  return device.TransferFromOutfeed(
+  return device.transfer_from_outfeed(
       shape.with_major_to_minor_layout_if_absent())
 
 
@@ -497,6 +490,7 @@ class CompileOptions(object):
   """
 
   def __init__(self):
+    self.executable_build_options = _xla.ExecutableBuildOptions()
     self.xla_dump_to = None
     self.dump_hlo_pass_re = None
     self.dump_hlo_module_re = None
@@ -536,21 +530,18 @@ class CompileOptions(object):
 # There are different implementations of Executable for different backends.
 
 
-def execute_with_python_values(executable, arguments=(), backend=None):
+def execute_with_python_values(executable, arguments, backend):
   """Execute on one replica with Python values as arguments and output."""
 
-  backend = backend or get_local_backend()
-
   def put(arg):
-    return Buffer.from_pyval(
-        arg, device=executable.local_devices()[0], backend=backend)
+    return backend.buffer_from_pyval(arg, device=executable.local_devices()[0])
 
   arguments = [put(arg) for arg in arguments]
   outputs = executable.Execute(arguments)
   return [x.to_py() for x in outputs]
 
 
-def execute_with_python_values_replicated(executable, arguments, backend=None):
+def execute_with_python_values_replicated(executable, arguments, backend):
   """Execute on many replicas with Python values as arguments and output.
 
   Arguments:
@@ -562,7 +553,6 @@ def execute_with_python_values_replicated(executable, arguments, backend=None):
   Returns:
     A list of python values, one per replica.
   """
-  backend = backend or get_local_backend()
   devices = executable.local_devices()
   # pylint: disable=g-complex-comprehension
   flat_args = [(arg, devices[replica])
@@ -629,7 +619,7 @@ def register_custom_call_target(name, fn, platform='cpu'):
     fn: a PyCapsule object containing the function pointer.
     platform: the target platform.
   """
-  _xla.RegisterCustomCallTarget(name, fn, xla_platform_names[platform])
+  _xla.register_custom_call_target(name, fn, xla_platform_names[platform])
 
 
 # Deprecated. Use register_custom_call_target instead.
