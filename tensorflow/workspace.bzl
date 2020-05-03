@@ -77,9 +77,17 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
     tf_repositories(path_prefix, tf_repo_name)
     tf_bind()
 
+# Toolchains & platforms required by Tensorflow to build.
+def tf_toolchains():
+    native.register_execution_platforms("@local_execution_config_platform//:platform")
+    native.register_toolchains("@local_execution_config_python//:py_toolchain")
+
 # Define all external repositories required by TensorFlow
 def tf_repositories(path_prefix = "", tf_repo_name = ""):
     """All external dependencies for TF builds."""
+
+    # Initialize toolchains and platforms.
+    tf_toolchains()
 
     # Loads all external repos to configure RBE builds.
     initialize_rbe_configs()
@@ -154,13 +162,26 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
         print("path_prefix was specified to tf_workspace but is no longer used " +
               "and will be removed in the future.")
 
+    TFRT_COMMIT = "0bad623e8d99ace05f7f60e9e7f8b53ec813d66a"
+    TFRT_SHA256 = "d002429866d2d824a80dcf6c1602a15398412bc01324200d371c55b13b9a4b27"
+    TFRT_URLS = [
+        "http://mirror.tensorflow.org/github.com/tensorflow/runtime/archive/{commit}.zip".format(commit = TFRT_COMMIT),
+        "https://github.com/tensorflow/runtime/archive/{commit}.zip".format(commit = TFRT_COMMIT),
+    ]
+    tf_http_archive(
+        name = "tf_runtime",
+        sha256 = TFRT_SHA256,
+        strip_prefix = "runtime-" + TFRT_COMMIT,
+        urls = TFRT_URLS,
+    )
+
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "f6eb0f1759eca187d922a72a3a12dfe1593bd09783aa4b67bee70630985eb832",
-        strip_prefix = "XNNPACK-38c07ec51af0cbacb255922fb6219df80c06df59",
+        sha256 = "aebbd8c707224b73f4bfafbac200f56b0d8c8da6053d21bd3e6c3df47d64ac69",
+        strip_prefix = "XNNPACK-582094e4c765fd78d8d3d28c2147e68c82a91768",
         urls = [
-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/google/XNNPACK/archive/38c07ec51af0cbacb255922fb6219df80c06df59.zip",
-            "https://github.com/google/XNNPACK/archive/38c07ec51af0cbacb255922fb6219df80c06df59.zip",
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/google/XNNPACK/archive/582094e4c765fd78d8d3d28c2147e68c82a91768.zip",
+            "https://github.com/google/XNNPACK/archive/582094e4c765fd78d8d3d28c2147e68c82a91768.zip",
         ],
     )
 
@@ -658,8 +679,8 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     )
 
     # Check out LLVM and MLIR from llvm-project.
-    LLVM_COMMIT = "ef06016d73390d5b380018cc0d16003b4ed4a35a"
-    LLVM_SHA256 = "9e5a58b59326f06374ad7d380dd83bf9d5770493610e824c1c0bbf1ca76f5385"
+    LLVM_COMMIT = "9295f356bb30f283219b3fd32542f0096cfb9316"
+    LLVM_SHA256 = "5719098e985a14ffc6021acfc9531a10e3dd042c6e2d473c5d5d04b89f276f21"
     LLVM_URLS = [
         "https://storage.googleapis.com/mirror.tensorflow.org/github.com/llvm/llvm-project/archive/{commit}.tar.gz".format(commit = LLVM_COMMIT),
         "https://github.com/llvm/llvm-project/archive/{commit}.tar.gz".format(commit = LLVM_COMMIT),
@@ -990,30 +1011,33 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     # https://github.com/bazelbuild/rules_apple/releases
     tf_http_archive(
         name = "build_bazel_rules_apple",
-        sha256 = "a045a436b642c70fb0c10ca84ff0fd2dcbd59cc89100d597a61e8374afafb366",
+        sha256 = "ee9e6073aeb5a65c100cb9c44b0017c937706a4ae03176e14a7e78620a198079",
+        strip_prefix = "rules_apple-5131f3d46794bf227d296c82f30c2499c9de3c5b",
         urls = [
-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_apple/releases/download/0.18.0/rules_apple.0.18.0.tar.gz",
-            "https://github.com/bazelbuild/rules_apple/releases/download/0.18.0/rules_apple.0.18.0.tar.gz",
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_apple/archive/5131f3d46794bf227d296c82f30c2499c9de3c5b.tar.gz",
+            "https://github.com/bazelbuild/rules_apple/archive/5131f3d46794bf227d296c82f30c2499c9de3c5b.tar.gz",
         ],
     )
 
     # https://github.com/bazelbuild/rules_swift/releases
     tf_http_archive(
         name = "build_bazel_rules_swift",
-        sha256 = "18cd4df4e410b0439a4935f9ca035bd979993d42372ba79e7f2d4fafe9596ef0",
+        sha256 = "d0833bc6dad817a367936a5f902a0c11318160b5e80a20ece35fb85a5675c886",
+        strip_prefix = "rules_swift-3eeeb53cebda55b349d64c9fc144e18c5f7c0eb8",
         urls = [
-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_swift/releases/download/0.12.1/rules_swift.0.12.1.tar.gz",
-            "https://github.com/bazelbuild/rules_swift/releases/download/0.12.1/rules_swift.0.12.1.tar.gz",
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_swift/archive/3eeeb53cebda55b349d64c9fc144e18c5f7c0eb8.tar.gz",
+            "https://github.com/bazelbuild/rules_swift/archive/3eeeb53cebda55b349d64c9fc144e18c5f7c0eb8.tar.gz",
         ],
     )
 
     # https://github.com/bazelbuild/apple_support/releases
     tf_http_archive(
         name = "build_bazel_apple_support",
-        sha256 = "122ebf7fe7d1c8e938af6aeaee0efe788a3a2449ece5a8d6a428cb18d6f88033",
+        sha256 = "ad8ae80e93612b8151019367a3d1604d7a51c14480dae1254e10252007e8260c",
+        strip_prefix = "apple_support-501b4afb27745c4813a88ffa28acd901408014e4",
         urls = [
-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/apple_support/releases/download/0.7.1/apple_support.0.7.1.tar.gz",
-            "https://github.com/bazelbuild/apple_support/releases/download/0.7.1/apple_support.0.7.1.tar.gz",
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/apple_support/archive/501b4afb27745c4813a88ffa28acd901408014e4.tar.gz",
+            "https://github.com/bazelbuild/apple_support/archive/501b4afb27745c4813a88ffa28acd901408014e4.tar.gz",
         ],
     )
 
