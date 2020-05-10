@@ -17,17 +17,17 @@ limitations under the License.
 
 #include "grpcpp/support/status.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
-#include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/env_time.h"
+#include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/profiler/convert/xplane_to_profile_response.h"
 #include "tensorflow/core/profiler/internal/profiler_interface.h"
 #include "tensorflow/core/profiler/lib/profiler_session.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
-#include "tensorflow/core/util/ptr_util.h"
 
 namespace tensorflow {
 namespace {
@@ -81,7 +81,7 @@ class ProfilerServiceImpl : public grpc::ProfilerService::Service {
 }  // namespace
 
 std::unique_ptr<grpc::ProfilerService::Service> CreateProfilerService() {
-  return MakeUnique<ProfilerServiceImpl>();
+  return absl::make_unique<ProfilerServiceImpl>();
 }
 
 }  // namespace tensorflow

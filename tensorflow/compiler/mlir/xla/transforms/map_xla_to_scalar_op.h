@@ -228,6 +228,28 @@ inline Value MapLhloOpToStdScalarOp<xla_lhlo::CeilOp>(
 }
 
 template <>
+inline Value MapLhloOpToStdScalarOp<xla_lhlo::ComplexOp>(
+    Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
+    OpBuilder* b) {
+  return MapLhloOpToStdScalarOpImpl<CreateComplexOp>{}(loc, result_types, args,
+                                                       b);
+}
+
+template <>
+inline Value MapLhloOpToStdScalarOp<xla_lhlo::RealOp>(
+    Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
+    OpBuilder* b) {
+  return MapLhloOpToStdScalarOpImpl<ReOp>{}(loc, result_types, args, b);
+}
+
+template <>
+inline Value MapLhloOpToStdScalarOp<xla_lhlo::ImagOp>(
+    Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
+    OpBuilder* b) {
+  return MapLhloOpToStdScalarOpImpl<ImOp>{}(loc, result_types, args, b);
+}
+
+template <>
 inline Value MapLhloOpToStdScalarOp<xla_lhlo::ConvertOp>(
     Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
     OpBuilder* b) {
@@ -272,6 +294,14 @@ inline Value MapLhloOpToStdScalarOp<xla_lhlo::CosOp>(
     Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
     OpBuilder* b) {
   return MapLhloOpToStdScalarOpImpl<FloatType, ::mlir::CosOp>{}(
+      loc, result_types, args, b);
+}
+
+template <>
+inline Value MapLhloOpToStdScalarOp<xla_lhlo::SinOp>(
+    Location loc, ArrayRef<Type> result_types, ArrayRef<Value> args,
+    OpBuilder* b) {
+  return MapLhloOpToStdScalarOpImpl<FloatType, ::mlir::SinOp>{}(
       loc, result_types, args, b);
 }
 

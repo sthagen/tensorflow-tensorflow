@@ -21,7 +21,6 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/substitute.h"
-#include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/lib/monitoring/collected_metrics.h"
 #include "tensorflow/core/lib/monitoring/collection_registry.h"
@@ -100,7 +99,8 @@ Status SerializeToXPlane(const std::vector<TfStreamzSnapshot>& snapshots,
             xevent.AddStatValue(*metadata, point->bool_value);
             break;
           case monitoring::ValueType::kString:
-            xevent.AddStatValue(*metadata, point->string_value);
+            xevent.AddStatValue(*metadata, *xplane.GetOrCreateStatMetadata(
+                                               point->string_value));
             break;
           case monitoring::ValueType::kHistogram:
             xevent.AddStatValue(*metadata,

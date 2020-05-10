@@ -367,6 +367,7 @@ Status GetOrCreateKernelAndDevice(
   Fprint128 cache_key = op->MutableAttrs()->CacheKey(op->DeviceName());
 
   std::vector<Device*> input_dev_ptrs;
+  absl::flat_hash_map<string, const std::vector<string>*> composite_devices;
   std::unordered_map<int, DtypeAndPartialTensorShape>
       input_resource_variable_dtypes_and_shapes;
   // We can eliminate some overhead by running simple functions using regular
@@ -410,6 +411,13 @@ Status GetOrCreateKernelAndDevice(
       Device* input_device;
       TF_RETURN_IF_ERROR(GetDeviceForInput(ctx, input, &input_device));
       input_dev_ptrs.push_back(input_device);
+      CompositeDevice* composite_device = nullptr;
+      if (ctx.FindCompositeDeviceFromName(input_device->name().c_str(),
+                                          &composite_device)
+              .ok()) {
+        composite_devices[input_device->name()] =
+            composite_device->underlying_devices();
+      }
       cache_key =
           FingerprintCat128(cache_key, Fingerprint128(input_device->name()));
 
@@ -520,6 +528,7 @@ Status GetOrCreateKernelAndDevice(
 #endif  // IS_MOBILE_PLATFORM
       kernel.reset(new KernelAndDeviceFunc(
           flr, ctx.pflr(), std::move(input_dev_ptrs),
+          std::move(composite_devices),
           std::move(input_resource_variable_dtypes_and_shapes), runner,
           ctx.GetCollectiveExecutorHandle(), ctx.HostCPU(), op->Name(),
           [&ctx](const int64 step_id) { return ctx.CreateRendezvous(step_id); },
@@ -1165,15 +1174,33 @@ Status LocalEagerCopyToDevice(TensorHandle* h, EagerContext* ctx,
 
   bool async = executor->Async();
   if (mirror) {
+    h->Ref();
+    *result = h;
+
+    if (h->HasLocalMirror(d)) {
+      return Status::OK();
+    }
+
     // We don't bother adding an empty local mirror in sync mode since we'll be
     // executing the operation directly and be calling AddLocalMirror. A
     // reference count is still needed which will be removed if the operation
     // fails.
     if (async) {
-      TF_RETURN_IF_ERROR(h->AddEmptyLocalMirror(d));
+      Status s = h->AddEmptyLocalMirror(d);
+      if (!s.ok()) {
+        // If a mirror was added since we called HasLocalMirror then just return
+        // since another thread has already added the mirror.
+        if (s.code() == error::Code::ALREADY_EXISTS) {
+          return Status::OK();
+        }
+
+        // Remove the previously added reference count since adding the mirror
+        // failed.
+        h->Unref();
+        *result = nullptr;
+        return s;
+      }
     }
-    h->Ref();
-    *result = h;
   } else {
     *result = TensorHandle::CreateEmptyLocalHandle(
         d, dstd, h->resource_device(), h->dtype, ctx);
@@ -1230,19 +1257,31 @@ Status EagerCopyToDevice(TensorHandle* h, EagerContext* ctx,
     uint64 recv_op_id = 0;
     if (receiver_is_local) {
       Device* d = ctx->CanonicalDevice(device);
-      if (mirror && h->HasLocalMirror(d)) {
-        h->Ref();
-        *result = h;
-        return Status::OK();
-      }
-
       // TODO(gjn): Need to add support for async execution. Note if receiver
       // is local, we need to first add support in TensorHandle to wait on local
       // mirrors.
       if (mirror) {
-        TF_RETURN_IF_ERROR(h->AddEmptyLocalMirror(d));
         h->Ref();
         *result = h;
+
+        if (h->HasLocalMirror(d)) {
+          return Status::OK();
+        }
+
+        Status s = h->AddEmptyLocalMirror(d);
+        if (!s.ok()) {
+          // If a mirror was added since we called HasLocalMirror then just
+          // return since another thread has already added the mirror.
+          if (s.code() == error::Code::ALREADY_EXISTS) {
+            return Status::OK();
+          }
+
+          // Remove the previously added reference count since adding the mirror
+          // failed.
+          h->Unref();
+          *result = nullptr;
+          return s;
+        }
       } else {
         *result = TensorHandle::CreateEmptyLocalHandle(
             /* d= */ d, /* op_device= */ device,

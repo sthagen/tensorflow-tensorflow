@@ -83,7 +83,6 @@ load(
     "tf_gen_op_libs",
     "tf_genrule_cmd_append_to_srcs",
     "tf_opts_nortti_if_lite_protos",
-    "tf_opts_nortti_if_mobile",
     "tf_portable_full_lite_protos",
     "transitive_hdrs",
 )
@@ -99,9 +98,6 @@ load("//tensorflow:tensorflow.bzl", "tf_cc_test_gpu")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "tf_cc_tests_gpu")
-
-# buildifier: disable=same-origin-load
-# Placeholder: load("//tensorflow:tensorflow.bzl", "tf_portable_proto_lib")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "tf_monitoring_deps")
@@ -1374,10 +1370,7 @@ cc_library(
     name = "portable_tensorflow_lib_lite",
     srcs = if_mobile([":mobile_srcs"]),
     copts = tf_copts(android_optimization_level_override = None) + tf_opts_nortti_if_lite_protos() + if_ios(["-Os"]),
-    defines = ["SUPPORT_SELECTIVE_REGISTRATION"] + tf_portable_full_lite_protos(
-        full = [],
-        lite = ["TENSORFLOW_LITE_PROTOS"],
-    ) + if_chromiumos(["IS_MOBILE_PLATFORM"]) + tf_defines_nortti_if_lite_protos(),
+    defines = ["SUPPORT_SELECTIVE_REGISTRATION"] + if_chromiumos(["IS_MOBILE_PLATFORM"]) + tf_defines_nortti_if_lite_protos(),
     linkopts = if_android(["-lz"]) + if_ios(["-lz"]),
     tags = [
         "manual",
@@ -1420,52 +1413,10 @@ cc_library(
     ],
 )
 
-# Native library support for iOS applications.
-#
-# bazel  build --config=ios_x86_64 \
-# :ios_tensorflow_lib
-cc_library(
-    name = "ios_tensorflow_lib",
-    srcs = if_ios([
-        ":portable_op_registrations_and_gradients",
-        "//tensorflow/core/kernels:android_core_ops",
-        "//tensorflow/core/kernels:android_extended_ops",
-    ]),
-    copts = tf_copts() + tf_opts_nortti_if_lite_protos() + ["-Os"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":portable_tensorflow_lib_lite",
-        ":protos_all_cc_impl",
-        "//third_party/eigen3",
-        "//third_party/fft2d:fft2d_headers",
-        "@com_google_protobuf//:protobuf",
-        "@fft2d",
-        "@gemmlowp",
-    ],
-    alwayslink = 1,
-)
-
 alias(
     name = "ios_tensorflow_lib_lite",
     actual = ":portable_tensorflow_lib_lite",
     visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "ios_tensorflow_test_lib",
-    testonly = 1,
-    srcs = if_ios([":android_test_srcs"]),
-    copts = tf_copts() + ["-Os"],
-    tags = [
-        "manual",
-        "notap",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":ios_tensorflow_lib",
-        "//tensorflow/core/platform/default/build_config:gtest",
-        "//third_party/eigen3",
-    ],
 )
 
 # Full TensorFlow library with operator support. Use this unless reducing
@@ -1476,10 +1427,16 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+alias(
+    name = "ios_tensorflow_lib",
+    actual = ":portable_tensorflow_lib",
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "portable_tensorflow_lib",
     srcs = if_mobile([":portable_op_registrations_and_gradients"]),
-    copts = tf_copts() + tf_opts_nortti_if_lite_protos(),
+    copts = tf_copts() + tf_opts_nortti_if_lite_protos() + if_ios(["-Os"]),
     features = tf_features_nomodules_if_mobile(),
     tags = [
         "manual",
@@ -1562,6 +1519,12 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+alias(
+    name = "ios_tensorflow_test_lib",
+    actual = ":portable_tensorflow_test_lib",
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "portable_tensorflow_test_lib",
     testonly = 1,
@@ -1572,7 +1535,7 @@ cc_library(
         "//tensorflow/core/framework:android_test_hdrs",
         "//tensorflow/core/util:android_test_hdrs",
     ],
-    copts = tf_copts(android_optimization_level_override = None),
+    copts = tf_copts(android_optimization_level_override = None) + if_ios(["-Os"]),
     features = tf_features_nomodules_if_mobile() + tf_opts_nortti_if_lite_protos(),
     tags = [
         "manual",
@@ -2400,10 +2363,6 @@ alias(
 
 # Library containing all of the graph construction code that is
 # independent of the runtime.
-#
-# TODO(mrry): Refactor graph_constructor.cc so that it does not depend on code
-# in "common_runtime/", and then the entire "graph/" directory can be included
-# in this library.
 tf_cuda_library(
     name = "graph",
     srcs = ["//tensorflow/core/graph:graph_srcs"],
@@ -2746,42 +2705,6 @@ tf_cc_tests(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
-    ],
-)
-
-tf_cc_tests(
-    name = "higher_level_tests_needing_kernels",
-    size = "small",
-    srcs = [
-        "//tensorflow/core/graph:higher_level_tests_needing_kernels",
-    ],
-    linkopts = select({
-        "//tensorflow:macos": ["-headerpad_max_install_names"],
-        "//conditions:default": [],
-    }),
-    linkstatic = tf_kernel_tests_linkstatic(),
-    deps = [
-        ":all_kernels",
-        ":core",
-        ":core_cpu",
-        ":core_cpu_internal",
-        ":direct_session_internal",
-        ":framework",
-        ":framework_internal",
-        ":lib",
-        ":lib_internal",
-        ":ops",
-        ":protos_all_cc",
-        ":test",
-        ":test_main",
-        ":testlib",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:cc_ops_internal",
-        "//tensorflow/cc:scope",
-        "//tensorflow/cc:sendrecv_ops",
-        "//tensorflow/core/kernels:ops_util",
-        "//tensorflow/core/util:protos_test_cc",
-        "//third_party/eigen3",
     ],
 )
 
@@ -3160,6 +3083,11 @@ alias(
     actual = "//tensorflow/core/platform:cuda_libdevice_path",
 )
 
+# Normalize CORE_PROTO_SRCS to generate valid output file names.
+PORTABLE_PROTO_HEADERS_OUT = tf_android_core_proto_headers(CORE_PROTO_SRCS) + [
+    "//google/protobuf/any.proto.h",
+]
+
 transitive_hdrs(
     name = "headers",
     visibility = ["//tensorflow:__subpackages__"],
@@ -3172,8 +3100,3 @@ transitive_hdrs(
         "//tensorflow/core/platform:platform_strings",
     ],
 )
-
-# Normalize CORE_PROTO_SRCS to generate valid output file names.
-PORTABLE_PROTO_HEADERS_OUT = tf_android_core_proto_headers(CORE_PROTO_SRCS) + [
-    "//google/protobuf/any.proto.h",
-]

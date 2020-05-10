@@ -11,7 +11,6 @@ cc_library(
     visibility = ["//tensorflow/python/profiler/internal:__pkg__"],
     deps = [
         ":save_profile",
-        "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core/profiler:profiler_analysis_proto_cc",
         "//tensorflow/core/profiler:profiler_service_proto_cc",
@@ -28,8 +27,8 @@ cc_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
         "//tensorflow/core/profiler:profiler_service_proto_cc",
-        "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ],
