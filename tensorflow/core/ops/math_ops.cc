@@ -936,7 +936,7 @@ REGISTER_OP("_MklMatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {bfloat16, float, double, complex64, complex128}")
+    .Attr("T: {bfloat16, float}")
     .SetShapeFn(shape_inference::MatMulShape);
 #endif  // INTEL_MKL
 
@@ -1657,7 +1657,7 @@ REGISTER_OP("DenseBincount")
     .Input("weights: T")
     .Attr("Tidx: {int32, int64}")
     .Attr("T: {int32, int64, float32, float64}")
-    .Attr("binary_count: bool = false")
+    .Attr("binary_output: bool = false")
     .Output("output: T")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle unused;
@@ -1704,7 +1704,7 @@ REGISTER_OP("SparseBincount")
     .Input("weights: T")
     .Attr("Tidx: {int32, int64}")
     .Attr("T: {int32, int64, float32, float64}")
-    .Attr("binary_count: bool = false")
+    .Attr("binary_output: bool = false")
     .Output("output: T")
     .SetShapeFn([](InferenceContext* c) {
       const Tensor* size_tensor = c->input_tensor(3);
@@ -1754,7 +1754,7 @@ REGISTER_OP("RaggedBincount")
     .Input("weights: T")
     .Attr("Tidx: {int32, int64}")
     .Attr("T: {int32, int64, float32, float64}")
-    .Attr("binary_count: bool = false")
+    .Attr("binary_output: bool = false")
     .Output("output: T")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->UnknownShape());
