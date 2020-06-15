@@ -70,6 +70,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
+
 import numpy as np
 import six
 from six.moves import builtins
@@ -82,6 +84,7 @@ from tensorflow.python.framework import graph_util
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import tensor_shape
+from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_array_ops
 from tensorflow.python.ops import gen_data_flow_ops
@@ -450,6 +453,10 @@ def divide(x, y, name=None):
     # override names. Use a dummy class to track the runtime division behavior
     return DivideDelegateWithName(x, name) / y
   else:
+    # We do conversion here to make sure at least x is a tensor.
+    if not tensor_util.is_tensor(x):
+      dtype = y.dtype.base_dtype if tensor_util.is_tensor(y) else None
+      x = ops.convert_to_tensor(x, dtype=dtype)
     return x / y
 
 
@@ -1409,8 +1416,28 @@ truncatemod = gen_math_ops.truncate_mod
 floormod = gen_math_ops.floor_mod
 
 
+@tf_export("__operators__.add", v1=[])
+@dispatch.add_dispatch_support
 def _add_dispatch(x, y, name=None):
-  """Dispatches to add for strings and add_v2 for all other types."""
+  """The operation invoked by the `Tensor.__add__` operator.
+
+    Purpose in the API:
+
+      This method is exposed in TensorFlow's API so that library developers
+      can register dispatching for `Tensor.__add__` to allow it to handle
+      custom composite tensors & other custom objects.
+
+      The API symbol is not intended to be called by users directly and does
+      appear in TensorFlow's generated documentation.
+
+  Args:
+    x: The left-hand side of the `+` operator.
+    y: The right-hand side of the `+` operator.
+    name: an optional name for the operation.
+
+  Returns:
+    The result of the elementwise `+` operation.
+  """
   if not isinstance(y, ops.Tensor) and not isinstance(
       y, sparse_tensor.SparseTensor):
     y = ops.convert_to_tensor(y, dtype_hint=x.dtype.base_dtype, name="y")
@@ -1623,8 +1650,33 @@ def not_equal(x, y, name=None):
   return gen_math_ops.not_equal(x, y, name=name)
 
 
+@tf_export("__operators__.eq", v1=[])
+@dispatch.add_dispatch_support
 def tensor_equals(self, other):
-  """Compares two tensors element-wise for equality."""
+  """The operation invoked by the `Tensor.__eq__` operator.
+
+  Compares two tensors element-wise for equality if they are
+  broadcast-compatible; or returns False if they are not broadcast-compatible.
+  (Note that this behavior differs from `tf.math.equal`, which raises an
+  exception if the two tensors are not broadcast-compatible.)
+
+  Purpose in the API:
+
+    This method is exposed in TensorFlow's API so that library developers
+    can register dispatching for `Tensor.__eq__` to allow it to handle
+    custom composite tensors & other custom objects.
+
+    The API symbol is not intended to be called by users directly and does
+    appear in TensorFlow's generated documentation.
+
+  Args:
+    self: The left-hand side of the `==` operator.
+    other: The right-hand side of the `==` operator.
+
+  Returns:
+    The result of the elementwise `==` operation, or `False` if the arguments
+    are not broadcast-compatible.
+  """
   if other is None:
     return False
   g = getattr(self, "graph", None)
@@ -1636,8 +1688,33 @@ def tensor_equals(self, other):
     return self is other
 
 
+@tf_export("__operators__.ne", v1=[])
+@dispatch.add_dispatch_support
 def tensor_not_equals(self, other):
-  """Compares two tensors element-wise for equality."""
+  """The operation invoked by the `Tensor.__ne__` operator.
+
+  Compares two tensors element-wise for inequality if they are
+  broadcast-compatible; or returns True if they are not broadcast-compatible.
+  (Note that this behavior differs from `tf.math.not_equal`, which raises an
+  exception if the two tensors are not broadcast-compatible.)
+
+  Purpose in the API:
+
+    This method is exposed in TensorFlow's API so that library developers
+    can register dispatching for `Tensor.__ne__` to allow it to handle
+    custom composite tensors & other custom objects.
+
+    The API symbol is not intended to be called by users directly and does
+    appear in TensorFlow's generated documentation.
+
+  Args:
+    self: The left-hand side of the `!=` operator.
+    other: The right-hand side of the `!=` operator.
+
+  Returns:
+    The result of the elementwise `!=` operation, or `True` if the arguments
+    are not broadcast-compatible.
+  """
   if other is None:
     return True
   if ops.Tensor._USE_EQUALITY and ops.executing_eagerly_outside_functions():
@@ -2675,7 +2752,7 @@ def reduce_all_v1(input_tensor,
   return reduce_all(input_tensor, axis, keepdims, name)
 
 
-@tf_export("reduce_all", "math.reduce_all", v1=[])
+@tf_export("math.reduce_all", "reduce_all", v1=[])
 @dispatch.add_dispatch_support
 def reduce_all(input_tensor, axis=None, keepdims=False, name=None):
   """Computes the "logical and" of elements across dimensions of a tensor.
@@ -3416,12 +3493,12 @@ def add_n(inputs, name=None):
     ValueError: If `inputs` don't all have same shape and dtype or the shape
     cannot be inferred.
   """
-  if not inputs or not isinstance(inputs, (list, tuple)):
-    raise ValueError("inputs must be a list of at least one "
+  if not inputs or not isinstance(inputs, collections.Iterable):
+    raise ValueError("inputs must be an iterable of at least one "
                      "Tensor/IndexedSlices with the same dtype and shape")
   inputs = ops.convert_n_to_tensor_or_indexed_slices(inputs)
   if not all(isinstance(x, (ops.Tensor, ops.IndexedSlices)) for x in inputs):
-    raise ValueError("inputs must be a list of at least one "
+    raise ValueError("inputs must be an iterable of at least one "
                      "Tensor/IndexedSlices with the same dtype and shape")
 
   if len(inputs) == 1:

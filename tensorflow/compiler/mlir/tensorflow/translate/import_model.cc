@@ -62,7 +62,6 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "tensorflow/compiler/jit/shape_inference_helpers.h"
 #include "tensorflow/compiler/mlir/op_or_arg_name_mapper.h"
-#include "tensorflow/compiler/mlir/tensorflow/ir/control_flow_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_attributes.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
@@ -220,8 +219,7 @@ class ImporterBase {
                  const absl::InlinedVector<OutputTensor, 4>& arg_nodes,
                  const absl::InlinedVector<OutputTensor, 4>& ret_nodes,
                  const absl::InlinedVector<Node*, 4>& control_ret_nodes,
-                 llvm::ArrayRef<mlir::NamedAttribute> attrs,
-                 bool function_graph);
+                 llvm::ArrayRef<mlir::NamedAttribute> attrs);
 
   // Finds out the function definition for the given function name from the
   // graph and converts it to a function of the module. This method is called
@@ -1303,8 +1301,7 @@ Status ImporterBase::ConvertLibFunction(llvm::StringRef func_name) {
 
   TF_RETURN_IF_ERROR(child_importer.Convert(
       mlir_func_name, func_type, arg_nodes, ret_nodes, control_ret_nodes,
-      llvm::makeArrayRef(attributes.begin(), attributes.end()),
-      /*function_graph=*/true));
+      llvm::makeArrayRef(attributes.begin(), attributes.end())));
   return Status::OK();
 }
 
@@ -1406,7 +1403,7 @@ Status ImporterBase::Convert(
     const absl::InlinedVector<OutputTensor, 4>& arg_nodes,
     const absl::InlinedVector<OutputTensor, 4>& ret_nodes,
     const absl::InlinedVector<Node*, 4>& control_ret_nodes,
-    llvm::ArrayRef<mlir::NamedAttribute> attrs, bool function_graph) {
+    llvm::ArrayRef<mlir::NamedAttribute> attrs) {
   // TODO(b/122040776): Uses debug info for FunctionDef.
   auto function = mlir::FuncOp::create(mlir::UnknownLoc::get(context_),
                                        func_name, func_type, attrs);
@@ -2223,8 +2220,15 @@ StatusOr<mlir::OwningModuleRef> GraphDefImporter::Convert(
   PopulateTfVersions(module.get(), graph.versions());
 
   TF_RETURN_IF_ERROR(importer.ImporterBase::Convert(
-      func_name, func_type, arg_nodes, ret_nodes, control_ret_nodes, attrs,
-      specs.graph_as_function));
+      func_name, func_type, arg_nodes, ret_nodes, control_ret_nodes, attrs));
+
+  // Mark main function public, others private.
+  for (auto function : module.get().getOps<mlir::FuncOp>()) {
+    auto visibility = function.getName() == func_name
+                          ? mlir::FuncOp::Visibility::Public
+                          : mlir::FuncOp::Visibility::Private;
+    function.setVisibility(visibility);
+  }
   return module;
 }
 
@@ -2889,6 +2893,16 @@ void AdjustBoundInputArgTypes(mlir::ModuleOp module) {
   }
 }
 
+// Marks the visibility of functions in the saved model module.
+void MarkSavedModelFunctionVisibility(mlir::ModuleOp module) {
+  for (auto func : module.getOps<mlir::FuncOp>()) {
+    auto visibility = mlir::tf_saved_model::IsExported(func)
+                          ? mlir::FuncOp::Visibility::Public
+                          : mlir::FuncOp::Visibility::Private;
+    func.setVisibility(visibility);
+  }
+}
+
 // Reorder the ops in the module to make testing easier and less dependent
 // on implementation details such as the order of functions in the
 // FunctionDefLibrary.
@@ -3131,6 +3145,7 @@ Status CreateSavedModelIR(
   AdjustBoundInputArgTypes(module);
   module.setAttr("tf_saved_model.semantics", builder.getUnitAttr());
   SortSavedModelModule(module);
+  MarkSavedModelFunctionVisibility(module);
   return Status::OK();
 }
 
@@ -3300,6 +3315,7 @@ SavedModelSignatureDefImporter::ConvertSignatures() {
   mlir::OpBuilder builder(module_->getBodyRegion());
   module_->setAttr("tf_saved_model.semantics", builder.getUnitAttr());
   SortSavedModelModule(*module_);
+  MarkSavedModelFunctionVisibility(*module_);
 
   return std::move(module_);
 }
@@ -3333,6 +3349,9 @@ Status SavedModelSignatureDefImporter::ConvertSignature(
   TF_RETURN_IF_ERROR(tensorflow::grappler::SetTransitiveFaninGraph(
       graphdef, &sub_graph_def,
       /*terminal_nodes=*/{specs.outputs.begin(), specs.outputs.end()}));
+
+  // Set the function library definitions in the pruned graphdef.
+  *sub_graph_def.mutable_library() = flib_def.ToProto();
 
   // Convert sub-graphdef to sub-graph.
   GraphConstructorOptions options;
@@ -3567,6 +3586,24 @@ StatusOr<mlir::OwningModuleRef> ConvertGraphToMlir(
   }
   return GraphDefImporter::Convert(context, graph, debug_info, flib_def, specs,
                                    /*func_name=*/"main");
+}
+
+stream_executor::port::StatusOr<mlir::OwningModuleRef> ConvertFunctionToMlir(
+    mlir::StringRef name, const FunctionLibraryDefinition& flib_def,
+    mlir::MLIRContext* context) {
+  const tensorflow::FunctionDef* fdef = flib_def.Find(name.str());
+  if (fdef == nullptr)
+    return tensorflow::errors::NotFound("Cannot find function ", name.str());
+
+  std::unique_ptr<tensorflow::FunctionBody> fbody;
+  TF_RETURN_IF_ERROR(FunctionDefToBodyHelper(*fdef, tensorflow::AttrSlice(),
+                                             &flib_def, &fbody));
+
+  tensorflow::GraphDebugInfo dummy_debug_info;
+  tensorflow::GraphImportConfig specs;
+  specs.graph_as_function = true;
+  return GraphDefImporter::Convert(context, *fbody->graph, dummy_debug_info,
+                                   flib_def, specs, name);
 }
 
 StatusOr<mlir::OwningModuleRef> ConvertSavedModelToMlir(

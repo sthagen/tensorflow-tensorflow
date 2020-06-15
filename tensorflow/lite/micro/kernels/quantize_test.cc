@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/common.h"
-#include "tensorflow/lite/micro/kernels/all_ops_resolver.h"
+#include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/micro/test_helpers.h"
 #include "tensorflow/lite/micro/testing/micro_test.h"
 #include "tensorflow/lite/micro/testing/test_utils.h"
@@ -33,7 +33,7 @@ void ValidateQuantizeGoldens(TfLiteTensor* tensors, int tensors_size,
   PopulateContext(tensors, tensors_size, micro_test::reporter, &context);
 
   // Version 1 of quantize supports int8 and uint8 quantization.
-  ::tflite::ops::micro::AllOpsResolver resolver;
+  ::tflite::AllOpsResolver resolver;
   const TfLiteRegistration* registration =
       resolver.FindOp(tflite::BuiltinOperator_QUANTIZE);
 
@@ -89,8 +89,8 @@ void TestQuantizeFloat(const int* input_dims_data, const float* input_data,
   TfLiteIntArray* output_dims = IntArrayFromInts(output_dims_data);
   const int output_dims_count = ElementCount(*output_dims);
 
-  TfLiteTensor output_tensor = CreateQuantizedTensor(
-      output_data, output_dims, scale, zero_point, "output_tensor");
+  TfLiteTensor output_tensor =
+      CreateQuantizedTensor(output_data, output_dims, scale, zero_point);
 
   TfLiteAffineQuantization quant;
   float scales[] = {1, scale};
@@ -102,7 +102,7 @@ void TestQuantizeFloat(const int* input_dims_data, const float* input_data,
   // 1 input, 1 output.
   constexpr int tensors_size = 2;
   TfLiteTensor tensors[tensors_size] = {
-      CreateFloatTensor(input_data, input_dims, "input_tensor"),
+      CreateFloatTensor(input_data, input_dims),
       output_tensor,
   };
 
@@ -121,9 +121,8 @@ void TestRequantize(const int* input_dims_data, const float* input_data,
   TfLiteIntArray* output_dims = IntArrayFromInts(output_dims_data);
   const int output_dims_count = ElementCount(*output_dims);
 
-  TfLiteTensor output_tensor =
-      CreateQuantizedTensor(output_data, output_dims, output_scale,
-                            output_zero_point, "output_tensor");
+  TfLiteTensor output_tensor = CreateQuantizedTensor(
+      output_data, output_dims, output_scale, output_zero_point);
 
   TfLiteAffineQuantization quant;
   float scales[] = {1, output_scale};
@@ -136,7 +135,7 @@ void TestRequantize(const int* input_dims_data, const float* input_data,
   constexpr int tensors_size = 2;
   TfLiteTensor tensors[tensors_size] = {
       CreateQuantizedTensor(input_data, input_quantized, input_dims,
-                            input_scale, input_zero_point, "input_tensor"),
+                            input_scale, input_zero_point),
       output_tensor,
   };
 
