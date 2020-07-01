@@ -90,6 +90,7 @@ cc_library(
         ":tpu_platform_interface",
         ":tpu_stream_interface",
         "//tensorflow/c:tf_status",
+        "//tensorflow/c:tf_status_helper",
         "//tensorflow/core:lib",
         "//tensorflow/core/platform:types",
         "//tensorflow/core/tpu:tpu_api",
@@ -170,6 +171,7 @@ cc_library(
     hdrs = ["tpu_computation_placer.h"],
     deps = [
         ":tpu_executor",
+        ":tpu_executor_base",
         ":tpu_executor_c_api_hdrs",
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla/service:computation_placer",
