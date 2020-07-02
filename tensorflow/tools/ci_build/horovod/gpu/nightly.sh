@@ -14,10 +14,19 @@
 # limitations under the License.
 # ==============================================================================
 set -e
+set -x
 
 # Source the external common scripts.
 source tensorflow/tools/ci_build/release/common.sh
 
+# Exit src directory to avoid Python import issues.
+# We do not need TensorFlow source files.
+mkdir /tmp/horovod_test
+cd /tmp/horovod_test
+
+
+# Update the latest Python dependency packages via pip3.7
+install_ubuntu_16_pip_deps pip3.7
 
 # Install latest bazel
 install_bazelisk
@@ -26,10 +35,10 @@ which bazel
 # Install realpath
 sudo apt-get install realpath
 
-# Update the version string to nightly
-if [ -n "${IS_NIGHTLY_BUILD}" ]; then
-  ./tensorflow/tools/ci_build/update_version.py --nightly
-fi
+# Install tf-nightly and verify version.
+pip3.7 install --user --upgrade tf-nightly
+
+python3.7 -c "import tensorflow as tf; print(tf.__version__)"
 
 # Download and install open-mpi.
 wget https://download.open-mpi.org/release/open-mpi/v4.0/openmpi-4.0.4.tar.gz
@@ -50,17 +59,18 @@ sudo ldconfig
 
 # Install Horovod.
 cd ..
-pip3 install horovod tensorflow
+HOROVOD_WITH_TENSORFLOW=1
+pip3.7 install horovod[tensorflow]
 
 # Install tests.
 git clone https://github.com/DEKHTIARJonathan/TF_HVD_Stability_Test.git
 
 # Install pytest.
-pip3 install -U pytest
+pip3.7 install -U pytest
 
 # Install requirements.
 cd TF_HVD_Stability_Test
-pip3 install -r requirements.txt
+pip3.7 install -r requirements.txt
 
 # Run the tests.
-python3 -m pytest
+python3.7 -m pytest
