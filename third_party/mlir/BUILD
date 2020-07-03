@@ -1478,6 +1478,7 @@ cc_library(
         ":IR",
         ":Pass",
         ":SCFDialect",
+        ":SCFToSPIRV",
         ":SPIRVDialect",
         ":SPIRVLowering",
         ":StandardToSPIRVTransforms",
@@ -2234,6 +2235,28 @@ cc_library(
 )
 
 cc_library(
+    name = "SCFToSPIRV",
+    srcs = ["lib/Conversion/SCFToSPIRV/SCFToSPIRV.cpp"],
+    hdrs = ["include/mlir/Conversion/SCFToSPIRV/SCFToSPIRV.h"],
+    includes = ["include"],
+    deps = [
+        ":Affine",
+        ":AffineToStandard",
+        ":ConversionPassIncGen",
+        ":IR",
+        ":Pass",
+        ":SCFDialect",
+        ":SPIRVDialect",
+        ":SPIRVLowering",
+        ":StandardOps",
+        ":Support",
+        ":TransformUtils",
+        ":Transforms",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "SCFToStandard",
     srcs = [
         "lib/Conversion/PassDetail.h",
@@ -2450,6 +2473,8 @@ cc_library(
         [
             "lib/Analysis/*.cpp",
             "lib/Analysis/*.h",
+            "lib/Analysis/*/*.cpp",
+            "lib/Analysis/*/*.h",
         ],
         exclude = [
             "lib/Analysis/Vector*.cpp",
@@ -2459,6 +2484,7 @@ cc_library(
     hdrs = glob(
         [
             "include/mlir/Analysis/*.h",
+            "include/mlir/Analysis/*/*.h",
         ],
         exclude = [
             "include/mlir/Analysis/Vector*.h",
