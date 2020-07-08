@@ -38,8 +38,8 @@ include "mlir/Interfaces/ViewLikeInterface.td"
 include "mlir-hlo/Dialect/mhlo/IR/hlo_ops_base.td"
 
 def LHLO_Dialect : Dialect {
-  let name = "xla_lhlo";
-  let cppNamespace = "xla_lhlo";
+  let name = "lmhlo";
+  let cppNamespace = "lmhlo";
 }
 
 //===----------------------------------------------------------------------===//
@@ -253,7 +253,7 @@ def LHLO_ReduceWindowOp: LHLO_Op<"reduce_window", [
 
 // TODO(timshen): Add a custom parser to hide operand_segment_sizes. For example,
 // A tuple-like pattern match syntax could work:
-// xla_lhlo.case %index, (%input0, %input1, %input2), (%output0, %output1) {
+// lmhlo.case %index, (%input0, %input1, %input2), (%output0, %output1) {
 //   ...
 // }, {
 //   ...
@@ -337,7 +337,7 @@ def HLO_StaticMemRefCastOp: Op<LHLO_Dialect, "static_memref_cast",
     Example:
     ```mlir
     %buf_transformed =
-        xla_lhlo.static_memref_cast %buf
+        lmhlo.static_memref_cast %buf
         : memref<1x5xf32> -> memref<5xf32, offset: 2, strides: [1]>
 
     // The result of the op is a rank-1 memref with `[5]` shape, stride 1 and
@@ -379,7 +379,7 @@ def HLO_DynamicMemRefCastOp: Op<LHLO_Dialect, "dynamic_memref_cast",
     Example:
     ```mlir
     %buf_transformed =
-        xla_lhlo.dynamic_memref_cast %buf(%size_X, %size_Y)[%step_X, %step_Y]
+        lmhlo.dynamic_memref_cast %buf(%size_X, %size_Y)[%step_X, %step_Y]
         : memref<?x?xf32> -> memref<?x?xf32, offset: 0, strides: [?, ?]>
     // The result of the op is a type-erased memref with `[%size_X, %size_Y]`
     // shape and `[%step_X, %step_Y]` strides. The offset will be inherited
@@ -413,6 +413,74 @@ def HLO_DynamicMemRefCastOp: Op<LHLO_Dialect, "dynamic_memref_cast",
     type($result)
   }];
 }
+
+//===----------------------------------------------------------------------===//
+// ReshapeMemRefCastOp
+//===----------------------------------------------------------------------===//
+
+def ReshapeMemRefCastOp: Op<LHLO_Dialect, "reshape_memref_cast", [
+    DeclareOpInterfaceMethods<ViewLikeOpInterface>,
+    NoSideEffect]>  {
+  let summary = "reshape memref cast operation";
+  let description = [{
+    The `reshape_memref_cast` operation converts a memref from one type to an
+    equivalent type with a provided shape. The data is never copied or moved.
+    The source and destination types are compatible if both have the same
+    element type, address space and identity layout map. The following
+    combinations are possible:
+
+    a. Both are ranked memref types.
+
+    ```mlir
+    // Reshape statically-shaped memref.
+    %dst = reshape_memref_cast %src(%shape)
+             : (memref<4x1xf32>, memref<1xi32>) to memref<4xf32>
+    %dst0 = reshape_memref_cast %src(%shape0)
+             : (memref<4x1xf32>, memref<2xi32>) to memref<2x2xf32>
+    ```
+
+    b. Source type is ranked, destination type is unranked.
+
+    ```mlir
+    // Reshape dynamically-shaped 1D memref.
+    %dst = reshape_memref_cast %src(%shape)
+             : (memref<?xf32>, memref<?xi32>) to memref<*xf32>
+    ```
+
+    c. Source type is unranked, destination type is ranked.
+
+    ```mlir
+    // Flatten unranked memref.
+    %dst = reshape_memref_cast %src(%shape)
+             : (memref<*xf32>, memref<1xi32>) to memref<?xf32>
+    ```
+
+    d. Both are unranked memref types.
+
+    ```mlir
+    // Reshape unranked memref.
+    %dst = reshape_memref_cast %src(%shape)
+             : (memref<*xf32>, memref<?xi32>) to memref<*xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    AnyRankedOrUnrankedMemRef:$operand,
+    MemRefRankOf<[AnySignlessInteger], [1]>:$shape
+  );
+  let results = (outs AnyRankedOrUnrankedMemRef:$result);
+
+  let extraClassDeclaration = [{
+    MemRefType getType() { return getResult().getType().cast<MemRefType>(); }
+  }];
+
+  let verifier = [{ return Verify(*this); }];
+  let assemblyFormat = [{
+    $operand `(` $shape `)` attr-dict `:` `(` type($operand) `,` type($shape)
+    `)` `->` type($result)
+  }];
+}
+
 
 //===----------------------------------------------------------------------===//
 // XLA Other op definitions.
