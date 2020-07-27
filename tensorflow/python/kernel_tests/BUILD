@@ -49,6 +49,7 @@ tf_py_test(
     shard_count = 20,
     tags = [
         "no_mac",  # TODO(b/129706424): Re-enable this test on Mac.
+        "nomsan",  # TODO(b/161902335): Re-enable.
         "notsan",  # TODO(b/161829717): Re-enable.
     ],
     deps = [
@@ -3520,9 +3521,7 @@ cuda_py_test(
     size = "medium",
     srcs = ["tensordot_op_test.py"],
     shard_count = 20,
-    tags = [
-        "no_gpu",  # TODO(b/161856380): Re-enable when fix lands.
-    ],
+    xla_enable_strict_auto_jit = False,  # b/161856380
     deps = [
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
