@@ -1,7 +1,7 @@
-// RUN: tf-opt "-xla-legalize-tf=allow-partial-conversion legalize-chlo=false" %s | FileCheck %s
+// RUN: tf-opt "-xla-legalize-tf=allow-partial-conversion legalize-chlo=false" %s | FILECHECK_OPTS="" FileCheck %s
 // RUN: tf-opt "-xla-legalize-tf=allow-partial-conversion legalize-chlo=true" -verify-diagnostics %s
 // This test runs twice:
-//   1. Through FileCheck with chlo legalization disabled since verifying
+//   1. Through FILECHECK_OPTS="" FileCheck with chlo legalization disabled since verifying
 //      that the chlo ops emit produces more useful tests.
 //   2. With chlo legalization enabled, verifying diagnostics to pick up any
 //      issues with the full lowering (can catch some broadcasting corner
@@ -3047,6 +3047,34 @@ func @linspace_invalid_num(%arg0: tensor<f32>, %arg1: tensor<f32>) -> tensor<?xf
   %0 = "tf.Const"() {_output_shapes = ["tfshape$"], device = "", dtype = i32, value = dense<> : tensor<0xi32>} : () -> tensor<0xi32>
   %1 = "tf.LinSpace"(%arg0, %arg1, %0) : (tensor<f32>, tensor<f32>, tensor<0xi32>) -> tensor<?xf32>
   return %1 : tensor<?xf32>
+}
+
+//===----------------------------------------------------------------------===//
+// LegacyCall op legalizations.
+//===----------------------------------------------------------------------===//
+
+func @identity_func(%arg0: tensor<10x2xf32>) -> tensor<10x2xf32> {
+  return %arg0: tensor<10x2xf32>
+}
+
+// CHECK-LABEL: testSimpleLegacyCallOp
+func @testSimpleLegacyCallOp(%arg0: tensor<10x2xf32>) -> tensor<10x2xf32> {
+  // CHECK: %[[RESULT:.*]] = call @identity_func(%arg0) : (tensor<10x2xf32>) -> tensor<10x2xf32>
+  %0 = "tf.LegacyCall"(%arg0) {f = @identity_func} : (tensor<10x2xf32>) -> tensor<10x2xf32>
+  // CHECK: return %[[RESULT]]
+  return %0: tensor<10x2xf32>
+}
+
+func @select_first(%arg0: tensor<10x2xf32>, %arg1: tensor<10x2xf32>) -> tensor<10x2xf32> {
+  return %arg0: tensor<10x2xf32>
+}
+
+// CHECK-LABEL: testMultiInputLegacyCallOp
+func @testMultiInputLegacyCallOp(%arg0: tensor<10x2xf32>, %arg1: tensor<10x2xf32>) -> tensor<10x2xf32> {
+  // CHECK: %[[RESULT:.*]] = call @select_first(%arg0, %arg1) : (tensor<10x2xf32>, tensor<10x2xf32>) -> tensor<10x2xf32>
+  %0 = "tf.LegacyCall"(%arg0, %arg1) {_disable_call_shape_inference = true, _tpu_replicate = "cluster", device = "", f = @select_first} : (tensor<10x2xf32>, tensor<10x2xf32>) -> tensor<10x2xf32>
+  // CHECK: return %[[RESULT]]
+  return %0: tensor<10x2xf32>
 }
 
 //===----------------------------------------------------------------------===//

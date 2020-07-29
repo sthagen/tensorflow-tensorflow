@@ -3,7 +3,7 @@
 #  ":platform" - Low-level and platform-specific Python code.
 
 load("//tensorflow:tensorflow.bzl", "py_strict_library")
-load("//tensorflow:tensorflow.bzl", "cc_header_only_library", "if_mlir", "if_not_windows", "if_tpu", "if_xla_available", "py_test", "py_tests", "tf_cc_shared_object", "tf_cc_test", "tf_cuda_library", "tf_enable_mlir_bridge", "tf_gen_op_wrapper_py")
+load("//tensorflow:tensorflow.bzl", "cc_header_only_library", "if_mlir", "if_not_windows", "if_xla_available", "py_test", "py_tests", "tf_cc_shared_object", "tf_cc_test", "tf_cuda_library", "tf_enable_mlir_bridge", "tf_gen_op_wrapper_py")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "tf_monitoring_python_deps")
@@ -3346,11 +3346,9 @@ cuda_py_test(
     python_version = "PY3",
     tags = [
         "guitar",
-        "manual",
         "multi_gpu",
-        "no_oss",
         "no_rocm",
-        "notap",
+        "no_windows",
     ],
     deps = [
         ":client_testlib",
@@ -5068,7 +5066,7 @@ cuda_py_test(
     srcs = ["ops/image_ops_test.py"],
     data = ["//tensorflow/core:image_testdata"],
     python_version = "PY3",
-    shard_count = 5,
+    shard_count = 16,
     deps = [
         ":array_ops",
         ":client",
@@ -5085,6 +5083,7 @@ cuda_py_test(
         ":variables",
         "//tensorflow/core:protos_all_py",
         "//third_party/py/numpy",
+        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -6093,8 +6092,6 @@ pywrap_tensorflow_macro(
         "@ngraph_tf//:ngraph_tf",
     ]) + if_xla_available([
         "//tensorflow/compiler/aot:tfcompile_lib",
-    ]) + if_tpu([
-        "//tensorflow/core/tpu:tpu_api_dlsym_initializer",
     ]) + if_static(extra_deps = ["//tensorflow/core/platform:tf32_utils"]),
 )
 
