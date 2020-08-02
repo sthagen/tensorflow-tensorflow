@@ -341,6 +341,7 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:StandardOps",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
     ],
@@ -774,12 +775,12 @@ cc_library(
 )
 
 cc_library(
-    name = "all_passes_for_testing",
+    name = "all_passes",
     hdrs = [
         "include/mlir-hlo/Dialect/mhlo/transforms/register_passes.h",
     ],
     visibility = [
-        "//tensorflow/compiler/mlir:__subpackages__",
+        ":friends",
     ],
     deps = [
         ":LmhloPassIncGen",
@@ -806,13 +807,20 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "register_all_passes",
+    srcs = ["lib/Dialect/mhlo/transforms/register_all_passes.cc"],
+    deps = [":all_passes"],
+    alwayslink = 1,
+)
+
 cc_binary(
     name = "mlir-hlo-opt",
     srcs = [
         "tools/mlir-hlo-opt/mlir-hlo-opt.cpp",
     ],
     deps = [
-        ":all_passes_for_testing",
+        ":all_passes",
         ":hlo_dialect_registration",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AllPassesAndDialectsNoRegistration",

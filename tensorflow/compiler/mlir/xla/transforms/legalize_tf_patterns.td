@@ -524,6 +524,7 @@ def : Pat<(TF_ReverseV2Op AnyRankedTensor:$values, (TF_ConstOp $axis)),
 
 foreach Mapping = [
                    [TF_AbsOp, HLO_AbsOp],
+                   [TF_AcosOp, HLOClient_AcosOp],
                    [TF_CeilOp, HLO_CeilOp],
                    [TF_ComplexAbsOp, HLO_AbsOp],
                    [TF_CosOp, HLO_CosOp],
@@ -546,6 +547,19 @@ foreach Mapping = [
            (Mapping[1] $input)>;
 }
 
+// Expand acos to MHLO dialect as follows:
+//   acos(x) = 2 * atan(sqrt(1 - x^2) / (1 + x)) if x != -1
+//           = pi                                if x == -1
+def : Pat<(HLOClient_AcosOp $input), (HLO_SelectOp
+  (HLO_CompareOp $input, (HLO_ConstOp (ConstantSplat<"0"> $input)),
+    HLO_COMPARISON_DIRECTION_NE),
+  (HLO_MulOp (HLO_ConstOp (ConstantSplat<"2"> $input)),
+    (HLO_Atan2Op (HLO_SqrtOp (HLO_SubOp
+                               (HLO_ConstOp (ConstantSplat<"1"> $input)),
+                               (HLO_MulOp $input, $input))),
+      (HLO_AddOp (HLO_ConstOp (ConstantSplat<"1"> $input)), $input))),
+  (HLO_ConstOp (ConstantSplat<"M_PI"> $input)))>;
+
 // TODO(bixia): Lower Cast with a Complex type source operand or with
 // Truncate=True for floating point value conversions.
 def : Pat<(TF_CastOp HLO_Tensor:$arg, ConstBoolAttrFalse),
@@ -563,17 +577,8 @@ foreach TfOp = [TF_ExpandDimsOp, TF_ReshapeOp, TF_SqueezeOp, ] in {
             (HLO_ReshapeOp $arg), [(AnyStaticShapeTensor $res)]>;
 }
 
-// Returns 0 if x is NaN, 0 if x is 0, -1 if x < 0 and 1 if x > 0.
-def : Pat<(TF_SignOp $x),
-          (HLO_SelectOp
-            (HLO_CompareOp
-              $x,
-              $x,
-              HLO_COMPARISON_DIRECTION_NE
-            ),
-            (HLO_ConstOp (ConstantSplat<"0"> $x)),
-            (HLO_SignOp $x)
-          )>;
+// Returns NaN if x is NaN, 0 if x is 0, -1 if x < 0 and 1 if x > 0.
+def : Pat<(TF_SignOp $x), (HLO_SignOp $x)>;
 
 def BothElementTypesSameWidthIntOrFloat : Constraint<CPred<
   "getElementTypeOrSelf($0.getType()).isSignlessIntOrFloat() && "

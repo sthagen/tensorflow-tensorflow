@@ -45,9 +45,9 @@ namespace tflite {
 namespace gpu {
 namespace cl {
 
-void SelectLSTM(const OperationDef& op_def,
+void SelectLSTM(const OperationDef& op_def, const DeviceInfo& device_info,
                 std::unique_ptr<GPUOperation>* ptr) {
-  LSTM operation = CreateLSTM(op_def);
+  LSTM operation = CreateLSTM(op_def, device_info);
   *ptr = absl::make_unique<LSTM>(std::move(operation));
 }
 
@@ -69,15 +69,17 @@ absl::Status SelectPReLU(const PReLUAttributes& attr,
 }
 
 void SelectPooling(const Pooling2DAttributes& attr, const OperationDef& op_def,
+                   const DeviceInfo& device_info,
                    std::unique_ptr<GPUOperation>* ptr) {
-  Pooling pooling = CreatePooling(op_def, attr);
+  Pooling pooling = CreatePooling(op_def, attr, device_info);
   *ptr = absl::make_unique<Pooling>(std::move(pooling));
 }
 
 void SelectMaxUnpooling(const MaxUnpooling2DAttributes& attr,
                         const OperationDef& op_def,
+                        const DeviceInfo& device_info,
                         std::unique_ptr<GPUOperation>* ptr) {
-  MaxUnpooling operation = CreateMaxUnpooling(op_def, attr);
+  MaxUnpooling operation = CreateMaxUnpooling(op_def, attr, device_info);
   *ptr = absl::make_unique<MaxUnpooling>(std::move(operation));
 }
 
@@ -98,10 +100,11 @@ absl::Status SelectResize(const Resize2DAttributes& attr,
 absl::Status SelectConcat(const ConcatAttributes& attr,
                           const std::vector<int>& channels,
                           const OperationDef& op_def,
+                          const DeviceInfo& device_info,
                           std::unique_ptr<GPUOperation>* ptr) {
   switch (attr.axis) {
     case Axis::CHANNELS: {
-      ConcatZ operation = CreateConcatZ(op_def, channels);
+      ConcatZ operation = CreateConcatZ(op_def, channels, device_info);
       *ptr = absl::make_unique<ConcatZ>(std::move(operation));
       return absl::OkStatus();
     }
@@ -109,7 +112,7 @@ absl::Status SelectConcat(const ConcatAttributes& attr,
     case Axis::DEPTH:
     case Axis::HEIGHT:
     case Axis::WIDTH: {
-      ConcatXY operation = CreateConcatXY(op_def, attr, channels.size());
+      ConcatXY operation = CreateConcatXY(op_def, attr);
       *ptr = absl::make_unique<ConcatXY>(std::move(operation));
       return absl::OkStatus();
     }
@@ -150,11 +153,12 @@ void SelectStridedSlice(const SliceAttributes& attr, const OperationDef& op_def,
 }
 
 absl::Status SelectMean(const MeanAttributes& attr, const OperationDef& op_def,
+                        const DeviceInfo& device_info,
                         std::unique_ptr<GPUOperation>* ptr) {
   if (attr.dims != std::set<Axis>({Axis::HEIGHT, Axis::WIDTH})) {
     return absl::UnimplementedError("Mean operation supports only HW plane");
   }
-  Mean operation = CreateMean(op_def);
+  Mean operation = CreateMean(op_def, device_info);
   *ptr = absl::make_unique<Mean>(std::move(operation));
   return absl::OkStatus();
 }
