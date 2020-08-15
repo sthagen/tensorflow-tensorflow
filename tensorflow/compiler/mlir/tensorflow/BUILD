@@ -676,6 +676,7 @@ cc_library(
 cc_library(
     name = "tf_saved_model_passes",
     srcs = [
+        "transforms/deduplicate_bound_input_bindings.cc",
         "transforms/freeze_global_tensors.cc",
         "transforms/lift_variables_pass.cc",
         "transforms/optimize_global_tensors.cc",
@@ -721,6 +722,7 @@ cc_library(
         "//tensorflow/core:framework",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
@@ -775,7 +777,9 @@ cc_library(
         "transforms/stack_ops_decomposition.cc",
         "transforms/tensor_array_ops_decomposition.cc",
         "transforms/tensor_list_ops_decomposition.cc",
+        "transforms/test_resource_alias_analysis.cc",
         "transforms/test_side_effect_analysis.cc",
+        "transforms/test_visitor_util.cc",
         "transforms/tf_data_optimization_pass.cc",
         "transforms/tf_device_assignment.cc",
         "transforms/tpu_cluster_formation.cc",
@@ -784,6 +788,7 @@ cc_library(
         "transforms/tpu_extract_head_tail_outside_compilation.cc",
         "transforms/tpu_extract_outside_compilation.cc",
         "transforms/tpu_host_computation_expansion.cc",
+        "transforms/tpu_identity_pruning.cc",
         "transforms/tpu_merge_variables_with_execute.cc",
         "transforms/tpu_outside_compilation_cluster.cc",
         "transforms/tpu_rewrite_pass.cc",
@@ -823,9 +828,12 @@ cc_library(
         ":tpu_rewrite_device_util",
         ":translate_utils",
         ":unroll_batch_matmul_pass",
+        ":visitor_util",
         ":xla_sharding_util",
         "//tensorflow/compiler/mlir:op_or_arg_name_mapper",
         "//tensorflow/compiler/mlir/lite:validators",
+        "//tensorflow/compiler/mlir/xla:xla_legalize_tf",
+        "//tensorflow/compiler/mlir/xla:xla_legalize_tf_with_tf2xla",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla:xla_proto_cc",
         "//tensorflow/compiler/xla/client:sharding_builder",
@@ -1626,6 +1634,7 @@ cc_library(
     deps = [
         ":lower_tf_inc_gen",
         ":tensorflow",
+        ":tensorflow_ops",
         ":tensorflow_types",
         "//tensorflow/core:framework",
         "@llvm-project//llvm:Support",
@@ -1678,6 +1687,7 @@ cc_library(
         ":tensorflow",
         "//tensorflow/core:core_cpu_lib",
         "//tensorflow/core:framework",
+        "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -1777,6 +1787,21 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+    ],
+)
+
+cc_library(
+    name = "visitor_util",
+    srcs = [
+        "utils/visitor_util.cc",
+    ],
+    hdrs = [
+        "utils/visitor_util.h",
+    ],
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
     ],
 )
 
