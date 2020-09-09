@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"  // from @llvm-project
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"  // from @llvm-project
+#include "mlir/Dialect/GPU/GPUDialect.h"  // from @llvm-project
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"  // from @llvm-project
 #include "mlir/Dialect/StandardOps/IR/Ops.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
@@ -33,6 +34,10 @@ namespace {
 
 class TestTFFrameworkToLLVMPass
     : public TestTFFrameworkLegalizeToLLVMPassBase<TestTFFrameworkToLLVMPass> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<LLVM::LLVMDialect>();
+  }
+
  public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
@@ -52,10 +57,11 @@ class TestTFFrameworkToLLVMPass
     // Set target.
     ConversionTarget target(getContext());
     target.addLegalDialect<LLVM::LLVMDialect>();
+    target.addLegalDialect<gpu::GPUDialect>();
     target.addIllegalDialect<tf_framework::TFFrameworkDialect>();
-    target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
+    target.addIllegalOp<LLVM::DialectCastOp>();
 
-    if (failed(applyFullConversion(m, target, patterns))) {
+    if (failed(applyPartialConversion(m, target, patterns))) {
       signalPassFailure();
     }
   }
