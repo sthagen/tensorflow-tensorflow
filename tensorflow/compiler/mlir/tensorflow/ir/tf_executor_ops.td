@@ -43,7 +43,7 @@ def TfExecutor_Dialect : Dialect {
     value).
 }];
 
-  let cppNamespace = "tf_executor";
+  let cppNamespace = "::mlir::tf_executor";
 }
 
 // Control type.
@@ -541,6 +541,10 @@ def TfExecutor_NextIterationSinkOp : TfExecutor_Op<"NextIteration.Sink",
       result.attributes.append(attributes.begin(), attributes.end());
     }]>
    ];
+
+  let extraClassDeclaration = [{
+    NextIterationSourceOp GetSource();
+  }];
 
   let assemblyFormat = " `[` $token `]` $input (`,` $controlInputs^)? `:` type($input) attr-dict";
 

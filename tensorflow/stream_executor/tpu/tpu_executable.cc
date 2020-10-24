@@ -17,8 +17,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/platform/casts.h"
-#include "tensorflow/core/tpu/kernels/tpu_execute_c_api.h"
 #include "tensorflow/core/tpu/tpu_api.h"
+#include "tensorflow/core/tpu/tpu_ops_c_api.h"
 #include "tensorflow/stream_executor/tpu/c_api_conversions.h"
 #include "tensorflow/stream_executor/tpu/proto_helper.h"
 #include "tensorflow/stream_executor/tpu/status_helper.h"
@@ -73,17 +73,16 @@ Status TpuExecutable::LoadProgramAndEnqueueToStream(
     c_dev_assign.size = dev_assign_serialized.size;
   }
 
-  auto platform = tensorflow::down_cast<tensorflow::TpuPlatform*>(
+  auto platform = tensorflow::down_cast<tensorflow::tpu::TpuPlatform*>(
       tensorflow::tpu::TpuPlatformInterface::GetRegisteredPlatform());
   auto stream = platform->stream_map()->at(
       run_options.run_options().stream()->implementation());
   StatusHelper status;
 
-  tensorflow::tpu::ExecuteApiFn()
-      ->TpuExecutable_LoadProgramAndEnqueueToStreamFn(
-          core_program_, arguments_bases, arguments.size(), &result_base,
-          (cross_program_prefetch_addr.has_value() ? &prefetch_base : nullptr),
-          rng_seed, &c_dev_assign, stream, status.c_status);
+  tensorflow::tpu::OpsApiFn()->TpuExecutable_LoadProgramAndEnqueueToStreamFn(
+      core_program_, arguments_bases, arguments.size(), &result_base,
+      (cross_program_prefetch_addr.has_value() ? &prefetch_base : nullptr),
+      rng_seed, &c_dev_assign, stream, status.c_status);
 
   if (dev_assign != nullptr) {
     stream_executor::tpu::SerializedProto_Free(dev_assign_serialized);
@@ -96,7 +95,7 @@ Shape TpuExecutable::HostShapeToDeviceShape(const Shape& host_shape) {
   XLA_Shape c_host_shape;
   XLA_Shape c_device_shape;
   ApiConverter::ToC(host_shape, &c_host_shape);
-  tensorflow::tpu::ExecuteApiFn()->HardwareLayout_HostShapeToDeviceShapeFn(
+  tensorflow::tpu::OpsApiFn()->HardwareLayout_HostShapeToDeviceShapeFn(
       &c_host_shape, &c_device_shape);
   Shape device_shape = ApiConverter::FromC(&c_device_shape);
   ApiConverter::Free(&c_host_shape);
@@ -108,9 +107,14 @@ int64 TpuExecutable::ShapeSize(const Shape& shape) {
   XLA_Shape c_shape;
   ApiConverter::ToC(shape, &c_shape);
   int64 size =
-      tensorflow::tpu::ExecuteApiFn()->HardwareLayout_ShapeSizeFn(&c_shape);
+      tensorflow::tpu::OpsApiFn()->HardwareLayout_ShapeSizeFn(&c_shape);
   ApiConverter::Free(&c_shape);
   return size;
+}
+
+absl::string_view TpuExecutable::fingerprint() const {
+  // TODO(skye): the fingerprint can be plumbed through via core_program_
+  LOG(FATAL) << "TpuExecutable::fingerprint() unimplemented";
 }
 
 }  // namespace xla

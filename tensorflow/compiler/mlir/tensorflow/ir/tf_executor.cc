@@ -824,6 +824,10 @@ LogicalResult Verify(NextIterationSinkOp sink) {
 
 }  // anonymous namespace
 
+NextIterationSourceOp NextIterationSinkOp::GetSource() {
+  return cast<NextIterationSourceOp>(token().getDefiningOp());
+}
+
 //===----------------------------------------------------------------------===//
 // tf_executor.Exit
 //===----------------------------------------------------------------------===//
@@ -1121,12 +1125,12 @@ LogicalResult IslandOp::fold(llvm::ArrayRef<Attribute> operands,
   return success();
 }
 
+}  // namespace tf_executor
+}  // namespace mlir
+
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
 
 #define GET_OP_CLASSES
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.cc.inc"
-
-}  // namespace tf_executor
-}  // namespace mlir

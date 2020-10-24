@@ -70,6 +70,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numbers
 import numpy as np
 import six
 from six.moves import builtins
@@ -100,7 +101,14 @@ from tensorflow.python.util import deprecation
 from tensorflow.python.util import dispatch
 from tensorflow.python.util import nest
 from tensorflow.python.util.compat import collections_abc
+from tensorflow.python.util.lazy_loader import LazyLoader
 from tensorflow.python.util.tf_export import tf_export
+
+
+np_dtypes = LazyLoader(
+    "np_dtypes", globals(),
+    "tensorflow.python.ops.numpy_ops.np_dtypes")
+
 
 # Aliases for some automatically-generated names.
 nextafter = gen_math_ops.next_after
@@ -114,8 +122,9 @@ def linspace_nd(start, stop, num, name=None, axis=0):
 
   A sequence of `num` evenly-spaced values are generated beginning at `start`
   along a given `axis`.
-  If `num > 1`, the values in the sequence increase by `stop - start / num - 1`,
-  so that the last one is exactly `stop`. If `num <= 0`, `ValueError` is raised.
+  If `num > 1`, the values in the sequence increase by
+  `(stop - start) / (num - 1)`, so that the last one is exactly `stop`.
+  If `num <= 0`, `ValueError` is raised.
 
   Matches
   [np.linspace](https://docs.scipy.org/doc/numpy/reference/generated/numpy.linspace.html)'s
@@ -533,6 +542,31 @@ _mul.__doc__ = (
 @tf_export("math.subtract", "subtract")
 @dispatch.add_dispatch_support
 def subtract(x, y, name=None):
+  """Returns x - y element-wise.
+
+  *Note*: Subtract supports broadcasting. More about broadcasting
+  [here](https://numpy.org/doc/stable/user/basics.broadcasting.html)
+
+  Both input and output have a range `(-inf, inf)`.
+
+  For example:
+
+  >>> x = tf.constant([1.0, -1.0, 5.0, -2.0, 0.0])
+  >>> y = tf.constant([5.0, 1.0, 3.7, -19.9, float("inf")])
+  >>> tf.subtract(x,y)
+  <tf.Tensor: shape=(5,), dtype=float32,
+  numpy= array([-4. , -2. ,  1.3, 17.9, -inf], dtype=float32)>
+
+  Args:
+    x: A `Tensor`. Must be one of the following types: `bfloat16`, `half`,
+      `float32`, `float64`, `uint8`, `int8`, `int16`, `int32`, `int64`,
+      `complex64`, `complex128`, `string`.
+    y: A `Tensor`. Must have the same type as x.
+    name: A name for the operation (optional).
+
+  Returns:
+    A `Tensor`. Has the same type as x.
+  """
   return gen_math_ops.sub(x, y, name)
 
 
@@ -1121,6 +1155,44 @@ ops.Tensor._override_operator("__neg__", gen_math_ops.neg)
 ops.Tensor._override_operator("__abs__", abs)
 
 
+def _maybe_get_dtype(x):
+  """Returns a numpy type if available from x. Skips if x is numpy.ndarray."""
+  # Don't put np.ndarray in this list, because np.result_type looks at the
+  # value (not just dtype) of np.ndarray to decide the result type.
+  if isinstance(x, numbers.Real):
+    return x
+  if isinstance(x, ops.Tensor):
+    return x.dtype.as_numpy_dtype
+  if isinstance(x, dtypes.DType):
+    return x.as_numpy_dtype
+  if isinstance(x, (list, tuple)):
+    raise ValueError("Got sequence {}".format(x))
+  return x
+
+
+def maybe_promote_tensors(*tensors, force_same_dtype=True):
+  """Promote tensors if numpy style promotion is enabled."""
+  if not ops._numpy_style_type_promotion:
+    if not force_same_dtype:
+      return tensors
+    promoted_tensors = []
+    promoted_tensors.append(tensors[0])
+    dtype = tensors[0].dtype.base_dtype
+    for tensor in tensors[1:]:
+      promoted_tensors.append(
+          ops.convert_to_tensor(tensor, dtype, name="tensor"))
+    return promoted_tensors
+  result_type = np_dtypes._result_type(
+      *[_maybe_get_dtype(x) for x in nest.flatten(tensors)])
+  def _promote_or_cast(x):
+    if isinstance(x, ops.Tensor):
+      x = cast(x, result_type)
+    else:
+      x = ops.convert_to_tensor(x, result_type)
+    return x
+  return [_promote_or_cast(x) for x in tensors]
+
+
 def _OverrideBinaryOperatorHelper(func, op_name, clazz_object=ops.Tensor):
   """Register operators with different tensor and scalar versions.
 
@@ -1136,6 +1208,7 @@ def _OverrideBinaryOperatorHelper(func, op_name, clazz_object=ops.Tensor):
   def binary_op_wrapper(x, y):
     with ops.name_scope(None, op_name, [x, y]) as name:
       try:
+        x, y = maybe_promote_tensors(x, y, force_same_dtype=False)
         return func(x, y, name=name)
       except (TypeError, ValueError) as e:
         # Even if dispatching the op failed, the RHS may be a tensor aware
@@ -1148,7 +1221,7 @@ def _OverrideBinaryOperatorHelper(func, op_name, clazz_object=ops.Tensor):
           try:
             r_op = getattr(y, "__r%s__" % op_name)
             out = r_op(x)
-            if out == NotImplemented:
+            if out is NotImplemented:
               raise
             return out
           except (TypeError, ValueError):
@@ -1166,7 +1239,7 @@ def _OverrideBinaryOperatorHelper(func, op_name, clazz_object=ops.Tensor):
 
   def r_binary_op_wrapper(y, x):
     with ops.name_scope(None, op_name, [x, y]) as name:
-      x = ops.convert_to_tensor(x, dtype=y.dtype.base_dtype, name="x")
+      y, x = maybe_promote_tensors(y, x)
       return func(x, y, name=name)
 
   # Propagate func.__doc__ to the wrappers
@@ -1612,10 +1685,17 @@ _OverrideBinaryOperatorHelper(xor_, "xor")
 ops.Tensor._override_operator("__invert__", invert_)
 
 
-ops.Tensor._override_operator("__lt__", gen_math_ops.less)
-ops.Tensor._override_operator("__le__", gen_math_ops.less_equal)
-ops.Tensor._override_operator("__gt__", gen_math_ops.greater)
-ops.Tensor._override_operator("__ge__", gen_math_ops.greater_equal)
+def _wrap(fn):
+  def wrapper(x, y, name=fn.__name__):
+    x, y = maybe_promote_tensors(x, y)
+    return fn(x, y, name)
+  return wrapper
+
+
+ops.Tensor._override_operator("__lt__", _wrap(gen_math_ops.less))
+ops.Tensor._override_operator("__le__", _wrap(gen_math_ops.less_equal))
+ops.Tensor._override_operator("__gt__", _wrap(gen_math_ops.greater))
+ops.Tensor._override_operator("__ge__", _wrap(gen_math_ops.greater_equal))
 
 
 @tf_export("math.equal", "equal")
@@ -1722,6 +1802,7 @@ def tensor_equals(self, other):
   g = getattr(self, "graph", None)
   if (ops.Tensor._USE_EQUALITY and ops.executing_eagerly_outside_functions() and
       (g is None or g.building_function)):
+    self, other = maybe_promote_tensors(self, other)
     return gen_math_ops.equal(self, other, incompatible_shape_error=False)
   else:
     # In legacy graph mode, tensor equality is object equality
@@ -1758,6 +1839,7 @@ def tensor_not_equals(self, other):
   if other is None:
     return True
   if ops.Tensor._USE_EQUALITY and ops.executing_eagerly_outside_functions():
+    self, other = maybe_promote_tensors(self, other)
     return gen_math_ops.not_equal(self, other, incompatible_shape_error=False)
   else:
     # In legacy graph mode, tensor equality is object equality
@@ -2696,10 +2778,10 @@ def reduce_max(input_tensor, axis=None, keepdims=False, name=None):
   tf.Tensor(-1, shape=(), dtype=int32)
   >>> x = tf.constant([4, float('nan')])
   >>> print(tf.reduce_max(x))
-  tf.Tensor(4.0, shape=(), dtype=float32)
+  tf.Tensor(nan, shape=(), dtype=float32)
   >>> x = tf.constant([float('nan'), float('nan')])
   >>> print(tf.reduce_max(x))
-  tf.Tensor(-inf, shape=(), dtype=float32)
+  tf.Tensor(nan, shape=(), dtype=float32)
   >>> x = tf.constant([float('-inf'), float('inf')])
   >>> print(tf.reduce_max(x))
   tf.Tensor(inf, shape=(), dtype=float32)
@@ -3046,7 +3128,7 @@ def reduce_logsumexp(input_tensor, axis=None, keepdims=False, name=None):
             dims=reduce_dim))
     if not keepdims:
       my_max = array_ops.reshape(my_max, gen_array_ops.shape(result))
-    result = gen_math_ops.add(result, my_max)
+    result = _add_dispatch(result, my_max, name=name)
     return _may_reduce_to_scalar(keepdims, axis, result)
 
 
@@ -3390,7 +3472,21 @@ def matvec(a,
     return array_ops.squeeze(output, axis=-1)
 
 
-_OverrideBinaryOperatorHelper(matmul, "matmul")
+def matmul_wrapper(a,
+                   b,
+                   transpose_a=False,
+                   transpose_b=False,
+                   adjoint_a=False,
+                   adjoint_b=False,
+                   a_is_sparse=False,
+                   b_is_sparse=False,
+                   name=None):
+  if ops._numpy_style_type_promotion:
+    return a._matmul(b)
+  return matmul(a, b, transpose_a, transpose_b, adjoint_a, adjoint_b,
+                a_is_sparse, b_is_sparse, name)
+matmul_wrapper.__doc__ = matmul.__doc__
+_OverrideBinaryOperatorHelper(matmul_wrapper, "matmul")
 
 sparse_matmul = deprecation.deprecated(None, "Use `tf.linalg.matmul` instead")(
     gen_math_ops.sparse_mat_mul)
@@ -3693,6 +3789,29 @@ def log_sigmoid(x, name=None):
 
   Returns:
     A Tensor with the same type as `x`.
+
+  Usage Example:
+
+  If a positive number is large, then its log_sigmoid will approach to 0 since
+  the formula will be `y = log( <large_num> / (1 + <large_num>) )` which
+  approximates to `log (1)` which is 0.
+
+  >>> x = tf.constant([0.0, 1.0, 50.0, 100.0])
+  >>> tf.math.log_sigmoid(x)
+  <tf.Tensor: shape=(4,), dtype=float32, numpy=
+  array([-6.9314718e-01, -3.1326169e-01, -1.9287499e-22, -0.0000000e+00],
+        dtype=float32)>
+
+  If a negative number is large, its log_sigmoid will approach to the number
+  itself since the formula will be `y = log( 1 / (1 + <large_num>) )` which is
+  `log (1) - log ( (1 + <large_num>) )` which approximates to `- <large_num>`
+  that is the number itself.
+
+  >>> x = tf.constant([-100.0, -50.0, -1.0, 0.0])
+  >>> tf.math.log_sigmoid(x)
+  <tf.Tensor: shape=(4,), dtype=float32, numpy=
+  array([-100.       ,  -50.       ,   -1.3132616,   -0.6931472],
+        dtype=float32)>
   """
   with ops.name_scope(name, "LogSigmoid", [x]) as name:
     x = ops.convert_to_tensor(x, name="x")
@@ -4761,6 +4880,35 @@ def ndtri(x, name=None):
     return gen_math_ops.ndtri(x)
 
 
+@tf_export("math.erfcinv")
+@dispatch.add_dispatch_support
+def erfcinv(x, name=None):
+  """Computes the inverse of complementary error function.
+
+  Given `x`, compute the inverse complementary error function of `x`.
+  This function is the inverse of `tf.math.erfc`, and is defined on
+  `[0, 2]`.
+
+  >>> tf.math.erfcinv([0., 0.2, 1., 1.5, 2.])
+  <tf.Tensor: shape=(5,), dtype=float32, numpy=
+  array([       inf,  0.9061935, -0.       , -0.4769363,       -inf],
+        dtype=float32)>
+
+  Args:
+    x: `Tensor` with type `float` or `double`.
+    name: A name for the operation (optional).
+  Returns:
+    Inverse complementary error function of `x`.
+
+  @compatibility(numpy)
+  Equivalent to scipy.special.erfcinv
+  @end_compatibility
+  """
+  with ops.name_scope(name, "erfcinv", [x]):
+    x = ops.convert_to_tensor(x, name="start")
+    return -ndtri(0.5 * x) * np.sqrt(0.5)
+
+
 @tf_export("math.ceil", v1=["math.ceil", "ceil"])
 @dispatch.add_dispatch_support
 @deprecation.deprecated_endpoints("ceil")
@@ -4920,10 +5068,66 @@ def rsqrt(x, name=None):
 
   Args:
     x: A `tf.Tensor`. Must be one of the following types: `bfloat16`, `half`,
-      `float32`, `float64`. `int32`
+      `float32`, `float64`.
     name: A name for the operation (optional).
 
   Returns:
     A `tf.Tensor`. Has the same type as `x`.
   """
   return gen_math_ops.rsqrt(x, name)
+
+
+@tf_export("math.acos", "acos")
+@dispatch.add_dispatch_support
+def acos(x, name=None):
+  """Computes acos of x element-wise.
+
+  Provided an input tensor, the `tf.math.acos` operation
+  returns the inverse cosine of each element of the tensor.
+  If `y = tf.math.cos(x)` then, `x = tf.math.acos(y)`.
+
+  Input range is `[-1, 1]` and the output has a range of `[0, pi]`.
+
+  For example:
+
+  >>> x = tf.constant([1.0, -0.5, 3.4, 0.2, 0.0, -2], dtype = tf.float32)
+  >>> tf.math.acos(x)
+  <tf.Tensor: shape=(6,), dtype=float32,
+  numpy= array([0. , 2.0943952, nan, 1.3694383, 1.5707964, nan],
+  dtype=float32)>
+
+  Args:
+    x: A `Tensor`. Must be one of the following types: `bfloat16`, `half`,
+      `float32`, `float64`, `uint8`, `int8`, `int16`, `int32`, `int64`,
+      `complex64`, `complex128`, `string`.
+    name: A name for the operation (optional).
+
+  Returns:
+    A `Tensor`. Has the same type as x.
+  """
+  return gen_math_ops.acos(x, name)
+
+
+@tf_export("math.floor", "floor")
+@dispatch.add_dispatch_support
+def floor(x, name=None):
+  """Returns element-wise largest integer not greater than x.
+
+  Both input range is `(-inf, inf)` and the
+  ouput range consists of all integer values.
+
+  For example:
+
+  >>> x = tf.constant([1.3324, -1.5, 5.555, -2.532, 0.99, float("inf")])
+  >>> tf.floor(x).numpy()
+  array([ 1., -2.,  5., -3.,  0., inf], dtype=float32)
+
+  Args:
+    x:  A `Tensor`. Must be one of the following types: `bfloat16`, `half`,
+      `float32`, `float64`.
+    name: A name for the operation (optional).
+
+  Returns:
+    A `Tensor`. Has the same type as x.
+  """
+  return gen_math_ops.floor(x, name)

@@ -60,6 +60,9 @@ cuda_py_test(
     name = "beta_test",
     size = "small",
     srcs = ["beta_test.py"],
+    xla_tags = [
+        "no_cuda_asan",  # times out
+    ],
     deps = [
         "//tensorflow/python:client",
         "//tensorflow/python:client_testlib",
@@ -212,6 +215,7 @@ cuda_py_test(
         "no_oss",
         # disable to avoid false positives from scipy.
         "nomsan",
+        "noasan",  #b/168810473
     ],
     deps = [
         "//tensorflow/python:client_testlib",
