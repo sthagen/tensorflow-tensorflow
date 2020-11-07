@@ -304,6 +304,26 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
       return errors::Unimplemented("RestoreInternal is not yet supported");
     }
 
+    data::TraceMeMetadata GetTraceMeMetadata() const override {
+      data::TraceMeMetadata result;
+      int64 num_tasks = -1;
+      if (mu_.try_lock()) {
+        num_tasks = tasks_.size() - finished_tasks_;
+        mu_.unlock();
+      }
+      std::string num_tasks_string =
+          (num_tasks == -1)
+              ? "unavailable"
+              : strings::Printf("%lld", static_cast<long long>(num_tasks));
+      result.push_back(std::make_pair("num_tasks", num_tasks_string));
+      result.push_back(std::make_pair("job_name", dataset()->job_name_));
+      result.push_back(std::make_pair(
+          "max_outstanding_requests",
+          strings::Printf("%lld", static_cast<long long>(
+                                      dataset()->max_outstanding_requests_))));
+      return result;
+    }
+
    private:
     struct Task {
       Task(int64 task_id, const std::string& address,
@@ -482,7 +502,10 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
           VLOG(1) << "Failed to get element from worker "
                   << task_to_process->address << ": " << s;
           task_to_process->in_use = false;
-          status_ = s;
+          status_ = Status(
+              s.code(),
+              absl::StrCat("Failed to get element from worker ",
+                           task_to_process->address, ": ", s.error_message()));
           get_next_cv_.notify_all();
           return;
         }
@@ -568,7 +591,7 @@ class DataServiceDatasetOp::Dataset : public DatasetBase {
 
     const int64 iterator_index_;
 
-    mutex mu_;
+    mutable mutex mu_;
     condition_variable get_next_cv_ TF_GUARDED_BY(mu_);
     condition_variable worker_thread_cv_ TF_GUARDED_BY(mu_);
     condition_variable manager_thread_cv_ TF_GUARDED_BY(mu_);

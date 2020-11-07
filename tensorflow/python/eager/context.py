@@ -633,7 +633,7 @@ class Context(object):
     """Sync both local executors and the ones on remote workers.
 
     In async execution mode, local function calls can return before the
-    coresponding remote op/function execution requests are completed. Calling
+    corresponding remote op/function execution requests are completed. Calling
     this method creates a synchronization barrier for remote executors. It only
     returns when all remote pending nodes are finished, potentially with errors
     if any remote executors are in error state.
@@ -2060,6 +2060,47 @@ def device(name):
   return context().device(name)
 
 
+# Expose some properties of Context as internally public APIs (b/160348781).
+@tf_export("__internal__.eager_context.get_config", v1=[])
+def get_config():
+  """Get the ConfigProto of Context.
+
+  Returns:
+    The ConfigProto of Context.
+  """
+  return context().config
+
+
+@tf_export("__internal__.eager_context.get_device_name", v1=[])
+def get_device_name():
+  """Get the device name for the current thread.
+
+  Returns:
+    The device name for the current thread.
+  """
+  return context().device_name
+
+
+@tf_export("__internal__.eager_context.set_soft_device_placement", v1=[])
+def set_soft_device_placement(enabled):
+  """Set if soft device placements should be allowed.
+
+  Args:
+    enabled: Whether to enable soft device placement.
+  """
+  context().soft_device_placement = enabled
+
+
+@tf_export("__internal__.eager_context.get_executor", v1=[])
+def get_executor():
+  """Get the Executor of the current thread.
+
+  Returns:
+    The Executor of the current thread.
+  """
+  return context().executor
+
+
 @tf_export("debugging.get_log_device_placement")
 def get_log_device_placement():
   """Get if device placements are logged.
@@ -2281,7 +2322,7 @@ def async_scope():
   execution, potentially raising exceptions if async execution results in
   an error state.
 
-  Users may write the following code to asynchronuously invoke `train_step_fn`
+  Users may write the following code to asynchronously invoke `train_step_fn`
   and log the `loss` metric for every `num_steps` steps in a training loop.
   `train_step_fn` internally consumes data using `iterator.get_next()`, and may
   throw OutOfRangeError when running out of data. In the case:

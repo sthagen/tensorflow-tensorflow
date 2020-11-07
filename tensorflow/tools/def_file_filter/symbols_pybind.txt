@@ -222,6 +222,7 @@ tensorflow::EagerContext::WaitForAndCloseRemoteContexts
 
 [mlir] # mlir
 tensorflow::ExperimentalRunPassPipeline
+tensorflow::ExperimentalConvertSavedModelV1ToMlirLite
 tensorflow::ExperimentalConvertSavedModelV1ToMlir
 tensorflow::ExperimentalConvertSavedModelToMlir
 tensorflow::ImportGraphDef
@@ -400,3 +401,6 @@ tensorflow::TensorHandle::Tensor
 
 [python_api_dispatcher] # python_api_dispatcher
 tensorflow::PythonAPIDispatcher
+
+[python_tensor_converter] # python_tensor_converter
+tensorflow::PythonTensorConverter

@@ -198,13 +198,6 @@ StatusOr<Shape> InferWindowOutputShape(const Shape& base_shape,
           window.DebugString());
     }
 
-    if (base_shape.is_dynamic_dimension(i) &&
-        !window_util::IsTrivialWindowDimension(dim)) {
-      return Unimplemented(
-          "Dynamic shape is not supported for non trivial window: %s",
-          window_util::ToString(window));
-    }
-
     const int64 dilated_base = window_util::DilatedBound(
         ShapeUtil::GetDimension(base_shape, i), dim.base_dilation());
     const int64 padded_dilated_base =
@@ -1811,19 +1804,32 @@ ShapeInference::InferDegenerateDimensionBroadcastShape(HloOpcode operation,
         // Input feature dimension is a contracting dimension, which does not
         // affect the output dimension size. So we need to do nothing.
       } else {
-        return InvalidArgument(
-            "Dynamic Spatial Convolution is not supported: lhs shape is %s ",
-            lhs.ToString());
+        for (int64 j = 0; j < dnums.output_spatial_dimensions_size(); ++j) {
+          if (i == dnums.input_spatial_dimensions(j)) {
+            // i is a spatial dimension, find corresponding output spatial
+            // dimension.
+            is_dynamic[dnums.output_spatial_dimensions(j)] = true;
+          }
+        }
       }
     }
     if (rhs.is_dynamic_dimension(i)) {
       if (i == dnums.kernel_input_feature_dimension()) {
         // Kernel feature dimension does not affect the output dimension size.
         // So we need to do nothing.
-      } else {
+      } else if (i == dnums.kernel_output_feature_dimension()) {
         return InvalidArgument(
-            "Dynamic Spatial Convolution is not supported: rhs shape is %s ",
+            "Dynamic output feature dim on convolution kernel is not "
+            "supported: rhs shape is %s ",
             rhs.ToString());
+      } else {
+        for (int64 j = 0; j < dnums.kernel_spatial_dimensions_size(); ++j) {
+          if (i == dnums.kernel_spatial_dimensions(j)) {
+            // i is a spatial dimension, find corresponding output spatial
+            // dimension.
+            is_dynamic[dnums.output_spatial_dimensions(j)] = true;
+          }
+        }
       }
     }
   }
@@ -2155,8 +2161,9 @@ ShapeInference::InferDegenerateDimensionBroadcastShape(HloOpcode operation,
 }
 
 /* static */ StatusOr<Shape> ShapeInference::InferReduceWindowShape(
-    absl::Span<const Shape*> operands, absl::Span<const Shape*> init_values,
-    const Window& window, const ProgramShape& to_apply_shape) {
+    absl::Span<const Shape* const> operands,
+    absl::Span<const Shape* const> init_values, const Window& window,
+    const ProgramShape& to_apply_shape) {
   auto number_of_input = operands.size();
   // Check that all of the reduced tensors have the same dimensions. The element
   // types may be different.

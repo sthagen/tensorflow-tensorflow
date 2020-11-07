@@ -82,3 +82,17 @@ cuda_py_test(
         "//third_party/py/numpy",
     ],
 )
+
+cuda_py_test(
+    name = "stack_op_test",
+    size = "medium",
+    srcs = ["stack_op_test.py"],
+    deps = [
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:errors",
+        "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:variables",
+        "//third_party/py/numpy",
+    ],
+)

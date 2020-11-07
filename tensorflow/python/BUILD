@@ -1538,6 +1538,7 @@ py_library(
     name = "function_def_to_graph",
     srcs = ["framework/function_def_to_graph.py"],
     srcs_version = "PY2AND3",
+    visibility = visibility,
     deps = [
         ":framework",
         ":framework_ops",
@@ -1591,7 +1592,7 @@ py_library(
         "framework/convert_to_constants.py",
     ],
     srcs_version = "PY2AND3",
-    visibility = visibility + ["//waymo/ml:__subpackages__"],
+    visibility = visibility,
     deps = [
         ":dtypes",
         ":framework_ops",
@@ -1773,6 +1774,79 @@ tf_py_test(
     tags = ["no_pip"],
     deps = [
         ":_pywrap_python_api_dispatcher",
+        ":client_testlib",
+    ],
+)
+
+cc_library(
+    name = "python_tensor_converter",
+    srcs = ["framework/python_tensor_converter.cc"],
+    hdrs = ["framework/python_tensor_converter.h"],
+    deps = [
+        ":cpp_python_util",
+        ":safe_pyobject_ptr",
+        "//tensorflow/c/eager:c_api",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/python/eager:pywrap_tfe_lib",
+        "//third_party/python_runtime:headers",  # buildcleaner: keep
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# Note: this target is only used by python_tensor_converter_test.
+tf_python_pybind_extension(
+    name = "_pywrap_python_tensor_converter",
+    srcs = ["framework/python_tensor_converter_wrapper.cc"],
+    hdrs = [
+        "framework/python_tensor_converter.h",
+        "lib/core/numpy.h",
+        "//tensorflow/c:headers",
+        "//tensorflow/c/eager:pywrap_required_hdrs",
+        "//tensorflow/c/experimental/ops:pywrap_required_hdrs",
+        "//tensorflow/core/common_runtime/eager:pywrap_required_hdrs",
+        "//tensorflow/core/distributed_runtime:pywrap_required_hdrs",
+        "//tensorflow/core/distributed_runtime/eager:pywrap_required_hdrs",
+        "//tensorflow/python/eager:pywrap_required_hdrs",
+    ],
+    module_name = "_pywrap_python_tensor_converter",
+    deps = [
+        ":safe_pyobject_ptr_required_hdrs",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@pybind11",
+        "//third_party/python_runtime:headers",  # buildcleaner: keep
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:framework",
+        "//tensorflow/core/common_runtime:core_cpu_headers_lib",
+        "//tensorflow/core:lib_headers_for_pybind",
+        "//third_party/py/numpy:headers",
+        "//tensorflow/c:pywrap_required_hdrs",
+        "@com_google_absl//absl/types:span",
+    ] + if_static(
+        extra_deps = [
+            "//tensorflow/core/protobuf:eager_service_proto_cc",
+            "//tensorflow/core/protobuf:master_proto_cc",
+            "//tensorflow/core/protobuf:worker_proto_cc",
+        ],
+        otherwise = [
+            "//tensorflow/core/protobuf:eager_service_proto_cc_headers_only",
+            "//tensorflow/core/protobuf:master_proto_cc_headers_only",
+            "//tensorflow/core/protobuf:worker_proto_cc_headers_only",
+        ],
+    ),
+)
+
+tf_py_test(
+    name = "python_tensor_converter_test",
+    srcs = ["framework/python_tensor_converter_test.py"],
+    python_version = "PY3",
+    tags = ["no_pip"],
+    deps = [
+        ":_pywrap_python_tensor_converter",
         ":client_testlib",
     ],
 )
@@ -3284,6 +3358,16 @@ tf_gen_op_wrapper_private_py(
 tf_gen_op_wrapper_private_py(
     name = "ragged_conversion_ops_gen",
     visibility = ["//tensorflow/python/ops/ragged:__pkg__"],
+)
+
+tf_gen_op_wrapper_private_py(
+    name = "risc_ops_gen",
+    visibility = [
+        "//tensorflow/python/ops/risc:__pkg__",
+    ],
+    deps = [
+        "//tensorflow/core:risc_ops_op_lib",
+    ],
 )
 
 tf_gen_op_wrapper_private_py(name = "rnn_ops_gen")
@@ -6026,6 +6110,7 @@ pywrap_tensorflow_macro(
         ":pybind11_proto",
         ":python_api_dispatcher",
         ":python_op_gen",
+        ":python_tensor_converter",
         ":safe_pyobject_ptr",
         ":tf_session_helper",
         "//third_party/python_runtime:headers",
@@ -6096,6 +6181,7 @@ filegroup(
         ":py_exception_registry",  # py_exception_registry
         ":py_func_lib",  # py_func
         ":python_api_dispatcher",  # python_api_dispatcher
+        ":python_tensor_converter",  # python_tensor_converter
         ":python_op_gen",  # python_op_gen
         ":safe_ptr",  # checkpoint_reader
         "//tensorflow/c:checkpoint_reader",  # checkpoint_reader
@@ -7414,7 +7500,6 @@ py_library(
     visibility = visibility + [
         "//learning/deepmind/tensorflow:__subpackages__",
         "//third_party/car/deep_nets/tensorflow:__subpackages__",
-        "//waymo/ml:__subpackages__",
     ],
     deps = [
         ":framework_for_generated_wrappers",

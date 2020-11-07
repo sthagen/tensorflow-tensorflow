@@ -325,6 +325,9 @@ struct MatrixSetDiagOptionsT;
 struct IfOptions;
 struct IfOptionsT;
 
+struct CallOnceOptions;
+struct CallOnceOptionsT;
+
 struct WhileOptions;
 struct WhileOptionsT;
 
@@ -351,6 +354,9 @@ struct BatchMatMulOptionsT;
 
 struct CumsumOptions;
 struct CumsumOptionsT;
+
+struct BroadcastToOptions;
+struct BroadcastToOptionsT;
 
 struct OperatorCode;
 struct OperatorCodeT;
@@ -792,11 +798,13 @@ enum BuiltinOperator {
   BuiltinOperator_BATCH_MATMUL = 126,
   BuiltinOperator_PLACEHOLDER_FOR_GREATER_OP_CODES = 127,
   BuiltinOperator_CUMSUM = 128,
+  BuiltinOperator_CALL_ONCE = 129,
+  BuiltinOperator_BROADCAST_TO = 130,
   BuiltinOperator_MIN = BuiltinOperator_ADD,
-  BuiltinOperator_MAX = BuiltinOperator_CUMSUM
+  BuiltinOperator_MAX = BuiltinOperator_BROADCAST_TO
 };
 
-inline const BuiltinOperator (&EnumValuesBuiltinOperator())[129] {
+inline const BuiltinOperator (&EnumValuesBuiltinOperator())[131] {
   static const BuiltinOperator values[] = {
     BuiltinOperator_ADD,
     BuiltinOperator_AVERAGE_POOL_2D,
@@ -926,13 +934,15 @@ inline const BuiltinOperator (&EnumValuesBuiltinOperator())[129] {
     BuiltinOperator_SEGMENT_SUM,
     BuiltinOperator_BATCH_MATMUL,
     BuiltinOperator_PLACEHOLDER_FOR_GREATER_OP_CODES,
-    BuiltinOperator_CUMSUM
+    BuiltinOperator_CUMSUM,
+    BuiltinOperator_CALL_ONCE,
+    BuiltinOperator_BROADCAST_TO
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOperator() {
-  static const char * const names[130] = {
+  static const char * const names[132] = {
     "ADD",
     "AVERAGE_POOL_2D",
     "CONCATENATION",
@@ -1062,13 +1072,15 @@ inline const char * const *EnumNamesBuiltinOperator() {
     "BATCH_MATMUL",
     "PLACEHOLDER_FOR_GREATER_OP_CODES",
     "CUMSUM",
+    "CALL_ONCE",
+    "BROADCAST_TO",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOperator(BuiltinOperator e) {
-  if (flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_CUMSUM)) return "";
+  if (flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_BROADCAST_TO)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOperator()[index];
 }
@@ -1177,11 +1189,13 @@ enum BuiltinOptions {
   BuiltinOptions_SegmentSumOptions = 100,
   BuiltinOptions_BatchMatMulOptions = 101,
   BuiltinOptions_CumsumOptions = 102,
+  BuiltinOptions_CallOnceOptions = 103,
+  BuiltinOptions_BroadcastToOptions = 104,
   BuiltinOptions_MIN = BuiltinOptions_NONE,
-  BuiltinOptions_MAX = BuiltinOptions_CumsumOptions
+  BuiltinOptions_MAX = BuiltinOptions_BroadcastToOptions
 };
 
-inline const BuiltinOptions (&EnumValuesBuiltinOptions())[103] {
+inline const BuiltinOptions (&EnumValuesBuiltinOptions())[105] {
   static const BuiltinOptions values[] = {
     BuiltinOptions_NONE,
     BuiltinOptions_Conv2DOptions,
@@ -1285,13 +1299,15 @@ inline const BuiltinOptions (&EnumValuesBuiltinOptions())[103] {
     BuiltinOptions_DensifyOptions,
     BuiltinOptions_SegmentSumOptions,
     BuiltinOptions_BatchMatMulOptions,
-    BuiltinOptions_CumsumOptions
+    BuiltinOptions_CumsumOptions,
+    BuiltinOptions_CallOnceOptions,
+    BuiltinOptions_BroadcastToOptions
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOptions() {
-  static const char * const names[104] = {
+  static const char * const names[106] = {
     "NONE",
     "Conv2DOptions",
     "DepthwiseConv2DOptions",
@@ -1395,13 +1411,15 @@ inline const char * const *EnumNamesBuiltinOptions() {
     "SegmentSumOptions",
     "BatchMatMulOptions",
     "CumsumOptions",
+    "CallOnceOptions",
+    "BroadcastToOptions",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOptions(BuiltinOptions e) {
-  if (flatbuffers::IsOutRange(e, BuiltinOptions_NONE, BuiltinOptions_CumsumOptions)) return "";
+  if (flatbuffers::IsOutRange(e, BuiltinOptions_NONE, BuiltinOptions_BroadcastToOptions)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOptions()[index];
 }
@@ -1816,6 +1834,14 @@ template<> struct BuiltinOptionsTraits<tflite::BatchMatMulOptions> {
 
 template<> struct BuiltinOptionsTraits<tflite::CumsumOptions> {
   static const BuiltinOptions enum_value = BuiltinOptions_CumsumOptions;
+};
+
+template<> struct BuiltinOptionsTraits<tflite::CallOnceOptions> {
+  static const BuiltinOptions enum_value = BuiltinOptions_CallOnceOptions;
+};
+
+template<> struct BuiltinOptionsTraits<tflite::BroadcastToOptions> {
+  static const BuiltinOptions enum_value = BuiltinOptions_BroadcastToOptions;
 };
 
 struct BuiltinOptionsUnion {
@@ -2665,6 +2691,22 @@ struct BuiltinOptionsUnion {
   const tflite::CumsumOptionsT *AsCumsumOptions() const {
     return type == BuiltinOptions_CumsumOptions ?
       reinterpret_cast<const tflite::CumsumOptionsT *>(value) : nullptr;
+  }
+  tflite::CallOnceOptionsT *AsCallOnceOptions() {
+    return type == BuiltinOptions_CallOnceOptions ?
+      reinterpret_cast<tflite::CallOnceOptionsT *>(value) : nullptr;
+  }
+  const tflite::CallOnceOptionsT *AsCallOnceOptions() const {
+    return type == BuiltinOptions_CallOnceOptions ?
+      reinterpret_cast<const tflite::CallOnceOptionsT *>(value) : nullptr;
+  }
+  tflite::BroadcastToOptionsT *AsBroadcastToOptions() {
+    return type == BuiltinOptions_BroadcastToOptions ?
+      reinterpret_cast<tflite::BroadcastToOptionsT *>(value) : nullptr;
+  }
+  const tflite::BroadcastToOptionsT *AsBroadcastToOptions() const {
+    return type == BuiltinOptions_BroadcastToOptions ?
+      reinterpret_cast<const tflite::BroadcastToOptionsT *>(value) : nullptr;
   }
 };
 
@@ -8992,6 +9034,60 @@ inline flatbuffers::Offset<IfOptions> CreateIfOptions(
 
 flatbuffers::Offset<IfOptions> CreateIfOptions(flatbuffers::FlatBufferBuilder &_fbb, const IfOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct CallOnceOptionsT : public flatbuffers::NativeTable {
+  typedef CallOnceOptions TableType;
+  int32_t init_subgraph_index;
+  CallOnceOptionsT()
+      : init_subgraph_index(0) {
+  }
+};
+
+struct CallOnceOptions FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef CallOnceOptionsT NativeTableType;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_INIT_SUBGRAPH_INDEX = 4
+  };
+  int32_t init_subgraph_index() const {
+    return GetField<int32_t>(VT_INIT_SUBGRAPH_INDEX, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<int32_t>(verifier, VT_INIT_SUBGRAPH_INDEX) &&
+           verifier.EndTable();
+  }
+  CallOnceOptionsT *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(CallOnceOptionsT *_o, const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static flatbuffers::Offset<CallOnceOptions> Pack(flatbuffers::FlatBufferBuilder &_fbb, const CallOnceOptionsT* _o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct CallOnceOptionsBuilder {
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_init_subgraph_index(int32_t init_subgraph_index) {
+    fbb_.AddElement<int32_t>(CallOnceOptions::VT_INIT_SUBGRAPH_INDEX, init_subgraph_index, 0);
+  }
+  explicit CallOnceOptionsBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  CallOnceOptionsBuilder &operator=(const CallOnceOptionsBuilder &);
+  flatbuffers::Offset<CallOnceOptions> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<CallOnceOptions>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<CallOnceOptions> CreateCallOnceOptions(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    int32_t init_subgraph_index = 0) {
+  CallOnceOptionsBuilder builder_(_fbb);
+  builder_.add_init_subgraph_index(init_subgraph_index);
+  return builder_.Finish();
+}
+
+flatbuffers::Offset<CallOnceOptions> CreateCallOnceOptions(flatbuffers::FlatBufferBuilder &_fbb, const CallOnceOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct WhileOptionsT : public flatbuffers::NativeTable {
   typedef WhileOptions TableType;
   int32_t cond_subgraph_index;
@@ -9429,6 +9525,46 @@ inline flatbuffers::Offset<CumsumOptions> CreateCumsumOptions(
 }
 
 flatbuffers::Offset<CumsumOptions> CreateCumsumOptions(flatbuffers::FlatBufferBuilder &_fbb, const CumsumOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct BroadcastToOptionsT : public flatbuffers::NativeTable {
+  typedef BroadcastToOptions TableType;
+  BroadcastToOptionsT() {
+  }
+};
+
+struct BroadcastToOptions FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef BroadcastToOptionsT NativeTableType;
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           verifier.EndTable();
+  }
+  BroadcastToOptionsT *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(BroadcastToOptionsT *_o, const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static flatbuffers::Offset<BroadcastToOptions> Pack(flatbuffers::FlatBufferBuilder &_fbb, const BroadcastToOptionsT* _o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct BroadcastToOptionsBuilder {
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  explicit BroadcastToOptionsBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  BroadcastToOptionsBuilder &operator=(const BroadcastToOptionsBuilder &);
+  flatbuffers::Offset<BroadcastToOptions> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<BroadcastToOptions>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<BroadcastToOptions> CreateBroadcastToOptions(
+    flatbuffers::FlatBufferBuilder &_fbb) {
+  BroadcastToOptionsBuilder builder_(_fbb);
+  return builder_.Finish();
+}
+
+flatbuffers::Offset<BroadcastToOptions> CreateBroadcastToOptions(flatbuffers::FlatBufferBuilder &_fbb, const BroadcastToOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct OperatorCodeT : public flatbuffers::NativeTable {
   typedef OperatorCode TableType;
@@ -9886,6 +10022,12 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const tflite::CumsumOptions *builtin_options_as_CumsumOptions() const {
     return builtin_options_type() == tflite::BuiltinOptions_CumsumOptions ? static_cast<const tflite::CumsumOptions *>(builtin_options()) : nullptr;
   }
+  const tflite::CallOnceOptions *builtin_options_as_CallOnceOptions() const {
+    return builtin_options_type() == tflite::BuiltinOptions_CallOnceOptions ? static_cast<const tflite::CallOnceOptions *>(builtin_options()) : nullptr;
+  }
+  const tflite::BroadcastToOptions *builtin_options_as_BroadcastToOptions() const {
+    return builtin_options_type() == tflite::BuiltinOptions_BroadcastToOptions ? static_cast<const tflite::BroadcastToOptions *>(builtin_options()) : nullptr;
+  }
   const flatbuffers::Vector<uint8_t> *custom_options() const {
     return GetPointer<const flatbuffers::Vector<uint8_t> *>(VT_CUSTOM_OPTIONS);
   }
@@ -10328,6 +10470,14 @@ template<> inline const tflite::BatchMatMulOptions *Operator::builtin_options_as
 
 template<> inline const tflite::CumsumOptions *Operator::builtin_options_as<tflite::CumsumOptions>() const {
   return builtin_options_as_CumsumOptions();
+}
+
+template<> inline const tflite::CallOnceOptions *Operator::builtin_options_as<tflite::CallOnceOptions>() const {
+  return builtin_options_as_CallOnceOptions();
+}
+
+template<> inline const tflite::BroadcastToOptions *Operator::builtin_options_as<tflite::BroadcastToOptions>() const {
+  return builtin_options_as_BroadcastToOptions();
 }
 
 struct OperatorBuilder {
@@ -13810,6 +13960,32 @@ inline flatbuffers::Offset<IfOptions> CreateIfOptions(flatbuffers::FlatBufferBui
       _else_subgraph_index);
 }
 
+inline CallOnceOptionsT *CallOnceOptions::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = new CallOnceOptionsT();
+  UnPackTo(_o, _resolver);
+  return _o;
+}
+
+inline void CallOnceOptions::UnPackTo(CallOnceOptionsT *_o, const flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = init_subgraph_index(); _o->init_subgraph_index = _e; }
+}
+
+inline flatbuffers::Offset<CallOnceOptions> CallOnceOptions::Pack(flatbuffers::FlatBufferBuilder &_fbb, const CallOnceOptionsT* _o, const flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateCallOnceOptions(_fbb, _o, _rehasher);
+}
+
+inline flatbuffers::Offset<CallOnceOptions> CreateCallOnceOptions(flatbuffers::FlatBufferBuilder &_fbb, const CallOnceOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { flatbuffers::FlatBufferBuilder *__fbb; const CallOnceOptionsT* __o; const flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _init_subgraph_index = _o->init_subgraph_index;
+  return tflite::CreateCallOnceOptions(
+      _fbb,
+      _init_subgraph_index);
+}
+
 inline WhileOptionsT *WhileOptions::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
   auto _o = new WhileOptionsT();
   UnPackTo(_o, _resolver);
@@ -14033,6 +14209,29 @@ inline flatbuffers::Offset<CumsumOptions> CreateCumsumOptions(flatbuffers::FlatB
       _fbb,
       _exclusive,
       _reverse);
+}
+
+inline BroadcastToOptionsT *BroadcastToOptions::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = new BroadcastToOptionsT();
+  UnPackTo(_o, _resolver);
+  return _o;
+}
+
+inline void BroadcastToOptions::UnPackTo(BroadcastToOptionsT *_o, const flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+}
+
+inline flatbuffers::Offset<BroadcastToOptions> BroadcastToOptions::Pack(flatbuffers::FlatBufferBuilder &_fbb, const BroadcastToOptionsT* _o, const flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateBroadcastToOptions(_fbb, _o, _rehasher);
+}
+
+inline flatbuffers::Offset<BroadcastToOptions> CreateBroadcastToOptions(flatbuffers::FlatBufferBuilder &_fbb, const BroadcastToOptionsT *_o, const flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { flatbuffers::FlatBufferBuilder *__fbb; const BroadcastToOptionsT* __o; const flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  return tflite::CreateBroadcastToOptions(
+      _fbb);
 }
 
 inline OperatorCodeT *OperatorCode::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
@@ -14918,6 +15117,14 @@ inline bool VerifyBuiltinOptions(flatbuffers::Verifier &verifier, const void *ob
       auto ptr = reinterpret_cast<const tflite::CumsumOptions *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case BuiltinOptions_CallOnceOptions: {
+      auto ptr = reinterpret_cast<const tflite::CallOnceOptions *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case BuiltinOptions_BroadcastToOptions: {
+      auto ptr = reinterpret_cast<const tflite::BroadcastToOptions *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -15344,6 +15551,14 @@ inline void *BuiltinOptionsUnion::UnPack(const void *obj, BuiltinOptions type, c
       auto ptr = reinterpret_cast<const tflite::CumsumOptions *>(obj);
       return ptr->UnPack(resolver);
     }
+    case BuiltinOptions_CallOnceOptions: {
+      auto ptr = reinterpret_cast<const tflite::CallOnceOptions *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case BuiltinOptions_BroadcastToOptions: {
+      auto ptr = reinterpret_cast<const tflite::BroadcastToOptions *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -15758,6 +15973,14 @@ inline flatbuffers::Offset<void> BuiltinOptionsUnion::Pack(flatbuffers::FlatBuff
       auto ptr = reinterpret_cast<const tflite::CumsumOptionsT *>(value);
       return CreateCumsumOptions(_fbb, ptr, _rehasher).Union();
     }
+    case BuiltinOptions_CallOnceOptions: {
+      auto ptr = reinterpret_cast<const tflite::CallOnceOptionsT *>(value);
+      return CreateCallOnceOptions(_fbb, ptr, _rehasher).Union();
+    }
+    case BuiltinOptions_BroadcastToOptions: {
+      auto ptr = reinterpret_cast<const tflite::BroadcastToOptionsT *>(value);
+      return CreateBroadcastToOptions(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -16170,6 +16393,14 @@ inline BuiltinOptionsUnion::BuiltinOptionsUnion(const BuiltinOptionsUnion &u) FL
     }
     case BuiltinOptions_CumsumOptions: {
       value = new tflite::CumsumOptionsT(*reinterpret_cast<tflite::CumsumOptionsT *>(u.value));
+      break;
+    }
+    case BuiltinOptions_CallOnceOptions: {
+      value = new tflite::CallOnceOptionsT(*reinterpret_cast<tflite::CallOnceOptionsT *>(u.value));
+      break;
+    }
+    case BuiltinOptions_BroadcastToOptions: {
+      value = new tflite::BroadcastToOptionsT(*reinterpret_cast<tflite::BroadcastToOptionsT *>(u.value));
       break;
     }
     default:
@@ -16686,6 +16917,16 @@ inline void BuiltinOptionsUnion::Reset() {
     }
     case BuiltinOptions_CumsumOptions: {
       auto ptr = reinterpret_cast<tflite::CumsumOptionsT *>(value);
+      delete ptr;
+      break;
+    }
+    case BuiltinOptions_CallOnceOptions: {
+      auto ptr = reinterpret_cast<tflite::CallOnceOptionsT *>(value);
+      delete ptr;
+      break;
+    }
+    case BuiltinOptions_BroadcastToOptions: {
+      auto ptr = reinterpret_cast<tflite::BroadcastToOptionsT *>(value);
       delete ptr;
       break;
     }

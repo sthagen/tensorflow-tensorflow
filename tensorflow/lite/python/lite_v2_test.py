@@ -35,8 +35,6 @@ from tensorflow.lite.toco import types_pb2 as _types_pb2
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
-from tensorflow.python.keras.layers import recurrent
-from tensorflow.python.keras.layers import recurrent_v2
 from tensorflow.python.lib.io import file_io
 from tensorflow.python.platform import test
 from tensorflow.python.saved_model import save_options
@@ -888,6 +886,31 @@ class FromSavedModelTest(lite_v2_test_util.ModelTest):
 
     self.assertTrue(tflite_model)
 
+  @test_util.run_v2_only
+  def testNonStatefulConvLSTM2D(self):
+    """Test saved model with non stateful ConvLSTM2D keras layer."""
+    # Create keras model
+    model = tf.keras.Sequential([
+        tf.keras.layers.ConvLSTM2D(
+            32, (3, 3),
+            padding='same',
+            return_sequences=True,
+            stateful=False,
+            batch_input_shape=(1, 1, 10, 10, 1))
+    ])
+    model.compile()
+
+    # Export the keras model to saved model.
+    saved_model_dir = os.path.join(self.get_temp_dir(), 'conv_lstm_2d')
+    model.save(saved_model_dir, save_format='tf', include_optimizer=False)
+
+    converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+    converter.target_spec.supported_ops = [
+        tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS
+    ]
+    tflite_model = converter.convert()
+    self.assertTrue(tflite_model)
+
 
 class FromKerasModelTest(lite_v2_test_util.ModelTest):
 
@@ -1122,9 +1145,9 @@ class ControlFlowTest(lite_v2_test_util.ModelTest):
         expected = expected.c
       self.assertAllClose(expected, actual)
 
-  @parameterized.named_parameters(('LSTM', recurrent_v2.LSTM),
-                                  ('SimpleRNN', recurrent.SimpleRNN),
-                                  ('GRU', recurrent_v2.GRU))
+  @parameterized.named_parameters(('LSTM', tf.keras.layers.LSTM),
+                                  ('SimpleRNN', tf.keras.layers.SimpleRNN),
+                                  ('GRU', tf.keras.layers.GRU))
   @test_util.run_v2_only
   def testKerasRNN(self, rnn_layer):
     # This relies on TFLiteConverter to rewrite unknown batch size to 1. The
@@ -1146,9 +1169,9 @@ class ControlFlowTest(lite_v2_test_util.ModelTest):
     expected_value = model.predict(input_data)
     self.assertAllClose(expected_value, actual_value, atol=1e-05)
 
-  @parameterized.named_parameters(('LSTM', recurrent_v2.LSTM),
-                                  ('SimpleRNN', recurrent.SimpleRNN),
-                                  ('GRU', recurrent_v2.GRU))
+  @parameterized.named_parameters(('LSTM', tf.keras.layers.LSTM),
+                                  ('SimpleRNN', tf.keras.layers.SimpleRNN),
+                                  ('GRU', tf.keras.layers.GRU))
   @test_util.run_v2_only
   def testKerasRNNMultiBatches(self, rnn_layer):
     input_data = tf.constant(
@@ -1175,7 +1198,7 @@ class ControlFlowTest(lite_v2_test_util.ModelTest):
     model.add(tf.keras.layers.Input(batch_size=1, shape=(10, 10), name='input'))
     model.add(
         tf.keras.layers.Bidirectional(
-            recurrent_v2.LSTM(units=10, return_sequences=True),
+            tf.keras.layers.LSTM(units=10, return_sequences=True),
             input_shape=(10, 10)))
     model.add(tf.keras.layers.Flatten())
     model.add(tf.keras.layers.Dense(5))
@@ -1196,7 +1219,7 @@ class ControlFlowTest(lite_v2_test_util.ModelTest):
         np.array(np.random.random_sample((1, 10, 10)), dtype=np.float32))
     model = tf.keras.models.Sequential()
     model.add(tf.keras.layers.Input(batch_size=1, shape=(10, 10), name='input'))
-    model.add(tf.keras.layers.Bidirectional(recurrent_v2.LSTM(units=10)))
+    model.add(tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(units=10)))
     model.add(tf.keras.layers.Dense(5))
     model.add(tf.keras.layers.Activation('softmax'))
 
@@ -1393,6 +1416,55 @@ class UnknownShapes(lite_v2_test_util.ModelTest):
         'None is only supported in the 1st dimension. Tensor '
         '\'in_tensor\' has invalid shape \'[1, None, 16, 3]\'.',
         str(error.exception))
+
+
+class AffineOpThenMulFusionTest(lite_v2_test_util.ModelTest):
+
+  @parameterized.named_parameters(('should_fuse_1d', [2], True),
+                                  ('should_fuse_1x2', [1, 2], True),
+                                  ('should_not_fuse_2x1', [2, 1], False),
+                                  ('should_not_fuse_2x2', [2, 2], False))
+  @test_util.run_v2_only
+  def testFullyConnectedFusion(self, multiplier_shape, can_fuse):
+    """Test fusion of (x ∗ w) * m into fullyconnected."""
+
+    @tf.function
+    def func(x):
+      w = tf.constant([3., 4., 5., 6.], shape=[2, 2])
+      m_value = [7., 8.] if sum(multiplier_shape) < 4 else [7., 8., 9., 10.]
+      m = tf.constant(m_value, shape=multiplier_shape)
+      return tf.matmul(x, w) * m
+
+    input_data = tf.constant([1., 2.], shape=[1, 2])
+    self._checkAffineFusion(func, input_data, 1 if can_fuse else 2)
+
+  @parameterized.named_parameters(('should_fuse_1d', [2], True),
+                                  ('should_fuse_1x2', [1, 2], True),
+                                  ('should_not_fuse_2x1', [2, 1], False))
+  @test_util.run_v2_only
+  def testConvFusion(self, multiplier_shape, can_fuse):
+    """Test fusion of (x ∗ w) * m into conv2d."""
+
+    @tf.function
+    def func(x):
+      w = tf.constant([3., 4., 5., 6.], shape=[2, 1, 1, 2])
+      m = tf.constant([7., 8.], shape=multiplier_shape)
+      return tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding='SAME') * m
+
+    input_data = tf.constant([1., 2.], shape=[1, 1, 2, 1])
+    self._checkAffineFusion(func, input_data, 1 if can_fuse else 2)
+
+  def _checkAffineFusion(self, func, input_data, expected_number_of_ops):
+    concrete_func = func.get_concrete_function(input_data)
+    converter = lite.TFLiteConverterV2.from_concrete_functions([concrete_func])
+    tflite_model = converter.convert()
+
+    interpreter = Interpreter(model_content=tflite_model)
+    assert len(interpreter._get_ops_details()) == expected_number_of_ops
+
+    expected_value = func(input_data)
+    actual_value = self._evaluateTFLiteModel(tflite_model, [input_data])[0]
+    self.assertAllClose(expected_value.numpy(), actual_value)
 
 
 if __name__ == '__main__':

@@ -871,10 +871,10 @@ py_library(
         ":one_device_strategy",
         ":test_util",
         ":tpu_strategy",
-        "//tensorflow/python:config",
         "//tensorflow/python:platform",
         "//tensorflow/python:tf2",
-        "//tensorflow/python:util",
+        "//tensorflow/python:tf_export",
+        "//tensorflow/python/distribute/cluster_resolver:cluster_resolver_lib",
         "//tensorflow/python/distribute/cluster_resolver:tpu_cluster_resolver_py",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:remote",
@@ -984,6 +984,7 @@ distribute_py_test(
     shard_count = 10,
     tags = [
         "multi_and_single_gpu",
+        "no_cuda_asan",  # times out
     ],
     deps = [
         ":collective_all_reduce_strategy",
@@ -1070,9 +1071,6 @@ cuda_py_test(
         "multi_and_single_gpu",
         "no_cuda_asan",  # times out
     ],
-    xla_tags = [
-        "no_cuda_asan",  # times out
-    ],
     deps = [
         ":collective_util",
         ":combinations",
@@ -1137,10 +1135,6 @@ tf_py_test(
     name = "sharded_variable_test",
     size = "small",
     srcs = ["sharded_variable_test.py"],
-    tags = [
-        # depend through //third_party/tensorflow/python:extra_py_tests_deps.
-        "ignore_for_dep=third_party.tensorflow.python.keras.engine.base_layer",
-    ],
     deps = [
         ":sharded_variable",
         "//tensorflow/python:array_ops",
@@ -1291,6 +1285,7 @@ distribute_py_test(
     shard_count = 5,
     tags = [
         "multi_and_single_gpu",
+        "no_cuda_asan",  # times out
         "no_rocm",
     ],
     tpu_tags = [
@@ -1696,7 +1691,6 @@ py_test(
     srcs = ["multi_process_runner_test.py"],
     python_version = "PY3",
     shard_count = 12,
-    tags = ["no_oss_py38"],  #TODO(b/171435331)
     deps = [
         ":multi_process_runner",
         ":multi_worker_test_base",
@@ -1715,37 +1709,6 @@ py_test(
         ":multi_process_runner",
         ":multi_worker_test_base",
         "//tensorflow/python/eager:test",
-    ],
-)
-
-py_library(
-    name = "distributed_file_utils",
-    srcs = [
-        "distributed_file_utils.py",
-    ],
-    srcs_version = "PY2AND3",
-    deps = [
-        ":multi_worker_util",
-    ],
-)
-
-py_test(
-    name = "distributed_file_utils_test",
-    srcs = ["distributed_file_utils_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
-    deps = [
-        ":distributed_file_utils",
-        ":multi_worker_util",
-        "//tensorflow/core:protos_all_py",
-        "//tensorflow/python:constant_op",
-        "//tensorflow/python:framework_ops",
-        "//tensorflow/python:framework_test_lib",
-        "//tensorflow/python:math_ops",
-        "//tensorflow/python:training",
-        "//tensorflow/python/eager:test",
-        "//third_party/py/numpy",
-        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -1788,6 +1751,7 @@ distribute_py_test(
     shard_count = 4,
     tags = [
         "multi_and_single_gpu",
+        "no_cuda_asan",  # times out
         "notsan",  # TODO(b/160006974)
     ],
     xla_enable_strict_auto_jit = True,

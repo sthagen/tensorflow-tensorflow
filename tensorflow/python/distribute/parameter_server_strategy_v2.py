@@ -39,6 +39,8 @@ from tensorflow.python.training.tracking import base as trackable
 from tensorflow.python.util import tf_inspect
 from tensorflow.python.util.tf_export import tf_export
 
+ALLOWED_TASK_TYPES = ("chief", "worker", "ps")
+
 
 @tf_export("distribute.experimental.ParameterServerStrategy", v1=[])
 class ParameterServerStrategyV2(distribute_lib.Strategy):
@@ -52,22 +54,22 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
   synchronizing with each other. Under this configuration, it is known as
   asynchronous training.
 
-  In TensorFlow 2, we recommend a central coordiantion-based architecture for
-  parameter server training, where workers and parameter servers run a
-  `tf.distribute.Server` and there is another task that creates resources on
-  workers and parameter servers, dispatches functions, and coordinates the
-  training. We refer to this task as “coordinator”. The coordinator uses a
+  In TensorFlow 2, we recommend an architecture based on central coordination
+  for parameter server training. Each worker and parameter server runs a
+  `tf.distribute.Server`, and on top of that, a coordinator task is responsible
+  for creating resources on workers and parameter servers, dispatching
+  functions, and coordinating the training. The coordinator uses a
   `tf.distribute.experimental.coordinator.ClusterCoordinator` to coordinate the
   cluster, and a `tf.distribute.experimental.ParameterServerStrategy` to define
   variables on parameter servers and computation on workers.
 
   For the training to work, the coordinator dispatches `tf.function`s to be
-  executed on remote workers. Upon receiving requests from
-  the coordinator, a worker executes the `tf.function` by reading the variables
-  from parameter servers, executing the ops, and updating the variables on the
-  parameter servers. Each of the worker only processes the requests from the
-  coordinator, and communicates with parameter servers, without direct
-  interactions with other workers in the cluster.
+  executed on remote workers. Upon receiving requests from the coordinator, a
+  worker executes the `tf.function` by reading the variables from parameter
+  servers, executing the ops, and updating the variables on the parameter
+  servers. Each of the worker only processes the requests from the coordinator,
+  and communicates with parameter servers, without direct interactions with
+  other workers in the cluster.
 
   As a result, failures of some workers do not prevent the cluster from
   continuing the work, and this allows the cluster to train with instances that
@@ -77,7 +79,7 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
 
   Note that the coordinator is not one of the training workers. Instead, it
   creates resources such as variables and datasets, dispatchs `tf.function`s,
-  saving checkpoints and so on. In addition to workers, parameter servers and
+  saves checkpoints and so on. In addition to workers, parameter servers and
   the coordinator, an optional evaluator can be run on the side that
   periodically reads the checkpoints saved by the coordinator and runs
   evaluations against each checkpoint.
@@ -182,11 +184,18 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
 
   If `TF_CONFIG` environment variable is set, a
   `tf.distribute.cluster_resolver.TFConfigClusterResolver` should be used as
-  well. Note that for legacy reason, on some platform, "chief" is used as the
-  task type for the coordinator, as the following example demonstrates. Here we
-  set `TF_CONFIG` for the task designated as a parameter server (task type "ps")
-  and index 1 (the second task), in a cluster with 1 chief, 2 parameter servers,
-  and 3 workers. Note that the it needs to be set before the use of
+  well.
+
+  Since there are assumptions in
+  `tf.distribute.experimental.ParameterServerStrategy` around the naming of the
+  task types, "chief", "ps", and "worker" should be used in the
+  `tf.distribute.cluster_resolver.ClusterResolver` to refer to the coordinator,
+  parameter servers, and workers, respectively.
+
+  The following example demonstrates setting `TF_CONFIG` for the task designated
+  as a parameter server (task type "ps") and index 1 (the second task), in a
+  cluster with 1 chief, 2 parameter servers, and 3 workers. Note that it needs
+  to be set before the use of
   `tf.distribute.cluster_resolver.TFConfigClusterResolver`.
 
   Example code for cluster setup:
@@ -226,8 +235,8 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
   ```
   Alternatively, you can also start a bunch of TensorFlow servers in advance and
   connect to them later. The coordinator can be in the same cluster or on any
-  machine that has connectivity to workers and parameter server. This is covered
-  in our guide and tutorial.
+  machine that has connectivity to workers and parameter servers. This is
+  covered in our guide and tutorial.
 
   __Variable creation with `strategy.scope()`__
 
@@ -270,9 +279,9 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
   "shard" the variables across the ps. Partitioning large variable among ps is a
   commonly used technique to boost training throughput and mitigate memory
   constraints. It enables parallel computations and updates on different shards
-  of a variable, and often yields better load balancing across parameter servers
-  . Without sharding, models with large variables (e.g, embeddings) that can't
-  fit into one machine's memory would otherwise be unable to train.
+  of a variable, and often yields better load balancing across parameter
+  servers. Without sharding, models with large variables (e.g, embeddings) that
+  can't fit into one machine's memory would otherwise be unable to train.
 
   With `tf.distribute.experimental.ParameterServerStrategy`, if a
   `variable_partitioner` is provided to `__init__` and certain conditions are
@@ -294,40 +303,41 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
       return x * self.w
 
   # Partition the dense layer into 2 shards.
-  variable_partitioiner  = (
+  variable_partitioner = (
     tf.distribute.experimental.partitioners.FixedShardsPartitioner(
       num_shards = 2))
-  strategy = ParameterServerStrategy(cluster_resolver=...,
+  strategy = tf.distribute.experimental.ParameterServerStrategy(
+    cluster_resolver=...,
     variable_partitioner = variable_partitioner)
   with strategy.scope():
     dense = Dense()
   assert len(dense.variables) == 2
   assert isinstance(dense.variables[0], tf.Variable)
   assert isinstance(dense.variables[1], tf.Variable)
-  assert dense.variables[0].name == "w/part_0"
-  assert dense.variables[1].name == "w/part_1"
+  assert dense.variables[0].shape == (50, 10)
+  assert dense.variables[1].shape == (50, 10)
   ```
 
   The sharded variable container can be converted to a `Tensor` via
   `tf.convert_to_tensor`. This means the container can be directly used in most
-  Python Ops where such `Tensor` convertion automatically happens. For example
+  Python Ops where such `Tensor` conversion automatically happens. For example,
   in the above code snippet, `x * self.w` would implicitly apply the said tensor
-  convertion. Note that such convertion can be expensive, as the variable
+  conversion. Note that such conversion can be expensive, as the variable
   components need to be transferred from multiple parameter servers to where
   the value is used.
 
-  `tf.nn.embedding_lookup` on the other hand doesn't apply the tensor convertion
-  , and performs parallel lookups on the variable components instead. This is
-  crutial to scale up embedding lookups when the embedding table variable is
-  large.
+  `tf.nn.embedding_lookup` on the other hand doesn't apply the tensor
+  conversion, and performs parallel lookups on the variable components instead.
+  This is crucial to scale up embedding lookups when the embedding table
+  variable is large.
 
-  When a partitioned variable is saved to `SavedModel`, it will be saved as if
+  When a partitioned variable is saved to a `SavedModel`, it will be saved as if
   it is one single variable. This improves serving efficiency by eliminating
   a number of Ops that handle the partiton aspects.
 
   Known limitations of variable partitioning:
 
-  * Number of parttions must not change across Checkpoint save/load.
+  * Number of partitions must not change across Checkpoint saving/loading.
 
   * After saving partitioned variables to a SavedModel, the SavedModel can't be
     loaded via `tf.saved_model.load`.
@@ -358,7 +368,6 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
   coordinator =
       tf.distribute.experimental.coordinator.ClusterCoordinator(strategy=...)
   distributed_dataset = coordinator.create_per_worker_dataset(dataset_fn)
-
   ```
 
   __Limitations__
@@ -404,7 +413,7 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
         * `variable_partitioner` will be called for each variable created under
         strategy `scope` to instruct how the variable should be partitioned.
         Variables that have only one partition along the partitioning axis
-        (i.e., no need for partition) will be created as normal `tf.Variable`.
+        (i.e., no need for partition) will be created as a normal `tf.Variable`.
 
         * Only the first / outermost axis partitioning is supported.
 
@@ -472,9 +481,27 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
 
   def _verify_args_and_config(self, cluster_resolver):
     if not cluster_resolver.cluster_spec():
-      raise ValueError("Cluster spec must be non-empty in `cluster_resolver`.")
+      raise ValueError("Cluster spec must be non-empty in "
+                       "`tf.distribute.cluster_resolver.ClusterResolver`.")
     if self.extended._num_gpus_per_worker > 1:  # pylint: disable=protected-access
       raise NotImplementedError("Multi-gpu is not supported yet.")
+
+    # The following checks if the task types are allowed (chief, ps, worker).
+    disallowed_task_type_error_str = (
+        "Disallowed task type found in "
+        "`tf.distribute.cluster_resolver.ClusterResolver` provided to "
+        "`tf.distribute.experimental.ParameterServerStrategy`. Allowed types "
+        "are {},".format(ALLOWED_TASK_TYPES))
+    if any([
+        job not in ALLOWED_TASK_TYPES
+        for job in cluster_resolver.cluster_spec().jobs
+    ]):
+      raise ValueError("{} and the cluster spec is {}.".format(
+          disallowed_task_type_error_str, cluster_resolver.cluster_spec()))
+    if (cluster_resolver.task_type and
+        cluster_resolver.task_type not in ALLOWED_TASK_TYPES):
+      raise ValueError("{} and current task type is {}.".format(
+          disallowed_task_type_error_str, cluster_resolver.task_type))
 
 
 class ParameterServerStrategyV2Extended(
@@ -677,13 +704,12 @@ class ParameterServerStrategyV2Extended(
 # The warning that will be logged if the way we initialize sharded variables
 # is memory-inefficient.
 _INEFFICIENT_INIT_WARNING = (
-    "Large variable %s is partitioned but not initialized in a memory-efficient"
-    " way. The full value is first being created and then sliced into smaller "
-    "values. To reduce the memory footprint, explicitly specify `dtype` and "
-    "`shape` when creating variables, and pass a callable to Variable's "
-    "`initial_value`. The callable should take only one argument which is a "
-    "namedtuple (shape: `tf.TensorShape`, offsets: list/tuple) where shape is "
-    "the shape of the component variable, and offsets is the offsets of the "
-    "smaller variable on each axis.")
+    "Large variable %s is partitioned but not initialized in a "
+    "memory-efficient way. On each shard, the full value is first being "
+    "created and then sliced into smaller values. To reduce the memory "
+    "footprint, explicitly specify `dtype` and `shape` when creating "
+    "variables, and use `tf.initializers` to initialize the variable. "
+    "Note that some initializers (e.g., orthogonal) don't support "
+    "memory-efficient initialization and there is not much you can do here.")
 
 _LARGE_VARIABLE_NUM_ELEMENTS = 1e9

@@ -27,7 +27,7 @@ import warnings
 import six
 
 from tensorflow.python.autograph.lang import directives
-from tensorflow.python.data.experimental.ops.distribute_options import AutoShardPolicy
+from tensorflow.python.data.experimental.ops import distribute_options
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.distribute import collective_all_reduce_strategy
 from tensorflow.python.distribute import distribution_strategy_context as ds_context
@@ -70,15 +70,12 @@ from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import sparse_ops
 from tensorflow.python.ops import summary_ops_v2
 from tensorflow.python.ops import variables
-from tensorflow.python.ops.ragged import ragged_concat_ops
-from tensorflow.python.ops.ragged import ragged_tensor
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.profiler import trace
 from tensorflow.python.training import checkpoint_management
 from tensorflow.python.training import py_checkpoint_reader
 from tensorflow.python.training.tracking import base as trackable
 from tensorflow.python.training.tracking import data_structures
-from tensorflow.python.training.tracking import layer_utils as trackable_layer_utils
 from tensorflow.python.training.tracking import util as trackable_utils
 from tensorflow.python.util import nest
 from tensorflow.python.util import tf_decorator
@@ -425,12 +422,18 @@ class Model(base_layer.Layer, version_utils.ModelVersionSelector):
                            'the correct dtype).')
     super(Model, self).build(input_shape)
 
+  @doc_controls.doc_in_current_and_subclasses
   def call(self, inputs, training=None, mask=None):
     """Calls the model on new inputs.
 
     In this case `call` just reapplies
     all ops in the graph to the new inputs
     (e.g. build a new computational graph from the provided inputs).
+
+    Note: This method should not be called directly. It is only meant to be
+    overridden when subclassing `tf.keras.Model`.
+    To call a model on an input, always use the `__call__` method,
+    i.e. `model(inputs)`, which relies on the underlying `call` method.
 
     Arguments:
         inputs: A tensor or list of tensors.
@@ -968,7 +971,7 @@ class Model(base_layer.Layer, version_utils.ModelVersionSelector):
             form of datasets, generators, or `keras.utils.Sequence` instances
             (since they generate batches).
         validation_freq: Only relevant if validation data is provided. Integer
-            or `collections_abc.Container` instance (e.g. list, tuple, etc.).
+            or `collections.abc.Container` instance (e.g. list, tuple, etc.).
             If an integer, specifies how many training epochs to run before a
             new validation run is performed, e.g. `validation_freq=2` runs
             validation every 2 epochs. If a Container, specifies the epochs on
@@ -1586,7 +1589,7 @@ class Model(base_layer.Layer, version_utils.ModelVersionSelector):
           self.distribute_strategy)) and isinstance(x, dataset_types):
         try:
           options = dataset_ops.Options()
-          data_option = AutoShardPolicy.DATA
+          data_option = distribute_options.AutoShardPolicy.DATA
           options.experimental_distribute.auto_shard_policy = data_option
           x = x.with_options(options)
         except ValueError:
@@ -1922,21 +1925,35 @@ class Model(base_layer.Layer, version_utils.ModelVersionSelector):
   @property
   def trainable_weights(self):
     self._assert_weights_created()
-    return self._dedup_weights(
-        trackable_layer_utils.gather_trainable_weights(
-            trainable=self.trainable,
-            sub_layers=self._layers,
-            extra_variables=self._trainable_weights))
+    if not self._trainable:
+      return []
+    trainable_variables = []
+    for trackable_obj in self._self_tracked_trackables:
+      trainable_variables += trackable_obj.trainable_variables
+    trainable_variables += self._trainable_weights
+    return self._dedup_weights(trainable_variables)
 
   @property
   def non_trainable_weights(self):
     self._assert_weights_created()
-    return self._dedup_weights(
-        trackable_layer_utils.gather_non_trainable_weights(
-            trainable=self.trainable,
-            sub_layers=self._layers,
-            extra_variables=self._non_trainable_weights +
-            self._trainable_weights))
+    non_trainable_variables = []
+    for trackable_obj in self._self_tracked_trackables:
+      non_trainable_variables += trackable_obj.non_trainable_variables
+
+    if not self._trainable:
+      # Return order is all trainable vars, then all non-trainable vars.
+      trainable_variables = []
+      for trackable_obj in self._self_tracked_trackables:
+        trainable_variables += trackable_obj.trainable_variables
+
+      non_trainable_variables = (
+          trainable_variables + self._trainable_weights +
+          non_trainable_variables + self._non_trainable_weights)
+    else:
+      non_trainable_variables = (
+          non_trainable_variables + self._non_trainable_weights)
+
+    return self._dedup_weights(non_trainable_variables)
 
   def get_weights(self):
     """Retrieves the weights of the model.
@@ -2349,8 +2366,8 @@ class Model(base_layer.Layer, version_utils.ModelVersionSelector):
     """Returns the undeduplicated list of all layer variables/weights."""
     self._assert_weights_created()
     weights = []
-    for layer in self._layers:
-      weights += layer.weights
+    for layer in self._self_tracked_trackables:
+      weights += layer.variables
     weights += (self._trainable_weights + self._non_trainable_weights)
     return weights
 
@@ -2711,8 +2728,6 @@ def concat(tensors, axis=0):
   """Concats `tensor`s along `axis`."""
   if isinstance(tensors[0], sparse_tensor.SparseTensor):
     return sparse_ops.sparse_concat_v2(axis=axis, sp_inputs=tensors)
-  if isinstance(tensors[0], ragged_tensor.RaggedTensor):
-    return ragged_concat_ops.concat(tensors, axis=axis)
   return array_ops.concat(tensors, axis=axis)
 
 
