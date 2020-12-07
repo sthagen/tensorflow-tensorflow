@@ -518,11 +518,19 @@ void ConvertOp::build(OpBuilder& builder, OperationState& result, Value operand,
 }
 
 OpFoldResult ConvertOp::fold(ArrayRef<Attribute> operands) {
-  if (getOperand().getType() == getResult().getType()) return getOperand();
+  auto operand_ty = getOperand().getType().cast<TensorType>();
+  auto result_ty = getResult().getType().cast<TensorType>();
+  if (operand_ty == result_ty) return getOperand();
 
   // If the result has non-static shape, a convert op is necessary to go from
   // static shape to non-static shape.
-  if (!getResult().getType().cast<TensorType>().hasStaticShape()) return {};
+  if (!result_ty.hasStaticShape()) return {};
+
+  // TODO(hinsu): Handle unsigned types.
+  if (operand_ty.getElementType().isUnsignedInteger() ||
+      result_ty.getElementType().isUnsignedInteger()) {
+    return {};
+  }
 
   // If the operand is constant, we can do the conversion now.
   if (auto elementsAttr = operands.front().dyn_cast_or_null<ElementsAttr>()) {
@@ -1268,7 +1276,8 @@ class DynamicReshapeOpNotActuallyDynamic
 
 void DynamicReshapeOp::getCanonicalizationPatterns(
     OwningRewritePatternList& results, MLIRContext* context) {
-  results.insert<DynamicReshapeOpNotActuallyDynamic>(context);
+  results.insert<DynamicReshapeOpNotActuallyDynamic,
+                 RemoveRedundantDynamicReshape, ShapeOfDynamicReshape>(context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1936,6 +1945,24 @@ OpFoldResult ReshapeOp::fold(ArrayRef<Attribute> operands) {
   }
 
   return {};
+}
+
+void ReshapeOp::getCanonicalizationPatterns(OwningRewritePatternList& results,
+                                            MLIRContext* context) {
+  results.insert<IdentityBroadcastReshape, IdentityBroadcastInDimReshape>(
+      context);
+}
+
+//===----------------------------------------------------------------------===//
+// ReplicaId Op
+//===----------------------------------------------------------------------===//
+
+LogicalResult ReplicaIdOp::inferReturnTypes(
+    MLIRContext* context, Optional<Location>, ValueRange operands,
+    DictionaryAttr, RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
+  inferredReturnTypes.push_back(RankedTensorType::get(
+      /*shape=*/{}, IntegerType::get(32, IntegerType::Unsigned, context)));
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -2763,11 +2790,10 @@ OpFoldResult CompareOp::fold(ArrayRef<Attribute> operands) {
   if (!result_ty.hasStaticShape()) return {};
 
   auto direction = comparison_direction();
-  if (lhs() == rhs()) {
+  if (lhs() == rhs() && !getElementTypeOrSelf(lhs()).isa<FloatType>()) {
     if (direction == "LE" || direction == "EQ" || direction == "GE") {
       return DenseIntElementsAttr::get(result_ty, {true});
     }
-
     return DenseIntElementsAttr::get(result_ty, {false});
   }
 

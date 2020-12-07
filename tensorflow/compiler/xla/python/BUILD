@@ -465,7 +465,7 @@ cc_library(
 
 config_setting(
     name = "enable_gpu",
-    values = {"define": "xla_python_enable_gpu=true"},
+    define_values = {"xla_python_enable_gpu": "true"},
 )
 
 pybind_extension(
@@ -513,7 +513,7 @@ pybind_extension(
         "//tensorflow/compiler/xla/client:local_client",
         "//tensorflow/compiler/xla/pjrt:cpu_device",
         "//tensorflow/compiler/xla/pjrt:interpreter_device",
-        "//tensorflow/compiler/xla/pjrt:nvidia_gpu_device",
+        "//tensorflow/compiler/xla/pjrt:gpu_device",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
         "//tensorflow/compiler/xla/pjrt:tpu_client",
         "//tensorflow/compiler/xla/pjrt:tracked_device_buffer",

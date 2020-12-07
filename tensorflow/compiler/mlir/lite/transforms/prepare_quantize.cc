@@ -18,21 +18,32 @@ limitations under the License.
 #include <string>
 
 #include "absl/memory/memory.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
+#include "mlir/Dialect/Quant/FakeQuantSupport.h"  // from @llvm-project
 #include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project
-#include "mlir/IR/Function.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
+#include "mlir/IR/Operation.h"  // from @llvm-project
+#include "mlir/IR/PatternMatch.h"  // from @llvm-project
+#include "mlir/IR/StandardTypes.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
 #include "tensorflow/compiler/mlir/lite/quantization/lite/tfl_to_std.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_config.h"
+#include "tensorflow/compiler/mlir/lite/quantization/quantization_traits.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_utils.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"
+#include "tensorflow/compiler/mlir/lite/transforms/prepare_quantize_lstm.h"
 #include "tensorflow/core/framework/types.pb.h"
 
 // NOLINTNEXTLINE
@@ -46,6 +57,12 @@ static llvm::cl::list<std::string> quantize_allowlist(
 static llvm::cl::opt<bool> quantize_signed(
     "tfl-test-quantize-signed", llvm::cl::value_desc("bool"),
     llvm::cl::desc("signed inference type. Only used in tests"),
+    llvm::cl::init(false));
+
+// NOLINTNEXTLINE
+static llvm::cl::opt<bool> post_training_quantize(
+    "tfl-test-post-training-quantize", llvm::cl::value_desc("bool"),
+    llvm::cl::desc("enable post training quantization. Only used in tests"),
     llvm::cl::init(false));
 
 // NOLINTNEXTLINE
@@ -78,10 +95,9 @@ class PrepareQuantizePass
   // Constructor used by the PassRegistration and enforce uint8 quantization.
   // This is only used by test.
   explicit PrepareQuantizePass() {
-    if (quantize_signed)
-      quant_specs_.inference_type = tensorflow::DT_QINT8;
-    else
-      quant_specs_.inference_type = tensorflow::DT_QUINT8;
+    quant_specs_.inference_type =
+        quantize_signed ? tensorflow::DT_QINT8 : tensorflow::DT_QUINT8;
+    quant_specs_.post_training_quantization = post_training_quantize;
   }
 
   // Constructor used by manually creating the pass.
@@ -305,6 +321,10 @@ bool PrepareQuantizePass::ContainsQuantizeOps(FuncOp func) {
 using PrepareQuantStats =
     quant::ConvertStatsToQDQs<quant::QuantizeCastOp, quant::DequantizeCastOp>;
 
+using PrepareLstmQuantStats =
+    TFL::ConvertLstmStatsToQDQs<TFL::UnidirectionalSequenceLSTMOp,
+                                quant::QuantizeCastOp, quant::DequantizeCastOp>;
+
 void PrepareQuantizePass::runOnFunction() {
   FuncOp func = getFunction();
   MLIRContext* ctx = func.getContext();
@@ -326,7 +346,17 @@ void PrepareQuantizePass::runOnFunction() {
   OwningRewritePatternList patterns;
   bool is_signed = quant_specs_.IsSignedInferenceType();
   int bit_width = quant_specs_.GetQuantizationTypeWidth();
-  bool enforce_fixed_output_range = ContainsQuantizeOps(func);
+  // When this is true, the quantizer will try its best to extract the
+  // quantization parameters from the op quantization property and constant
+  // content. This is also set to true when the `quantize_allowlist` and
+  // `quantize_signed` test flags are enabled.
+  bool eager_quantize = ContainsQuantizeOps(func) ||
+                        (!quantize_allowlist.empty() || quantize_signed);
+  // Infer the tensor range for the activation ops and weight constants unless
+  // it is disabled explicitly.
+  bool infer_tensor_range =
+      (quant_specs_.post_training_quantization || eager_quantize) &&
+      !quant_specs_.disable_infer_tensor_range;
   if (is_signed) {
     patterns.insert<quant::ConvertUnsignedToSigned<quant::QuantizeCastOp>>(ctx);
     // Convert quant stats to int8 quantization parameters.
@@ -337,6 +367,7 @@ void PrepareQuantizePass::runOnFunction() {
     // Currently, only activation stats are imported, so narrow_range = false.
     patterns.insert<PrepareQuantStats>(bit_width, false, false, ctx);
   }
+  patterns.insert<PrepareLstmQuantStats>(ctx, quant_specs_);
   applyPatternsAndFoldGreedily(func, std::move(patterns));
 
   SanityCheckAndAdjustment(func);
@@ -345,8 +376,7 @@ void PrepareQuantizePass::runOnFunction() {
   // values (tensors).
   ApplyQuantizationParamsPropagation(
       func, is_signed, disable_per_channel || quant_specs_.disable_per_channel,
-      GetOpQuantSpec,
-      enforce_fixed_output_range || quant_specs_.post_training_quantization);
+      GetOpQuantSpec, infer_tensor_range);
 
   ConvertMlirQuantOpsToTFLQuantOps(func);
 }

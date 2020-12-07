@@ -26,6 +26,7 @@ import os
 
 from tensorflow.python.distribute import distribute_lib
 from tensorflow.python.distribute import distribute_utils
+from tensorflow.python.distribute import multi_worker_util
 from tensorflow.python.distribute import parameter_server_strategy
 from tensorflow.python.distribute import sharded_variable
 from tensorflow.python.eager import remote
@@ -486,22 +487,19 @@ class ParameterServerStrategyV2(distribute_lib.Strategy):
     if self.extended._num_gpus_per_worker > 1:  # pylint: disable=protected-access
       raise NotImplementedError("Multi-gpu is not supported yet.")
 
+    cluster_spec = cluster_resolver.cluster_spec()
+
     # The following checks if the task types are allowed (chief, ps, worker).
-    disallowed_task_type_error_str = (
-        "Disallowed task type found in "
-        "`tf.distribute.cluster_resolver.ClusterResolver` provided to "
-        "`tf.distribute.experimental.ParameterServerStrategy`. Allowed types "
-        "are {},".format(ALLOWED_TASK_TYPES))
-    if any([
-        job not in ALLOWED_TASK_TYPES
-        for job in cluster_resolver.cluster_spec().jobs
-    ]):
-      raise ValueError("{} and the cluster spec is {}.".format(
-          disallowed_task_type_error_str, cluster_resolver.cluster_spec()))
-    if (cluster_resolver.task_type and
-        cluster_resolver.task_type not in ALLOWED_TASK_TYPES):
-      raise ValueError("{} and current task type is {}.".format(
-          disallowed_task_type_error_str, cluster_resolver.task_type))
+    multi_worker_util._validate_cluster_spec(  # pylint: disable=protected-access
+        cluster_spec,
+        cluster_resolver.task_type,
+        cluster_resolver.task_id)
+
+    if multi_worker_util.task_count(cluster_spec, "ps") < 1:
+      raise ValueError("There must be at least one ps.")
+
+    if multi_worker_util.task_count(cluster_spec, "worker") < 1:
+      raise ValueError("There must be at least one worker.")
 
 
 class ParameterServerStrategyV2Extended(
@@ -518,6 +516,11 @@ class ParameterServerStrategyV2Extended(
     self._num_ps = len(cluster_resolver.cluster_spec().as_dict().get("ps", []))
     self._variable_count = 0
     self._variable_partitioner = variable_partitioner
+
+    # The following two attrs are to verify that `ParameterServerStrategy`
+    # methods are properly used with a `ClusterCoordinator`.
+    self._used_with_coordinator = False
+    self._being_scheduled = False
 
   def _create_variable(self, next_creator, **kwargs):
     """Implements StrategyExtendedV2._create_variable.
@@ -672,7 +675,22 @@ class ParameterServerStrategyV2Extended(
         self._variable_count += 1
         return var
 
+  def _assert_used_with_cluster_coordinator(self):
+    if not self._used_with_coordinator:
+      raise NotImplementedError(
+          "`tf.distribute.experimental.ParameterServerStrategy` must be used "
+          "with `tf.distribute.experimental.coordinator.ClusterCoordinator`.")
+
+  def _assert_being_scheduled_by_cluster_coordinator(self):
+    if not self._being_scheduled:
+      raise NotImplementedError(
+          "`tf.distribute.experimental.ParameterServerStrategy`'s `run` or "
+          "`reduce` must be used within a function passed to `"
+          "tf.distribute.experimental.coordinator.ClusterCoordinator.schedule"
+          "`.")
+
   def _experimental_distribute_dataset(self, dataset, options):
+    self._assert_used_with_cluster_coordinator()
     if not ops.get_default_graph().building_function:
       raise ValueError(
           "The `experimental_distribute_dataset` method must be called inside "
@@ -681,6 +699,7 @@ class ParameterServerStrategyV2Extended(
     return dataset
 
   def _distribute_datasets_from_function(self, dataset_fn, options):
+    self._assert_used_with_cluster_coordinator()
     if not ops.get_default_graph().building_function:
       raise ValueError(
           "The `distribute_datasets_from_function` method must be called "
@@ -689,6 +708,7 @@ class ParameterServerStrategyV2Extended(
     return dataset_fn(distribute_lib.InputContext())
 
   def _call_for_each_replica(self, fn, args, kwargs):
+    self._assert_being_scheduled_by_cluster_coordinator()
     with distribute_lib.ReplicaContext(
         self._container_strategy(),
         replica_id_in_sync_group=constant_op.constant(0, dtypes.int32)):
@@ -696,6 +716,7 @@ class ParameterServerStrategyV2Extended(
       return distribute_utils.regroup((fn(*args, **kwargs),))
 
   def _reduce(self, reduce_op, value):
+    self._assert_being_scheduled_by_cluster_coordinator()
     # TODO(rchao): Provide implementation for multi-replica. Also look into why
     # the default implementation is not working.
     return value

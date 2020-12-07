@@ -275,7 +275,7 @@ class Layer(module.Module, version_utils.LayerVersionSelector):
   ```
 
   For more information about creating layers, see the guide
-  [Writing custom layers and models with Keras](
+  [Making new Layers and Models via subclassing](
     https://www.tensorflow.org/guide/keras/custom_layers_and_models)
   """
 
@@ -675,6 +675,10 @@ class Layer(module.Module, version_utils.LayerVersionSelector):
     The config of a layer does not include connectivity
     information, nor the layer class name. These are handled
     by `Network` (one layer of abstraction above).
+
+    Note that `get_config()` does not guarantee to return a fresh copy of dict
+    every time it is called. The callers should make a copy of the returned dict
+    if they want to modify it.
 
     Returns:
         Python dictionary.

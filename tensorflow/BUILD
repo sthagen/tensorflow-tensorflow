@@ -68,7 +68,15 @@ TENSORFLOW_API_INIT_FILES_V1 = (
 # which requires restricted licenses to be avoided.
 config_setting(
     name = "no_lgpl_deps",
-    values = {"define": "__TENSORFLOW_NO_LGPL_DEPS__=1"},
+    define_values = {"__TENSORFLOW_NO_LGPL_DEPS__": "1"},
+    visibility = ["//visibility:public"],
+)
+
+# Config setting that disables the default logger, only logging
+# to registered TFLogSinks
+config_setting(
+    name = "no_default_logger",
+    define_values = {"no_default_logger": "true"},
     visibility = ["//visibility:public"],
 )
 
@@ -372,9 +380,7 @@ config_setting(
 # due to limitations in nested select() statements.
 config_setting(
     name = "framework_shared_object",
-    define_values = {
-        "framework_shared_object": "true",
-    },
+    define_values = {"framework_shared_object": "true"},
     visibility = ["//visibility:public"],
 )
 
@@ -392,17 +398,13 @@ config_setting(
 
 config_setting(
     name = "using_cuda_clang",
-    define_values = {
-        "using_cuda_clang": "true",
-    },
+    define_values = {"using_cuda_clang": "true"},
 )
 
 # Flag to indicate open source build, .bazelrc always has it set to be true
 config_setting(
     name = "oss",
-    define_values = {
-        "open_source_build": "true",
-    },
+    define_values = {"open_source_build": "true"},
     visibility = ["//visibility:public"],
 )
 
@@ -434,9 +436,7 @@ config_setting(
 
 config_setting(
     name = "using_cuda_nvcc",
-    define_values = {
-        "using_cuda_nvcc": "true",
-    },
+    define_values = {"using_cuda_nvcc": "true"},
 )
 
 config_setting(
@@ -457,14 +457,12 @@ config_setting(
 
 config_setting(
     name = "using_rocm_hipcc",
-    define_values = {
-        "using_rocm_hipcc": "true",
-    },
+    define_values = {"using_rocm_hipcc": "true"},
 )
 
 config_setting(
     name = "override_eigen_strong_inline",
-    values = {"define": "override_eigen_strong_inline=true"},
+    define_values = {"override_eigen_strong_inline": "true"},
     visibility = ["//visibility:public"],
 )
 
@@ -488,28 +486,28 @@ config_setting(
 # This flag enables experimental MLIR support.
 config_setting(
     name = "with_mlir_support",
-    values = {"define": "with_mlir_support=true"},
+    define_values = {"with_mlir_support": "true"},
     visibility = ["//visibility:public"],
 )
 
 # This flag forcibly enables experimental MLIR bridge support.
 config_setting(
     name = "enable_mlir_bridge",
-    values = {"define": "enable_mlir_bridge=true"},
+    define_values = {"enable_mlir_bridge": "true"},
     visibility = ["//visibility:public"],
 )
 
 # This flag forcibly disables experimental MLIR bridge support.
 config_setting(
     name = "disable_mlir_bridge",
-    values = {"define": "enable_mlir_bridge=false"},
+    define_values = {"enable_mlir_bridge": "false"},
     visibility = ["//visibility:public"],
 )
 
 # This flag enables experimental TPU support
 config_setting(
     name = "with_tpu_support",
-    values = {"define": "with_tpu_support=true"},
+    define_values = {"with_tpu_support": "true"},
     visibility = ["//visibility:public"],
 )
 
@@ -527,13 +525,13 @@ selects.config_setting_group(
 
 config_setting(
     name = "lite_protos_legacy",
-    values = {"define": "TENSORFLOW_PROTOS=lite"},
+    define_values = {"TENSORFLOW_PROTOS": "lite"},
     visibility = ["//visibility:private"],
 )
 
 config_setting(
     name = "full_protos",
-    values = {"define": "TENSORFLOW_PROTOS=full"},
+    define_values = {"TENSORFLOW_PROTOS": "full"},
     visibility = ["//visibility:public"],
 )
 
@@ -588,9 +586,11 @@ config_setting(
 # DO NOT ADD ANY NEW EXCEPTIONS TO THIS LIST!
 # Instead, please use public APIs or public build rules TF provides.
 # If you need functionality that is not exposed, we will work with you to expand our public APIs.
+# TODO(b/173549186): Move Google-internal TF code out of learning/brain
 package_group(
     name = "internal",
     packages = [
+        "//learning/brain/mlir/...",
         "//learning/lib/ami/simple_ml/...",
         "//tensorflow/...",
     ],
@@ -728,8 +728,9 @@ tf_cc_shared_object(
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/c/experimental/filesystem:filesystem_interface",
-        "//tensorflow/c/experimental/stream_executor:stream_executor_hdrs",
-        "//tensorflow/c:kernels_hdrs",
+        "//tensorflow/c/experimental/stream_executor:stream_executor",
+        "//tensorflow/c:kernels",
+        "//tensorflow/c:logging",
         "//tensorflow/c:ops_hdrs",
         "//tensorflow/cc/saved_model:loader_lite_impl",
         "//tensorflow/core/common_runtime:core_cpu_impl",

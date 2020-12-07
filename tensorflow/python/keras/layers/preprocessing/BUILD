@@ -152,6 +152,7 @@ py_library(
     ],
     srcs_version = "PY2AND3",
     deps = [
+        ":category_encoding",
         ":table_utils",
         "//tensorflow/python:dtypes",
         "//tensorflow/python:lookup_ops",
@@ -404,9 +405,9 @@ distribute_py_test(
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/distribute:tpu_strategy",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -430,9 +431,9 @@ distribute_py_test(
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/distribute:tpu_strategy",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -453,8 +454,8 @@ distribute_py_test(
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -489,8 +490,8 @@ distribute_py_test(
         "//tensorflow/python:config",
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -526,8 +527,8 @@ tpu_py_test(
     deps = [
         ":hashing",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -557,8 +558,8 @@ tpu_py_test(
     deps = [
         ":index_lookup",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -637,9 +638,9 @@ distribute_py_test(
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 
@@ -694,9 +695,9 @@ distribute_py_test(
         "//tensorflow/python:framework_test_combinations_lib",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:combinations",
-        "//tensorflow/python/distribute:strategy_combinations",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/keras",
+        "//tensorflow/python/keras/distribute:strategy_combinations",
     ],
 )
 

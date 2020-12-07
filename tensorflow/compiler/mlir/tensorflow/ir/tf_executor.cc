@@ -30,8 +30,8 @@ limitations under the License.
 #include "mlir/Dialect/Traits.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/DialectImplementation.h"  // from @llvm-project
-#include "mlir/IR/Function.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/IR/Matchers.h"  // from @llvm-project
 #include "mlir/IR/OpDefinition.h"  // from @llvm-project
@@ -677,7 +677,7 @@ ParseResult ParseMergeOp(OpAsmParser &parser, OperationState &result) {
   } else {
     // In case of the short form, use the parsed type for both the operands and
     // the remaining operands are expected to be control inputs.
-    types.push_back(types.front());
+    types.push_back(Type(types.front()));
     Type control_type = ControlType::get(parser.getBuilder().getContext());
     types.append(op_infos.size() - 2, control_type);
 

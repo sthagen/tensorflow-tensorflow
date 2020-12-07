@@ -24,9 +24,8 @@ limitations under the License.
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/IR/Builders.h"  // from @llvm-project
-#include "mlir/IR/Function.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/IR/Module.h"  // from @llvm-project
 #include "mlir/IR/Operation.h"  // from @llvm-project
 #include "mlir/IR/OperationSupport.h"  // from @llvm-project
 #include "mlir/IR/StandardTypes.h"  // from @llvm-project
@@ -255,7 +254,7 @@ TF::WhileRegionOp CloneEmptyWhile(bool is_stateless,
                                   OpBuilder& builder) {
   auto host_side_while = builder.create<TF::WhileRegionOp>(
       loc, /*output=*/ArrayRef<Type>{}, /*input=*/ArrayRef<Value>{},
-      is_stateless, parallel_iterations);
+      parallel_iterations, is_stateless, /*shape_invariant=*/false);
 
   // Create empty else branch region.
   auto& body = host_side_while.body();

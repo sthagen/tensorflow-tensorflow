@@ -44,16 +44,11 @@ limitations under the License.
 #include "tensorflow/compiler/xla/window_util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/lib/monitoring/gauge.h"
 #include "tensorflow/core/platform/errors.h"
 
 namespace xla {
 
 namespace {
-
-auto* dynamic_padding_gauge = tensorflow::monitoring::Gauge<bool, 0>::New(
-    "/tensorflow/core/use_dynamic_padding_gauge",
-    "Tracks if dynamic padder is used.");
 
 // ChooseIdentityValue looks at the instruction's operand, returns a
 // identity value which, when padded, doesn't change the result of the
@@ -250,6 +245,8 @@ bool ShouldSkipPadOnOperand(const HloInstruction* inst, int64 operand_num,
 HloInstruction* PadWithScalar(HloInstruction* inst, int64 dim,
                               HloInstruction* dynamic_size,
                               HloInstruction* padding_scalar) {
+  CHECK(inst != nullptr && dynamic_size != nullptr &&
+        padding_scalar != nullptr);
   const Shape mask_shape =
       ShapeUtil::ChangeElementType(inst->shape(), xla::S32);
   const Shape pred_shape =
@@ -902,6 +899,14 @@ StatusOr<bool> RewriteDynamicConvolutionForward(
         window_dim.stride(), custom_call_conv->padding_type());
     padding_before[spatial_dim_index] = dynamic_window_dims.padding_before;
   }
+  // Input feature dim can be dynamic too, reset it to zero.
+  const int64 input_feature_dim = dnums.input_feature_dimension();
+  if (HloInstruction* input_feature_dynamic_size =
+          dynamic_dimension_inference->GetDynamicSize(
+              custom_call_conv->mutable_operand(0), {}, input_feature_dim)) {
+    input = PadWithScalar(input, input_feature_dim, input_feature_dynamic_size,
+                          zero);
+  }
 
   if (custom_call_conv->padding_type() == PaddingType::PADDING_SAME) {
     input = RewriteInputWithDynamicPadding(
@@ -974,6 +979,16 @@ StatusOr<bool> RewriteDynamicConvolutionKernelGrad(
         /*window_stride=*/window_dim.window_dilation(),
         custom_call_conv->padding_type());
     padding_before[spatial_dim_index] = dynamic_window_dims.padding_before;
+  }
+
+  // We only need to pad input feature on lhs to 0 -- it's mathematically
+  // equivalent to padding both lhs and rhs to 0.
+  const int64 input_feature_dim = dnums.input_feature_dimension();
+  if (HloInstruction* input_feature_dynamic_size =
+          dynamic_dimension_inference->GetDynamicSize(
+              custom_call_conv->mutable_operand(0), {}, input_feature_dim)) {
+    activations = PadWithScalar(activations, input_feature_dim,
+                                input_feature_dynamic_size, zero);
   }
 
   if (custom_call_conv->padding_type() == PaddingType::PADDING_SAME) {
@@ -1784,7 +1799,6 @@ StatusOr<bool> DynamicPadder::Run(HloModule* module) {
               operand, input_dim, operand_dynamic_size, identity_value);
           TF_RETURN_IF_ERROR(inst->ReplaceOperandWith(operand_num, padded));
           operand = inst->mutable_operand(operand_num);
-          dynamic_padding_gauge->GetCell()->Set(true);
           changed = true;
         }
       }
@@ -1831,7 +1845,6 @@ StatusOr<bool> DynamicPadder::Run(HloModule* module) {
 
   VLOG(2) << "Post DynamicPadder HLO:";
   XLA_VLOG_LINES(2, module->ToString());
-  dynamic_padding_gauge->GetCell()->Set(changed);
   return changed;
 }
 

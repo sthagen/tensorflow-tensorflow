@@ -27,10 +27,9 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/Diagnostics.h"  // from @llvm-project
-#include "mlir/IR/Function.h"  // from @llvm-project
 #include "mlir/IR/Location.h"  // from @llvm-project
-#include "mlir/IR/Module.h"  // from @llvm-project
 #include "mlir/IR/Operation.h"  // from @llvm-project
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
 #include "mlir/IR/StandardTypes.h"  // from @llvm-project
@@ -132,12 +131,14 @@ bool IsOpAllowedTf2XlaFallback(Operation* op) {
     TypeID::get<TF::EluOp>(),
     TypeID::get<TF::EqualOp>(),
     TypeID::get<TF::ErfcOp>(),
+    TypeID::get<TF::ErfinvOp>(),
     TypeID::get<TF::ErfOp>(),
     TypeID::get<TF::Expm1Op>(),
     TypeID::get<TF::ExtractImagePatchesOp>(),
     TypeID::get<TF::FFT2DOp>(),
     TypeID::get<TF::FFT3DOp>(),
     TypeID::get<TF::FFTOp>(),
+    TypeID::get<TF::FakeParamOp>(),
     TypeID::get<TF::FakeQuantWithMinMaxArgsGradientOp>(),
     TypeID::get<TF::FakeQuantWithMinMaxVarsGradientOp>(),
     TypeID::get<TF::FloorDivOp>(),
@@ -175,15 +176,19 @@ bool IsOpAllowedTf2XlaFallback(Operation* op) {
     TypeID::get<TF::MatrixSetDiagV3Op>(),
     TypeID::get<TF::MatrixSolveOp>(),
     TypeID::get<TF::MatrixTriangularSolveOp>(),
+    TypeID::get<TF::MaxPool3DGradGradOp>(),
+    TypeID::get<TF::MaxPoolGradGradOp>(),
     TypeID::get<TF::MirrorPadOp>(),
     TypeID::get<TF::MirrorPadGradOp>(),
     TypeID::get<TF::MulOp>(),
     TypeID::get<TF::MultinomialOp>(),
+    TypeID::get<TF::NdtriOp>(),
     TypeID::get<TF::NegOp>(),
     TypeID::get<TF::NextAfterOp>(),
     TypeID::get<TF::NonMaxSuppressionV4Op>(),
     TypeID::get<TF::NotEqualOp>(),
     TypeID::get<TF::PadOp>(),
+    TypeID::get<TF::ParameterizedTruncatedNormalOp>(),
     TypeID::get<TF::PlaceholderWithDefaultOp>(),
     TypeID::get<TF::PowOp>(),
     // TODO(hinsu): Canonicalize QuantizeAndDequantize and
@@ -225,16 +230,20 @@ bool IsOpAllowedTf2XlaFallback(Operation* op) {
     TypeID::get<TF::SqrtGradOp>(),
     TypeID::get<TF::SquareOp>(),
     TypeID::get<TF::StatelessMultinomialOp>(),
+    TypeID::get<TF::StatelessRandomGetAlgOp>(),
+    TypeID::get<TF::StatelessRandomGetKeyCounterOp>(),
     TypeID::get<TF::StatelessRandomGetKeyCounterAlgOp>(),
     TypeID::get<TF::StatelessRandomNormalOp>(),
     TypeID::get<TF::StatelessRandomNormalV2Op>(),
     TypeID::get<TF::StatelessRandomUniformOp>(),
+    TypeID::get<TF::StatelessRandomUniformFullIntOp>(),
     TypeID::get<TF::StatelessRandomUniformV2Op>(),
     TypeID::get<TF::StatelessRandomUniformIntOp>(),
     TypeID::get<TF::StatelessRandomUniformIntV2Op>(),
     TypeID::get<TF::StatelessTruncatedNormalOp>(),
     TypeID::get<TF::StatelessTruncatedNormalV2Op>(),
     TypeID::get<TF::SubOp>(),
+    TypeID::get<TF::SvdOp>(),
     TypeID::get<TF::TanOp>(),
     TypeID::get<TF::TensorScatterAddOp>(),
     TypeID::get<TF::TensorScatterSubOp>(),
@@ -255,9 +264,11 @@ bool IsOpAllowedTf2XlaFallback(Operation* op) {
     TypeID::get<TF::XlaEinsumOp>(),
     TypeID::get<TF::XlaKeyValueSortOp>(),
     TypeID::get<TF::XlaPadOp>(),
+    TypeID::get<TF::XlaSetDynamicDimensionSizeOp>(),
     TypeID::get<TF::Xlog1pyOp>(),
     TypeID::get<TF::XlogyOp>(),
-    TypeID::get<TF::XlaSortOp>()
+    TypeID::get<TF::XlaSortOp>(),
+    TypeID::get<TF::XlaSvdOp>()
   };
   // clang-format on
 

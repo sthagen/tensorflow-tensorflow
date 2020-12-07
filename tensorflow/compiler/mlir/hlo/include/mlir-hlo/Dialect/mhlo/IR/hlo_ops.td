@@ -41,7 +41,9 @@ def HLO_OUTPUT_FUSION : StrEnumAttrCase<"kOutput">;
 def HLO_CUSTOM_FUSION : StrEnumAttrCase<"kCustom">;
 def HLO_FusionKindAttr : StrEnumAttr<"FusionKind", "fusion kind", [
     HLO_LOOP_FUSION, HLO_INPUT_FUSION, HLO_OUTPUT_FUSION, HLO_CUSTOM_FUSION
-]>;
+]> {
+  let cppNamespace = "::mlir::mhlo";
+}
 
 //===----------------------------------------------------------------------===//
 // MHLO nullary op definitions.
@@ -488,7 +490,8 @@ def HLO_RecvOp : HLO_Op<"recv", []> {
 // MHLO parallelism related op definitions.
 //===----------------------------------------------------------------------===//
 
-def HLO_ReplicaIdOp : HLO_Op<"replica_id", [NoSideEffect]>,
+def HLO_ReplicaIdOp : HLO_Op<"replica_id", [NoSideEffect,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>]>,
       BASE_HLO_ReplicaIdOp {
   let results = (outs TensorOf<[UI32]>);
 }
@@ -896,7 +899,7 @@ def HLO_ConvOp : HLO_Op<"convolution", [NoSideEffect]>, BASE_HLO_ConvOp {
     (ins
        HLO_Tensor:$lhs,
        HLO_Tensor:$rhs),
-    ConvolutionAttributes<HLO_Dialect>.attributes);
+    ConvolutionAttributes.attributes);
 
   let results = (outs HLO_Tensor);
 }
@@ -925,7 +928,7 @@ def HLO_CustomCallOp: HLO_Op<"custom_call", []>, BASE_HLO_CustomCallOp {
     DefaultValuedAttr<BoolAttr, "false">:$has_side_effect,
     DefaultValuedAttr<StrAttr, "">:$backend_config
   );
-  let results = (outs HLO_Tensor);
+  let results = (outs Variadic<HLO_Tensor>);
   let hasCustomHLOConverter = 1;
 }
 
@@ -1046,6 +1049,7 @@ def HLO_ReshapeOp: HLO_Op<"reshape",
 
   let results = (outs HLO_StaticShapeTensor);
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 
   let hasCustomHLOConverter = 1;
 }

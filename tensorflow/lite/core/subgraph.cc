@@ -162,9 +162,9 @@ class InterpreterInfo : public GraphInfo {
  public:
   explicit InterpreterInfo(Subgraph* subgraph) : subgraph_(subgraph) {}
 
-  size_t num_tensors() const override { return subgraph_->tensors().size(); }
+  size_t num_tensors() const override { return subgraph_->tensors_size(); }
   TfLiteTensor* tensor(size_t index) override {
-    return &subgraph_->tensors()[index];
+    return subgraph_->tensor(index);
   }
   size_t num_execution_nodes() const override {
     return subgraph_->execution_plan().size();
@@ -218,8 +218,8 @@ Subgraph::Subgraph(ErrorReporter* error_reporter,
 
   // Reserve some space for the tensors to avoid excessive resizing.
   tensors_.reserve(kTensorsReservedCapacity);
-  nodes_and_registration().reserve(kTensorsReservedCapacity);
-  // Invalid to call these these except from TfLiteDelegate
+  nodes_and_registration_.reserve(kTensorsReservedCapacity);
+  // Invalid to call these except from TfLiteDelegate
   SwitchToKernelContext();
 }
 
@@ -311,7 +311,7 @@ TfLiteDelegateParams* CreateDelegateParams(TfLiteDelegate* delegate,
   // Use `char*` for conveniently step through the allocated space by bytes.
   char* allocation = static_cast<char*>(malloc(allocation_size));
 
-  // Step 3: Fill all data structures structures.
+  // Step 3: Fill all data structures.
   TfLiteDelegateParams* params =
       reinterpret_cast<TfLiteDelegateParams*>(allocation);
   params->delegate = delegate;
@@ -961,12 +961,13 @@ TfLiteStatus Subgraph::PrepareOpsAndTensors() {
   // overhead should be minimal since the number of custom-allocated tensors
   // will typically be low.
   for (int i = 0; i < custom_allocations_.size(); ++i) {
-    auto idx_and_alloc = custom_allocations_[i];
-    auto& tensor = tensors()[idx_and_alloc.first];
-    const auto& alloc = idx_and_alloc.second;
-    TF_LITE_ENSURE(context(), tensor.allocation_type == kTfLiteCustom);
+    auto index_and_alloc = custom_allocations_[i];
+    TfLiteTensor* tensor_at_index = tensor(index_and_alloc.first);
+    const auto& alloc = index_and_alloc.second;
+    TF_LITE_ENSURE(context(),
+                   tensor_at_index->allocation_type == kTfLiteCustom);
     TF_LITE_ENSURE_STATUS(
-        ValidateCustomAllocationForTensor(context(), &tensor, alloc));
+        ValidateCustomAllocationForTensor(context(), tensor_at_index, alloc));
   }
 
   next_execution_plan_index_to_plan_allocation_ =
