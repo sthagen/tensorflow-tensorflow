@@ -236,6 +236,7 @@ py_library(
     ],
     srcs_version = "PY2AND3",
     deps = [
+        ":activations",
         ":backend",
         ":losses",
         "//tensorflow/python:array_ops",
@@ -581,7 +582,6 @@ tf_py_test(
     python_version = "PY3",
     shard_count = 8,
     tags = [
-        "no_rocm",
         "notsan",  # b/67509773
     ],
     deps = [

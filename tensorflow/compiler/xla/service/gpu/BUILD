@@ -115,7 +115,7 @@ cc_library(
 
 tf_cc_test(
     name = "custom_call_test",
-    srcs = if_cuda_is_configured(["custom_call_test.cc"]),
+    srcs = if_cuda_or_rocm(["custom_call_test.cc"]),
     tags = tf_cuda_tests_tags(),
     deps = [
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
@@ -259,6 +259,7 @@ cc_library(
         ":hlo_to_ir_bindings",
         ":ir_emission_utils",
         ":launch_dimensions",
+        ":nccl_all_gather_thunk",
         ":nccl_all_reduce_thunk",
         ":nccl_all_to_all_thunk",
         ":parallel_loop_emitter",
@@ -269,6 +270,7 @@ cc_library(
         "//tensorflow/compiler/mlir/hlo",
         "//tensorflow/compiler/mlir/hlo:lhlo",
         "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
+        "//tensorflow/compiler/mlir/xla:attribute_exporter",
         "//tensorflow/compiler/mlir/xla:hlo_module_importer",
         "//tensorflow/compiler/mlir/xla:hlo_utils",
         "//tensorflow/compiler/mlir/xla:mhlo_to_lhlo_with_xla",
@@ -439,7 +441,7 @@ filegroup(
     name = "nccl_collective_thunk_src",
     srcs = if_nccl(
         ["nccl_collective_thunk.cc"],
-        ["dummy_collective_thunk.cc"],
+        ["nccl_collective_thunk_dummy.cc"],
     ),
 )
 
@@ -447,7 +449,7 @@ tf_cuda_library(
     name = "nccl_collective_thunk",
     srcs = if_cuda_or_rocm(
         [":nccl_collective_thunk_src"],
-        ["dummy_collective_thunk.cc"],
+        ["nccl_collective_thunk_dummy.cc"],
     ),
     hdrs = ["nccl_collective_thunk.h"],
     deps = [
@@ -455,6 +457,7 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
         "//tensorflow/compiler/xla/service:collective_ops_utils",
         "//tensorflow/compiler/xla/service:global_device_id",
         "//tensorflow/compiler/xla/service:hlo",
@@ -476,10 +479,50 @@ tf_cuda_library(
 
 # First level of nested select. NCCL requires both if_cuda and if_nccl.
 filegroup(
+    name = "nccl_all_gather_thunk_src",
+    srcs = if_nccl(
+        ["nccl_all_gather_thunk.cc"],
+        ["nccl_all_gather_thunk_dummy.cc"],
+    ),
+)
+
+tf_cuda_library(
+    name = "nccl_all_gather_thunk",
+    srcs = if_cuda_or_rocm(
+        [":nccl_all_gather_thunk_src"],
+        ["nccl_all_gather_thunk_dummy.cc"],
+    ),
+    hdrs = ["nccl_all_gather_thunk.h"],
+    deps = [
+        ":buffer_allocations",
+        ":gpu_executable_run_options",
+        ":hlo_execution_profiler",
+        ":nccl_collective_thunk",
+        ":thunk",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings:str_format",
+        "//tensorflow/compiler/xla/service:buffer_assignment",
+        "//tensorflow/compiler/xla/service:collective_ops_utils",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_casting_utils",
+        "//tensorflow/compiler/xla/service:pattern_matcher",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/core:lib",
+    ] + if_nccl([
+        ":virtual_nccl",
+        ":virtual_nccl_utils",
+        ":virtual_rccl",
+    ]),
+)
+
+# First level of nested select. NCCL requires both if_cuda and if_nccl.
+filegroup(
     name = "nccl_all_reduce_thunk_src",
     srcs = if_nccl(
         ["nccl_all_reduce_thunk.cc"],
-        ["dummy_all_reduce_thunk.cc"],
+        ["nccl_all_reduce_thunk_dummy.cc"],
     ),
 )
 
@@ -487,7 +530,7 @@ tf_cuda_library(
     name = "nccl_all_reduce_thunk",
     srcs = if_cuda_or_rocm(
         [":nccl_all_reduce_thunk_src"],
-        ["dummy_all_reduce_thunk.cc"],
+        ["nccl_all_reduce_thunk_dummy.cc"],
     ),
     hdrs = ["nccl_all_reduce_thunk.h"],
     deps = [
@@ -519,7 +562,7 @@ filegroup(
     name = "nccl_all_to_all_thunk_src",
     srcs = if_nccl(
         ["nccl_all_to_all_thunk.cc"],
-        ["dummy_all_to_all_thunk.cc"],
+        ["nccl_all_to_all_thunk_dummy.cc"],
     ),
 )
 
@@ -527,7 +570,7 @@ tf_cuda_library(
     name = "nccl_all_to_all_thunk",
     srcs = if_cuda_or_rocm(
         [":nccl_all_to_all_thunk_src"],
-        ["dummy_all_to_all_thunk.cc"],
+        ["nccl_all_to_all_thunk_dummy.cc"],
     ),
     hdrs = ["nccl_all_to_all_thunk.h"],
     deps = [
@@ -559,7 +602,7 @@ filegroup(
     name = "nccl_test_utils_src",
     srcs = if_nccl(
         ["nccl_test_utils.cc"],
-        ["dummy_nccl_test_utils.cc"],
+        ["nccl_test_utils_dummy.cc"],
     ),
 )
 
@@ -567,7 +610,7 @@ tf_cuda_library(
     name = "nccl_test_utils",
     srcs = if_cuda_or_rocm(
         [":nccl_test_utils_src"],
-        ["dummy_nccl_test_utils.cc"],
+        ["nccl_test_utils_dummy.cc"],
     ),
     hdrs = ["nccl_test_utils.h"],
     deps = [
@@ -629,8 +672,8 @@ cc_library(
         "gpu_debug_info_manager.h",
     ],
     deps = [
-        "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_proto_cc",
         "//tensorflow/compiler/xla/service:hlo_proto_util",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -642,15 +685,10 @@ tf_cc_test(
     srcs = ["gpu_debug_info_manager_test.cc"],
     tags = tf_cuda_tests_tags(),
     deps = [
-        ":gpu_constants",
         ":gpu_debug_info_manager",
-        ":gpu_hlo_schedule",
-        ":stream_assignment",
-        "//tensorflow/compiler/xla/service:buffer_assignment",
+        "//tensorflow/compiler/xla/service:hlo_proto_cc",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
-        "//tensorflow/compiler/xla/tests:test_utils",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
-        "//tensorflow/core:test",
     ],
 )
 
@@ -679,6 +717,8 @@ cc_library(
     ] + if_cuda_is_configured([
         "cholesky_thunk.cc",
         "custom_call_thunk.cc",
+    ]) + if_rocm_is_configured([
+        "custom_call_thunk.cc",
     ]),
     hdrs = [
         "collective_permute_thunk.h",
@@ -702,6 +742,8 @@ cc_library(
         "while_thunk.h",
     ] + if_cuda_is_configured([
         "cholesky_thunk.h",
+        "custom_call_thunk.h",
+    ]) + if_rocm_is_configured([
         "custom_call_thunk.h",
     ]),
     deps = [
@@ -798,7 +840,24 @@ cc_library(
         "//tensorflow/core/platform:stream_executor_no_cuda",
         "//tensorflow/stream_executor:device_description",
         "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
+    ],
+)
+
+tf_cc_test(
+    name = "ir_emission_utils_test",
+    srcs = ["ir_emission_utils_test.cc"],
+    deps = [
+        ":ir_emission_utils",
+        "//tensorflow/compiler/mlir/hlo:hlo_dialect_registration",
+        "//tensorflow/compiler/mlir/hlo:lhlo",
+        "//tensorflow/compiler/xla/tests:test_utils",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "//tensorflow/core:test",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:StandardOps",
     ],
 )
 
@@ -1411,7 +1470,11 @@ cc_library(
         "//tensorflow/stream_executor:stream_executor_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
+        "@llvm-project//llvm:AsmParser",
+        "@llvm-project//llvm:BitReader",
+        "@llvm-project//llvm:BitWriter",
         "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:TransformUtils",
         "@llvm-project//mlir:AllPassesAndDialectsNoRegistration",
         "@llvm-project//mlir:IR",
     ],
@@ -1476,7 +1539,7 @@ cc_library(
         "//tensorflow/stream_executor:stream_executor_headers",
         "//tensorflow/stream_executor/cuda:cuda_diagnostics",
         "//tensorflow/stream_executor/gpu:asm_compiler",
-    ]),
+    ]) + ["//tensorflow/stream_executor/gpu:gpu_driver_header"],
 )
 
 cc_library(

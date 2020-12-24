@@ -17,7 +17,7 @@
 
 # Keep in sync with tensorflow_estimator and configure.py.
 # LINT.IfChange
-LATEST_BAZEL_VERSION=3.1.0
+LATEST_BAZEL_VERSION=3.7.2
 # LINT.ThenChange(
 #   //tensorflow/opensource_only/configure.py,
 #   //tensorflow_estimator/google/kokoro/common.sh,
@@ -126,7 +126,7 @@ function install_ubuntu_16_pip_deps {
   "${PIP_CMD}" install --user 'astunparse ~= 1.6.3'
   "${PIP_CMD}" install --user 'flatbuffers ~= 1.12.0'
   "${PIP_CMD}" install --user 'google_pasta ~= 0.2'
-  "${PIP_CMD}" install --user 'h5py ~= 2.10.0'
+  "${PIP_CMD}" install --user 'h5py ~= 3.1.0'
   "${PIP_CMD}" install --user 'keras_preprocessing ~= 1.1.2'
   "${PIP_CMD}" install --user 'numpy ~= 1.19.2'
   "${PIP_CMD}" install --user 'opt_einsum ~= 3.3.0'
@@ -188,7 +188,7 @@ function install_macos_pip_deps {
   ${PIP_CMD} install $USER_FLAG 'astunparse ~= 1.6.3'
   ${PIP_CMD} install $USER_FLAG 'flatbuffers ~= 1.12.0'
   ${PIP_CMD} install $USER_FLAG 'google_pasta ~= 0.2'
-  ${PIP_CMD} install $USER_FLAG 'h5py ~= 2.10.0'
+  ${PIP_CMD} install $USER_FLAG 'h5py ~= 3.1.0'
   ${PIP_CMD} install $USER_FLAG 'keras_preprocessing ~= 1.1.2'
   ${PIP_CMD} install $USER_FLAG 'numpy ~= 1.19.2'
   ${PIP_CMD} install $USER_FLAG 'opt_einsum ~= 3.3.0'
