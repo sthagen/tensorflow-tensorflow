@@ -367,6 +367,7 @@ cuda_py_test(
 py_library(
     name = "cudnn_deterministic_base",
     srcs = ["cudnn_deterministic_base.py"],
+    srcs_version = "PY3",
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:constant_op",
@@ -1736,6 +1737,7 @@ cuda_py_test(
 py_library(
     name = "bias_op_base",
     srcs = ["bias_op_base.py"],
+    srcs_version = "PY3",
     deps = [
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
@@ -3246,10 +3248,12 @@ cuda_py_test(
     srcs = ["extract_volume_patches_grad_test.py"],
     shard_count = 50,
     tags = [
+        "no_gpu",  # b/171837334
+        "no_oss",  # Test times out on oss-nightly cpu builds
         "no_pip",
-        "nogpu",  # http://b/171837334
-        "nomac",  # http://b/139946976
-        "notap",  # http://b/31080670
+        "nogpu",  # b/171837334
+        "nomac",  # b/139946976
+        "notap",  # b/31080670
     ],
     deps = [
         "//tensorflow/python:array_ops",
