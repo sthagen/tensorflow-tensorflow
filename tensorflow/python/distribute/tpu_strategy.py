@@ -55,6 +55,7 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
+from tensorflow.python.ops import variables as variables_lib
 from tensorflow.python.ops.ragged import ragged_tensor
 from tensorflow.python.tpu import device_assignment as device_assignment_lib  # pylint: disable=unused-import
 from tensorflow.python.tpu import tpu
@@ -154,17 +155,26 @@ def _maybe_partial_apply_variables(fn, args, kwargs):
   positional_args = []
   index_of_star_args = None
   for i, p in enumerate(tf_inspect.signature(fn).parameters.values()):
+    # Class methods define "self" as first argument, but we don't pass "self".
+    # Note that this is a heuristic, as a method can name its first argument
+    # something else, and a function can define a first argument "self" as well.
+    # In both of these cases, using a Variable will fail with an unfortunate
+    # error about the number of arguments.
+    # inspect.is_method() seems not to work here, possibly due to the use of
+    # tf.function().
+    if i == 0 and p.name == "self":
+      continue
 
     if p.kind == tf_inspect.Parameter.POSITIONAL_OR_KEYWORD:
       positional_args.append(p.name)
 
-    if p.kind == tf_inspect.Parameter.VAR_POSITIONAL:
+    elif p.kind == tf_inspect.Parameter.VAR_POSITIONAL:
       # We'll raise an error later if a variable is passed to *args, since we
       # can neither pass it by name nor partially apply it. This case only
       # happens once at most.
       index_of_star_args = i
 
-    if p.kind == tf_inspect.Parameter.POSITIONAL_ONLY:
+    elif p.kind == tf_inspect.Parameter.POSITIONAL_ONLY:
       # This is a rare Python feature, indicating a / in the arg list.
       if var_kwargs or any(is_distributed_var(a) for a in args):
         raise ValueError(
@@ -1268,6 +1278,10 @@ class TPUExtended(distribute_lib.StrategyExtendedV1):
       for value in var.values:
         values_and_devices.append((value, value.device))
 
+    if (var.synchronization != variables_lib.VariableSynchronization.ON_READ and
+        var.synchronization != variables_lib.VariableAggregation.NONE):
+      distribute_utils.assert_mirrored(args)
+      distribute_utils.assert_mirrored(kwargs)
     for i, value_and_device in enumerate(values_and_devices):
       value = value_and_device[0]
       device = value_and_device[1]
@@ -1277,8 +1291,8 @@ class TPUExtended(distribute_lib.StrategyExtendedV1):
            ops.name_scope(name):
         # If args and kwargs are not mirrored, the value is returned as is.
         updates.append(
-            fn(value, *distribute_utils.select_replica_mirrored(i, args),
-               **distribute_utils.select_replica_mirrored(i, kwargs)))
+            fn(value, *distribute_utils.select_replica(i, args),
+               **distribute_utils.select_replica(i, kwargs)))
     return distribute_utils.update_regroup(self, updates, group)
 
   def read_var(self, var):

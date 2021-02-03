@@ -64,6 +64,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
+#include "tensorflow/compiler/xla/window_util.h"
+#include "tensorflow/compiler/xla/xla_data.pb.h"
 
 using xla::BufferAllocation;
 using xla::BufferAssignment;
@@ -225,9 +227,8 @@ template <typename OpType>
 OpType LhloDialectEmitter::CreateOpWithoutAttrs(const HloInstruction* instr,
                                                 ValueRange operands) {
   Location loc = getLocation(instr);
-  NamedAttribute attrs[] = {{Identifier::get("name", builder_.getContext()),
-                             builder_.getStringAttr(instr->name())}};
-  return builder_.create<OpType>(loc, llvm::None, operands, attrs);
+  return builder_.create<OpType>(loc, llvm::None, operands,
+                                 llvm::ArrayRef<NamedAttribute>{});
 }
 
 template <typename OpType>
@@ -248,6 +249,10 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpWithoutAttrs<lmhlo::AbsOp>(instr);
     case HloOpcode::kAdd:
       return CreateOpWithoutAttrs<lmhlo::AddOp>(instr);
+    case HloOpcode::kAllToAll:
+      return EmitAllToAllOp(instr);
+    case HloOpcode::kAllGather:
+      return EmitAllGatherOp(instr);
     case HloOpcode::kAllReduce:
       return EmitAllReduceOp(instr);
     case HloOpcode::kAnd:
@@ -256,18 +261,24 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpWithoutAttrs<lmhlo::Atan2Op>(instr);
     case HloOpcode::kBitcastConvert:
       return CreateOpWithoutAttrs<lmhlo::BitcastConvertOp>(instr);
+    case HloOpcode::kBroadcast:
+      return EmitBroadcastOp(instr);
     case HloOpcode::kCeil:
       return CreateOpWithoutAttrs<lmhlo::CeilOp>(instr);
     case HloOpcode::kCbrt:
       return CreateOpWithoutAttrs<lmhlo::CbrtOp>(instr);
     case HloOpcode::kClamp:
       return CreateOpWithoutAttrs<lmhlo::ClampOp>(instr);
+    case HloOpcode::kCollectivePermute:
+      return EmitCollectivePermuteOp(instr);
     case HloOpcode::kClz:
       return CreateOpWithoutAttrs<lmhlo::ClzOp>(instr);
     case HloOpcode::kCompare:
       return EmitCompareOp(instr);
     case HloOpcode::kComplex:
       return CreateOpWithoutAttrs<lmhlo::ComplexOp>(instr);
+    case HloOpcode::kConcatenate:
+      return EmitConcatenateOp(instr);
     case HloOpcode::kConvert:
       return CreateOpWithoutAttrs<lmhlo::ConvertOp>(instr);
     case HloOpcode::kCopy:
@@ -276,16 +287,26 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpWithoutAttrs<lmhlo::CosOp>(instr);
     case HloOpcode::kDivide:
       return CreateOpWithoutAttrs<lmhlo::DivOp>(instr);
+    case HloOpcode::kDot:
+      return EmitDotOp(instr);
+    case HloOpcode::kDynamicSlice:
+      return EmitDynamicSliceOp(instr);
+    case HloOpcode::kDynamicUpdateSlice:
+      return CreateOpWithoutAttrs<lmhlo::DynamicUpdateSliceOp>(instr);
     case HloOpcode::kExp:
       return CreateOpWithoutAttrs<lmhlo::ExpOp>(instr);
     case HloOpcode::kExpm1:
       return CreateOpWithoutAttrs<lmhlo::Expm1Op>(instr);
     case HloOpcode::kFloor:
       return CreateOpWithoutAttrs<lmhlo::FloorOp>(instr);
+    case HloOpcode::kGather:
+      return EmitGatherOp(instr);
     case HloOpcode::kImag:
       return CreateOpWithoutAttrs<lmhlo::ImagOp>(instr);
     case HloOpcode::kInfeed:
       return EmitInfeedOp(instr);
+    case HloOpcode::kIota:
+      return EmitIotaOp(instr);
     case HloOpcode::kIsFinite:
       return CreateOpWithoutAttrs<lmhlo::IsFiniteOp>(instr);
     case HloOpcode::kLog:
@@ -308,16 +329,28 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpWithoutAttrs<lmhlo::OrOp>(instr);
     case HloOpcode::kOutfeed:
       return EmitOutfeedOp(instr);
+    case HloOpcode::kPartitionId:
+      return CreateOpWithoutAttrs<lmhlo::PartitionIdOp>(instr);
+    case HloOpcode::kPad:
+      return EmitPadOp(instr);
     case HloOpcode::kPopulationCount:
       return CreateOpWithoutAttrs<lmhlo::PopulationCountOp>(instr);
     case HloOpcode::kPower:
       return CreateOpWithoutAttrs<lmhlo::PowOp>(instr);
     case HloOpcode::kReal:
       return CreateOpWithoutAttrs<lmhlo::RealOp>(instr);
+    case HloOpcode::kReshape:
+      return CreateOpWithoutAttrs<lmhlo::ReshapeOp>(instr);
     case HloOpcode::kReducePrecision:
       return EmitReducePrecisionOp(instr);
+    case HloOpcode::kReduceWindow:
+      return EmitReduceWindowOp(instr);
     case HloOpcode::kRemainder:
       return CreateOpWithoutAttrs<lmhlo::RemOp>(instr);
+    case HloOpcode::kReplicaId:
+      return CreateOpWithoutAttrs<lmhlo::ReplicaIdOp>(instr);
+    case HloOpcode::kReverse:
+      return EmitReverseOp(instr);
     case HloOpcode::kRoundNearestAfz:
       return CreateOpWithoutAttrs<lmhlo::RoundOp>(instr);
     case HloOpcode::kRsqrt:
@@ -334,12 +367,16 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpWithoutAttrs<lmhlo::SignOp>(instr);
     case HloOpcode::kSin:
       return CreateOpWithoutAttrs<lmhlo::SinOp>(instr);
+    case HloOpcode::kSlice:
+      return EmitSliceOp(instr);
     case HloOpcode::kSqrt:
       return CreateOpWithoutAttrs<lmhlo::SqrtOp>(instr);
     case HloOpcode::kSubtract:
       return CreateOpWithoutAttrs<lmhlo::SubOp>(instr);
     case HloOpcode::kTanh:
       return CreateOpWithoutAttrs<lmhlo::TanhOp>(instr);
+    case HloOpcode::kTranspose:
+      return EmitTransposeOp(instr);
     case HloOpcode::kXor:
       return CreateOpWithoutAttrs<lmhlo::XorOp>(instr);
     case HloOpcode::kSort:
@@ -356,6 +393,8 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return EmitConstant(instr);
     case HloOpcode::kReduce:
       return EmitReduceOp(instr);
+    case HloOpcode::kRngGetAndUpdateState:
+      return EmitRngGetAndUpdateStateOp(instr);
     default:
       llvm::errs() << instr->ToString();
       return tensorflow::errors::Internal(
@@ -861,7 +900,8 @@ StatusOr<mlir::GetGlobalMemrefOp> LhloDialectEmitter::EmitConstant(
       DenseElementsAttr initial_value,
       CreateDenseElementsAttrFromLiteral(const_instr->literal(), builder_));
 
-  std::string constant_name = xla::llvm_ir::ConstantHloToGlobalName(*instr);
+  std::string constant_name = xla::llvm_ir::ConstantNameToGlobalName(
+      xla::llvm_ir::SanitizeConstantName(instr->name()));
 
   // Insert the global memref at the top level.
   {
@@ -974,25 +1014,85 @@ StatusOr<lmhlo::ReducePrecisionOp> LhloDialectEmitter::EmitReducePrecisionOp(
   return reduce_precision_op;
 }
 
+namespace {
+template <typename OpT>
+void SetupChannelIdAttribute(OpT op, const xla::HloChannelInstruction* instr,
+                             mlir::Builder builder) {
+  if (instr->channel_id().has_value()) {
+    op.channel_idAttr(mlir::mhlo::ChannelHandle::get(
+        builder.getI64IntegerAttr(*instr->channel_id()),
+        builder.getI64IntegerAttr(0), builder.getContext()));
+  }
+}
+
+template <typename OpT>
+Status SetupCommonCollectiveOpAttributes(OpT op, const HloInstruction* instr,
+                                         mlir::OpBuilder& builder) {
+  auto* collective = xla::Cast<xla::HloCollectiveInstruction>(instr);
+  auto replica_groups_attr = xla::HloFunctionImporter::ConvertReplicaGroups(
+      collective->replica_groups(), &builder);
+  op->setAttr(replica_groups_attr.first, replica_groups_attr.second);
+  op.constrain_layoutAttr(builder.getBoolAttr(collective->constrain_layout()));
+  SetupChannelIdAttribute(op, collective, builder);
+  return Status::OK();
+}
+}  // namespace
+
+StatusOr<lmhlo::AllToAllOp> LhloDialectEmitter::EmitAllToAllOp(
+    const HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto all_to_all_op,
+                      CreateOpWithoutAttrs<lmhlo::AllToAllOp>(instr));
+  auto* all_to_all = xla::Cast<xla::HloAllToAllInstruction>(instr);
+  TF_RETURN_IF_ERROR(
+      SetupCommonCollectiveOpAttributes(all_to_all_op, instr, builder_));
+  if (all_to_all->split_dimension().has_value()) {
+    all_to_all_op.split_dimensionAttr(
+        builder_.getI64IntegerAttr(*all_to_all->split_dimension()));
+  }
+  return all_to_all_op;
+}
+
+StatusOr<lmhlo::AllGatherOp> LhloDialectEmitter::EmitAllGatherOp(
+    const HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto all_gather_op,
+                      CreateOpWithoutAttrs<lmhlo::AllGatherOp>(instr));
+  auto* all_gather = xla::Cast<xla::HloAllGatherInstruction>(instr);
+  TF_RETURN_IF_ERROR(
+      SetupCommonCollectiveOpAttributes(all_gather_op, instr, builder_));
+  all_gather_op.use_global_device_idsAttr(
+      builder_.getBoolAttr(all_gather->use_global_device_ids()));
+  all_gather_op.all_gather_dimensionAttr(
+      builder_.getI64IntegerAttr(all_gather->all_gather_dimension()));
+  return all_gather_op;
+}
+
 StatusOr<lmhlo::AllReduceOp> LhloDialectEmitter::EmitAllReduceOp(
     const HloInstruction* instr) {
   TF_ASSIGN_OR_RETURN(auto all_reduce_op,
                       CreateOpWithoutAttrs<lmhlo::AllReduceOp>(instr));
   auto* all_reduce = xla::Cast<xla::HloAllReduceInstruction>(instr);
-  auto replica_groups_attr = xla::HloFunctionImporter::ConvertReplicaGroups(
-      all_reduce->replica_groups(), builder_);
-  all_reduce_op->setAttr(replica_groups_attr.first, replica_groups_attr.second);
-  all_reduce_op.constrain_layoutAttr(
-      builder_.getBoolAttr(all_reduce->constrain_layout()));
-  all_reduce_op.channel_idAttr(mlir::mhlo::ChannelHandle::get(
-      builder_.getI64IntegerAttr(all_reduce->channel_id().value_or(0)),
-      builder_.getI64IntegerAttr(0), builder_.getContext()));
+  TF_RETURN_IF_ERROR(
+      SetupCommonCollectiveOpAttributes(all_reduce_op, instr, builder_));
   all_reduce_op.use_global_device_idsAttr(
       builder_.getBoolAttr(all_reduce->use_global_device_ids()));
   TF_RETURN_IF_ERROR(xla::HloFunctionImporter::ImportAsRegion(
       *instr->called_computations()[0], &all_reduce_op.computation(),
       &builder_));
   return all_reduce_op;
+}
+
+StatusOr<lmhlo::CollectivePermuteOp>
+LhloDialectEmitter::EmitCollectivePermuteOp(const HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto permute_op,
+                      CreateOpWithoutAttrs<lmhlo::CollectivePermuteOp>(instr));
+  auto* permute = xla::Cast<xla::HloCollectivePermuteInstruction>(instr);
+  SetupChannelIdAttribute(permute_op, permute, builder_);
+  mlir::NamedAttribute source_target_pairs_attr =
+      xla::HloFunctionImporter::ConvertSourceTargetPairs(
+          permute->source_target_pairs(), &builder_);
+  permute_op->setAttr(source_target_pairs_attr.first,
+                      source_target_pairs_attr.second);
+  return permute_op;
 }
 
 StatusOr<lmhlo::InfeedOp> LhloDialectEmitter::EmitInfeedOp(
@@ -1020,6 +1120,159 @@ StatusOr<lmhlo::OutfeedOp> LhloDialectEmitter::EmitOutfeedOp(
   auto outfeed_op = CreateOpWithoutAttrs<lmhlo::OutfeedOp>(instr, operands);
   outfeed_op.configAttr(builder_.getStringAttr(outfeed->outfeed_config()));
   return outfeed_op;
+}
+
+xla::StatusOr<lmhlo::BroadcastInDimOp> LhloDialectEmitter::EmitBroadcastOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto broadcast,
+                      CreateOpWithoutAttrs<lmhlo::BroadcastInDimOp>(instr));
+  broadcast.broadcast_dimensionsAttr(
+      builder_.getI64TensorAttr(instr->dimensions()));
+  return broadcast;
+}
+
+xla::StatusOr<lmhlo::ConcatenateOp> LhloDialectEmitter::EmitConcatenateOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto concat,
+                      CreateOpWithoutAttrs<lmhlo::ConcatenateOp>(instr));
+  auto hlo_concat = xla::Cast<xla::HloConcatenateInstruction>(instr);
+  concat.dimensionAttr(
+      builder_.getI64IntegerAttr(hlo_concat->concatenate_dimension()));
+  return concat;
+}
+
+xla::StatusOr<lmhlo::IotaOp> LhloDialectEmitter::EmitIotaOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto iota, CreateOpWithoutAttrs<lmhlo::IotaOp>(instr));
+  auto hlo_iota = xla::Cast<xla::HloIotaInstruction>(instr);
+  iota.iota_dimensionAttr(
+      builder_.getI64IntegerAttr(hlo_iota->iota_dimension()));
+  return iota;
+}
+
+xla::StatusOr<lmhlo::ReverseOp> LhloDialectEmitter::EmitReverseOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto reverse,
+                      CreateOpWithoutAttrs<lmhlo::ReverseOp>(instr));
+  reverse.dimensionsAttr(builder_.getI64TensorAttr(instr->dimensions()));
+  return reverse;
+}
+
+xla::StatusOr<lmhlo::TransposeOp> LhloDialectEmitter::EmitTransposeOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto transpose,
+                      CreateOpWithoutAttrs<lmhlo::TransposeOp>(instr));
+  transpose.permutationAttr(builder_.getI64TensorAttr(instr->dimensions()));
+  return transpose;
+}
+
+xla::StatusOr<lmhlo::PadOp> LhloDialectEmitter::EmitPadOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto pad, CreateOpWithoutAttrs<lmhlo::PadOp>(instr));
+  auto hlo_pad = xla::Cast<xla::HloPadInstruction>(instr);
+  std::vector<xla::int64> low, high, interior;
+  for (const auto& dim : hlo_pad->padding_config().dimensions()) {
+    low.push_back(dim.edge_padding_low());
+    high.push_back(dim.edge_padding_high());
+    interior.push_back(dim.interior_padding());
+  }
+  pad.edge_padding_lowAttr(builder_.getI64TensorAttr(low));
+  pad.edge_padding_highAttr(builder_.getI64TensorAttr(high));
+  pad.interior_paddingAttr(builder_.getI64TensorAttr(interior));
+  return pad;
+}
+
+xla::StatusOr<lmhlo::ReduceWindowOp> LhloDialectEmitter::EmitReduceWindowOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto reduce_window,
+                      CreateOpWithoutAttrs<lmhlo::ReduceWindowOp>(instr));
+  auto hlo_reduce_window = xla::Cast<xla::HloReduceWindowInstruction>(instr);
+  std::vector<xla::int64> dims, strides, base_dilations, window_dilations,
+      paddings;
+  for (const auto& dim : hlo_reduce_window->window().dimensions()) {
+    dims.push_back(dim.size());
+    strides.push_back(dim.stride());
+    base_dilations.push_back(dim.base_dilation());
+    window_dilations.push_back(dim.window_dilation());
+    paddings.push_back(dim.padding_low());
+    paddings.push_back(dim.padding_high());
+  }
+  reduce_window.window_dimensionsAttr(builder_.getI64TensorAttr(dims));
+  if (xla::window_util::HasStride(hlo_reduce_window->window())) {
+    reduce_window.window_stridesAttr(builder_.getI64TensorAttr(strides));
+  }
+  if (xla::window_util::HasBaseDilation(hlo_reduce_window->window())) {
+    reduce_window.base_dilationsAttr(builder_.getI64TensorAttr(base_dilations));
+  }
+  if (xla::window_util::HasWindowDilation(hlo_reduce_window->window())) {
+    reduce_window.window_dilationsAttr(
+        builder_.getI64TensorAttr(window_dilations));
+  }
+  CHECK_EQ(0, paddings.size() % 2);
+  if (xla::window_util::HasPadding(hlo_reduce_window->window())) {
+    reduce_window.paddingAttr(DenseIntElementsAttr::get(
+        RankedTensorType::get({static_cast<int64_t>(paddings.size() / 2), 2},
+                              builder_.getIntegerType(64)),
+        paddings));
+  }
+  TF_RETURN_IF_ERROR(xla::HloFunctionImporter::ImportAsRegion(
+      *hlo_reduce_window->called_computations()[0], &reduce_window.body(),
+      &builder_));
+  return reduce_window;
+}
+
+xla::StatusOr<lmhlo::SliceOp> LhloDialectEmitter::EmitSliceOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto slice, CreateOpWithoutAttrs<lmhlo::SliceOp>(instr));
+  auto hlo_slice = xla::Cast<xla::HloSliceInstruction>(instr);
+  slice.start_indicesAttr(builder_.getI64TensorAttr(hlo_slice->slice_starts()));
+  slice.limit_indicesAttr(builder_.getI64TensorAttr(hlo_slice->slice_limits()));
+  slice.stridesAttr(builder_.getI64TensorAttr(hlo_slice->slice_strides()));
+  return slice;
+}
+
+xla::StatusOr<lmhlo::GatherOp> LhloDialectEmitter::EmitGatherOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto gather,
+                      CreateOpWithoutAttrs<lmhlo::GatherOp>(instr));
+  auto hlo_gather = xla::Cast<xla::HloGatherInstruction>(instr);
+  gather.dimension_numbersAttr(xla::ConvertGatherDimensionNumbers(
+      hlo_gather->gather_dimension_numbers(), &builder_));
+  gather.slice_sizesAttr(builder_.getI64TensorAttr(
+      std::vector<int64_t>(hlo_gather->gather_slice_sizes().begin(),
+                           hlo_gather->gather_slice_sizes().end())));
+  return gather;
+}
+
+xla::StatusOr<lmhlo::DynamicSliceOp> LhloDialectEmitter::EmitDynamicSliceOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto dynamic_slice,
+                      CreateOpWithoutAttrs<lmhlo::DynamicSliceOp>(instr));
+  auto hlo_dynamic_slice = xla::Cast<xla::HloDynamicSliceInstruction>(instr);
+  dynamic_slice.slice_sizesAttr(
+      builder_.getI64TensorAttr(hlo_dynamic_slice->dynamic_slice_sizes()));
+  return dynamic_slice;
+}
+
+xla::StatusOr<lmhlo::DotOp> LhloDialectEmitter::EmitDotOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(auto dot, CreateOpWithoutAttrs<lmhlo::DotOp>(instr));
+  auto hlo_dot = xla::Cast<xla::HloDotInstruction>(instr);
+  dot.dot_dimension_numbersAttr(xla::ConvertDotDimensionNumbers(
+      hlo_dot->dot_dimension_numbers(), &builder_));
+  dot.precision_configAttr(
+      xla::ConvertPrecisionConfig(&hlo_dot->precision_config(), &builder_));
+  return dot;
+}
+
+xla::StatusOr<lmhlo::RngGetAndUpdateStateOp>
+LhloDialectEmitter::EmitRngGetAndUpdateStateOp(
+    const xla::HloInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(
+      auto rng, CreateOpWithoutAttrs<lmhlo::RngGetAndUpdateStateOp>(instr));
+  auto hlo_rng = xla::Cast<xla::HloRngGetAndUpdateStateInstruction>(instr);
+  rng.deltaAttr(builder_.getI64IntegerAttr(hlo_rng->delta()));
+  return rng;
 }
 
 StatusOr<Value> LhloDialectEmitter::GetOrCreateArrayView(
@@ -1086,7 +1339,7 @@ StatusOr<Value> LhloDialectEmitter::GetOrCreateArrayView(
           "Failed to get strides and offset from the output type.");
     result = builder_.create<MemRefReinterpretCastOp>(
         loc, out_memref_type, result, out_offset, out_memref_type.getShape(),
-        out_strides, llvm::None, llvm::None, llvm::None);
+        out_strides);
   }
   return cached_value = result;
 }
@@ -1126,6 +1379,9 @@ Status LhloDialectEmitter::GetOrCreateView(
 }
 
 Status LhloDialectEmitter::Initialize() {
+  mlir::IntegerAttr unique_id =
+      builder_.getI32IntegerAttr(computation_.parent()->unique_id());
+  module_->setAttr("hlo.unique_id", unique_id);
   std::string function_name =
       computation_.name().empty() ? "__compute" : computation_.name();
 

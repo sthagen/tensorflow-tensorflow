@@ -146,10 +146,7 @@ cc_library(
         "c_api_experimental.h",
         "c_api_internal.h",
     ],
-    visibility = [
-        "//learning/deepmind/courier:__subpackages__",
-        "//tensorflow:internal",
-    ],
+    visibility = ["//tensorflow:internal"],
     deps = [
         ":c_api",
         ":tfe_cancellation_manager_internal",
@@ -623,6 +620,7 @@ cc_library(
         "//tensorflow:internal",
     ],
     deps = [
+        "//tensorflow/c:conversion_macros",
         "//tensorflow/core:framework",
     ],
 )
@@ -712,6 +710,19 @@ cc_header_only_library(
     ],
 )
 
+cc_header_only_library(
+    name = "tfe_cancellationmanager_internal_hdrs_only",
+    extra_deps = [
+        "@com_google_absl//absl/strings",
+    ],
+    visibility = [
+        "//tensorflow:internal",
+    ],
+    deps = [
+        ":tfe_cancellation_manager_internal",
+    ],
+)
+
 tf_cuda_library(
     name = "c_api_test_util",
     testonly = 1,
@@ -742,9 +753,7 @@ tf_cuda_cc_test(
         "c_api_test.cc",
     ],
     tags = [
-        "noguitar",  # TODO(b/155445984): flaky
-        #"guitar",
-        "notap",  # TODO(b/156981931): flaky
+        "guitar",
         "multi_gpu",
     ],
     deps = [

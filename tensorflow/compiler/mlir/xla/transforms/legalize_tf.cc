@@ -4184,12 +4184,31 @@ class ConvertConvBackpropInputOp : public OpRewritePattern<OpTy> {
     const int64_t feature_group_count = in_depth / filter_in_depth;
 
     if (feature_group_count != 1) {
-      /*
-      // TODO(parkers): Convert this code to mlir.
-    filter = TransposeFilterForGroupConvolutionBackpropInput(
-        filter, filter_shape, feature_group_count, attrs.num_spatial_dims);
-        */
-      return failure();
+      // 1. Reshape filter from
+      //   [H, W, ..., filter_in_depth, out_depth] to
+      //   [H, W, ..., filter_in_depth, G, out_depth / G].
+      auto new_shape = llvm::to_vector<6>(filter_shape);
+      new_shape.back() = feature_group_count;
+      new_shape.push_back(filter_shape.back() / feature_group_count);
+      Type filter_element_ty = filter_ty.getElementType();
+      auto ty = RankedTensorType::get(new_shape, filter_element_ty);
+      filter = rewriter.create<ReshapeOp>(op.getLoc(), ty, filter);
+
+      // 2. Transpose to [H, W, ..., G, filter_in_depth, out_depth / G].
+      llvm::SmallVector<int64_t, 6> perm(num_dims + 1);
+      std::iota(perm.begin(), perm.end(), 0);
+      std::swap(perm[num_spatial_dims], perm[num_spatial_dims + 1]);
+      std::swap(new_shape[num_spatial_dims], new_shape[num_spatial_dims + 1]);
+      ty = RankedTensorType::get(new_shape, filter_element_ty);
+      filter = rewriter.create<TransposeOp>(
+          op.getLoc(), ty, filter, GetI64ElementsAttr(perm, &rewriter));
+
+      // 3. Reshape to [H, W, ..., in_depth, out_depth / G].
+      new_shape[num_spatial_dims] *= new_shape[num_spatial_dims + 1];
+      new_shape[num_spatial_dims + 1] = new_shape.back();
+      new_shape.pop_back();
+      ty = RankedTensorType::get(new_shape, filter_element_ty);
+      filter = rewriter.create<ReshapeOp>(op.getLoc(), ty, filter);
     }
 
     auto kernel_spatial_dims_attr =
@@ -4542,6 +4561,31 @@ class ConvertInfeedDequeueTupleOp
  public:
   using OpRewritePattern::OpRewritePattern;
 
+  Attribute GetLayout(const Type &type, PatternRewriter &rewriter) const {
+    auto i64_type = rewriter.getIntegerType(64);
+    if (type.isa<TupleType>()) {
+      TupleType tuple_type = type.dyn_cast<TupleType>();
+      std::vector<mlir::Attribute> v;
+      for (const mlir::Type &t : tuple_type.getTypes()) {
+        v.push_back(GetLayout(t, rewriter));
+      }
+      ArrayRef<Attribute> shape(v);
+      return rewriter.getArrayAttr(shape);
+    } else if (type.isa<RankedTensorType>()) {
+      RankedTensorType t = type.dyn_cast<RankedTensorType>();
+      std::vector<mlir::Attribute> attrs;
+      std::vector<Attribute> elements;
+      // Tuples are always serialized with an ascending layout. See
+      // LiteralLinearizer::LinearizeToBuffers.
+      for (int64_t i = 0; i < t.getRank(); i++) {
+        elements.push_back(rewriter.getIntegerAttr(i64_type, i));
+      }
+      return rewriter.getArrayAttr(elements);
+    } else {
+      return rewriter.getUnitAttr();  // e.g. tokens
+    }
+  }
+
   LogicalResult matchAndRewrite(TF::InfeedDequeueTupleOp op,
                                 PatternRewriter &rewriter) const override {
     std::vector<Type> result_types(op.outputs().size());
@@ -4563,6 +4607,7 @@ class ConvertInfeedDequeueTupleOp
     auto data_and_token =
         rewriter.create<InfeedOp>(op.getLoc(), data_and_token_type, token,
                                   /*infeed_config=*/rewriter.getStringAttr(""));
+
     if (op._XlaSharding().hasValue()) {
       // _XlaSharding attribute in TF is a serialized string of the OpSharding
       // proto, so convert to a text form here.
@@ -6095,7 +6140,7 @@ LogicalResult legalizeTF(
   PopulateLegalizeTfPatterns(context, &patterns);
 
   // Add TF->TF lowering patterns.
-  TF::PopulateLoweringTFPatterns(context, &patterns);
+  TF::PopulateTFLoweringBeforeHLOPatterns(context, &patterns);
 
   // Add TF->HLO legalization patterns via TF2XLA fallback.
   if (tf2xla_fallback_device_type.hasValue()) {

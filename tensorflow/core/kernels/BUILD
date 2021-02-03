@@ -3347,7 +3347,7 @@ tf_kernel_library(
 tf_kernel_library(
     name = "cwise_op",
     copts = if_mlir_generated_gpu_kernels_enabled(if_true = ["-DMLIR_GENERATED_GPU_KERNELS_ENABLED=1"]) +
-            if_mlir_experimental_kernels_enabled(if_true = ["-DMLIR_GENERATED_EXPERIMENTAL_GPU_KERNELS_ENABLED=1"]),
+            if_mlir_experimental_kernels_enabled(if_true = ["-DMLIR_GENERATED_EXPERIMENTAL_KERNELS_ENABLED=1"]),
     prefix = "cwise_op",
     deps = MATH_DEPS + if_mlir_generated_gpu_kernels_enabled(if_true = ["//tensorflow/core/kernels/mlir_generated:cwise_op"]),
 )
@@ -5929,10 +5929,12 @@ filegroup(
         "relu_op.h",
         "relu_op_functor.h",
         "reshape_util.h",
+        "resource_variable_ops.h",
         "reverse_op.h",
         "roll_op.h",
         "save_restore_tensor.h",
         "scan_ops.h",
+        "scatter_functor.h",
         "scatter_nd_op.h",
         "segment_reduction_ops.h",
         "segment_reduction_ops_impl.h",
@@ -5974,6 +5976,7 @@ filegroup(
         "//tensorflow/core/kernels/linalg:linalg_ops_common.h",
         "//tensorflow/core/kernels/linalg:matrix_diag_op.h",
         "//tensorflow/core/kernels/linalg:matrix_set_diag_op.h",
+        "//tensorflow/core/kernels/linalg:matrix_triangular_solve_op_impl.h",
         "//tensorflow/core/util:image_resizer_state.h",
     ],
 )
@@ -6011,6 +6014,7 @@ filegroup(
         "cwise_op_abs.cc",
         "cwise_op_add_1.cc",
         "cwise_op_add_2.cc",
+        "cwise_op_arg.cc",
         "cwise_op_atan.cc",
         "cwise_op_atan2.cc",
         "cwise_op_bitwise_and.cc",
@@ -6176,6 +6180,7 @@ filegroup(
         "regex_full_match_op.cc",
         "relu_op.cc",
         "reshape_util.cc",
+        "resource_variable_ops.cc",
         "restore_op.cc",
         "reverse_op.cc",
         "roll_op.cc",
@@ -6183,6 +6188,7 @@ filegroup(
         "save_restore_tensor.cc",
         "save_restore_v2_ops.cc",
         "scan_ops.cc",
+        "scatter_functor.cc",
         "scatter_nd_op.cc",
         "scatter_nd_op_cpu_impl_0.cc",
         "scatter_nd_op_cpu_impl_1.cc",
@@ -6280,9 +6286,13 @@ filegroup(
         "//tensorflow/core/kernels/image:resize_nearest_neighbor_op.cc",
         "//tensorflow/core/kernels/image:sample_distorted_bounding_box_op.cc",
         "//tensorflow/core/kernels/linalg:linalg_ops_common.cc",
+        "//tensorflow/core/kernels/linalg:cholesky_op.cc",
+        "//tensorflow/core/kernels/linalg:determinant_op.cc",
         "//tensorflow/core/kernels/linalg:matrix_diag_op.cc",
         "//tensorflow/core/kernels/linalg:matrix_inverse_op.cc",
         "//tensorflow/core/kernels/linalg:matrix_set_diag_op.cc",
+        "//tensorflow/core/kernels/linalg:matrix_triangular_solve_op_complex.cc",
+        "//tensorflow/core/kernels/linalg:matrix_triangular_solve_op_real.cc",
     ],
 )
 
@@ -6378,7 +6388,6 @@ filegroup(
             "spectrogram_convert_test_data.cc",
             "decode_proto_op.cc",
             "encode_proto_op.cc",
-            "rpc_op.cc",
             "sobol_op.cc",
             # Excluded due to experimental status:
             "debug_ops.*",
@@ -7291,22 +7300,6 @@ tf_kernel_library(
         "//tensorflow/core:lib",
         "//tensorflow/core/util/proto:descriptors",
         "//tensorflow/core/util/proto:proto_utils",
-        "//third_party/eigen3",
-    ],
-)
-
-tf_kernel_library(
-    name = "rpc_op",
-    srcs = [
-        "rpc_op.cc",
-    ],
-    deps = [
-        "//tensorflow/core:framework",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:lib_internal",
-        "//tensorflow/core/util/rpc:call_container",
-        "//tensorflow/core/util/rpc:rpc_factory",
-        "//tensorflow/core/util/rpc:rpc_factory_registry",
         "//third_party/eigen3",
     ],
 )
