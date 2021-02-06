@@ -798,7 +798,7 @@ cc_library(
         "//tensorflow:ios": [],
         "//tensorflow:linux_ppc64le": [],
         "//tensorflow:linux_s390x": [],
-        "//conditions:default": ["@mkl_dnn//:mkldnn_single_threaded"],
+        "//conditions:default": ["@mkl_dnn_v1//:dnnl_single_threaded"],
     }),
 )
 
@@ -6079,6 +6079,7 @@ filegroup(
         "decode_wav_op.cc",
         "deep_conv2d.cc",
         "deep_conv2d.h",
+        "depthwise_conv_grad_op.cc",
         "depthwise_conv_op.cc",
         "dynamic_partition_op.cc",
         "eigen_contraction_kernel.cc",

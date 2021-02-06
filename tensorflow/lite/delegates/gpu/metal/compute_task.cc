@@ -24,7 +24,6 @@ limitations under the License.
 #include "absl/strings/match.h"
 #include "absl/strings/substitute.h"
 #include "tensorflow/lite/delegates/gpu/common/kernel_info.h"
-#include "tensorflow/lite/delegates/gpu/common/model.h"
 #include "tensorflow/lite/delegates/gpu/common/shape.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
 #include "tensorflow/lite/delegates/gpu/common/types.h"
@@ -134,6 +133,7 @@ absl::Status ComputeTask::CompileProgram(MetalDevice* device,
     @"INIT_ACCUM_FLT4(value)" :
         [NSString stringWithFormat:@"%@4(value)", accumulatorType],
     @"TO_ACCUM_TYPE" : toAccumulatorType4,
+    @"TO_ACCUM_FLT" : accumulatorType,
     @"TO_FLT4" : [NSString stringWithFormat:@"%@4", storageType],
     @"SIMDGROUP_BARRIER" : barrier,
     @"SIMD_LOCAL_MEM_BARRIER" : barrier,

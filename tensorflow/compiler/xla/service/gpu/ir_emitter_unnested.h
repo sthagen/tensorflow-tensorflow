@@ -179,6 +179,7 @@ class IrEmitterUnnested : public IrEmitter,
 #endif  // GOOGLE_CUDA
   Status EmitCustomCallThunkFromMlir(MlirEmitterInput input);
   Status HandleFft(HloInstruction* fft) override;
+  Status EmitFftThunkFromMlir(MlirEmitterInput input);
   Status HandleFusion(HloInstruction* fusion) override;
   Status EmitLoopFusionFromMlir(
       MlirEmitterInput input, const Shape& output_shape,
@@ -196,10 +197,10 @@ class IrEmitterUnnested : public IrEmitter,
   Status EmitRngGetAndUpdateState(MlirEmitterInput mlir_input);
   Status HandleScatter(HloInstruction* scatter) override;
   Status EmitScatterFromMlir(MlirEmitterInput mlir_input);
-  Status HandleSelect(HloInstruction* select) override;
   Status HandleSort(HloInstruction* sort) override;
   Status EmitSortFromMlir(MlirEmitterInput mlir_input);
   Status HandleTriangularSolve(HloInstruction* hlo) override;
+  Status EmitTriangularSolveFromMlir(MlirEmitterInput mlir_input);
 
   template <typename NcclThunkType, typename OpTy>
   Status EmitNcclThunkFromMlir(MlirEmitterInput mlir_input);
@@ -215,6 +216,7 @@ class IrEmitterUnnested : public IrEmitter,
   Status HandlePartitionId(HloInstruction* hlo) override;
 
   Status HandleCollectivePermute(HloInstruction* hlo) override;
+  Status EmitCollectivePermuteFromMlir(MlirEmitterInput input);
 
   Status EmitOp(MlirEmitterInput mlir_input);
 

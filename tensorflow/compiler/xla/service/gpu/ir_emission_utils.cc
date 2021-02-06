@@ -377,8 +377,8 @@ bool IsInputFusibleSlices(mlir::Operation* unnested_hlo,
   }
 
   auto is_non_strided = [](mlir::DenseIntElementsAttr strides) -> bool {
-    return absl::c_all_of(strides.getValues<int>(),
-                          [](int stride) { return stride == 1; });
+    return absl::c_all_of(
+        strides, [](const llvm::APInt& stride) { return stride == 1; });
   };
 
   for (mlir::Value value : fusion.getFusionResults()) {
@@ -809,7 +809,6 @@ bool CanEmitFusedDynamicUpdateSliceInPlaceForGpu(
 
   auto maybe_lhs = GetAllocationSliceForMlir(parameter.memref(), allocations);
   auto maybe_rhs = GetAllocationSliceForMlir(output_buffers[0], allocations);
-  LOG(ERROR) << "TIM: ";
   return maybe_lhs.ok() && maybe_rhs.ok() && *maybe_lhs == *maybe_rhs;
 }
 

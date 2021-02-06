@@ -39,6 +39,11 @@ filegroup(
     name = "enabled_unary_kernel_srcs",
     srcs = [
         "gpu_op_abs.cc",
+        "gpu_op_acos.cc",
+        "gpu_op_acosh.cc",
+        "gpu_op_angle.cc",
+        "gpu_op_asin.cc",
+        "gpu_op_asinh.cc",
         "gpu_op_atan.cc",
         "gpu_op_atanh.cc",
         "gpu_op_ceil.cc",
@@ -61,6 +66,8 @@ filegroup(
         "gpu_op_neg.cc",
         "gpu_op_real.cc",
         "gpu_op_rsqrt.cc",
+        "gpu_op_sin.cc",
+        "gpu_op_sinh.cc",
         "gpu_op_sqrt.cc",
         "gpu_op_square.cc",
         "gpu_op_tan.cc",
@@ -72,18 +79,11 @@ filegroup(
 filegroup(
     name = "experimental_unary_kernel_srcs",
     srcs = [
-        "gpu_op_acos.cc",
-        "gpu_op_acosh.cc",
-        "gpu_op_angle.cc",
-        "gpu_op_asin.cc",
-        "gpu_op_asinh.cc",
         "gpu_op_digamma.cc",
         "gpu_op_exp.cc",
         "gpu_op_expm1.cc",
         "gpu_op_lgamma.cc",
         "gpu_op_sign.cc",
-        "gpu_op_sin.cc",
-        "gpu_op_sinh.cc",
     ],
     compatible_with = get_compatible_with_cloud(),
 )
@@ -204,6 +204,7 @@ tf_kernel_library(
         "gpu_op_right_shift.cc",
         "gpu_op_squared_difference.cc",
         "gpu_op_sub.cc",
+        "gpu_op_zeta.cc",
     ],
     tags = [
         "manual",
@@ -233,6 +234,7 @@ tf_kernel_library(
         ":right_shift_kernels",
         ":squared_difference_kernels",
         ":sub_kernels",
+        ":zeta_kernels",
         "//third_party/eigen3",
     ],
 )
@@ -568,8 +570,7 @@ gen_kernel_library(
             "f64",
             "i64",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "square",
@@ -590,8 +591,7 @@ gen_kernel_library(
         "f32",
         "f64",
     ],
-    # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-    # unroll_factors = "2",
+    unroll_factors = "2",
 )
 
 gen_kernel_library(
@@ -617,8 +617,7 @@ gen_kernel_library(
         "i16",
         "i64",
     ],
-    # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-    # unroll_factors = "4",
+    unroll_factors = "4",
 )
 
 gen_kernel_library(
@@ -632,8 +631,7 @@ gen_kernel_library(
         "i16",
         "i64",
     ],
-    # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-    # unroll_factors = "4",
+    unroll_factors = "4",
 )
 
 # Bitwise operations.
@@ -652,8 +650,7 @@ gen_kernel_library(
             # "ui32",
             # "ui64",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "bitwise_and",
@@ -682,8 +679,7 @@ gen_kernel_library(
         types = [
             "i1",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "logical_and",
@@ -706,8 +702,7 @@ gen_kernel_library(
             "i32",
             "i64",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "equal",
@@ -729,8 +724,7 @@ gen_kernel_library(
             "i32",
             "i64",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "less",
@@ -752,8 +746,7 @@ gen_kernel_library(
             "i32",
             "i64",
         ],
-        # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-        # unroll_factors = "4",
+        unroll_factors = "4",
     )
     for name in [
         "maximum",
@@ -792,8 +785,7 @@ gen_kernel_library(
         "f32",
         "f64",
     ],
-    # TODO(b/178388085): Enable unrolling after vectorization is fixed.
-    # unroll_factors = "4",
+    unroll_factors = "4",
 )
 
 # Kernels that support all floating-point types.
@@ -861,28 +853,27 @@ gen_kernel_library(
     ]
 ]
 
-# TODO(b/178578256): Enable this target after it doesn't cause the ROCM build to fail.
-# gen_kernel_library(
-#     name = "cast",
-#     # We generate all combinations of input types/output types from the set
-#     # {i1, i8, i16, i32, i64, f16, f32, f64}. The easiest way to do this is to
-#     # repeat each input type 8 times and match it with the 8 different output
-#     # types (thus, the list of 8 different output types needs to be repeated 8
-#     # times as well).
-#     output_types = [
-#         "i1",
-#         "i8",
-#         "i16",
-#         "i32",
-#         "i64",
-#         "f16",
-#         "f32",
-#         "f64",
-#     ] * 8,
-#     tile_size = "256",
-#     types = ["i1"] * 8 + ["i8"] * 8 + ["i16"] * 8 + ["i32"] * 8 + ["i64"] * 8 + ["f16"] * 8 + ["f32"] * 8 + ["f64"] * 8,
-#     unroll_factors = "4",
-# )
+gen_kernel_library(
+    name = "cast",
+    # We generate all combinations of input types/output types from the set
+    # {i1, i8, i16, i32, i64, f16, f32, f64}. The easiest way to do this is to
+    # repeat each input type 8 times and match it with the 8 different output
+    # types (thus, the list of 8 different output types needs to be repeated 8
+    # times as well).
+    output_types = [
+        "i1",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "f16",
+        "f32",
+        "f64",
+    ] * 8,
+    tile_size = "256",
+    types = ["i1"] * 8 + ["i8"] * 8 + ["i16"] * 8 + ["i32"] * 8 + ["i64"] * 8 + ["f16"] * 8 + ["f32"] * 8 + ["f64"] * 8,
+    unroll_factors = "4",
+)
 
 gen_kernel_library(
     name = "pow",
@@ -892,6 +883,17 @@ gen_kernel_library(
         "f32",
         "f64",
         "i64",
+    ],
+    unroll_factors = "4",
+)
+
+gen_kernel_library(
+    # The zeta kernels needs many registers so tile at 256.
+    name = "zeta",
+    tile_size = "256",
+    types = [
+        "f32",
+        "f64",
     ],
     # TODO(b/178388085): Enable unrolling after vectorization is fixed.
     # unroll_factors = "4",
