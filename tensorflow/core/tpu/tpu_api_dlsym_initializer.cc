@@ -67,7 +67,11 @@ Status InitializeTpuLibrary(void* library_handle) {
 bool FindAndLoadTpuLibrary() {
   void* library = dlopen("libtpu.so", RTLD_NOW);
   if (library) {
-    InitializeTpuLibrary(library);
+    // We can open the shared library which means we are in a TPU environment.
+    // Try to acquire exclusive access.
+    if (TryAcquireTpuLock()) {
+      InitializeTpuLibrary(library);
+    }
   }
   return true;
 }
