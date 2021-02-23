@@ -60,6 +60,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/permutation_util.h"
 #include "tensorflow/compiler/xla/service/buffer_assignment.h"
+#include "tensorflow/compiler/xla/service/collective_ops_utils.h"
 #include "tensorflow/compiler/xla/service/custom_call_target_registry.h"
 #include "tensorflow/compiler/xla/service/dfs_hlo_visitor.h"
 #include "tensorflow/compiler/xla/service/gpu/backend_configs.pb.h"
@@ -1533,28 +1534,63 @@ Status IrEmitterUnnested::EmitCustomCallThunkFromMlir(MlirEmitterInput input) {
 
   void* call_target = CustomCallTargetRegistry::Global()->Lookup(
       call_target_name, std::string(platform_name()));
-  if (call_target) {
-    std::vector<BufferAllocation::Slice> operands;
-    for (mlir::Value arg : custom_call.args()) {
-      TF_ASSIGN_OR_RETURN(BufferAllocation::Slice arg_slice,
-                          GetAllocationSliceForMlir(arg));
-      operands.push_back(arg_slice);
-    }
-
-    std::vector<BufferAllocation::Slice> results;
-    for (mlir::Value output : custom_call.output()) {
-      TF_ASSIGN_OR_RETURN(BufferAllocation::Slice output_slice,
-                          GetAllocationSliceForMlir(output));
-      results.push_back(output_slice);
-    }
-
-    AddThunkToThunkSequence(absl::make_unique<CustomCallThunk>(
-        input.thunk_info, call_target, std::move(operands), std::move(results),
-        custom_call.backend_config().str()));
-    return Status::OK();
+  if (!call_target) {
+    return Unimplemented(
+        "No registered implementation for custom call to \"%s\"",
+        call_target_name);
   }
-  return Unimplemented("No registered implementation for custom call to \"%s\"",
-                       call_target_name);
+
+  std::vector<CustomCallThunk::OptionalSlice> operands;
+  std::vector<CustomCallThunk::OptionalSlice> results;
+
+  if (custom_call.target_arg_mapping()) {
+    auto values_to_slices_with_token_holes =
+        [&](mlir::ValueRange operands, mlir::ArrayAttr op_to_target_mapping,
+            mlir::IntegerAttr num_target)
+        -> StatusOr<std::vector<CustomCallThunk::OptionalSlice>> {
+      std::vector<CustomCallThunk::OptionalSlice> slices(num_target.getInt());
+      for (auto index_and_value_it :
+           llvm::zip(op_to_target_mapping, operands)) {
+        mlir::Attribute index_attr = std::get<0>(index_and_value_it);
+        mlir::Value value = std::get<1>(index_and_value_it);
+        int64 index = index_attr.cast<mlir::IntegerAttr>().getInt();
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSliceForMlir(value));
+        slices[index] = slice;
+      }
+      return slices;
+    };
+
+    mlir::lmhlo::CustomCallTargetArgMapping target_mapping =
+        *custom_call.target_arg_mapping();
+    TF_ASSIGN_OR_RETURN(
+        operands, values_to_slices_with_token_holes(
+                      custom_call.args(), target_mapping.args_to_target_args(),
+                      target_mapping.num_args()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices_with_token_holes(
+                                     custom_call.output(),
+                                     target_mapping.results_to_target_results(),
+                                     target_mapping.num_results()));
+  } else {
+    auto values_to_slices = [&](mlir::ValueRange values)
+        -> StatusOr<std::vector<CustomCallThunk::OptionalSlice>> {
+      std::vector<CustomCallThunk::OptionalSlice> slices;
+      for (mlir::Value value : values) {
+        TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
+                            GetAllocationSliceForMlir(value));
+        slices.push_back(slice);
+      }
+      return slices;
+    };
+
+    TF_ASSIGN_OR_RETURN(operands, values_to_slices(custom_call.args()));
+    TF_ASSIGN_OR_RETURN(results, values_to_slices(custom_call.output()));
+  }
+
+  AddThunkToThunkSequence(absl::make_unique<CustomCallThunk>(
+      input.thunk_info, call_target, std::move(operands), std::move(results),
+      custom_call.backend_config().str()));
+  return Status::OK();
 }
 
 Status IrEmitterUnnested::HandleFft(HloInstruction* fft) {
@@ -3111,14 +3147,19 @@ template <typename NcclThunkType, typename OpTy>
 Status IrEmitterUnnested::EmitNcclThunkFromMlir(MlirEmitterInput input) {
   OpTy op = mlir::cast<OpTy>(input.op);
   int64 replica_count = hlo_module_config_.replica_count();
+  int64 partition_count = hlo_module_config_.num_partitions();
   VLOG(2) << NcclThunkType::GetName() << "; replica count: " << replica_count
+          << "; partition count: " << partition_count
           << "; operand count: " << op.operands().size()
           << "; NCCL is enabled: " << NcclThunkType::NcclIsEnabled();
 
-  // Note the replica_count == 1 case is handled via device-to-device copy
-  // below.
+  // A given collective op can be degenerate if across all groups formed
+  // by it are singleton. In such a case, we don't need to do any communication
+  // and we can just copy the input to the output.
+  bool is_degenerate =
+      NcclThunkType::IsDegenerate(op, replica_count, partition_count);
   bool should_use_nccl_thunk =
-      replica_count > 1 && NcclThunkType::CanImplement(op);
+      !is_degenerate && NcclThunkType::CanImplement(op);
 
   // Stash relevant information in NcclAllGatherThunk::Buffer even if we may
   // not generate an NcclAllGatherThunk.
@@ -3138,17 +3179,21 @@ Status IrEmitterUnnested::EmitNcclThunkFromMlir(MlirEmitterInput input) {
 
   if (should_use_nccl_thunk) {
     auto nccl_thunk =
-        absl::make_unique<NcclThunkType>(input.thunk_info, op, replica_count,
+        absl::make_unique<NcclThunkType>(input.thunk_info, op,
                                          /*buffers=*/std::move(buffers));
     AddThunkToThunkSequence(std::move(nccl_thunk));
     return Status::OK();
   }
 
   if (replica_count != 1) {
+    CollectiveOpGroupMode group_mode = NcclThunkType::GetGroupMode(op);
+
     string message = absl::StrFormat(
         "Requested %s not implemented on GPU; replica_count: %d; "
-        "operand_count: %d; NCCL support: %d",
-        NcclThunkType::GetName(), replica_count, op.operands().size(),
+        "partition_count: %d, group_mode: %s, operand_count: %d; NCCL support: "
+        "%d",
+        NcclThunkType::GetName(), replica_count, partition_count,
+        CollectiveOpGroupModeToString(group_mode), op.operands().size(),
         NcclThunkType::NcclIsEnabled());
     if (!op.operands().empty()) {
       const Shape shape = TypeToShape(op.operands().front().getType());
@@ -3840,6 +3885,20 @@ Status CheckConditionalBuffersShareAllocation(
   return Status::OK();
 }
 
+Status AcceptMaybeOrdered(HloComputation* computation,
+                          IrEmitterUnnested* emitter,
+                          const BufferAssignment& buffer_assignment) {
+  const auto& debug_options = computation->parent()->config().debug_options();
+  if (debug_options.xla_gpu_disable_multi_streaming()) {
+    const HloInstructionSequence* sequence =
+        buffer_assignment.hlo_ordering().SequentialOrder(*computation);
+    // Always expect a sequential ordering for single-stream programs.
+    TF_RET_CHECK(sequence);
+    return computation->AcceptOrdered(emitter, sequence->instructions());
+  }
+  return computation->Accept(emitter);
+}
+
 }  // namespace
 
 StatusOr<std::unique_ptr<Thunk>> IrEmitterUnnested::BuildWhileThunk(
@@ -3853,14 +3912,18 @@ StatusOr<std::unique_ptr<Thunk>> IrEmitterUnnested::BuildWhileThunk(
   TF_ASSIGN_OR_RETURN(auto ir_emitter_condition,
                       IrEmitterUnnested::Create(hlo_module_config_, condition,
                                                 ir_emitter_context_));
-  TF_RETURN_IF_ERROR(condition->Accept(ir_emitter_condition.get()));
+
+  TF_RETURN_IF_ERROR(
+      AcceptMaybeOrdered(condition, ir_emitter_condition.get(),
+                         ir_emitter_context_->buffer_assignment()));
 
   // Generate thunk sequence for while 'body'.
   HloComputation* body = hlo->while_body();
   TF_ASSIGN_OR_RETURN(
       auto ir_emitter_body,
       IrEmitterUnnested::Create(hlo_module_config_, body, ir_emitter_context_));
-  TF_RETURN_IF_ERROR(body->Accept(ir_emitter_body.get()));
+  TF_RETURN_IF_ERROR(AcceptMaybeOrdered(
+      body, ir_emitter_body.get(), ir_emitter_context_->buffer_assignment()));
 
   const auto* index_map = ir_emitter_context_->profile_index_map();
   absl::optional<size_t> condition_profile_index, body_profile_index;
@@ -3888,7 +3951,8 @@ StatusOr<std::unique_ptr<Thunk>> IrEmitterUnnested::BuildForThunk(
   TF_ASSIGN_OR_RETURN(
       auto ir_emitter_body,
       IrEmitterUnnested::Create(hlo_module_config_, body, ir_emitter_context_));
-  TF_RETURN_IF_ERROR(body->Accept(ir_emitter_body.get()));
+  TF_RETURN_IF_ERROR(AcceptMaybeOrdered(
+      body, ir_emitter_body.get(), ir_emitter_context_->buffer_assignment()));
 
   const auto* index_map = ir_emitter_context_->profile_index_map();
   absl::optional<size_t> body_profile_index;
@@ -3925,7 +3989,8 @@ StatusOr<std::unique_ptr<Thunk>> IrEmitterUnnested::BuildConditionalThunk(
         auto ir_emitter,
         IrEmitterUnnested::Create(hlo_module_config_, branch_computation,
                                   ir_emitter_context_));
-    TF_CHECK_OK(branch_computation->Accept(ir_emitter.get()));
+    TF_CHECK_OK(AcceptMaybeOrdered(branch_computation, ir_emitter.get(),
+                                   ir_emitter_context_->buffer_assignment()));
     branch_thunks.push_back(std::move(*ir_emitter->ConsumeThunkSequence()));
 
     absl::optional<size_t> profile_index;
