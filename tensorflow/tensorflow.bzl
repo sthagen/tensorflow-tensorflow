@@ -250,7 +250,7 @@ def if_windows(a, otherwise = []):
 
 def if_windows_cuda(a, otherwise = []):
     return select({
-        clean_dep("//tensorflow:with_cuda_support_windows_override"): a,
+        clean_dep("//tensorflow:is_cuda_enabled_and_windows"): a,
         "//conditions:default": otherwise,
     })
 
@@ -296,6 +296,9 @@ def if_registration_v2(if_true, if_false = []):
         "//tensorflow:registration_v2": if_true,
         "//conditions:default": if_false,
     })
+
+def if_portable(if_true, if_false = []):
+    return if_true
 
 # Linux systems may required -lrt linker flag for e.g. clock_gettime
 # see https://github.com/tensorflow/tensorflow/issues/15129
