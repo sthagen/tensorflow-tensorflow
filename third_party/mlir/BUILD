@@ -82,6 +82,28 @@ gentbl(
 )
 
 gentbl(
+    name = "BuiltinAttributesIncGen",
+    strip_include_prefix = "include",
+    tbl_outs = [
+        (
+            "--gen-attrdef-decls",
+            "include/mlir/IR/BuiltinAttributes.h.inc",
+        ),
+        (
+            "--gen-attrdef-defs",
+            "include/mlir/IR/BuiltinAttributes.cpp.inc",
+        ),
+    ],
+    tblgen = ":mlir-tblgen",
+    td_file = "include/mlir/IR/BuiltinAttributes.td",
+    td_srcs = [
+        "include/mlir/IR/BuiltinAttributes.td",
+        "include/mlir/IR/BuiltinDialect.td",
+        ":OpBaseTdFiles",
+    ],
+)
+
+gentbl(
     name = "BuiltinOpsIncGen",
     strip_include_prefix = "include",
     tbl_outs = [
@@ -134,6 +156,7 @@ cc_library(
     ],
     includes = ["include"],
     deps = [
+        ":BuiltinAttributesIncGen",
         ":BuiltinDialectIncGen",
         ":BuiltinOpsIncGen",
         ":BuiltinTypesIncGen",
@@ -4205,7 +4228,6 @@ cc_binary(
         ":StandardToLLVM",
         ":ToLLVMIRTranslation",
         ":Transforms",
-        "//devtools/build/runtime:get_runfiles_dir",
         "//third_party/gpus/cuda:cuda_headers",
         "//third_party/gpus/cuda:cuda_runtime",
         "//third_party/gpus/cuda:libcuda",
