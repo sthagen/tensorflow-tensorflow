@@ -983,6 +983,20 @@ cc_library(
 )
 
 cc_library(
+    name = "tpu_fingerprint_lookup",
+    srcs = ["tpu_fingerprint_lookup.cc"],
+    hdrs = ["tpu_fingerprint_lookup.h"],
+    deps = [
+        "//tensorflow/core:framework",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
     name = "tpu_functional_ops",
     srcs = ["tpu_functional_ops.cc"],
     hdrs = ["tpu_functional_ops.h"],
@@ -1010,8 +1024,11 @@ cc_library(
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/core/protobuf/tpu:topology_proto_cc",
         "//tensorflow/core/tpu:tpu_api",
+        "//tensorflow/core/tpu:tpu_configuration",
         "//tensorflow/core/tpu:tpu_defs",
         "//tensorflow/core/tpu:tpu_ops_c_api_hdrs",
+        "//tensorflow/core/tpu/kernels:tpu_fingerprint_lookup",
+        "//tensorflow/core/tpu/kernels:tpu_op_consts",
         "//third_party/eigen3",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
