@@ -330,6 +330,19 @@ cc_library(
 )
 
 cc_library(
+    name = "convolution_transposed_thin_test_util",
+    testonly = 1,
+    srcs = ["convolution_transposed_thin_test_util.cc"],
+    hdrs = ["convolution_transposed_thin_test_util.h"],
+    deps = [
+        ":convolution_transposed_thin",
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common/task:testing_util",
+    ],
+)
+
+cc_library(
     name = "depthwise_conv",
     srcs = ["depthwise_conv.cc"],
     hdrs = ["depthwise_conv.h"],
@@ -871,6 +884,19 @@ cc_library(
         "//tensorflow/lite/delegates/gpu/common:types",
         "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
         "//tensorflow/lite/delegates/gpu/common/task:work_group_picking",
+    ],
+)
+
+cc_library(
+    name = "split_test_util",
+    testonly = 1,
+    srcs = ["split_test_util.cc"],
+    hdrs = ["split_test_util.h"],
+    deps = [
+        ":split",
+        "//tensorflow/lite/delegates/gpu/common:operations",
+        "//tensorflow/lite/delegates/gpu/common:status",
+        "//tensorflow/lite/delegates/gpu/common/task:testing_util",
     ],
 )
 
