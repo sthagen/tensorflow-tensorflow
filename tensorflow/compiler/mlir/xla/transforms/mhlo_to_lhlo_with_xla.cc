@@ -20,6 +20,7 @@ limitations under the License.
 #include <tuple>
 
 #include "absl/algorithm/container.h"
+#include "absl/types/optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"  // from @llvm-project
@@ -269,7 +270,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
     case HloOpcode::kAtan2:
       return CreateOpWithoutAttrs<lmhlo::Atan2Op>(instr);
     case HloOpcode::kBitcast:
-      return nullptr;
+      return EmitBitcast(instr);
     case HloOpcode::kBitcastConvert:
       return CreateOpWithoutAttrs<lmhlo::BitcastConvertOp>(instr);
     case HloOpcode::kBroadcast:
@@ -558,17 +559,24 @@ StatusOr<lmhlo::FusionOp> LhloDialectEmitter::EmitFusionOp(
 }
 
 StatusOr<mhlo::ScatterDimensionNumbers>
-LhloDialectEmitter::GetScatterDimensionNumbers(const HloInstruction* instr) {
+LhloDialectEmitter::GetScatterDimensionNumbers(const HloInstruction* instr,
+                                               mlir::MLIRContext* context) {
   auto* scatter_instr = xla::Cast<xla::HloScatterInstruction>(instr);
 
   const xla::ScatterDimensionNumbers& xla_scatter_dim =
       scatter_instr->scatter_dimension_numbers();
+
+  mlir::Builder builder(context);
+  auto get_i64_array_attr =
+      [builder](absl::Span<const xla::int64> container) mutable {
+        return builder.getI64TensorAttr(
+            {container.data(), static_cast<size_t>(container.size())});
+      };
   auto scatter_dimension_numbers = mhlo::ScatterDimensionNumbers::get(
-      GetI64DenseElementsAttr(xla_scatter_dim.update_window_dims()),
-      GetI64DenseElementsAttr(xla_scatter_dim.inserted_window_dims()),
-      GetI64DenseElementsAttr(xla_scatter_dim.scatter_dims_to_operand_dims()),
-      builder_.getI64IntegerAttr(xla_scatter_dim.index_vector_dim()),
-      module_.getContext());
+      get_i64_array_attr(xla_scatter_dim.update_window_dims()),
+      get_i64_array_attr(xla_scatter_dim.inserted_window_dims()),
+      get_i64_array_attr(xla_scatter_dim.scatter_dims_to_operand_dims()),
+      builder.getI64IntegerAttr(xla_scatter_dim.index_vector_dim()), context);
   return scatter_dimension_numbers;
 }
 
@@ -581,7 +589,7 @@ StatusOr<lmhlo::ScatterOp> LhloDialectEmitter::EmitScatterOp(
   auto* scatter_instr = xla::Cast<xla::HloScatterInstruction>(instr);
 
   TF_ASSIGN_OR_RETURN(auto scatter_dimension_numbers,
-                      GetScatterDimensionNumbers(instr));
+                      GetScatterDimensionNumbers(instr, builder_.getContext()));
   scatter.scatter_dimension_numbersAttr(scatter_dimension_numbers);
   scatter.indices_are_sortedAttr(
       builder_.getBoolAttr(scatter_instr->indices_are_sorted()));
@@ -1385,6 +1393,23 @@ LhloDialectEmitter::EmitTriangularSolveOp(const xla::HloInstruction* instr) {
   triangular_solve.layout_outputAttr(
       GetLayoutAttribute(instr->shape().layout(), &builder_));
   return triangular_solve;
+}
+
+xla::StatusOr<Operation*> LhloDialectEmitter::EmitBitcast(
+    const xla::HloInstruction* instr) {
+  // XLA buffer assignment should assign the same slice to a bitcast input and
+  // output.
+  const xla::ShapeIndex top_index;
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice result_slice,
+                      assignment_.GetUniqueSlice(instr, top_index));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice input_slice,
+                      assignment_.GetUniqueSlice(instr->operand(0), top_index));
+
+  if (input_slice != result_slice) {
+    return xla::InvalidArgument(
+        "Bitcast input and result slice should be same");
+  }
+  return nullptr;
 }
 
 mlir::DenseIntElementsAttr LhloDialectEmitter::GetLayoutAttribute(

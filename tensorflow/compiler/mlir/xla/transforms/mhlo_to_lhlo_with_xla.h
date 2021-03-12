@@ -51,8 +51,9 @@ class LhloDialectEmitter : public xla::ConstDfsHloVisitorWithDefault {
 
   xla::StatusOr<mlir::Operation*> EmitOp(const xla::HloInstruction* instr);
 
-  xla::StatusOr<mhlo::ScatterDimensionNumbers> GetScatterDimensionNumbers(
-      const xla::HloInstruction* instr);
+  static xla::StatusOr<mhlo::ScatterDimensionNumbers>
+  GetScatterDimensionNumbers(const xla::HloInstruction* instr,
+                             mlir::MLIRContext* context);
 
  private:
   xla::StatusOr<lmhlo::SortOp> EmitSortOp(const xla::HloInstruction* instr);
@@ -128,6 +129,7 @@ class LhloDialectEmitter : public xla::ConstDfsHloVisitorWithDefault {
   xla::StatusOr<lmhlo::FftOp> EmitFftOp(const xla::HloInstruction* instr);
   xla::StatusOr<lmhlo::TriangularSolveOp> EmitTriangularSolveOp(
       const xla::HloInstruction* instr);
+  xla::StatusOr<Operation*> EmitBitcast(const xla::HloInstruction* instr);
 
   xla::StatusOr<lmhlo::CaseOp> EmitCaseOp(const xla::HloInstruction* instr);
 
