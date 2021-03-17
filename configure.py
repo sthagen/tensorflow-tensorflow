@@ -542,7 +542,6 @@ def set_cc_opt_flags(environ_cp):
   for opt in cc_opt_flags.split():
     write_to_bazelrc('build:opt --copt=%s' % opt)
     write_to_bazelrc('build:opt --host_copt=%s' % opt)
-  write_to_bazelrc('build:opt --define with_default_optimizations=true')
 
 
 def set_tf_cuda_clang(environ_cp):
@@ -1330,8 +1329,10 @@ def main():
   else:
     environ_cp['TF_CONFIGURE_IOS'] = '0'
 
-  if environ_cp.get('TF_ENABLE_XLA', '1') == '1':
-    write_to_bazelrc('build --config=xla')
+  with_xla_support = environ_cp.get('TF_ENABLE_XLA', None)
+  if with_xla_support is not None:
+    write_to_bazelrc('build --define=with_xla_support=%s' % (
+        'true' if int(with_xla_support) else 'false'))
 
   set_action_env_var(
       environ_cp, 'TF_NEED_ROCM', 'ROCm', False, bazel_config_name='rocm')

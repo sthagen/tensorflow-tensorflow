@@ -172,6 +172,7 @@ tf_py_test(
     name = "filter_test",
     size = "small",
     srcs = ["filter_test.py"],
+    shard_count = 4,
     deps = [
         ":checkpoint_test_base",
         ":test_base",
@@ -263,6 +264,7 @@ tf_py_test(
     size = "small",
     srcs = ["from_sparse_tensor_slices_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:array_ops",
@@ -286,6 +288,7 @@ tf_py_test(
     size = "small",
     srcs = ["from_tensors_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:array_ops",
@@ -309,6 +312,7 @@ tf_py_test(
     size = "small",
     srcs = ["from_tensor_slices_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:dtypes",
@@ -570,6 +574,7 @@ tf_py_test(
         ":test_base",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python/data/experimental/ops:optimization_options",
+        "//tensorflow/python/data/experimental/ops:testing",
         "//tensorflow/python/data/experimental/ops:threading_options",
         "//tensorflow/python/data/ops:dataset_ops",
     ],
@@ -675,6 +680,7 @@ tf_py_test(
     size = "small",
     srcs = ["repeat_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
@@ -725,6 +731,7 @@ tf_py_test(
     size = "small",
     srcs = ["skip_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
@@ -740,6 +747,7 @@ tf_py_test(
     size = "small",
     srcs = ["take_test.py"],
     deps = [
+        ":checkpoint_test_base",
         ":test_base",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
