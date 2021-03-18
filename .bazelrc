@@ -101,11 +101,6 @@ build:libc++ --action_env=PATH
 build:libc++ --define force_libcpp=enabled
 build:libc++ --linkopt -fuse-ld=lld
 
-# Trigger --config=<host platform>, except when cross-compiling.
-build --enable_platform_specific_config
-build:android --noenable_platform_specific_config
-build:ios --noenable_platform_specific_config
-
 # Android configs. Bazel needs to have --cpu and --fat_apk_cpu both set to the
 # target CPU to build transient dependencies correctly. See
 # https://docs.bazel.build/versions/master/user-manual.html#flag--fat_apk_cpu
@@ -267,6 +262,11 @@ build:c++17 --cxxopt=-stdlib=libc++
 build:c++1z --config=c++17
 build:c++17_gcc --cxxopt=-std=c++1z
 build:c++1z_gcc --config=c++17_gcc
+
+# Trigger --config=<host platform>, except when cross-compiling.
+build --enable_platform_specific_config
+build:android --noenable_platform_specific_config
+build:ios --noenable_platform_specific_config
 
 # Suppress C++ compiler warnings, otherwise build logs become 10s of MBs.
 build:android --copt=-w
