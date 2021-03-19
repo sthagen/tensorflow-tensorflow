@@ -1956,9 +1956,7 @@ cc_library(
             "lib/Dialect/GPU/IR/*.h",
         ],
     ),
-    hdrs = glob([
-        "include/mlir/Dialect/GPU/GPUDialect.h",
-    ]),
+    hdrs = ["include/mlir/Dialect/GPU/GPUDialect.h"],
     includes = ["include"],
     deps = [
         ":GPUBaseIncGen",
@@ -2238,6 +2236,7 @@ cc_library(
         ":Pass",
         ":StandardToLLVM",
         ":Support",
+        ":VectorToLLVM",
         "@llvm-project//llvm:Support",
     ],
 )
