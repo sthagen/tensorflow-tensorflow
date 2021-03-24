@@ -46,6 +46,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/py_buffer.h"
 #include "tensorflow/compiler/xla/python/py_executable.h"
 #include "tensorflow/compiler/xla/python/py_values.h"
+#include "tensorflow/compiler/xla/python/python_ref_manager.h"
 #include "tensorflow/compiler/xla/python/pytree.h"
 #include "tensorflow/compiler/xla/python/types.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -131,13 +132,23 @@ struct GlobalJitState {
 GlobalJitState& global_state = *new GlobalJitState();
 
 struct ThreadLocalJitState {
+  ~ThreadLocalJitState() {
+    if (extra_jit_context) {
+      // We likely do not hold the GIL, so we hand the Python object to the
+      // global reference manager to destroy.
+      py::object o = std::move(*extra_jit_context);
+      xla::GlobalPyRefManager()->AddGarbage(absl::MakeSpan(&o, 1));
+      extra_jit_context = absl::nullopt;
+    }
+  }
   absl::optional<bool> disable_jit;
   absl::optional<bool> enable_x64;
   absl::optional<py::object> extra_jit_context;
 };
 
-thread_local ThreadLocalJitState& thread_local_state =
-    *new ThreadLocalJitState();
+// TODO(phawkins): Google style guide forbids thread-local values with
+// non-trivial destructors.
+ABSL_CONST_INIT thread_local ThreadLocalJitState thread_local_state;  // NOLINT
 
 bool JitIsDisabled() {
   return thread_local_state.disable_jit.value_or(global_state.disable_jit);
@@ -526,6 +537,7 @@ class CompiledFunction {
   }
 
   int cache_size() const { return executables_.size(); }
+  void ClearCache() { executables_.clear(); }
 
  private:
   // Returns nullptr if not present in the cache.
@@ -1021,8 +1033,9 @@ void BuildJaxjitSubmodule(pybind11::module& m) {
       .def_readonly("weak_type", &ArgSignature::weak_type);
   jitlib.def("_ArgSignatureOfValue", &ArgSignatureOfValue);
 
-  // All private members are only for testing purposes
+  // All private members are only for testing/debugging purposes
   cfun.def("_cache_size", &CompiledFunction::cache_size);
+  cfun.def("_clear_cache", &CompiledFunction::ClearCache);
   jitlib.def("_is_float0", &IsFloat0);
 }
 
