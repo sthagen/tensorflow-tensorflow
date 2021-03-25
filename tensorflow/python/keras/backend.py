@@ -3971,7 +3971,7 @@ class GraphExecutionFunction:
       connection = callable_opts.tensor_connection.add()
       if x.dtype != y.dtype:
         y = math_ops.cast(y, dtype=x.dtype)
-      from_tensor = ops._as_graph_element(y)
+      from_tensor = _as_graph_element(y)
       if from_tensor is None:
         from_tensor = y
       connection.from_tensor = from_tensor.name  # Data tensor
@@ -4793,7 +4793,7 @@ def softplus(x):
   Returns:
       A tensor.
   """
-  return nn.softplus(x)
+  return math_ops.softplus(x)
 
 
 @keras_export('keras.backend.softsign')

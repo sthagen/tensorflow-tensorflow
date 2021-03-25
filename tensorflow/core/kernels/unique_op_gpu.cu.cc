@@ -13,7 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+// The kernel as written below does not build for ROCm.
+#if GOOGLE_CUDA
 
 #define EIGEN_USE_GPU
 
@@ -30,7 +31,9 @@ limitations under the License.
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/util/cuda_solvers.h"  // For ScratchSpace
+#include "tensorflow/stream_executor/cuda/cuda_activation.h"
 #elif TENSORFLOW_USE_ROCM
+#include "tensorflow/core/platform/rocm.h"
 #include "tensorflow/core/util/rocm_solvers.h"
 #endif
 
@@ -326,6 +329,9 @@ class UniqueOpGPU : public AsyncOpKernel {
       const GPUDevice& device = context->eigen_gpu_device();
       int64 uniq_size = (*last_idx_host.data()) + 1;
 
+      se::cuda::ScopedActivateExecutorContext scoped_activation{
+          context->op_device_context()->stream()->parent()};
+
       Tensor unique_input_inds;
       TIndex* unique_input_inds_ptr = nullptr;
       AllocateTemp(context, uniq_size, &unique_input_inds,
@@ -465,4 +471,4 @@ REGISTER_UNIQUE_GPU(bool);
 
 }  // end namespace tensorflow
 
-#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#endif  // GOOGLE_CUDA
