@@ -15,6 +15,7 @@
 """Meatadata about fields for user-defined Struct classes."""
 
 import collections
+import collections.abc
 import typing
 
 from tensorflow.python.framework import composite_tensor
@@ -407,17 +408,20 @@ def _report_field_mismatches(fields, field_values):
 # ==============================================================================
 def is_generic_union(tp):
   """Returns true if `tp` is a parameterized typing.Union value."""
-  return getattr(tp, '__origin__', None) is typing.Union
+  return (tp is not typing.Union and
+          getattr(tp, '__origin__', None) is typing.Union)
 
 
 def is_generic_tuple(tp):
   """Returns true if `tp` is a parameterized typing.Tuple value."""
-  return getattr(tp, '__origin__', None) in (tuple, typing.Tuple)
+  return (tp not in (tuple, typing.Tuple) and
+          getattr(tp, '__origin__', None) in (tuple, typing.Tuple))
 
 
 def is_generic_mapping(tp):
   """Returns true if `tp` is a parameterized typing.Mapping value."""
-  return getattr(tp, '__origin__', None) is typing.Mapping
+  return (tp not in (collections.abc.Mapping, typing.Mapping) and getattr(
+      tp, '__origin__', None) in (collections.abc.Mapping, typing.Mapping))
 
 
 def is_forward_ref(tp):
