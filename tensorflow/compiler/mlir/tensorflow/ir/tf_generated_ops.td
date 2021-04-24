@@ -4804,12 +4804,12 @@ with a flooring divide. E.g. `floor(x / y) * y + mod(x, y) = x`.
   }];
 
   let arguments = (ins
-    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint64]>:$x,
-    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint64]>:$y
+    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint32, TF_Uint64]>:$x,
+    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint32, TF_Uint64]>:$y
   );
 
   let results = (outs
-    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint64]>:$z
+    TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint32, TF_Uint64]>:$z
   );
 
   TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
@@ -5646,7 +5646,7 @@ Equivalent to np.irfftn with 3 dimensions.
   TF_DerivedResultTypeAttr Treal = TF_DerivedResultTypeAttr<0>;
 }
 
-def TF_IdentityOp : TF_Op<"Identity", [TF_OperandsSameAsResultsTypeOrRef]> {
+def TF_IdentityOp : TF_Op<"Identity", [NoSideEffect, TF_NoConstantFold, TF_OperandsSameAsResultsTypeOrRef]> {
   let summary = [{
 Return a tensor with the same shape and contents as the input tensor or value.
   }];
