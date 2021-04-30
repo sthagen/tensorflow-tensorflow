@@ -21,7 +21,8 @@ limitations under the License.
 // definition to `tf_ops.td` and perform the modification there.
 //
 // This file contains TensorFlow ops whose definitions are programmatically
-// generated from the api-def-files in the following folder:
+// generated from the TF op registration and the api-def-files in the following
+// folder:
 // tensorflow/core/api_def/base_api
 // The generated fields for an op include name, summary, description, traits,
 // arguments, results, derived attributes. Therefore, modifications to these
@@ -4752,6 +4753,24 @@ Equivalent to np.full
   let builders = [
     OpBuilder<(ins "Value":$dims, "Value":$value)>
   ];
+}
+
+def TF_FinalizeDatasetOp : TF_Op<"FinalizeDataset", [NoSideEffect]> {
+  let summary = [{
+Creates a dataset by applying `tf.data.Options` to `input_dataset`.
+  }];
+
+  let arguments = (ins
+    Arg<TF_VariantTensor, [{A variant tensor representing the input dataset.}]>:$input_dataset,
+
+    DefaultValuedAttr<BoolAttr, "false">:$has_captured_ref,
+    Confined<TypeArrayAttr, [ArrayMinCount<1>]>:$output_types,
+    Confined<TF_ShapeAttrArray, [ArrayMinCount<1>]>:$output_shapes
+  );
+
+  let results = (outs
+    TF_VariantTensor:$handle
+  );
 }
 
 def TF_FloorOp : TF_Op<"Floor", [Idempotent, NoSideEffect, SameOperandsAndResultType]> {
@@ -16694,6 +16713,22 @@ variables.
   let results = (outs);
 
   TF_DerivedOperandSizeAttr N = TF_DerivedOperandSizeAttr<0>;
+}
+
+def TF_TPURoundRobinOp : TF_Op<"TPURoundRobin", []> {
+  let summary = "A load balancing op that round-robins among TPU cores.";
+
+  let description = [{
+This op round-robins between the integers in [0, NumTPUCoresVisiblePerHost]. It
+is useful for interfacing with TensorFlow ops that take as input a TPU core on
+which to execute computations, such as `TPUPartitionedCall`.
+  }];
+
+  let arguments = (ins);
+
+  let results = (outs
+    Res<TF_Int32Tensor, [{An integer in [0, NumTPUCoresVisiblePerHost].}]>:$device_ordinal
+  );
 }
 
 def TF_TanOp : TF_Op<"Tan", [NoSideEffect, TF_SameOperandsAndResultTypeResolveRef]> {

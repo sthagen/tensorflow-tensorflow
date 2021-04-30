@@ -7,6 +7,7 @@ load(
     "//tensorflow/core/platform:build_config.bzl",
     "tf_proto_library",
 )
+load("//tensorflow/compiler/xla:xla.bzl", "xla_py_proto_library")
 load("//tensorflow:tensorflow.bzl", "if_libtpu", "tf_cc_test")
 
 # buildifier: disable=same-origin-load
@@ -3931,6 +3932,7 @@ tf_cc_test(
         ":hlo",
         ":hlo_matchers",
         ":memory_space_assignment",
+        ":memory_space_assignment_utils",
         "//tensorflow/compiler/xla:test",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
@@ -5069,6 +5071,7 @@ cc_library(
     hdrs = ["while_loop_invariant_code_motion.h"],
     deps = [
         ":hlo",
+        ":hlo_dce",
         ":hlo_pass",
         ":tuple_util",
         ":while_loop_analysis",
@@ -5768,10 +5771,9 @@ tf_cc_test(
     ],
 )
 
-# copybara:uncomment_begin(google-only)
-# py_proto_library(
-#     name = "hlo_pb2",
-#     api_version = 2,
-#     deps = [":hlo_proto"],
-# )
-# copybara:uncomment_end
+xla_py_proto_library(
+    name = "hlo_pb2",
+    api_version = 2,
+    visibility = ["//visibility:public"],
+    deps = [":hlo_proto"],
+)
