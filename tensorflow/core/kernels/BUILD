@@ -3336,9 +3336,11 @@ tf_kernel_library(
 
 tf_kernel_library(
     name = "cast_op",
-    copts = if_mlir_generated_experimental_kernels_enabled([
-        "-DMLIR_GENERATED_EXPERIMENTAL_KERNELS_ENABLED",
-    ]),
+    copts = if_mlir_generated_experimental_kernels_enabled(
+        ["-DMLIR_GENERATED_EXPERIMENTAL_KERNELS_ENABLED"],
+    ) + if_mlir_generated_gpu_kernels_enabled(
+        ["-DMLIR_GENERATED_GPU_KERNELS_ENABLED"],
+    ),
     prefix = "cast_op",
     deps = MATH_DEPS + [
         "//tensorflow/core/kernels/mlir_generated:cast_op",
@@ -3997,8 +3999,15 @@ tf_kernel_library(
 
 tf_kernel_library(
     name = "relu_op",
+    copts = if_mlir_generated_experimental_kernels_enabled(
+        ["-DMLIR_GENERATED_EXPERIMENTAL_KERNELS_ENABLED"],
+    ) + if_mlir_generated_gpu_kernels_enabled(
+        ["-DMLIR_GENERATED_GPU_KERNELS_ENABLED"],
+    ),
     prefix = "relu_op",
-    deps = NN_DEPS,
+    deps = NN_DEPS + [
+        "//tensorflow/core/kernels/mlir_generated:relu_op",
+    ],
 )
 
 tf_kernel_library(
@@ -6006,6 +6015,8 @@ filegroup(
         "//tensorflow/core/data:captured_function.h",
         "//tensorflow/core/data:dataset_utils.h",
         "//tensorflow/core/data:name_utils.h",
+        "//tensorflow/core/data:rewrite_utils.h",
+        "//tensorflow/core/data:root_dataset.h",
         "//tensorflow/core/data:split_utils.h",
         "//tensorflow/core/data:stats_utils.h",
         "//tensorflow/core/kernels/boosted_trees/quantiles:weighted_quantiles_hdrs",
@@ -6342,6 +6353,8 @@ filegroup(
         "//tensorflow/core/data:captured_function.cc",
         "//tensorflow/core/data:dataset_utils.cc",
         "//tensorflow/core/data:name_utils.cc",
+        "//tensorflow/core/data:rewrite_utils.cc",
+        "//tensorflow/core/data:root_dataset.cc",
         "//tensorflow/core/data:split_utils.cc",
         "//tensorflow/core/data:stats_utils.cc",
         "//tensorflow/core/kernels/data:batch_dataset_op.cc",

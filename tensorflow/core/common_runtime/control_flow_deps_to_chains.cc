@@ -196,7 +196,8 @@ Status ControlFlowDepsToChainsPass::Run(
       attr_val.mutable_list()->mutable_shape();
       FunctionDef_ArgAttrs arg_attrs;
       arg_attrs.mutable_attr()->insert({"_output_shapes", attr_val});
-      modified_body.mutable_arg_attr()->insert({i + num_loop_vars, arg_attrs});
+      modified_body.mutable_arg_attr()->insert(
+          {static_cast<uint32_t>(i + num_loop_vars), arg_attrs});
     }
 
     // Wire chain loop vars to the ops they need to condition.

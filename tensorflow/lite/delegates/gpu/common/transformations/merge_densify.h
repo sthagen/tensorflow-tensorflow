@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_KERNELS_DATA_SPLIT_UTILS_H_
-#define TENSORFLOW_CORE_KERNELS_DATA_SPLIT_UTILS_H_
+#ifndef TENSORFLOW_LITE_DELEGATES_GPU_COMMON_TRANSFORMATIONS_MERGE_DENSIFY_H_
+#define TENSORFLOW_LITE_DELEGATES_GPU_COMMON_TRANSFORMATIONS_MERGE_DENSIFY_H_
 
-#include "tensorflow/core/data/split_utils.h"
+#include <memory>
 
-#endif  // TENSORFLOW_CORE_KERNELS_DATA_SPLIT_UTILS_H_
+#include "tensorflow/lite/delegates/gpu/common/model_transformer.h"
+
+namespace tflite {
+namespace gpu {
+
+// Merges DENSIFY with CONV_2D / DEPTHWISE_CONV_2D.
+std::unique_ptr<NodeTransformation> NewMergeDensify();
+
+}  // namespace gpu
+}  // namespace tflite
+
+#endif  // TENSORFLOW_LITE_DELEGATES_GPU_COMMON_TRANSFORMATIONS_MERGE_DENSIFY_H_
