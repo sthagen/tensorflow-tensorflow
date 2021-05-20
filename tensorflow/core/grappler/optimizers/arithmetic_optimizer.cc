@@ -4187,8 +4187,7 @@ class SimplifyEmbeddingLookupStage : public ArithmeticOptimizerStage {
       // Copy the _class attr from the Gather node should it exist in case
       // of location constraints with the variable.
       if (gather_node->attr().count("_class")) {
-        SetAttrValue(gather_node->attr().at("_class").type(),
-                     &(*attr)["_class"]);
+        (*attr)["_class"] = gather_node->attr().at("_class");
       }
       if (variable_node->attr().count("shape")) {
         SetAttrValue(variable_node->attr().at("shape").shape(),

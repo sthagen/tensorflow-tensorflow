@@ -139,7 +139,8 @@ class HLO_UnaryElementwiseOp<string mnemonic, list<OpTrait> traits,
       return failure();
     }
     LogicalResult reifyReturnTypeShapes(
-        OpBuilder& builder, SmallVectorImpl<Value>& reifiedReturnShapes) {
+        OpBuilder& builder, ValueRange operands,
+        SmallVectorImpl<Value>& reifiedReturnShapes) {
       return ::mlir::mhlo::deriveShapeFromFirstOperand(&builder, getOperation(),
                                                        &reifiedReturnShapes);
     }
@@ -396,6 +397,7 @@ def HLO_SignOp: HLO_UnaryElementwiseOp<"sign",
     See
     https://www.tensorflow.org/xla/operation_semantics#element-wise_unary_functions.
   }];
+  let hasFolder = 1;
 }
 def HLO_SinOp: HLO_UnaryElementwiseOp<"sine",
     [NoSideEffect, SameOperandsAndResultType], HLO_FpOrComplexTensor> {
@@ -451,7 +453,8 @@ class HLO_BinaryElementwiseOp<string mnemonic, list<OpTrait> traits> :
       return failure();
     }
     LogicalResult reifyReturnTypeShapes(
-        OpBuilder& builder, SmallVectorImpl<Value>& reifiedReturnShapes) {
+        OpBuilder& builder, ValueRange operands,
+        SmallVectorImpl<Value>& reifiedReturnShapes) {
       return ::mlir::mhlo::deriveShapeFromFirstOperand(&builder, getOperation(),
                                                        &reifiedReturnShapes);
     }

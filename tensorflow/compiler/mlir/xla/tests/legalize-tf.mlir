@@ -524,8 +524,10 @@ func @clip_static_broadcast(%arg0 : tensor<5xf32>, %arg1 : tensor<f32>, %arg2 : 
 // CHECK-LABEL: @clip_dynamic_broadcast
 func @clip_dynamic_broadcast(%arg0 : tensor<?xf32>, %arg1 : tensor<f32>, %arg2 : tensor<f32>) -> tensor<?xf32> {
   // CHECK-DAG: [[SHP:%.+]] = shape.shape_of %arg0
-  // CHECK-DAG: [[EXT:%.+]] = shape.to_extent_tensor [[SHP]]
-  // CHECK-DAG: [[SHPIDX:%.+]] = index_cast %1
+  // CHECK: [[SHPIDX:%.+]] = tensor.generate {
+  // CHECK: [[INDEX:%.+]] = tensor.extract [[SHP]][%arg3] : tensor<1xindex>
+  // CHECK: [[CAST:%.+]] = index_cast [[INDEX]] : index to i32
+  // CHECK: tensor.yield [[CAST]] : i32
   // CHECK-DAG: [[BROADCAST_MIN:%.+]] = "mhlo.dynamic_broadcast_in_dim"(%arg1, [[SHPIDX]]) {broadcast_dimensions = dense<> : tensor<0xi64>}
   // CHECK-DAG: [[BROADCAST_MAX:%.+]] = "mhlo.dynamic_broadcast_in_dim"(%arg2, [[SHPIDX]]) {broadcast_dimensions = dense<> : tensor<0xi64>}
   // CHECK-DAG: [[CLAMP:%.+]] = "mhlo.clamp"([[BROADCAST_MIN]], %arg0, [[BROADCAST_MAX]])
@@ -1665,22 +1667,12 @@ func @relu6_unranked(%arg0: tensor<?xi32>) -> tensor<?xi32> {
 // CHECK-SAME: (%[[GRADIENTS:.*]]: tensor<4x8xf32>, %[[FEATURES:.*]]: tensor<?x?xf32>)
 func @relu_grad(%gradients: tensor<4x8xf32>, %features: tensor<?x?xf32>) -> tensor<4x8xf32> {
   // CHECK-DAG: %[[ZERO_SCALAR:.*]] = mhlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-DAG: %[[ZERO:.*]] = mhlo.constant dense<0.000000e+00> : tensor<4x8xf32>
   // CHECK-DAG: %[[PRED:.*]] = chlo.broadcast_compare %[[FEATURES]], %[[ZERO_SCALAR]] {comparison_direction = "GT"} : (tensor<?x?xf32>, tensor<f32>) -> tensor<?x?xi1>
-  // CHECK-DAG: %[[RESULT:.*]] = chlo.broadcast_select %[[PRED]], %[[GRADIENTS]], %[[ZERO_SCALAR]] : (tensor<?x?xi1>, tensor<4x8xf32>, tensor<f32>) -> tensor<4x8xf32>
+  // CHECK-DAG: %[[RESULT:.*]] = "mhlo.select"(%[[PRED]], %[[GRADIENTS]], %[[ZERO]]) : (tensor<?x?xi1>, tensor<4x8xf32>, tensor<4x8xf32>) -> tensor<4x8xf32>
   // CHECK-DAG: return %[[RESULT]] : tensor<4x8xf32>
   %2 = "tf.ReluGrad"(%gradients, %features) : (tensor<4x8xf32>, tensor<?x?xf32>) -> tensor<4x8xf32>
   return %2 : tensor<4x8xf32>
-}
-
-// CHECK-LABEL: func @relu_grad_unranked
-// CHECK-SAME: (%[[GRADIENTS:.*]]: tensor<*xf32>, %[[FEATURES:.*]]: tensor<*xf32>)
-func @relu_grad_unranked(%gradients: tensor<*xf32>, %features: tensor<*xf32>) -> tensor<*xf32> {
-  // CHECK-DAG: %[[ZERO_SCALAR:.*]] = mhlo.constant dense<0.000000e+00> : tensor<f32>
-  // CHECK-DAG: %[[PRED:.*]] = chlo.broadcast_compare %[[FEATURES]], %[[ZERO_SCALAR]] {comparison_direction = "GT"} : (tensor<*xf32>, tensor<f32>) -> tensor<*xi1>
-  // CHECK-DAG: %[[RESULT:.*]] = chlo.broadcast_select %[[PRED]], %[[GRADIENTS]], %[[ZERO_SCALAR]] : (tensor<*xi1>, tensor<*xf32>, tensor<f32>) -> tensor<*xf32>
-  // CHECK-DAG: return %[[RESULT]] : tensor<*xf32>
-  %2 = "tf.ReluGrad"(%gradients, %features) : (tensor<*xf32>, tensor<*xf32>) -> tensor<*xf32>
-  return %2 : tensor<*xf32>
 }
 
 // CHECK-LABEL: func @leaky_relu
@@ -1999,33 +1991,40 @@ func @rfft_1D_dynamic(%arg0: tensor<?xf32>) -> tensor<8xcomplex<f32>> {
 // CHECK-LABEL: func @shape_1D
 func @shape_1D(%arg0: tensor<?xf32>) -> tensor<1xi32> {
   // CHECK: [[SHAPE:%.+]] = shape.shape_of %arg0
-  // CHECK: [[TENSOR:%.+]] = shape.to_extent_tensor [[SHAPE]]
-  // CHECK: [[CAST:%.+]] = index_cast [[TENSOR]]
+  // CHECK: [[TENSOR:%.+]] = tensor.generate {
+  // CHECK: [[INDEX:%.+]] = tensor.extract [[SHAPE]][%arg1] : tensor<1xindex>
+  // CHECK: [[CAST:%.+]] = index_cast [[INDEX]] : index to i32
+  // CHECK: tensor.yield [[CAST]] : i32
   %0 = "tf.Shape"(%arg0) : (tensor<?xf32>) -> tensor<1xi32>
 
-  // CHECK: return [[CAST]]
+  // CHECK: return [[TENSOR]]
   return %0 : tensor<1xi32>
 }
 
 // CHECK-LABEL: func @shape_2D
 func @shape_2D(%arg0: tensor<?x?xf32>) -> tensor<2xi32> {
   // CHECK: [[SHAPE:%.+]] = shape.shape_of %arg0
-  // CHECK: [[TENSOR:%.+]] = shape.to_extent_tensor [[SHAPE]]
-  // CHECK: [[CAST:%.+]] = index_cast [[TENSOR]]
+  // CHECK: [[TENSOR:%.+]] = tensor.generate {
+  // CHECK: [[INDEX:%.+]] = tensor.extract [[SHAPE]][%arg1] : tensor<2xindex>
+  // CHECK: [[CAST:%.+]] = index_cast [[INDEX]] : index to i32
+  // CHECK: tensor.yield [[CAST]] : i32
   %0 = "tf.Shape"(%arg0) : (tensor<?x?xf32>) -> tensor<2xi32>
 
-  // CHECK: return [[CAST]]
+  // CHECK: return [[TENSOR]]
   return %0 : tensor<2xi32>
 }
 
 // CHECK-LABEL: func @shape_rankless
 func @shape_rankless(%arg0: tensor<*xf32>) -> tensor<?xi32> {
   // CHECK: [[SHAPE:%.+]] = shape.shape_of %arg0
-  // CHECK: [[TENSOR:%.+]] = shape.to_extent_tensor [[SHAPE]]
-  // CHECK: [[CAST:%.+]] = index_cast [[TENSOR]]
+  // CHECK: [[RANK:%.+]] = rank %arg0
+  // CHECK: [[TENSOR:%.+]] = tensor.generate [[RANK]] {
+  // CHECK: [[INDEX:%.+]] = tensor.extract [[SHAPE]][%arg1] : tensor<?xindex>
+  // CHECK: [[CAST:%.+]] = index_cast [[INDEX]] : index to i32
+  // CHECK: tensor.yield [[CAST]] : i32
   %0 = "tf.Shape"(%arg0) : (tensor<*xf32>) -> tensor<?xi32>
 
-  // CHECK: return [[CAST]]
+  // CHECK: return [[TENSOR]]
   return %0 : tensor<?xi32>
 }
 
