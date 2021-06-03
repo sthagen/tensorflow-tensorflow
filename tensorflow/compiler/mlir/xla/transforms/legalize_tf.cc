@@ -6478,6 +6478,14 @@ const llvm::DenseSet<mlir::TypeID> &MlirPreferredOps() {
     // Ops that have no XlaOpKernel.
     TypeID::get<TF::RiscAddOp>(),
     TypeID::get<TF::RiscDotOp>(),
+
+    // Const op has a simple legalization and it is much more efficient to lower
+    // within MLIR.
+    TypeID::get<TF::ConstOp>(),
+
+    // TF2XLA fallback pattern doesn't support this op as MLIR hlo builder
+    // doesn't implement the outfeed op builder method.
+    TypeID::get<TF::OutfeedEnqueueTupleOp>(),
   };
   // clang-format on
   return *ops;
@@ -6521,8 +6529,7 @@ LogicalResult legalizeTF(Operation *op, bool allow_partial_conversion,
   }
 
   // Set patterns to legalize_lower_patters, where in the prefer_tf2xla case
-  // only patterns whose ops are in the set MlirPreferredOps
-  // are kept.
+  // only patterns whose ops are in the set MlirPreferredOps are kept.
   OwningRewritePatternList patterns =
       (tf2xla_fallback_device_type && prefer_tf2xla)
           ? PatternsIncludeOps(legalize_lower_patterns, MlirPreferredOps())

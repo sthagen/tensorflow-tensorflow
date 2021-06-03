@@ -3,7 +3,7 @@
 #  ":platform" - Low-level and platform-specific Python code.
 
 load("//tensorflow:tensorflow.bzl", "py_strict_library")
-load("//tensorflow:tensorflow.bzl", "cc_header_only_library", "if_mlir", "if_xla_available", "py_test", "py_tests", "tf_enable_mlir_bridge")
+load("//tensorflow:tensorflow.bzl", "cc_header_only_library", "if_mlir", "if_xla_available", "py_test", "tf_enable_mlir_bridge")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "get_compatible_with_portable")
@@ -170,7 +170,6 @@ py_library(
         ":standard_ops",
         ":state_ops",
         ":string_ops",
-        ":summary",
         ":tensor_array_ops",
         ":training",
         ":weights_broadcast_ops",
@@ -225,6 +224,8 @@ py_library(
         "//tensorflow/python/profiler:profiler_v2",
         "//tensorflow/python/profiler:trace",
         "//tensorflow/python/saved_model",
+        "//tensorflow/python/summary",
+        "//tensorflow/python/summary/writer",
         "//tensorflow/python/tools:module_util",
         "//tensorflow/python/tools/api/generator:create_python_api",
         "//tensorflow/python/tpu:tpu_noestimator",
@@ -638,6 +639,8 @@ tf_gen_op_wrapper_private_py(
         "//learning/brain/python/ops:__pkg__",
         "//tensorflow/python/framework:__pkg__",
         "//tensorflow/python/kernel_tests:__pkg__",
+        "//tensorflow/python/summary:__pkg__",
+        "//tensorflow/python/summary/writer:__pkg__",
     ],
     deps = [
         "//tensorflow/c/kernels:histogram_summary_op_lib",
@@ -811,10 +814,6 @@ tf_gen_op_wrapper_private_py(
 
 tf_gen_op_wrapper_private_py(
     name = "string_ops_gen",
-)
-
-tf_gen_op_wrapper_private_py(
-    name = "user_ops_gen",
 )
 
 tf_gen_op_wrapper_private_py(
@@ -2581,18 +2580,6 @@ py_library(
     ],
 )
 
-# This target is deprecated.
-py_library(
-    name = "ops",
-    srcs = ["user_ops/user_ops.py"],
-    srcs_version = "PY3",
-    deps = [
-        ":user_ops_gen",
-        "//tensorflow/python/util",
-        "@six_archive//:six",
-    ],
-)
-
 cuda_py_test(
     name = "bitwise_ops_test",
     size = "small",
@@ -3224,6 +3211,7 @@ filegroup(
         "//tensorflow/core:framework_internal_impl",  # op_def_registry
         "//tensorflow/core:lib_internal_impl",  # device_lib
         "//tensorflow/core:op_gen_lib",  # tf_session
+        "//tensorflow/core:protos_all_cc",  # tf_text
         "//tensorflow/core/common_runtime/eager:context",  # tfe
         "//tensorflow/core/common_runtime/eager:tensor_handle",  # tfe
         "//tensorflow/core/common_runtime/eager:eager_executor",  # tfe
@@ -3389,73 +3377,16 @@ py_library(
     ],
 )
 
-py_library(
+alias(
     name = "summary",
-    srcs = glob(
-        ["summary/**/*.py"],
-        exclude = [
-            "**/fake*",
-            "**/*test*",
-        ],
-    ),
-    srcs_version = "PY3",
+    actual = "//tensorflow/python/summary:summary",
     visibility = ["//visibility:public"],
-    deps = [
-        ":lib",
-        ":logging_ops_gen",
-        ":platform",
-        ":protos_all_py",
-        ":pywrap_tensorflow",
-        ":summary_op_util",
-        ":summary_ops_gen",
-        ":summary_ops_v2",
-        "//tensorflow/python/client",
-        "//tensorflow/python/distribute:summary_op_util",
-        "//tensorflow/python/eager:context",
-        "//tensorflow/python/framework",
-        "//tensorflow/python/framework:constant_op",
-        "//tensorflow/python/framework:for_generated_wrappers",
-        "//tensorflow/python/util",
-        "@six_archive//:six",
-    ],
 )
 
-py_library(
+alias(
     name = "fake_summary_writer",
-    testonly = 1,
-    srcs = ["summary/writer/fake_summary_writer.py"],
-    srcs_version = "PY3",
+    actual = "//tensorflow/python/summary/writer:fake_summary_writer",
     visibility = ["//visibility:public"],
-    deps = [
-        ":protos_all_py",
-        ":summary",
-        "//tensorflow/python/framework:test_lib",
-    ],
-)
-
-py_tests(
-    name = "summary_tests",
-    size = "small",
-    srcs = [
-        "summary/plugin_asset_test.py",
-        "summary/summary_iterator_test.py",
-        "summary/summary_test.py",
-        "summary/writer/writer_test.py",
-    ],
-    python_version = "PY3",
-    deps = [
-        ":array_ops",
-        ":client_testlib",
-        ":platform",
-        ":platform_test",
-        ":summary",
-        ":summary_ops_v2",
-        ":variables",
-        "//tensorflow/core:protos_all_py",
-        "//tensorflow/python/framework",
-        "//tensorflow/python/framework:for_generated_wrappers",
-        "//tensorflow/python/framework:test_lib",
-    ],
 )
 
 # -----------------------------------------------------------------------------
@@ -3892,6 +3823,7 @@ tf_python_pybind_extension(
         "//tensorflow/c/experimental/ops:pywrap_required_hdrs",
         "//tensorflow/core/common_runtime/eager:pywrap_required_hdrs",
         "//tensorflow/core/distributed_runtime:pywrap_required_hdrs",
+        "//tensorflow/core/distributed_runtime/coordination:pywrap_required_hdrs",
         "//tensorflow/core/distributed_runtime/eager:pywrap_required_hdrs",
         "//tensorflow/python/eager:pywrap_required_hdrs",
         "//tensorflow/python/lib/core:numpy_hdr",
@@ -4287,7 +4219,7 @@ alias(
 alias(
     name = "is_mlir_bridge_test_true",
     actual = "//tensorflow/python/framework:is_mlir_bridge_test_true",
-    visibility = visibility,
+    visibility = visibility + ["//tensorflow/compiler/tests:friends"],
 )
 
 alias(
@@ -4348,7 +4280,7 @@ alias(
 alias(
     name = "is_mlir_bridge_test_false",
     actual = "//tensorflow/python/framework:is_mlir_bridge_test_false",
-    visibility = visibility,
+    visibility = visibility + ["//tensorflow/compiler/tests:friends"],
 )
 
 alias(
@@ -4445,6 +4377,11 @@ alias(
     name = "tf_optimizer",
     actual = "//tensorflow/python/grappler:tf_optimizer",
     visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "ops",
+    actual = "//tensorflow/python/user_ops:ops",
 )
 
 alias(
