@@ -12,23 +12,29 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_EXPERIMENTAL_MICROFRONTEND_LIB_MEMORY_UTIL_H_
-#define TENSORFLOW_LITE_EXPERIMENTAL_MICROFRONTEND_LIB_MEMORY_UTIL_H_
+#ifndef TENSORFLOW_LITE_NNAPI_SL_INCLUDE_SUPPORT_LIBRARY_SYMBOLS_H_
+#define TENSORFLOW_LITE_NNAPI_SL_INCLUDE_SUPPORT_LIBRARY_SYMBOLS_H_
 
 #include <stddef.h>
+// Changed when importing from AOSP
+#include "tensorflow/lite/nnapi/sl/public/NeuralNetworksSupportLibraryImpl.h"
+
+// If you are linking against SL driver implementation through DT_NEEDED,
+// you can use this declaration to access its implementation instead
+// of doing dlsym.
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// On platforms that support dynamic memory allocation, these just call into
-// malloc and free, but for embedded systems with no heap we have an alternate
-// implementation that allocates linearly from a fixed-size arena.
-void* microfrontend_alloc(size_t size);
-void microfrontend_free(void* ptr);
+/**
+ * Get the NNAPI SL Driver NnApiSLDriverImpl with all
+ * driver functions.
+ */
+NnApiSLDriverImpl* ANeuralNetworks_getSLDriverImpl();
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // TENSORFLOW_LITE_EXPERIMENTAL_MICROFRONTEND_LIB_MEMORY_UTIL_H_
+#endif  // TENSORFLOW_LITE_NNAPI_SL_INCLUDE_SUPPORT_LIBRARY_SYMBOLS_H_

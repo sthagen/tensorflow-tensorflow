@@ -12,20 +12,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "tensorflow/lite/experimental/microfrontend/lib/memory_util.h"
 
-#include "tensorflow/lite/micro/testing/micro_test.h"
+// Entry point for MHLO ops bind.
 
-TF_LITE_MICRO_TESTS_BEGIN
+#ifndef PYTHON_BINDINGS_MHLO_OPS
+#define PYTHON_BINDINGS_MHLO_OPS
 
-TF_LITE_MICRO_TEST(MemoryUtil_CheckAlloc) {
-  TF_LITE_MICRO_EXPECT_NE(nullptr, microfrontend_alloc(256));
-}
+include "mlir/Bindings/Python/Attributes.td"
+include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.td"
 
-TF_LITE_MICRO_TEST(MemoryUtil_CheckFree) {
-  void* ptr = microfrontend_alloc(128);
-  TF_LITE_MICRO_EXPECT_NE(nullptr, ptr);
-  microfrontend_free(ptr);
-}
-
-TF_LITE_MICRO_TESTS_END
+#endif
