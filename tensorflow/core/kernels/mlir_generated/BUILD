@@ -122,6 +122,7 @@ tf_kernel_library(
         "gpu_op_logical_not.cc",
         "gpu_op_neg.cc",
         "gpu_op_real.cc",
+        "gpu_op_reciprocal.cc",
         "gpu_op_rsqrt.cc",
         "gpu_op_sign.cc",
         "gpu_op_sin.cc",
@@ -130,8 +131,6 @@ tf_kernel_library(
         "gpu_op_square.cc",
         "gpu_op_tan.cc",
         "gpu_op_tanh.cc",
-    ]) + if_mlir_generated_experimental_kernels_enabled([
-        "gpu_op_reciprocal.cc",
     ]),
     tags = ["manual"],
     deps = if_mlir_generated_gpu_kernels_enabled([
@@ -166,6 +165,7 @@ tf_kernel_library(
         ":gpu_logical_not_kernels",
         ":gpu_neg_kernels",
         ":gpu_real_kernels",
+        ":gpu_reciprocal_kernels",
         ":gpu_rsqrt_kernels",
         ":gpu_sign_kernels",
         ":gpu_sin_kernels",
@@ -175,8 +175,6 @@ tf_kernel_library(
         ":gpu_tan_kernels",
         ":gpu_tanh_kernels",
         "//third_party/eigen3",
-    ]) + if_mlir_generated_experimental_kernels_enabled([
-        ":gpu_reciprocal_kernels",
     ]),
 )
 
@@ -246,9 +244,10 @@ tf_kernel_library(
         "gpu_op_sub.cc",
         "gpu_op_zeta.cc",
     ]) + if_mlir_generated_experimental_kernels_enabled([
+        "gpu_op_div_no_nan.cc",
         "gpu_op_floor_div.cc",
-        "gpu_op_xdivy.cc",
         "gpu_op_squared_difference.cc",
+        "gpu_op_xdivy.cc",
         "gpu_op_xlogy.cc",
         "gpu_op_xlog1py.cc",
     ]),
@@ -282,9 +281,10 @@ tf_kernel_library(
         ":gpu_zeta_kernels",
         "//third_party/eigen3",
     ]) + if_mlir_generated_experimental_kernels_enabled([
+        ":gpu_div_no_nan_kernels",
         ":gpu_floor_div_kernels",
-        ":gpu_xdivy_kernels",
         ":gpu_squared_difference_kernels",
+        ":gpu_xdivy_kernels",
         ":gpu_xlogy_kernels",
         ":gpu_xlog1py_kernels",
     ]),
@@ -1166,6 +1166,7 @@ gpu_kernel_library(
 
 gpu_kernel_library(
     name = "gpu_select_v2_kernels",
+    max_supported_rank = 8,
     op = "select_v2",
     tile_size = "256",
     types = [
@@ -1413,6 +1414,18 @@ cpu_kernel_library(
     name = "cpu_tanh_kernels",
     op = "tanh",
     tile_size = "256",
+    types = [
+        "f16",
+        "f32",
+        "f64",
+    ],
+    unroll_factors = "4",
+)
+
+gpu_kernel_library(
+    name = "gpu_div_no_nan_kernels",
+    op = "div_no_nan",
+    tile_size = "1024",
     types = [
         "f16",
         "f32",
