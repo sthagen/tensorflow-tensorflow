@@ -1,4 +1,4 @@
-// RUN: mlir-hlo-opt --split-input-file --allow-unregistered-dialect --mhlo-move-up-dynamic-broadcasts-for-fusion --canonicalize --cse %s | FileCheck %s
+// RUN: mlir-hlo-opt --split-input-file --allow-unregistered-dialect --mhlo-broadcast-propagation --canonicalize --cse %s | FileCheck %s
 
 // Shape computations shall be reified.
 // CHECK-LABEL: @shape_of_unary
@@ -189,6 +189,30 @@ func @move_cstr_broadcastable_out_of_assuming(%arg0 : !shape.witness,
     shape.assuming_yield %1 : !shape.witness
   }
   return %0 : !shape.witness
+}
+
+// -----
+
+// CHECK-LABEL: @move_elementwise_into_assuming
+// CHECK-SAME:  (%[[ARG0:.*]]: !shape.witness, %[[ARG1:.*]]: tensor<?xf32>)
+func @move_elementwise_into_assuming(%arg0 : !shape.witness,
+    %arg1 : tensor<?xf32>) -> tensor<?xf32> {
+  // CHECK:     %[[RES:.*]] = shape.assuming %[[ARG0]]
+  // CHECK:       %[[SOME:.*]] = "some.op"
+  // CHECK:       %[[TANH:.*]] = "mhlo.tanh"(%[[ARG1]])
+  // CHECK:       %[[BCAST_ADD:.*]] = chlo.broadcast_add %[[TANH]], %[[SOME]]
+  // CHECK:       shape.assuming_yield %[[BCAST_ADD]]
+  // CHECK-NOT: tanh
+  // CHECK-NOT: broadcast_add
+  // CHECK:     return %[[RES]]
+  %0:2 = shape.assuming %arg0 -> (tensor<?xf32>, tensor<?xf32>) {
+    %1 = "some.op"() : () -> tensor<?xf32>
+    shape.assuming_yield %arg1, %1 : tensor<?xf32>, tensor<?xf32>
+  }
+  %1 = "mhlo.tanh"(%arg1) : (tensor<?xf32>) -> tensor<?xf32>
+  %2 = chlo.broadcast_add %1, %0#1
+      : (tensor<?xf32>, tensor<?xf32>) -> tensor<?xf32>
+  return %2 : tensor<?xf32>
 }
 
 // -----

@@ -179,6 +179,14 @@ gentbl_cc_library(
             ["--gen-typedef-defs"],
             "include/mlir/IR/BuiltinTypes.cpp.inc",
         ),
+        (
+            ["--gen-type-interface-decls"],
+            "include/mlir/IR/BuiltinTypeInterfaces.h.inc",
+        ),
+        (
+            ["--gen-type-interface-defs"],
+            "include/mlir/IR/BuiltinTypeInterfaces.cpp.inc",
+        ),
     ],
     tblgen = ":mlir-tblgen",
     td_file = "include/mlir/IR/BuiltinTypes.td",
@@ -905,7 +913,9 @@ td_library(
     includes = ["include"],
     deps = [
         ":LLVMOpsTdFiles",
+        ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
+        ":StdOpsTdFiles",
     ],
 )
 
@@ -952,6 +962,7 @@ cc_library(
         ":IR",
         ":LLVMDialect",
         ":SideEffectInterfaces",
+        ":StandardOps",
         ":VectorOps",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
@@ -1641,6 +1652,7 @@ cc_library(
         ":LinalgToStandard",
         ":MathToLibm",
         ":OpenACCToLLVM",
+        ":OpenACCToSCF",
         ":OpenMPToLLVM",
         ":PDLToPDLInterp",
         ":SCFToGPUPass",
@@ -2225,6 +2237,7 @@ cc_library(
     includes = ["include"],
     deps = [
         ":ControlFlowInterfaces",
+        ":DataLayoutInterfaces",
         ":IR",
         ":LLVMDialectAttributesIncGen",
         ":LLVMDialectInterfaceIncGen",
@@ -2376,6 +2389,7 @@ cc_library(
         ":GPUOpsIncGen",
         ":IR",
         ":LLVMDialect",
+        ":MemRefDialect",
         ":SideEffectInterfaces",
         ":StandardOps",
         ":Support",
@@ -2669,23 +2683,6 @@ cc_library(
     ],
 )
 
-gentbl_cc_library(
-    name = "GPUToSPIRVIncGen",
-    strip_include_prefix = "lib/Conversion/GPUToSPIRV",
-    tbl_outs = [
-        (
-            ["-gen-rewriters"],
-            "lib/Conversion/GPUToSPIRV/GPUToSPIRV.cpp.inc",
-        ),
-    ],
-    tblgen = ":mlir-tblgen",
-    td_file = "lib/Conversion/GPUToSPIRV/GPUToSPIRV.td",
-    deps = [
-        ":GPUOpsTdFiles",
-        ":SPIRVOpsTdFiles",
-    ],
-)
-
 cc_library(
     name = "GPUToSPIRV",
     srcs = glob([
@@ -2702,7 +2699,6 @@ cc_library(
     deps = [
         ":ConversionPassIncGen",
         ":GPUDialect",
-        ":GPUToSPIRVIncGen",
         ":IR",
         ":Pass",
         ":SCFDialect",
@@ -3942,6 +3938,7 @@ cc_library(
     ],
     includes = ["include"],
     deps = [
+        ":Analysis",
         ":ConversionPassIncGen",
         ":DataLayoutInterfaces",
         ":IR",
@@ -4151,6 +4148,7 @@ cc_library(
         ":Affine",
         ":CallOpInterfaces",
         ":ControlFlowInterfaces",
+        ":DataLayoutInterfaces",
         ":IR",
         ":LinalgOps",
         ":SCFDialect",
@@ -5009,6 +5007,7 @@ cc_library(
         ":IR",
         ":OpenACCOpsIncGen",
         ":StandardOps",
+        ":Transforms",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -5103,6 +5102,27 @@ cc_library(
         ":SideEffectInterfaces",
         ":StandardOps",
         "@llvm-project//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "OpenACCToSCF",
+    srcs = glob([
+        "lib/Conversion/OpenACCToSCF/*.cpp",
+        "lib/Conversion/OpenACCToSCF/*.h",
+    ]) + ["lib/Conversion/PassDetail.h"],
+    hdrs = glob([
+        "include/mlir/Conversion/OpenACCToSCF/*.h",
+    ]),
+    includes = ["include"],
+    deps = [
+        ":ConversionPassIncGen",
+        ":IR",
+        ":OpenACCDialect",
+        ":Pass",
+        ":SCFDialect",
+        ":StandardOps",
+        ":Transforms",
     ],
 )
 

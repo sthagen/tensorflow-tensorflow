@@ -37,7 +37,7 @@ from tensorflow.core.framework import node_def_pb2
 from tensorflow.core.framework import op_def_pb2
 from tensorflow.core.framework import versions_pb2
 from tensorflow.core.protobuf import config_pb2
-# pywrap_tensorflow must be imported first to avoid profobuf issues.
+# pywrap_tensorflow must be imported first to avoid protobuf issues.
 # (b/143110113)
 # pylint: disable=invalid-import-order,g-bad-import-order,unused-import
 from tensorflow.python import pywrap_tensorflow
@@ -396,7 +396,7 @@ class Tensor(internal.NativeObject, core_tf_types.Tensor):
       raise AttributeError("""
         '{}' object has no attribute '{}'.
         If you are looking for numpy-related methods, please run the following:
-        import tensorflow.python.ops.numpy_ops.np_config
+        from tensorflow.python.ops.numpy_ops import np_config
         np_config.enable_numpy_behavior()""".format(type(self).__name__, name))
     self.__getattribute__(name)
 
