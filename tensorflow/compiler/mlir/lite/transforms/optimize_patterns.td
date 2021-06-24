@@ -39,7 +39,8 @@ def ExtractSingleElementAsFloat : NativeCodeCall<
 
 // Checks if the value has rank at most 'n'.
 class HasRankAtMost<int n> : Constraint<
-    CPred<"$0.getType().cast<ShapedType>().getRank() <= " # n>>;
+    CPred<"$0.getType().cast<ShapedType>().hasRank() && "
+          "$0.getType().cast<ShapedType>().getRank() <= " # n>>;
 
 //===----------------------------------------------------------------------===//
 // Ternary ops patterns.
@@ -586,7 +587,7 @@ foreach ValueOp = [TFL_CeilOp, TFL_ExpOp, TFL_FloorOp, TFL_NegOp,
     def ReorderElementwiseAndMoveOperations#ValueOp#MoveOp : Pat<
       (ValueOp:$value (MoveOp:$move $input, $move_def)),
       (MoveOp (ValueOp $input), $move_def),
-      [(HasOneUse $move)]>;
+      [(SameElementType $input, $value), (HasOneUse $move)]>;
   }
 }
 

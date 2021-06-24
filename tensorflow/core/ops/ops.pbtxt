@@ -13527,6 +13527,7 @@ op {
       list {
         type: DT_HALF
         type: DT_FLOAT
+        type: DT_BFLOAT16
         type: DT_DOUBLE
         type: DT_COMPLEX64
         type: DT_COMPLEX128
@@ -27161,6 +27162,13 @@ op {
   output_arg {
     name: "optional"
     type: DT_VARIANT
+    experimental_full_type {
+      type_id: TFT_OPTIONAL
+      args {
+        type_id: TFT_VAR
+        s: "Toutput_types"
+      }
+    }
   }
   attr {
     name: "Toutput_types"
@@ -46811,6 +46819,44 @@ op {
   }
 }
 op {
+  name: "SnapshotDatasetReader"
+  input_arg {
+    name: "shard_dir"
+    type: DT_STRING
+  }
+  input_arg {
+    name: "start_index"
+    type: DT_INT64
+  }
+  output_arg {
+    name: "handle"
+    type: DT_VARIANT
+  }
+  attr {
+    name: "output_types"
+    type: "list(type)"
+    has_minimum: true
+    minimum: 1
+  }
+  attr {
+    name: "output_shapes"
+    type: "list(shape)"
+    has_minimum: true
+    minimum: 1
+  }
+  attr {
+    name: "compression"
+    type: "string"
+    default_value {
+      s: ""
+    }
+  }
+  attr {
+    name: "version"
+    type: "int"
+  }
+}
+op {
   name: "SnapshotDatasetV2"
   input_arg {
     name: "input_dataset"
@@ -46896,6 +46942,36 @@ op {
     name: "Tshard_func_args"
     type: "list(type)"
     has_minimum: true
+  }
+}
+op {
+  name: "SnapshotNestedDatasetReader"
+  input_arg {
+    name: "inputs"
+    type: DT_VARIANT
+    number_attr: "N"
+  }
+  output_arg {
+    name: "handle"
+    type: DT_VARIANT
+  }
+  attr {
+    name: "output_types"
+    type: "list(type)"
+    has_minimum: true
+    minimum: 1
+  }
+  attr {
+    name: "output_shapes"
+    type: "list(shape)"
+    has_minimum: true
+    minimum: 1
+  }
+  attr {
+    name: "N"
+    type: "int"
+    has_minimum: true
+    minimum: 1
   }
 }
 op {
