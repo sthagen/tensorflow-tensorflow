@@ -393,6 +393,21 @@ cc_library(
 )
 
 cc_library(
+    name = "CAPILLVM",
+    srcs = [
+        "lib/CAPI/Dialect/LLVM.cpp",
+    ],
+    hdrs = [
+        "include/mlir-c/Dialect/LLVM.h",
+    ],
+    includes = ["include"],
+    deps = [
+        ":CAPIIR",
+        ":LLVMDialect",
+    ],
+)
+
+cc_library(
     name = "CAPIGPU",
     srcs = [
         "lib/CAPI/Dialect/GPU.cpp",
@@ -1568,6 +1583,7 @@ cc_library(
     includes = ["include"],
     deps = [
         ":IR",
+        ":LinalgOps",
         ":SideEffectInterfaces",
         ":SparseTensorAttrDefsIncGen",
         ":SparseTensorOpsIncGen",
@@ -2294,6 +2310,7 @@ cc_library(
         ":StandardOps",
         ":StandardOpsTransformsPassIncGen",
         ":Support",
+        ":TensorDialect",
         ":Transforms",
         "@llvm-project//llvm:Support",
     ],
@@ -2781,6 +2798,7 @@ cc_library(
         ":GPUToNVVMGen",
         ":GPUTransforms",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":MathDialect",
         ":MemRefDialect",
@@ -2864,6 +2882,7 @@ cc_library(
         ":GPUDialect",
         ":GPUToROCDLTGen",
         ":GPUTransforms",
+        ":LLVMCommonConversion",
         ":MathDialect",
         ":Pass",
         ":ROCDLDialect",
@@ -2915,6 +2934,7 @@ cc_library(
         ":GPUDialect",
         ":GPUTransforms",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":NVVMToLLVMIRTranslation",
         ":Pass",
@@ -2988,6 +3008,7 @@ cc_library(
         ":ConversionPassIncGen",
         ":GPUDialect",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":Pass",
         ":SPIRVDialect",
@@ -4213,6 +4234,22 @@ alias(
 )
 
 cc_library(
+    name = "LLVMCommonConversion",
+    srcs = glob([
+        "lib/Conversion/LLVMCommon/*.cpp",
+    ]) + ["lib/Conversion/LLVMCommon/MemRefDescriptor.h"],
+    hdrs = glob(["include/mlir/Conversion/LLVMCommon/*.h"]),
+    includes = ["include"],
+    deps = [
+        ":IR",
+        ":LLVMDialect",
+        ":Support",
+        ":Transforms",
+        "@llvm-project//llvm:Core",
+    ],
+)
+
+cc_library(
     name = "StandardToLLVM",
     srcs = [
         "lib/Conversion/PassDetail.h",
@@ -4229,6 +4266,7 @@ cc_library(
         ":DataLayoutInterfaces",
         ":DialectUtils",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":MathDialect",
         ":MemRefDialect",
@@ -5093,6 +5131,7 @@ cc_binary(
         ":GPUToSPIRV",
         ":GPUToVulkanTransforms",
         ":GPUTransforms",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":LLVMToLLVMIRTranslation",
         ":MemRefDialect",
@@ -5469,6 +5508,7 @@ cc_library(
     deps = [
         ":ConversionPassIncGen",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":OpenMPDialect",
         ":Pass",
@@ -5839,6 +5879,7 @@ cc_library(
         ":LinalgNamedStructuredOpsYamlIncGen",
         ":LinalgOpsIncGen",
         ":LinalgStructuredOpsIncGen",
+        ":MathDialect",
         ":MemRefDialect",
         ":Parser",
         ":SideEffectInterfaces",
@@ -6080,6 +6121,7 @@ td_library(
     name = "TosaDialectTdFiles",
     srcs = glob(["include/mlir/Dialect/Tosa/IR/*.td"]),
     deps = [
+        ":InferTypeOpInterfaceTdFiles",
         ":LoopLikeInterfaceTdFiles",
         ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
@@ -6174,8 +6216,10 @@ cc_library(
     ]),
     includes = ["include"],
     deps = [
+        ":Analysis",
         ":Dialect",
         ":IR",
+        ":InferTypeOpInterface",
         ":LoopLikeInterface",
         ":Pass",
         ":QuantOps",
@@ -6204,10 +6248,10 @@ cc_library(
     ],
     deps = [
         ":ConversionPassIncGen",
+        ":DialectUtils",
         ":IR",
         ":LinalgOps",
         ":MathDialect",
-        ":MemRefDialect",
         ":Pass",
         ":StandardOps",
         ":TensorDialect",
@@ -6354,6 +6398,7 @@ cc_library(
         ":ComplexDialect",
         ":ConversionPassIncGen",
         ":IR",
+        ":LLVMCommonConversion",
         ":LLVMDialect",
         ":Pass",
         ":StandardToLLVM",

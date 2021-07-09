@@ -265,11 +265,13 @@ class Stream {
 
   Stream &ThenBatchNormalizationBackward(
       const DeviceMemory<float> &y_backprop, const DeviceMemory<float> &x,
-      const DeviceMemory<float> &scale, const DeviceMemory<float> &mean,
-      const DeviceMemory<float> &inv_var, const dnn::BatchDescriptor &x_desc,
+      const DeviceMemory<float> &scale, const DeviceMemory<float> &offset,
+      const DeviceMemory<float> &mean, const DeviceMemory<float> &inv_var,
+      const DeviceMemory<float> &y, const dnn::BatchDescriptor &x_desc,
       const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      DeviceMemory<float> *x_backprop, DeviceMemory<float> *scale_backprop,
-      DeviceMemory<float> *offset_backprop,
+      dnn::ActivationMode activation_mode, DeviceMemory<float> *x_backprop,
+      DeviceMemory<float> *scale_backprop, DeviceMemory<float> *offset_backprop,
+      DeviceMemory<float> *side_input_backprop,
       DeviceMemory<uint8> *reserve_space_data,
       ScratchAllocator *workspace_allocator);
 
@@ -291,11 +293,14 @@ class Stream {
   Stream &ThenBatchNormalizationBackward(
       const DeviceMemory<Eigen::half> &y_backprop,
       const DeviceMemory<Eigen::half> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &mean, const DeviceMemory<float> &inv_var,
+      const DeviceMemory<float> &offset, const DeviceMemory<float> &mean,
+      const DeviceMemory<float> &inv_var, const DeviceMemory<Eigen::half> &y,
       const dnn::BatchDescriptor &x_desc,
       const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
+      dnn::ActivationMode activation_mode,
       DeviceMemory<Eigen::half> *x_backprop,
       DeviceMemory<float> *scale_backprop, DeviceMemory<float> *offset_backprop,
+      DeviceMemory<Eigen::half> *side_input_backprop,
       DeviceMemory<uint8> *reserve_space_data,
       ScratchAllocator *workspace_allocator);
 
@@ -569,22 +574,6 @@ class Stream {
 #endif  // GOOGLE_CUDA
     return port::UnimplementedError("DNN library is not found.");
   }
-
-  Stream &ThenConvolveBackwardBias(const dnn::BatchDescriptor &input_descriptor,
-                                   const DeviceMemory<double> &input_data,
-                                   const dnn::BatchDescriptor &bias_descriptor,
-                                   DeviceMemory<double> *backward_bias_data);
-
-  Stream &ThenConvolveBackwardBias(const dnn::BatchDescriptor &input_descriptor,
-                                   const DeviceMemory<float> &input_data,
-                                   const dnn::BatchDescriptor &bias_descriptor,
-                                   DeviceMemory<float> *backward_bias_data);
-
-  Stream &ThenConvolveBackwardBias(
-      const dnn::BatchDescriptor &input_descriptor,
-      const DeviceMemory<Eigen::half> &input_data,
-      const dnn::BatchDescriptor &bias_descriptor,
-      DeviceMemory<Eigen::half> *backward_bias_data);
 
   Stream &ThenMatMul(const DeviceMemory<float> &input_data,
                      const DeviceMemory<float> &weights,
@@ -2273,14 +2262,6 @@ class Stream {
   // Callbacks enqueued to be run after the next call to BlockHostUntilDone().
   std::vector<std::function<void()>> after_block_host_until_done_callbacks_
       TF_GUARDED_BY(mu_);
-
-  // Implementation of ThenConvolveBackwardBias that is shared by all types.
-  template <typename T>
-  Stream &ThenConvolveBackwardBiasImpl(
-      const dnn::BatchDescriptor &input_descriptor,
-      const DeviceMemory<T> &input_data,
-      const dnn::BatchDescriptor &bias_descriptor,
-      DeviceMemory<T> *backward_bias_data);
 
   // Implementation of ThenBlasLtMatmul that is shared by all types.
   template <typename ABType, typename CType>
