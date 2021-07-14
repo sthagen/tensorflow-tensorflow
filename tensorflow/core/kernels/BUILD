@@ -945,6 +945,9 @@ cc_library(
         "eigen_convolution_helpers.h",
     ],
     compatible_with = get_compatible_with_portable(),
+    defines = [
+        "EIGEN_ALTIVEC_USE_CUSTOM_PACK=0",
+    ],
 )
 
 # OpKernel libraries ----------------------------------------------------------
@@ -3400,6 +3403,10 @@ tf_kernel_library(
     copts = if_mlir_generated_gpu_kernels_enabled(
         ["-DMLIR_GENERATED_GPU_KERNELS_ENABLED"],
     ),
+    # *.cu.cc sources are compiled with gpu_copts instead of copts.
+    gpu_copts = if_mlir_generated_gpu_kernels_enabled(
+        ["-DMLIR_GENERATED_GPU_KERNELS_ENABLED"],
+    ),
     prefix = "cast_op",
     deps = MATH_DEPS + [
         "//tensorflow/core/kernels/mlir_generated:cast_op",
@@ -3994,8 +4001,7 @@ cc_library(
     ],
 )
 
-NN_DEPS = [
-    ":conv_2d",
+NN_DEPS = if_cuda_or_rocm([":conv_2d"]) + [
     ":eigen_contraction_kernel",
     ":ops_util",
     "//tensorflow/core:framework",
