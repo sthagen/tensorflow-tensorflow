@@ -44,14 +44,14 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     this(byteBuffer, /* options= */ null);
   }
 
-  NativeInterpreterWrapper(String modelPath, Interpreter.Options options) {
+  NativeInterpreterWrapper(String modelPath, InterpreterImpl.Options options) {
     TensorFlowLite.init();
     long errorHandle = createErrorReporter(ERROR_BUFFER_SIZE);
     long modelHandle = createModel(modelPath, errorHandle);
     init(errorHandle, modelHandle, options);
   }
 
-  NativeInterpreterWrapper(ByteBuffer buffer, Interpreter.Options options) {
+  NativeInterpreterWrapper(ByteBuffer buffer, InterpreterImpl.Options options) {
     TensorFlowLite.init();
     if (buffer == null
         || (!(buffer instanceof MappedByteBuffer)
@@ -66,9 +66,9 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     init(errorHandle, modelHandle, options);
   }
 
-  private void init(long errorHandle, long modelHandle, Interpreter.Options options) {
+  private void init(long errorHandle, long modelHandle, InterpreterImpl.Options options) {
     if (options == null) {
-      options = new Interpreter.Options();
+      options = new InterpreterImpl.Options();
     }
     this.errorHandle = errorHandle;
     this.modelHandle = modelHandle;
@@ -369,6 +369,15 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     if (inputName == null) {
       throw new IllegalArgumentException("Invalid input tensor name provided (null)");
     }
+    int subgraphIndex = getSubgraphIndexFromSignature(interpreterHandle, methodName);
+    if (subgraphIndex == -1) {
+      throw new IllegalArgumentException("Invalid input method name provided: " + methodName);
+    }
+    if (subgraphIndex > 0) {
+      int tensorIndex = getInputTensorIndexFromSignature(interpreterHandle, inputName, methodName);
+      return Tensor.fromSubgraphAndIndex(interpreterHandle, subgraphIndex, tensorIndex);
+    }
+
     initTensorIndexesMaps();
     int tensorIndex = getInputTensorIndexFromSignature(interpreterHandle, inputName, methodName);
     if (!tensorToInputsIndexes.containsKey(tensorIndex)) {
@@ -432,6 +441,16 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     if (outputName == null) {
       throw new IllegalArgumentException("Invalid output tensor name provided (null)");
     }
+    int subgraphIndex = getSubgraphIndexFromSignature(interpreterHandle, methodName);
+    if (subgraphIndex == -1) {
+      throw new IllegalArgumentException("Invalid input method name provided: " + methodName);
+    }
+    if (subgraphIndex > 0) {
+      int tensorIndex =
+          getOutputTensorIndexFromSignature(interpreterHandle, outputName, methodName);
+      return Tensor.fromSubgraphAndIndex(interpreterHandle, subgraphIndex, tensorIndex);
+    }
+
     initTensorIndexesMaps();
     int tensorIndex = getOutputTensorIndexFromSignature(interpreterHandle, outputName, methodName);
     if (!tensorToOutputsIndexes.containsKey(tensorIndex)) {
@@ -454,7 +473,7 @@ final class NativeInterpreterWrapper implements AutoCloseable {
   void setCancelled(boolean value) {
     if (cancellationFlagHandle == 0) {
       throw new IllegalStateException(
-          "Cannot cancel the inference. Have you called Interpreter.Options.setCancellable?");
+          "Cannot cancel the inference. Have you called InterpreterApi.Options.setCancellable?");
     }
     setCancelled(interpreterHandle, cancellationFlagHandle, value);
   }
@@ -462,7 +481,7 @@ final class NativeInterpreterWrapper implements AutoCloseable {
   private static native void setCancelled(
       long interpreterHandle, long cancellationFlagHandle, boolean value);
 
-  private void applyDelegates(Interpreter.Options options) {
+  private void applyDelegates(InterpreterImpl.Options options) {
     // First apply the flex delegate if necessary. This ensures the graph is fully resolved before
     // applying other delegates.
     boolean originalGraphHasUnresolvedFlexOp = hasUnresolvedFlexOp(interpreterHandle);
@@ -475,28 +494,14 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     }
 
     // Now apply the user-supplied delegates.
-    try {
-      for (Delegate delegate : options.delegates) {
-        applyDelegate(interpreterHandle, errorHandle, delegate.getNativeHandle());
-        delegates.add(delegate);
-      }
-      if (options.useNNAPI != null && options.useNNAPI.booleanValue()) {
-        NnApiDelegate optionalNnApiDelegate = new NnApiDelegate();
-        ownedDelegates.add(optionalNnApiDelegate);
-        applyDelegate(interpreterHandle, errorHandle, optionalNnApiDelegate.getNativeHandle());
-      }
-    } catch (IllegalArgumentException e) {
-      // Suppress exceptions where a delegate fails to apply after the flex delegate is successfuly
-      // applied. This can be a common occurrence, as the flex delegate makes the graph dynamic,
-      // which is typically unsupported by most delegates (e.g., NNAPI, GPU delegates). We should
-      // still log an error to indicate that the delegate application was a no-op.
-      // TODO(b/142678372): Fix the flex delegate to not unconditionally mark graphs as dynamic.
-      boolean shouldSuppressException =
-          originalGraphHasUnresolvedFlexOp && !hasUnresolvedFlexOp(interpreterHandle);
-      if (!shouldSuppressException) {
-        throw e;
-      }
-      System.err.println("Ignoring failed delegate application: " + e);
+    for (Delegate delegate : options.delegates) {
+      applyDelegate(interpreterHandle, errorHandle, delegate.getNativeHandle());
+      delegates.add(delegate);
+    }
+    if (options.useNNAPI != null && options.useNNAPI.booleanValue()) {
+      NnApiDelegate optionalNnApiDelegate = new NnApiDelegate();
+      ownedDelegates.add(optionalNnApiDelegate);
+      applyDelegate(interpreterHandle, errorHandle, optionalNnApiDelegate.getNativeHandle());
     }
   }
 
@@ -553,6 +558,9 @@ final class NativeInterpreterWrapper implements AutoCloseable {
   private final List<AutoCloseable> ownedDelegates = new ArrayList<>();
 
   private static native boolean hasUnresolvedFlexOp(long interpreterHandle);
+
+  private static native int getSubgraphIndexFromSignature(
+      long interpreterHandle, String methodName);
 
   private static native int getInputTensorIndex(long interpreterHandle, int inputIdx);
 
