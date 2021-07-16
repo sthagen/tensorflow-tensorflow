@@ -53,6 +53,7 @@ visibility = [
     "//third_party/py/tf_agents:__subpackages__",  # For benchmarks.
     "//third_party/py/tf_slim:__subpackages__",
     "//third_party/py/keras:__subpackages__",
+    "//third_party/py/starcraft2:__subpackages__",
     "//third_party/py/tensorflow_gnn:__subpackages__",
     "//third_party/py/tensorflow_numerics:__subpackages__",
 ]
@@ -2040,6 +2041,7 @@ py_library(
     deps = [
         ":math_ops",
         ":stateful_random_ops_gen",
+        ":stateless_random_ops",
         ":stateless_random_ops_v2_gen",
         ":variables",
         "//tensorflow/python/framework:dtypes",
@@ -2697,7 +2699,6 @@ cuda_py_test(
     size = "medium",
     srcs = ["ops/gradients_test.py"],
     python_version = "PY3",
-    tags = ["no_oss"],  # b/118709825
     deps = [
         ":array_grad",
         ":array_ops",

@@ -86,20 +86,8 @@ final class NativeInterpreterWrapper implements AutoCloseable {
       allowBufferHandleOutput(interpreterHandle, options.allowBufferHandleOutput.booleanValue());
     }
     applyDelegates(options);
-
-    // Simply use "-1" to represent the default mode.
-    int applyXNNPACKMode = -1;
-    if (options.useXNNPACK != null) {
-      applyXNNPACKMode = options.useXNNPACK.booleanValue() ? 1 : 0;
-    }
-
-    // TODO(b/171856982): uncomment the following when applying XNNPACK delegate by default is
-    // enabled for C++ TfLite library on Android platform.
-    if (applyXNNPACKMode == 1 /*|| applyXNNPACKMode == -1*/) {
-      useXNNPACK(interpreterHandle, errorHandle, applyXNNPACKMode, options.numThreads);
-    }
-    allocateTensors(interpreterHandle, errorHandle);
-    this.isMemoryAllocated = true;
+    allocateTensors(interpreterHandle, errorHandle, /*subgraphIndex=*/ 0);
+    this.memoryAllocated.put(/*subgraphIndex=*/ 0, true);
   }
 
   /** Releases resources associated with this {@code NativeInterpreterWrapper}. */
@@ -127,7 +115,7 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     modelByteBuffer = null;
     inputsIndexes = null;
     outputsIndexes = null;
-    isMemoryAllocated = false;
+    memoryAllocated = null;
     delegates.clear();
     for (AutoCloseable ownedDelegate : ownedDelegates) {
       try {
@@ -139,35 +127,74 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     ownedDelegates.clear();
   }
 
+  /** Runs model inference based on SignatureDef provided through {@code methodName}. */
   public void runSignature(
       Map<String, Object> inputs, Map<String, Object> outputs, String methodName) {
+    inferenceDurationNanoseconds = -1;
     if (inputs == null || inputs.isEmpty()) {
       throw new IllegalArgumentException("Input error: Inputs should not be null or empty.");
     }
     if (outputs == null) {
       throw new IllegalArgumentException("Input error: Outputs should not be null.");
     }
-    initTensorIndexesMaps();
-    // Map inputs/output to input indexes.
-    Map<Integer, Object> inputsWithInputIndex = new TreeMap<>();
-    Map<Integer, Object> outputsWithOutputIndex = new TreeMap<>();
+
+    int subgraphIndex = getSubgraphIndexFromSignature(interpreterHandle, methodName);
+    if (subgraphIndex == 0) {
+      // Run the primary subgraph and update the cached tensor objects.
+      initTensorIndexesMaps();
+      // Map inputs/output to input indexes.
+      Map<Integer, Object> inputsWithInputIndex = new TreeMap<>();
+      Map<Integer, Object> outputsWithOutputIndex = new TreeMap<>();
+      for (Map.Entry<String, Object> input : inputs.entrySet()) {
+        int tensorIndex =
+            getInputTensorIndexFromSignature(interpreterHandle, input.getKey(), methodName);
+        inputsWithInputIndex.put(tensorToInputsIndexes.get(tensorIndex), input.getValue());
+      }
+      for (Map.Entry<String, Object> output : outputs.entrySet()) {
+        int tensorIndex =
+            getOutputTensorIndexFromSignature(interpreterHandle, output.getKey(), methodName);
+        outputsWithOutputIndex.put(tensorToOutputsIndexes.get(tensorIndex), output.getValue());
+      }
+      Object[] inputsList = new Object[inputs.size()];
+      int index = 0;
+      for (Map.Entry<Integer, Object> input : inputsWithInputIndex.entrySet()) {
+        inputsList[index++] = input.getValue();
+      }
+      run(inputsList, outputsWithOutputIndex);
+      return;
+    }
+
     for (Map.Entry<String, Object> input : inputs.entrySet()) {
-      int tensorIndex =
-          getInputTensorIndexFromSignature(interpreterHandle, input.getKey(), methodName);
-      inputsWithInputIndex.put(tensorToInputsIndexes.get(tensorIndex), input.getValue());
+      Tensor tensor = getInputTensor(input.getKey(), methodName);
+      int[] newShape = tensor.getInputShapeIfDifferent(input.getValue());
+      if (newShape != null) {
+        resizeInput(interpreterHandle, errorHandle, tensor.index(), newShape, false, subgraphIndex);
+      }
     }
+
+    allocateTensorsIfNeeded(subgraphIndex);
+
+    for (Map.Entry<String, Object> input : inputs.entrySet()) {
+      getInputTensor(input.getKey(), methodName).setTo(input.getValue());
+    }
+
+    long inferenceStartNanos = System.nanoTime();
+    runSignature(interpreterHandle, errorHandle, subgraphIndex);
+    long inferenceDurationNanoseconds = System.nanoTime() - inferenceStartNanos;
+
     for (Map.Entry<String, Object> output : outputs.entrySet()) {
-      int tensorIndex =
-          getOutputTensorIndexFromSignature(interpreterHandle, output.getKey(), methodName);
-      outputsWithOutputIndex.put(tensorToOutputsIndexes.get(tensorIndex), output.getValue());
+      // Null output placeholders are allowed and ignored.
+      if (output.getValue() != null) {
+        getOutputTensor(output.getKey(), methodName).copyTo(output.getValue());
+      }
     }
-    Object[] inputsList = new Object[inputs.size()];
-    int index = 0;
-    for (Map.Entry<Integer, Object> input : inputsWithInputIndex.entrySet()) {
-      inputsList[index++] = input.getValue();
-    }
-    run(inputsList, outputsWithOutputIndex);
+
+    // Only set if the entire operation succeeds.
+    this.inferenceDurationNanoseconds = inferenceDurationNanoseconds;
   }
+
+  private static native void runSignature(
+      long interpreterHandle, long errorHandle, int subgraphIndex);
 
   /** Sets inputs, runs model inference and returns outputs. */
   void run(Object[] inputs, Map<Integer, Object> outputs) {
@@ -190,11 +217,7 @@ final class NativeInterpreterWrapper implements AutoCloseable {
       }
     }
 
-    boolean needsAllocation = !isMemoryAllocated;
-    if (needsAllocation) {
-      allocateTensors(interpreterHandle, errorHandle);
-      isMemoryAllocated = true;
-    }
+    boolean allocatedTensors = allocateTensorsIfNeeded(/*subgraphIndex=*/ 0);
 
     for (int i = 0; i < inputs.length; ++i) {
       getInputTensor(i).setTo(inputs[i]);
@@ -205,7 +228,7 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     long inferenceDurationNanoseconds = System.nanoTime() - inferenceStartNanos;
 
     // Allocation can trigger dynamic resizing of output tensors, so refresh all output shapes.
-    if (needsAllocation) {
+    if (allocatedTensors) {
       for (int i = 0; i < outputTensors.length; ++i) {
         if (outputTensors[i] != null) {
           outputTensors[i].refreshShape();
@@ -232,10 +255,10 @@ final class NativeInterpreterWrapper implements AutoCloseable {
 
   /** Resizes dimensions of a specific input. */
   void resizeInput(int idx, int[] dims, boolean strict) {
-    if (resizeInput(interpreterHandle, errorHandle, idx, dims, strict)) {
+    if (resizeInput(interpreterHandle, errorHandle, idx, dims, strict, /*subgraphIndex=*/ 0)) {
       // Tensor allocation is deferred until either an explicit `allocateTensors()` call or
       // `invoke()` avoiding redundant allocations if multiple tensors are simultaneosly resized.
-      isMemoryAllocated = false;
+      memoryAllocated.put(/*subgraphIndex=*/ 0, false);
       if (inputTensors[idx] != null) {
         inputTensors[idx].refreshShape();
       }
@@ -243,24 +266,42 @@ final class NativeInterpreterWrapper implements AutoCloseable {
   }
 
   private static native boolean resizeInput(
-      long interpreterHandle, long errorHandle, int inputIdx, int[] dims, boolean strict);
+      long interpreterHandle,
+      long errorHandle,
+      int inputIdx,
+      int[] dims,
+      boolean strict,
+      int subgraphIndex);
 
   /** Triggers explicit allocation of tensors. */
   void allocateTensors() {
-    if (isMemoryAllocated) {
-      return;
-    }
-
-    isMemoryAllocated = true;
-    allocateTensors(interpreterHandle, errorHandle);
-    for (int i = 0; i < outputTensors.length; ++i) {
-      if (outputTensors[i] != null) {
-        outputTensors[i].refreshShape();
-      }
-    }
+    allocateTensorsIfNeeded(/*subgraphIndex=*/ 0);
   }
 
-  private static native long allocateTensors(long interpreterHandle, long errorHandle);
+  /**
+   * Allocates tensor memory space in the given subgraph and returns true when allocation happens
+   */
+  private boolean allocateTensorsIfNeeded(int subgraphIndex) {
+    boolean needsAllocation =
+        !(memoryAllocated.containsKey(subgraphIndex) ? memoryAllocated.get(subgraphIndex) : false);
+    if (!needsAllocation) {
+      return false;
+    }
+
+    memoryAllocated.put(subgraphIndex, true);
+    allocateTensors(interpreterHandle, errorHandle, subgraphIndex);
+    if (subgraphIndex == 0) {
+      for (int i = 0; i < outputTensors.length; ++i) {
+        if (outputTensors[i] != null) {
+          outputTensors[i].refreshShape();
+        }
+      }
+    }
+    return true;
+  }
+
+  private static native long allocateTensors(
+      long interpreterHandle, long errorHandle, int subgraphIndex);
 
   void resetVariableTensors() {
     resetVariableTensors(interpreterHandle, errorHandle);
@@ -503,6 +544,23 @@ final class NativeInterpreterWrapper implements AutoCloseable {
       ownedDelegates.add(optionalNnApiDelegate);
       applyDelegate(interpreterHandle, errorHandle, optionalNnApiDelegate.getNativeHandle());
     }
+    // Finally apply the XNNPACK delegate if enabled.
+    maybeUseXNNPACK(options);
+  }
+
+  // Optionally apply the XNNPACK delegate.
+  private void maybeUseXNNPACK(InterpreterImpl.Options options) {
+    // Simply use "-1" to represent the default mode.
+    int applyXNNPACKMode = -1;
+    if (options.useXNNPACK != null) {
+      applyXNNPACKMode = options.useXNNPACK.booleanValue() ? 1 : 0;
+    }
+
+    // TODO(b/171856982): uncomment the following when applying XNNPACK delegate by default is
+    // enabled for C++ TfLite library on Android platform.
+    if (applyXNNPACKMode == 1 /*|| applyXNNPACKMode == -1*/) {
+      useXNNPACK(interpreterHandle, errorHandle, applyXNNPACKMode, options.numThreads);
+    }
   }
 
   private static Delegate maybeCreateFlexDelegate(List<Delegate> delegates) {
@@ -548,7 +606,8 @@ final class NativeInterpreterWrapper implements AutoCloseable {
   private Tensor[] inputTensors;
   private Tensor[] outputTensors;
 
-  private boolean isMemoryAllocated = false;
+  // Whether subgraph's tensor memory space is allocated.
+  private Map<Integer, Boolean> memoryAllocated = new HashMap<>();
 
   // As the Java Delegate owns the native delegate instance, we keep a strong ref to any injected
   // delegates for safety.

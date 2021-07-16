@@ -5,9 +5,9 @@
 # Description:
 #   The MLIR "Multi-Level Intermediate Representation" Compiler Infrastructure
 
-load("@org_tensorflow//third_party/mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
-load("@org_tensorflow//third_party/mlir:linalggen.bzl", "genlinalg")
-load("@org_tensorflow//third_party/mlir:build_defs.bzl", "cc_headers_only", "if_cuda_available")
+load(":tblgen.bzl", "gentbl_cc_library", "td_library")
+load(":linalggen.bzl", "genlinalg")
+load(":build_defs.bzl", "cc_headers_only", "if_cuda_available")
 
 package(
     default_visibility = [":friends"],
@@ -33,9 +33,6 @@ exports_files([
 filegroup(
     name = "c_headers",
     srcs = glob(["include/mlir-c/**/*"]),  # <== i.e. match the entire tree
-    visibility = [
-        ":friends",
-    ],
 )
 
 exports_files(glob(["include/**/*.td"]))
@@ -5985,10 +5982,12 @@ cc_library(
         "lib/Dialect/Linalg/Transforms/*.cpp",
         "lib/Dialect/Linalg/Transforms/*.h",
     ]) + [
+        "lib/Dialect/Linalg/Analysis/ConstraintsSet.cpp",
         "lib/Dialect/Linalg/Analysis/DependenceAnalysis.cpp",
         "lib/Dialect/Linalg/Utils/Utils.cpp",
     ],
     hdrs = [
+        "include/mlir/Dialect/Linalg/Analysis/ConstraintsSet.h",
         "include/mlir/Dialect/Linalg/Analysis/DependenceAnalysis.h",
         "include/mlir/Dialect/Linalg/Passes.h",
         "include/mlir/Dialect/Linalg/Transforms/CodegenStrategy.h",
