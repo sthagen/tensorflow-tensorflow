@@ -34,7 +34,7 @@ import org.tensorflow.lite.nnapi.NnApiDelegate;
  *
  * <p>Note: This class is not thread safe.
  */
-final class NativeInterpreterWrapper implements AutoCloseable {
+class NativeInterpreterWrapper implements AutoCloseable {
 
   NativeInterpreterWrapper(String modelPath) {
     this(modelPath, /* options= */ null);
@@ -246,8 +246,6 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     this.inferenceDurationNanoseconds = inferenceDurationNanoseconds;
   }
 
-  private static native void run(long interpreterHandle, long errorHandle);
-
   /** Resizes dimensions of a specific input. */
   void resizeInput(int idx, int[] dims) {
     resizeInput(idx, dims, false);
@@ -264,14 +262,6 @@ final class NativeInterpreterWrapper implements AutoCloseable {
       }
     }
   }
-
-  private static native boolean resizeInput(
-      long interpreterHandle,
-      long errorHandle,
-      int inputIdx,
-      int[] dims,
-      boolean strict,
-      int subgraphIndex);
 
   /** Triggers explicit allocation of tensors. */
   void allocateTensors() {
@@ -298,13 +288,6 @@ final class NativeInterpreterWrapper implements AutoCloseable {
       }
     }
     return true;
-  }
-
-  private static native long allocateTensors(
-      long interpreterHandle, long errorHandle, int subgraphIndex);
-
-  void resetVariableTensors() {
-    resetVariableTensors(interpreterHandle, errorHandle);
   }
 
   /** Gets index of an input given its name. */
@@ -434,21 +417,15 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     return getSignatureDefNames(interpreterHandle);
   }
 
-  private static native String[] getSignatureDefNames(long interpreterHandle);
-
   /** Gets the list of SignatureDefs inputs for method {@code methodName} */
   String[] getSignatureInputs(String methodName) {
     return getSignatureInputs(interpreterHandle, methodName);
   }
 
-  private static native String[] getSignatureInputs(long interpreterHandle, String methodName);
-
   /** Gets the list of SignatureDefs outputs for method {@code methodName} */
   String[] getSignatureOutputs(String methodName) {
     return getSignatureOutputs(interpreterHandle, methodName);
   }
-
-  private static native String[] getSignatureOutputs(long interpreterHandle, String methodName);
 
   /** Gets the number of output tensors. */
   int getOutputTensorCount() {
@@ -519,9 +496,6 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     setCancelled(interpreterHandle, cancellationFlagHandle, value);
   }
 
-  private static native void setCancelled(
-      long interpreterHandle, long cancellationFlagHandle, boolean value);
-
   private void applyDelegates(InterpreterImpl.Options options) {
     // First apply the flex delegate if necessary. This ensures the graph is fully resolved before
     // applying other delegates.
@@ -579,13 +553,11 @@ final class NativeInterpreterWrapper implements AutoCloseable {
     }
   }
 
-  private static native int getOutputDataType(long interpreterHandle, int outputIdx);
-
   private static final int ERROR_BUFFER_SIZE = 512;
 
-  private long errorHandle;
+  long errorHandle;
 
-  private long interpreterHandle;
+  long interpreterHandle;
 
   private long modelHandle;
 
@@ -615,6 +587,30 @@ final class NativeInterpreterWrapper implements AutoCloseable {
 
   // List of owned delegates that must be closed when the interpreter is closed.
   private final List<AutoCloseable> ownedDelegates = new ArrayList<>();
+
+  private static native void run(long interpreterHandle, long errorHandle);
+
+  private static native boolean resizeInput(
+      long interpreterHandle,
+      long errorHandle,
+      int inputIdx,
+      int[] dims,
+      boolean strict,
+      int subgraphIndex);
+
+  private static native long allocateTensors(
+      long interpreterHandle, long errorHandle, int subgraphIndex);
+
+  private static native String[] getSignatureDefNames(long interpreterHandle);
+
+  private static native String[] getSignatureInputs(long interpreterHandle, String methodName);
+
+  private static native String[] getSignatureOutputs(long interpreterHandle, String methodName);
+
+  private static native void setCancelled(
+      long interpreterHandle, long cancellationFlagHandle, boolean value);
+
+  private static native int getOutputDataType(long interpreterHandle, int outputIdx);
 
   private static native boolean hasUnresolvedFlexOp(long interpreterHandle);
 
