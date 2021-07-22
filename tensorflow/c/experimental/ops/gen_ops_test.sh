@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,12 +14,20 @@
 # limitations under the License.
 # ==============================================================================
 set -e
-set -x
 
-source tensorflow/tools/ci_build/release/common.sh
+dir=tensorflow/c/experimental/ops
+category=$1
 
-# Rename to tensorflow_cpu
-for f in $(ls py_test_dir/tensorflow-*cp3*-cp3*m-win_amd64.whl); do
-  copy_to_new_project_name "${f}" tensorflow_cpu /c/Python36/python
-  rm "${f}"
-done
+echo
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>> ${category}_ops.h >>>>>>>>>>>>>>>>>>>>>>>>>>>"
+cat ${dir}/${category}_ops.h
+echo "<<<<<<<<<<<<<<<<<<<<<<<<<<< ${category}_ops.h <<<<<<<<<<<<<<<<<<<<<<<<<<<"
+echo
+
+echo
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>> ${category}_ops.cc >>>>>>>>>>>>>>>>>>>>>>>>>>"
+cat ${dir}/${category}_ops.cc
+echo "<<<<<<<<<<<<<<<<<<<<<<<<<<< ${category}_ops.cc <<<<<<<<<<<<<<<<<<<<<<<<<<"
+echo
+
+echo "PASS"

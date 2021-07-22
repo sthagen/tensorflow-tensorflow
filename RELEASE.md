@@ -17,6 +17,23 @@
 
 *<INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
 *<IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
+*   TF1 -> TF2 Migration
+    * Introduced the `tf.compat.v1.keras.utils.track_tf1_style_variables`
+      decorator, which enables using large classes of tf1-style variable_scope,
+      `get_variable`, and `compat.v1.layer`-based components from within TF2
+      models running with TF2 behavior enabled.
+
+*  `tf.data`:
+    *   tf.data service now supports auto-sharding. Users specify the sharding
+        policy with `tf.data.experimental.service.ShardingPolicy` enum. It can
+        be one of OFF (equivalent to today's `"parallel_epochs"` mode), DYNAMIC
+        (equivalent to today's `"distributed_epoch"` mode), or one of the static
+        sharding policies: FILE, DATA, FILE_OR_DATA, or HINT (corresponding to
+        values of `tf.data.experimental.AutoShardPolicy`).
+
+        Static sharding (auto-sharding) requires the number of tf.data service
+        workers be fixed. Users need to specify the worker addresses in
+        `tensorflow.data.experimental.DispatcherConfig`.
 
 # Bug Fixes and Other Changes
 
