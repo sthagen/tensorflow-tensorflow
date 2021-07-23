@@ -1400,6 +1400,41 @@ class ConcatenateOperandRemoval : public OpRewritePattern<ConcatenateOp> {
     return failure();
   }
 };
+
+class ConcatenateForwarding : public OpRewritePattern<ConcatenateOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(ConcatenateOp op,
+                                PatternRewriter& rewriter) const override {
+    bool has_flatten = false;
+    llvm::SmallVector<Value, 6> new_operands;
+    llvm::SmallVector<ConcatenateOp, 2> flatten_stack = {op};
+
+    while (!flatten_stack.empty()) {
+      ConcatenateOp cur_op = flatten_stack.pop_back_val();
+
+      for (auto operand : cur_op.val()) {
+        Operation* defining_op = operand.getDefiningOp();
+        if (auto concat_op =
+                mlir::dyn_cast_or_null<ConcatenateOp>(defining_op)) {
+          if (concat_op.dimension() == op.dimension()) {
+            flatten_stack.push_back(concat_op);
+            has_flatten = true;
+            continue;
+          }
+        }
+        new_operands.push_back(operand);
+      }
+    }
+
+    if (has_flatten) {
+      rewriter.replaceOpWithNewOp<ConcatenateOp>(op, op.getResult().getType(),
+                                                 new_operands, op.dimension());
+      return success();
+    }
+    return failure();
+  }
+};
+
 }  // namespace
 
 LogicalResult ConcatenateOp::inferReturnTypes(
@@ -1484,7 +1519,7 @@ LogicalResult ConcatenateOp::inferReturnTypes(
 
 void ConcatenateOp::getCanonicalizationPatterns(
     OwningRewritePatternList& results, MLIRContext* context) {
-  results.insert<ConcatenateOperandRemoval>(context);
+  results.insert<ConcatenateOperandRemoval, ConcatenateForwarding>(context);
 }
 
 template <typename T>
@@ -2474,7 +2509,7 @@ LogicalResult ReduceOp::reifyReturnTypeShapes(
 //===----------------------------------------------------------------------===//
 
 LogicalResult RngNormalOp::inferReturnTypeComponents(
-    MLIRContext* context, Optional<Location> location, ValueRange operands,
+    MLIRContext* context, Optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   return rngInferReturnTypeComponents(context, location, operands, attributes,
@@ -2486,7 +2521,7 @@ LogicalResult RngNormalOp::inferReturnTypeComponents(
 //===----------------------------------------------------------------------===//
 
 LogicalResult RngUniformOp::inferReturnTypeComponents(
-    MLIRContext* context, Optional<Location> location, ValueRange operands,
+    MLIRContext* context, Optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   return rngInferReturnTypeComponents(context, location, operands, attributes,
@@ -2568,7 +2603,7 @@ LogicalResult SelectOp::inferReturnTypes(
 }
 
 LogicalResult SelectOp::inferReturnTypeComponents(
-    mlir::MLIRContext*, llvm::Optional<mlir::Location>, mlir::ValueRange,
+    mlir::MLIRContext*, llvm::Optional<mlir::Location>, ValueShapeRange,
     mlir::DictionaryAttr, mlir::RegionRange,
     llvm::SmallVectorImpl<mlir::ShapedTypeComponents>&) {
   // TODO(b/168772852)
@@ -3859,7 +3894,7 @@ void CompareOp::build(OpBuilder& builder, OperationState& result, Value lhs,
 }
 
 LogicalResult CompareOp::inferReturnTypeComponents(
-    mlir::MLIRContext*, llvm::Optional<mlir::Location>, mlir::ValueRange,
+    mlir::MLIRContext*, llvm::Optional<mlir::Location>, ValueShapeRange,
     mlir::DictionaryAttr, mlir::RegionRange,
     llvm::SmallVectorImpl<mlir::ShapedTypeComponents>&) {
   // TODO(b/168772852)

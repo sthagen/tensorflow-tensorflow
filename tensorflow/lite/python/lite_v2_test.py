@@ -156,10 +156,31 @@ class FromConcreteFunctionTest(lite_v2_test_util.ModelTest):
     # Try converting multiple functions.
     converter = lite.TFLiteConverterV2.from_concrete_functions(
         [add_func, sub_func], root)
-    with self.assertRaises(ValueError) as error:
-      _ = converter.convert()
-    self.assertIn('can only convert a single ConcreteFunction',
-                  str(error.exception))
+    tflite_model = converter.convert()
+
+    # Check signatures are valid from converted model.
+    interpreter = Interpreter(model_content=tflite_model)
+    signature_defs = interpreter.get_signature_list()
+
+    # Verify the SignatureDef structure returned is as expected.
+    self.assertEqual(len(signature_defs), 2)
+    self.assertEqual(list(signature_defs.keys()), ['add', 'sub'])
+    self.assertEqual(len(signature_defs.values()), 2)
+    self.assertEqual(list(signature_defs['add'].keys()), ['inputs', 'outputs'])
+    self.assertCountEqual(signature_defs['add']['inputs'], ['x'])
+    self.assertEqual(list(signature_defs['add']['outputs']), ['output_0'])
+    self.assertEqual(list(signature_defs['sub'].keys()), ['inputs', 'outputs'])
+    self.assertCountEqual(signature_defs['sub']['inputs'], ['x'])
+    self.assertEqual(list(signature_defs['sub']['outputs']), ['output_0'])
+
+    # Verify the Signature runner executions.
+    add_signature_runner = interpreter.get_signature_runner('add')
+    add_output = add_signature_runner(x=input_data)
+    self.assertEqual(add_output['output_0'], 3)
+
+    sub_signature_runner = interpreter.get_signature_runner('sub')
+    sub_output = sub_signature_runner(x=input_data)
+    self.assertEqual(sub_output['output_0'], -2)
 
   def _getIntegerQuantizeModel(self):
     np.random.seed(0)
@@ -401,7 +422,8 @@ class FromConcreteFunctionTest(lite_v2_test_util.ModelTest):
     input_data = tf.constant(1., shape=[1])
     concrete_func = root.f.get_concrete_function(input_data)
 
-    converter = lite.TFLiteConverterV2.from_concrete_functions([concrete_func])
+    converter = lite.TFLiteConverterV2.from_concrete_functions([concrete_func],
+                                                               None)
     tflite_model = converter.convert()
 
     # Check values from converted model.
@@ -780,12 +802,15 @@ class FromConcreteFunctionTest(lite_v2_test_util.ModelTest):
     self.assertEqual(output_details[1]['dtype'], expected_ceil_dtype)
 
   @parameterized.named_parameters(
-      ('_BlocklistedNone', None, None),
-      ('_BlocklistedOps', {'CONV_2D'}, None),
-      ('_BlocklistedNodes', None, {'Identity'}))
+      ('_BlocklistedNoneWithLowering', None, None, True),
+      ('_BlocklistedNoneWithoutLowering', None, None, False),
+      ('_BlocklistedOpsWithLowering', {'CONV_2D'}, None, True),
+      ('_BlocklistedOpsWithoutLowering', {'CONV_2D'}, None, False),
+      ('_BlocklistedNodesWithLowering', None, {'PartitionedCall:0'}, True),
+      ('_BlocklistedNodesWithoutLowering', None, {'Identity'}, False))
   @test_util.run_v2_only
-  def testNewQuantizerBlocklistingArgs(self, blocklisted_ops,
-                                       blocklisted_nodes):
+  def testNewQuantizerBlocklistingArgs(self, blocklisted_ops, blocklisted_nodes,
+                                       lower_to_saved_model):
     """Test the model quantized by the new converter and blocklisted options."""
     root, func, calibration_gen = self._getIntegerQuantizeModel()
     quantized_converter = lite.TFLiteConverterV2.from_concrete_functions([func],
@@ -797,9 +822,7 @@ class FromConcreteFunctionTest(lite_v2_test_util.ModelTest):
     quantized_converter.optimizations = [lite.Optimize.DEFAULT]
     quantized_converter.experimental_new_quantizer = True
     quantized_converter._experimental_calibrate_only = True
-    if blocklisted_nodes:
-      # TODO(b/191205988): Explicitly disable saved model lowering.
-      quantized_converter.experimental_lower_to_saved_model = False
+    quantized_converter.experimental_lower_to_saved_model = lower_to_saved_model
     calibrated = quantized_converter.convert()
     quantized_tflite_model = mlir_quantize(calibrated,
                                            blocklisted_ops=blocklisted_ops,

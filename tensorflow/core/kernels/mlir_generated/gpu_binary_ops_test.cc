@@ -380,6 +380,8 @@ GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/Bool, bool, bool, baseline_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/Int8, int8, bool, baseline_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/UInt8, uint8, bool, baseline_equal,
+                       test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/Int16, int16, bool, baseline_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/Int64, int64, bool, baseline_equal,
@@ -390,6 +392,14 @@ GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/C64, std::complex<float>, bool,
 GENERATE_DEFAULT_TESTS(Equal, /*test_name=*/C128, std::complex<double>, bool,
                        baseline_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
+
+TEST_F(BinaryOpsTest, EqualUint8SpecialCases) {
+  TestEqualShapes<uint8, uint8, bool, bool>(
+      "Equal", /*shape=*/{20},
+      test::InputAsVector<uint8>({255, 1, 0, 0, 1, 255, 0, 255}),
+      test::InputAsVector<uint8>({1, 255, 0, 1, 0, 0, 255, 255}),
+      baseline_equal, test::OpsTestConfig().ExpectStrictlyEqual());
+}
 
 /// Test `tf.FloorDiv`.
 
@@ -507,17 +517,33 @@ GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     test::DefaultInputLessThanBitwidth<int8>(), baseline_left_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    LeftShift, /*test_name=*/UInt8, uint8, uint8, test::DefaultInput<uint8>(),
+    test::DefaultInputLessThanBitwidth<uint8>(), baseline_left_shift,
+    test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     LeftShift, /*test_name=*/Int16, int16, int16, test::DefaultInput<int16>(),
     test::DefaultInputLessThanBitwidth<int16>(), baseline_left_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    LeftShift, /*test_name=*/UInt16, uint16, uint16,
+    test::DefaultInput<uint16>(), test::DefaultInputLessThanBitwidth<uint16>(),
+    baseline_left_shift, test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     LeftShift, /*test_name=*/Int32, int32, int32, test::DefaultInput<int32>(),
     test::DefaultInputLessThanBitwidth<int32>(), baseline_left_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    LeftShift, /*test_name=*/UInt32, uint32, uint32,
+    test::DefaultInput<uint32>(), test::DefaultInputLessThanBitwidth<uint32>(),
+    baseline_left_shift, test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     LeftShift, /*test_name=*/Int64, int64, int64, test::DefaultInput<int64>(),
     test::DefaultInputLessThanBitwidth<int64>(), baseline_left_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    LeftShift, /*test_name=*/UInt64, uint64, uint64,
+    test::DefaultInput<uint64>(), test::DefaultInputLessThanBitwidth<uint64>(),
+    baseline_left_shift, test::OpsTestConfig().ExpectStrictlyEqual())
 
 /// Test `tf.Less`.
 
@@ -755,6 +781,9 @@ GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/Bool, bool, bool,
 GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/Int8, int8, bool,
                        baseline_not_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/UInt8, uint8, bool,
+                       baseline_not_equal,
+                       test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/Int16, int16, bool,
                        baseline_not_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
@@ -767,6 +796,14 @@ GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/C64, std::complex<float>, bool,
 GENERATE_DEFAULT_TESTS(NotEqual, /*test_name=*/C128, std::complex<double>, bool,
                        baseline_not_equal,
                        test::OpsTestConfig().ExpectStrictlyEqual())
+
+TEST_F(BinaryOpsTest, NotEqualUint8SpecialCases) {
+  TestEqualShapes<uint8, uint8, bool, bool>(
+      "NotEqual", /*shape=*/{20},
+      test::InputAsVector<uint8>({255, 1, 0, 0, 1, 255, 0, 255}),
+      test::InputAsVector<uint8>({1, 255, 0, 1, 0, 0, 255, 255}),
+      baseline_not_equal, test::OpsTestConfig().ExpectStrictlyEqual());
+}
 
 /// Test `tf.Polygamma`.
 
@@ -951,20 +988,36 @@ GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     test::DefaultInputLessThanBitwidth<int8>(), baseline_right_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    RightShift, /*test_name=*/UInt8, uint8, uint8, test::DefaultInput<uint8>(),
+    test::DefaultInputLessThanBitwidth<uint8>(), baseline_right_shift,
+    test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     RightShift,
     /*test_name=*/Int16, int16, int16, test::DefaultInput<int16>(),
     test::DefaultInputLessThanBitwidth<int16>(), baseline_right_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    RightShift, /*test_name=*/UInt16, uint16, uint16,
+    test::DefaultInput<uint16>(), test::DefaultInputLessThanBitwidth<uint16>(),
+    baseline_right_shift, test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     RightShift,
     /*test_name=*/Int32, int32, int32, test::DefaultInput<int32>(),
     test::DefaultInputLessThanBitwidth<int32>(), baseline_right_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
 GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    RightShift, /*test_name=*/UInt32, uint32, uint32,
+    test::DefaultInput<uint32>(), test::DefaultInputLessThanBitwidth<uint32>(),
+    baseline_right_shift, test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
     RightShift,
     /*test_name=*/Int64, int64, int64, test::DefaultInput<int64>(),
     test::DefaultInputLessThanBitwidth<int64>(), baseline_right_shift,
     test::OpsTestConfig().ExpectStrictlyEqual())
+GENERATE_DEFAULT_TESTS_WITH_SPECIFIC_INPUT_VALUES(
+    RightShift, /*test_name=*/UInt64, uint64, uint64,
+    test::DefaultInput<uint64>(), test::DefaultInputLessThanBitwidth<uint64>(),
+    baseline_right_shift, test::OpsTestConfig().ExpectStrictlyEqual())
 
 /// Test `tf.SquaredDifference`.
 
