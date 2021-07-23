@@ -141,6 +141,9 @@ tf_kernel_library(
         "gpu_op_tan.cc",
         "gpu_op_tanh.cc",
     ]),
+    copts = if_mlir_generated_experimental_kernels_enabled([
+        "-DMLIR_GENERATED_EXPERIMENTAL_KERNELS_ENABLED",
+    ]),
     tags = ["manual"],
     deps = if_mlir_generated_gpu_kernels_enabled([
         ":base_gpu_op",
@@ -440,11 +443,11 @@ tf_kernel_library(
 
 tf_kernel_library(
     name = "gpu_softsign_op",
-    srcs = if_mlir_generated_experimental_kernels_enabled([
+    srcs = if_mlir_generated_gpu_kernels_enabled([
         "gpu_op_softsign.cc",
     ]),
     tags = ["manual"],
-    deps = if_mlir_generated_experimental_kernels_enabled([
+    deps = if_mlir_generated_gpu_kernels_enabled([
         ":base_gpu_op",
         ":gpu_softsign_kernels",
         "//third_party/eigen3",
@@ -906,26 +909,38 @@ gpu_kernel_library(
     ]
 ]
 
-[
-    gpu_kernel_library(
-        name = "gpu_" + op + "_kernels",
-        op = op,
-        tile_size = "1024",
-        types = [
-            "f16",
-            "f32",
-            "f64",
-            "i64",
-            "c64",
-            "c128",
-        ],
-        unroll_factors = "4",
-    )
-    for op in [
-        "add_v2",
-        "sub",
-    ]
-]
+gpu_kernel_library(
+    name = "gpu_add_v2_kernels",
+    op = "add_v2",
+    tile_size = "1024",
+    types = [
+        "f16",
+        "f32",
+        "f64",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "c64",
+        "c128",
+    ],
+    unroll_factors = "4",
+)
+
+gpu_kernel_library(
+    name = "gpu_sub_kernels",
+    op = "sub",
+    tile_size = "1024",
+    types = [
+        "f16",
+        "f32",
+        "f64",
+        "i64",
+        "c64",
+        "c128",
+    ],
+    unroll_factors = "4",
+)
 
 gpu_kernel_library(
     name = "gpu_complex_kernels",
@@ -1277,23 +1292,28 @@ gpu_kernel_library(
     name = "gpu_cast_kernels",
     op = "cast",
     # We generate all combinations of input types/output types from the set
-    # {i1, i8, i16, i32, i64, f16, f32, f64}. The easiest way to do this is to
-    # repeat each input type 8 times and match it with the 8 different output
-    # types (thus, the list of 8 different output types needs to be repeated 8
-    # times as well).
+    # {i1, i8, i16, i32, i64, ui8, ui16, ui32, ui64, f16, f32, f64}. The easiest
+    # way to do this is to repeat each input type 12 times and match it with the
+    # 12 different output types (thus, the list of 12 different output types
+    # needs to be repeated 12 times as well).
     output_types = [
         "i1",
         "i8",
         "i16",
         "i32",
         "i64",
+        "ui8",
+        "ui16",
+        "ui32",
+        "ui64",
         "f16",
         "f32",
         "f64",
-    ] * 8,
+    ] * 12,
     tile_size = "256",
-    types = ["i1"] * 8 + ["i8"] * 8 + ["i16"] * 8 + ["i32"] * 8 + ["i64"] * 8 +
-            ["f16"] * 8 + ["f32"] * 8 + ["f64"] * 8,
+    types = ["i1"] * 12 + ["i8"] * 12 + ["i16"] * 12 + ["i32"] * 12 +
+            ["i64"] * 12 + ["ui8"] * 12 + ["ui16"] * 12 + ["ui32"] * 12 +
+            ["ui64"] * 12 + ["f16"] * 12 + ["f32"] * 12 + ["f64"] * 12,
 )
 
 gpu_kernel_library(
@@ -1610,6 +1630,7 @@ gpu_kernel_library(
 
 gpu_kernel_library(
     name = "gpu_rint_kernels",
+    jit_types = ["f16"],
     op = "rint",
     tile_size = "1024",
     types = [
