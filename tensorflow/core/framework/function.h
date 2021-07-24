@@ -41,6 +41,7 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/core/platform/threadpool_interface.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #if !defined(IS_MOBILE_PLATFORM)
 #include "tensorflow/core/protobuf/remote_tensor_handle.pb.h"
@@ -813,6 +814,7 @@ class FunctionLibraryRuntime {
     CollectiveExecutor* collective_executor = nullptr;
     ScopedStepContainer* step_container = nullptr;
     StepStatsCollectorInterface* stats_collector = nullptr;
+    CoordinationServiceAgent* coordination_service_agent = nullptr;
 
     std::function<void(std::function<void()>)>* runner = nullptr;
 
@@ -836,6 +838,9 @@ class FunctionLibraryRuntime {
     // If True, hint that all kernels should be treated as "inexpensive", and
     // hence executed on the scheduling thread.
     bool run_all_kernels_inline = false;
+
+    // If not null, use this thread pool for intra op scheduling.
+    thread::ThreadPoolInterface* user_intra_op_threadpool = nullptr;
 
     // Returns a human readable representation of this.
     std::string DebugString() const;

@@ -1,6 +1,6 @@
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library")
 load("//tensorflow:tensorflow.bzl", "get_compatible_with_cloud")
-load("//tensorflow:tensorflow.bzl", "if_google", "if_oss")
+load("//tensorflow:tensorflow.bzl", "if_google")
 
 # TF to TFRT kernels conversion.
 package(licenses = ["notice"])
@@ -43,6 +43,7 @@ cc_library(
     hdrs = [
         "PassDetail.h",
     ],
+    compatible_with = get_compatible_with_cloud(),
     deps = [
         ":TfrtGpuPassIncGen",
         "@llvm-project//mlir:GPUDialect",
@@ -60,6 +61,7 @@ cc_library(
         "gpu_passes.cc",
     ],
     hdrs = ["gpu_passes.h"],
+    compatible_with = get_compatible_with_cloud(),
     tags = [
         "gpu",
         "no_oss",
@@ -67,8 +69,12 @@ cc_library(
     visibility = [":friends"],
     deps = [
         ":pass_details",
+        "//tensorflow/compiler/mlir/hlo:lhlo",
+        "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
+        "//tensorflow/compiler/mlir/tensorflow",
+        "//tensorflow/compiler/mlir/xla:type_to_shape",
+        "//tensorflow/compiler/xla:shape_util",
         "@com_google_absl//absl/strings",
-        "@local_config_cuda//cuda:cuda_headers",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:GPUDialect",
         "@llvm-project//mlir:IR",
@@ -78,16 +84,11 @@ cc_library(
         "@llvm-project//mlir:StandardOps",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
-        "//tensorflow/compiler/mlir/hlo:lhlo",
-        "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
-        "//tensorflow/compiler/mlir/tensorflow",
-        "//tensorflow/compiler/mlir/xla:type_to_shape",
-        "//tensorflow/compiler/xla:shape_util",
         "@tf_runtime//:basic_kernels_opdefs",
         "@tf_runtime//backends/gpu:gpu_opdefs",
         "@tf_runtime//backends/gpu:gpu_passes",
         "@tf_runtime//backends/gpu:gpu_wrapper",
-    ] + if_oss(["@local_config_cuda//cuda:cublas_headers"]),
+    ],
     alwayslink = 1,
 )
 
