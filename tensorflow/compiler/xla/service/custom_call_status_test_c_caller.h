@@ -13,14 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_UTIL_DETERMINISM_H_
-#define TENSORFLOW_CORE_UTIL_DETERMINISM_H_
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_CUSTOM_CALL_STATUS_TEST_C_CALLER_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_CUSTOM_CALL_STATUS_TEST_C_CALLER_H_
 
-namespace tensorflow {
+#include "tensorflow/compiler/xla/service/custom_call_status.h"
 
-bool OpDeterminismRequired();
-void EnableOpDeterminism(bool enabled);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-}  // namespace tensorflow
+void CSetSuccess(XlaCustomCallStatus* status);
 
-#endif  // TENSORFLOW_CORE_UTIL_DETERMINISM_H_
+void CSetFailure(XlaCustomCallStatus* status, const char* message,
+                 size_t message_len);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_CUSTOM_CALL_STATUS_TEST_C_CALLER_H_

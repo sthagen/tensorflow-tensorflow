@@ -13,14 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_UTIL_DETERMINISM_H_
-#define TENSORFLOW_CORE_UTIL_DETERMINISM_H_
+#include "tensorflow/compiler/xla/service/custom_call_status_internal.h"
 
-namespace tensorflow {
+namespace xla {
+// Internal functions
 
-bool OpDeterminismRequired();
-void EnableOpDeterminism(bool enabled);
+absl::optional<absl::string_view> CustomCallStatusGetMessage(
+    const XlaCustomCallStatus* status) {
+  return status->message;
+}
 
-}  // namespace tensorflow
+}  // namespace xla
 
-#endif  // TENSORFLOW_CORE_UTIL_DETERMINISM_H_
+void XlaCustomCallStatusSetSuccess(XlaCustomCallStatus* status) {
+  status->message = absl::nullopt;
+}
+
+void XlaCustomCallStatusSetFailure(XlaCustomCallStatus* status,
+                                   const char* message, size_t message_len) {
+  status->message = std::string(message, strnlen(message, message_len));
+}
