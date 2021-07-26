@@ -243,8 +243,8 @@ StatusOr<std::unique_ptr<se::MultiDeviceAdapter>> CreateBFCAllocator(
         /*alloc_visitors=*/std::vector<tensorflow::SubAllocator::Visitor>(),
         /*free_visitors=*/std::vector<tensorflow::SubAllocator::Visitor>());
 
-    int64 free_memory;
-    int64 total_memory;
+    int64_t free_memory;
+    int64_t total_memory;
     if (!executor->DeviceMemoryUsage(&free_memory, &total_memory)) {
       return Unavailable("Failed to query available memory from device %i",
                          device_ordinal);
@@ -320,7 +320,7 @@ std::unique_ptr<tensorflow::BFCAllocator> GetGpuHostAllocator(
   tensorflow::SubAllocator* sub_allocator = new tensorflow::DeviceHostAllocator(
       executor, /*numa_node=*/0, /*alloc_visitors=*/{}, /*free_visitors=*/{});
   // TODO(phawkins): allow the user to tune this.
-  const int64 kGpuHostMemoryLimitBytes = 64 * (1LL << 30);
+  const int64_t kGpuHostMemoryLimitBytes = 64 * (1LL << 30);
   return absl::make_unique<tensorflow::BFCAllocator>(
       sub_allocator, kGpuHostMemoryLimitBytes, /*allow_growth=*/true,
       /*name=*/"xla_gpu_host_bfc");
@@ -392,6 +392,7 @@ std::vector<std::unique_ptr<PjRtStreamExecutorDevice>> BuildLocalDevices(
         local_device->executor()->GetDeviceDescription();
     auto device = absl::make_unique<GpuDevice>(
         device_ordinal, std::move(local_device), description.name(),
+        description.device_vendor(),
         /*node_id=*/0);
     devices.push_back(std::move(device));
   }
@@ -441,7 +442,7 @@ Status BuildDistributedDevices(
       }
       auto device = absl::make_unique<GpuDevice>(
           device_proto.global_device_id(), std::move(local_device),
-          device_proto.name(), node.node_id());
+          device_proto.name(), device_proto.vendor(), node.node_id());
       devices->push_back(std::move(device));
     }
   }
@@ -463,9 +464,13 @@ Status BuildDistributedDevices(
 
 GpuDevice::GpuDevice(int id,
                      std::unique_ptr<LocalDeviceState> local_device_state,
-                     std::string device_kind, int node_id)
+                     std::string device_kind, std::string device_vendor,
+                     int node_id)
     : PjRtStreamExecutorDevice(id, std::move(local_device_state),
-                               std::move(device_kind), node_id) {}
+                               std::move(device_kind), node_id),
+      device_vendor_(std::move(device_vendor)) {}
+
+absl::string_view GpuDevice::device_vendor() { return device_vendor_; }
 
 StatusOr<std::unique_ptr<PjRtClient>> GetGpuClient(
     bool asynchronous, const GpuAllocatorConfig& allocator_config,

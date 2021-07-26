@@ -834,7 +834,7 @@ Status IrEmitterUnnested::EmitSliceToDynamic(mlir::Operation* op) {
   // calculate the location where metadata needs to be inserted
   //   int* dyn_dim0_size = dest_array + meta_data_offset;
   //   int* dyn_dim1_size = dest_array + meta_data_offset + sizeof(int);
-  int32 raw_data_size = ShapeUtil::ByteSizeOf(data_shape);
+  int32_t raw_data_size = ShapeUtil::ByteSizeOf(data_shape);
 
   // pseudo code for sliceToDynamic on a 2d array
   //   int* source_array = input[0];
@@ -1088,7 +1088,8 @@ Status IrEmitterUnnested::EmitGemmThunk(mlir::Operation* op) {
       inputs.push_back(bias.value());
     }
 
-    if (IsBefThunkEnabled()) {
+    if (IsBefThunkEnabled() && op.lhs_stride() && op.rhs_stride()) {
+      // TODO(loreno): TFRT support for zero-strided gemm calls
       return CreateBefThunk(GetThunkInfo(op), op, inputs,
                             std::vector<BufferAllocation::Slice>{output});
     }
@@ -1108,6 +1109,8 @@ Status IrEmitterUnnested::EmitGemmThunk(mlir::Operation* op) {
     if (gemm_bias_beta.has_value()) {
       backend.set_beta(gemm_bias_beta.value());
     }
+    backend.set_lhs_stride(op.lhs_stride());
+    backend.set_rhs_stride(op.rhs_stride());
 
     auto& dims = *backend.mutable_dot_dimension_numbers();
     auto mlir_dims = op.dot_dimension_numbers();

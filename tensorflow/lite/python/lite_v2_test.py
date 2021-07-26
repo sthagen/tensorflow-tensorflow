@@ -1267,8 +1267,10 @@ class FromSavedModelTest(lite_v2_test_util.ModelTest):
     actual_value = self._evaluateTFLiteModel(tflite_model, [input_data])
     self.assertEqual(expected_value.numpy(), actual_value)
 
+  @parameterized.named_parameters(('EnableResourceVariables', True),
+                                  ('DisableResourceVariables', False))
   @test_util.run_v2_only
-  def testNativeVariablesModel(self):
+  def testNativeVariablesModel(self, enable_resource_variables):
     """Test a basic model with Variables with saving/loading the SavedModel."""
     root = self._getSimpleModelWithVariables()
     input_data = tf.constant(1., shape=[1, 10])
@@ -1279,7 +1281,20 @@ class FromSavedModelTest(lite_v2_test_util.ModelTest):
 
     # Convert model and ensure model is not None.
     converter = lite.TFLiteConverterV2.from_saved_model(save_dir)
-    converter.experimental_enable_resource_variables = True
+    converter.experimental_enable_resource_variables = enable_resource_variables
+
+    if not enable_resource_variables:
+      with self.assertRaises(convert.ConverterError) as error:
+        tflite_model = converter.convert()
+      self.assertEqual(
+          'Variable constant folding is failed. Please consider using enabling '
+          '`experimental_enable_resource_variables` flag in the TFLite '
+          'converter object. For example, '
+          'converter.experimental_enable_resource_variables = True',
+          str(error.exception))
+      return
+
+    # Enable resource variables.
     tflite_model = converter.convert()
 
     # Check values from converted model.
@@ -2687,8 +2702,10 @@ class ResourceAndVariantTypes(lite_v2_test_util.ModelTest):
     actual_value = interpreter.get_tensor(output_details[0]['index'])
     self.assertEqual(40.0, actual_value)
 
+  @parameterized.named_parameters(('EnableLoweringTensorListOps', True),
+                                  ('DisableLoweringTensorListOps', False))
   @test_util.run_v2_only
-  def testTensorListWithDynamicSize(self):
+  def testTensorListWithDynamicSize(self, lower_tensor_list_ops):
 
     def create_v1_saved_model():
       saved_model_dir = os.path.join(self.get_temp_dir(),
@@ -2714,6 +2731,14 @@ class ResourceAndVariantTypes(lite_v2_test_util.ModelTest):
     saved_model_dir = create_v1_saved_model()
 
     converter = lite.TFLiteConverterV2.from_saved_model(saved_model_dir)
+    if lower_tensor_list_ops:
+      with self.assertRaises(convert.ConverterError) as error:
+        converter.convert()
+      self.assertIn(
+          'Lowering tensor list ops is failed. Please consider using Select '
+          'TF ops and disabling `_experimental_lower_tensor_list_ops` flag in '
+          'the TFLite converter object.', str(error.exception))
+
     converter.target_spec.supported_ops = [
         tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS
     ]
