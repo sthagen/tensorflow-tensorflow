@@ -30,12 +30,15 @@ package_group(
     ],
 )
 
-filegroup(
+td_library(
     name = "tensorflow_lite_ops_td_files",
     srcs = [
         "ir/tfl_op_interfaces.td",
         "ir/tfl_ops.td",
         "ir/tfl_structs.td",
+    ],
+    compatible_with = get_compatible_with_cloud(),
+    deps = [
         "//tensorflow/compiler/mlir/lite/quantization:quantization_td_files",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_ops_td_files",
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
@@ -860,6 +863,7 @@ cc_library(
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:status",
         "//tensorflow/lite:framework",
+        "//tensorflow/lite:string_util",
         "//tensorflow/lite/schema:schema_fbs",
         "//tensorflow/lite/schema:schema_utils",
         "@com_google_absl//absl/base",
