@@ -135,7 +135,7 @@ void MacroKernel(const char* __restrict a, int64_t lda, int outer_bs_a,
 // following by iterating over the linked Node data structure.
 template <typename T, int inner_bs>
 void Transpose(const char* __restrict a, int outer_bs_a, char* __restrict b,
-               int outer_bs_b, TransposePlan::Node const* node) {
+               int outer_bs_b, TransposePlan::Node const* __restrict node) {
   DVLOG(10) << "Transpose " << outer_bs_a << " " << outer_bs_b;
   DCHECK_GT(outer_bs_a, 0);
   DCHECK_GT(outer_bs_b, 0);
@@ -258,23 +258,75 @@ void Transpose(const char* __restrict a, int outer_bs_a, char* __restrict b,
 
 template <typename T>
 void TransposeConstStride1(const char* __restrict a, char* __restrict b,
-                           TransposePlan::Node const* node) {
-  a += node->start * node->lda;
-  b += node->start * node->ldb;
-  if (node->is_inner_dim_in_a) {
-    DCHECK(node->is_inner_dim_in_b);
+                           TransposePlan::Node const* __restrict node) {
+  a += node[0].start * node[0].lda;
+  b += node[0].start * node[0].ldb;
+  if (node[0].is_inner_dim_in_a) {
     int64_t num_bytes = (node->end - node->start) * sizeof(T);
     std::memcpy(b, a, num_bytes);
-  } else {
-    DCHECK(!node->is_inner_dim_in_b);
-    TransposePlan::Node const* next = node + 1;
-    for (int64_t i = node->start; i < node->end; ++i) {
-      TransposeConstStride1<T>(a, b, next);
-      a += node->lda;
-      b += node->ldb;
+  } else if (node[1].is_inner_dim_in_a) {
+    int64_t offset_a = node[1].start * node[1].lda;
+    int64_t offset_b = node[1].start * node[1].ldb;
+    int64_t num_bytes = (node[1].end - node[1].start) * sizeof(T);
+    a += offset_a;
+    b += offset_b;
+    for (int64_t i = node[0].start; i < node[0].end; ++i) {
+      std::memcpy(b, a, num_bytes);
+      a += node[0].lda;
+      b += node[0].ldb;
     }
-    if (node->trailing_tile_next_node_inc) {
-      TransposeConstStride1<T>(a, b, node + node->trailing_tile_next_node_inc);
+    if (node[0].trailing_tile_next_node_inc) {
+      TransposeConstStride1<T>(a - offset_a, b - offset_b,
+                               node + node[0].trailing_tile_next_node_inc);
+    }
+  } else if (node[2].is_inner_dim_in_a) {
+    int64_t num_bytes = (node[2].end - node[2].start) * sizeof(T);
+    int64_t offset_a1 = node[1].start * node[1].lda;
+    int64_t offset_b1 = node[1].start * node[1].ldb;
+    int64_t offset_a2 = node[2].start * node[2].lda;
+    int64_t offset_b2 = node[2].start * node[2].ldb;
+    a += offset_a1 + offset_a2;
+    b += offset_b1 + offset_b2;
+    for (int64_t i = node[0].start; i < node[0].end; ++i) {
+      const char* a1 = a;
+      char* b1 = b;
+      for (int64_t j = node[1].start; j < node[1].end; ++j) {
+        std::memcpy(b1, a1, num_bytes);
+        a1 += node[1].lda;
+        b1 += node[1].ldb;
+      }
+      if (node[1].trailing_tile_next_node_inc) {
+        TransposeConstStride1<T>(
+            a1 - offset_a2, b1 - offset_b2,
+            &node[1] + node[1].trailing_tile_next_node_inc);
+      }
+      a += node[0].lda;
+      b += node[0].ldb;
+    }
+    if (node[0].trailing_tile_next_node_inc) {
+      TransposeConstStride1<T>(a - offset_a1 - offset_a2,
+                               b - offset_b1 - offset_b2,
+                               node + node[0].trailing_tile_next_node_inc);
+    }
+  } else {
+    for (int64_t i = node[0].start; i < node[0].end; ++i) {
+      const char* a1 = a + node[1].start * node[1].lda;
+      char* b1 = b + node[1].start * node[1].ldb;
+      for (int64_t j = node[1].start; j < node[1].end; ++j) {
+        TransposeConstStride1<T>(a1, b1, node + 2);
+        a1 += node[1].lda;
+        b1 += node[1].ldb;
+      }
+      if (node[1].trailing_tile_next_node_inc) {
+        TransposeConstStride1<T>(
+            a1, b1, &node[1] + node[1].trailing_tile_next_node_inc);
+      }
+      a += node[0].lda;
+      b += node[0].ldb;
+    }
+    if (node[0].trailing_tile_next_node_inc) {
+      TransposeConstStride1<T>(a, b,
+                               node + node[0].trailing_tile_next_node_inc);
     }
   }
 }
@@ -841,16 +893,21 @@ StatusOr<std::unique_ptr<TransposePlan>> TransposePlan::Create(
     // fastest-varying (smallest strides).
     std::vector<int64_t> dim_order(ndim);
     absl::c_iota(dim_order, 0);
-    absl::c_stable_sort(dim_order, [&](int i, int j) {
-      int64_t stride_i = input_strides_in_bytes.at(i);
-      int64_t stride_j = input_strides_in_bytes.at(j);
+
+    auto cost = [&](int k) {
+      int64_t stride = input_strides_in_bytes.at(k);
       // If there is a dimension with size equal to the element size, sort it
       // last. This ensures that we place any stride-1 dimension last.
-      if (stride_i != elem_size_in_bytes && stride_j == elem_size_in_bytes) {
-        return true;
-      }
-      return stride_i > stride_j;
-    });
+      bool is_stride1 = stride == elem_size_in_bytes;
+      // If there are multiple stride-1 dimensions, we'd prefer the one that
+      // matches the stride-1 dimension of the output.
+      // Failing that, we'd just prefer the largest stride-1 dimension last.
+      bool is_trailing_dim_in_b = permutation.back() == k;
+      return std::make_tuple(is_stride1, -stride, is_trailing_dim_in_b,
+                             dims[k]);
+    };
+    absl::c_stable_sort(dim_order,
+                        [&cost](int i, int j) { return cost(i) < cost(j); });
     // dim_order maps new input dim -> old input dim, we need its inverse to
     // compute the new permutation.
     auto inv_dim_order = InversePermutation(dim_order);
@@ -933,63 +990,14 @@ void TransposePlan::Initialize() {
   ComputeStrides(elem_size_in_bytes_, b_dims_, b_tiling_, ldb_, ldb_tile_);
 
   const int pos_stride1a = ndim - 1;
-  inner_kernel_is_memcpy_ = (permutation_[ndim - 1] == pos_stride1a);
+  const int pos_stride1b_in_a = permutation_.back();
+  inner_kernel_is_memcpy_ = (pos_stride1b_in_a == pos_stride1a);
 
   loop_order_.reserve(ndim);
   for (int i = 0; i < ndim; ++i) {
     loop_order_.push_back(Loop{i, /*tile_interior=*/false});
     if (a_tiling_[i] != 1 || b_tiling_[inverse_permutation[i]] != 1) {
       loop_order_.push_back(Loop{i, /*tile_interior=*/true});
-    }
-  }
-  // Loop order heuristic: try to make loops with small strides innermost.
-  auto cost = [&](const Loop& l) -> double {
-    if (inner_kernel_is_memcpy_ && l.dim_in_a == pos_stride1a) {
-      return l.tile_interior ? -2 : -1;
-    }
-    int64_t a_stride = (l.tile_interior && a_is_tiled_) ? lda_tile_[l.dim_in_a]
-                                                        : lda_[l.dim_in_a];
-    int b_dim = inverse_permutation[l.dim_in_a];
-    int64_t b_stride =
-        (l.tile_interior && b_is_tiled_) ? ldb_tile_[b_dim] : ldb_[b_dim];
-    // Add a small penalty to the input strides: given the choice between
-    // consecutive writes and consecutive reads, we would prefer consecutive
-    // writes.
-    double penalty = 1.01;
-    return a_stride * penalty + b_stride;
-  };
-  absl::c_stable_sort(loop_order_, [&](const Loop& a, const Loop& b) {
-    return std::make_tuple(inner_kernel_is_memcpy_ && a.tile_interior,
-                           -cost(a)) <
-           std::make_tuple(inner_kernel_is_memcpy_ && b.tile_interior,
-                           -cost(b));
-  });
-  // It is a required invariant of the loop order that tile interiors always
-  // appear after the corresponding tile exterior. This is a consequence of the
-  // heuristic above, because
-
-  if (inner_kernel_is_memcpy_) {
-    // The stride-1 loop must be innermost.
-    CHECK_EQ(loop_order_.back().dim_in_a, ndim - 1);
-  } else {
-    switch (elem_size_in_bytes_) {
-      case 1:
-        inner_block_elems_ = 16;
-        break;
-      case 2:
-        inner_block_elems_ = 8;
-        break;
-      case 4:
-        inner_block_elems_ = 8;
-        break;
-      case 8:
-        inner_block_elems_ = 4;
-        break;
-      case 16:
-        inner_block_elems_ = 4;
-        break;
-      default:
-        LOG(FATAL) << "Unreachable: element size " << elem_size_in_bytes_;
     }
   }
 
@@ -1016,20 +1024,91 @@ void TransposePlan::Initialize() {
     outer_block_elems_a_ = -1;
     outer_block_elems_b_ = -1;
   } else {
+    // What are the smallest and largest block sizes for which we have a
+    // vectorized kernel for this element size?
+    int min_inner_block_elems;
+    int max_inner_block_elems;
+    switch (elem_size_in_bytes_) {
+      case 1:
+        min_inner_block_elems = 4;
+        max_inner_block_elems = 16;
+        break;
+      case 2:
+        min_inner_block_elems = 8;
+        max_inner_block_elems = 8;
+        break;
+      case 4:
+        min_inner_block_elems = 4;
+        max_inner_block_elems = 8;
+        break;
+      case 8:
+        min_inner_block_elems = 2;
+        max_inner_block_elems = 4;
+        break;
+      case 16:
+        min_inner_block_elems = 1;
+        max_inner_block_elems = 1;
+        break;
+      default:
+        LOG(FATAL) << "Unreachable: element size " << elem_size_in_bytes_;
+    }
+    inner_block_elems_ = max_inner_block_elems;
     while (inner_block_elems_ > std::min(a_stride1_size, b_stride1_size)) {
       inner_block_elems_ /= 2;
-      outer_block_elems_a_ *= 2;
-      outer_block_elems_b_ *= 2;
     }
-    while (outer_block_elems_a_ > 1 &&
-           inner_block_elems_ * outer_block_elems_a_ > a_stride1_size) {
-      outer_block_elems_a_ /= 2;
+    if (inner_block_elems_ < min_inner_block_elems) {
+      // Size is smaller than our smallest vectorized kernel. Use the scalar
+      // path.
+      inner_block_elems_ = 1;
     }
-    while (outer_block_elems_b_ > 1 &&
-           inner_block_elems_ * outer_block_elems_b_ > b_stride1_size) {
-      outer_block_elems_b_ /= 2;
-    }
+    outer_block_elems_a_ = FloorOfRatio<int64_t>(
+        std::min<int64_t>(16, a_stride1_size), inner_block_elems_);
+    outer_block_elems_b_ = FloorOfRatio<int64_t>(
+        std::min<int64_t>(16, b_stride1_size), inner_block_elems_);
   }
+
+  // Loop order heuristic: try to make loops with small strides innermost.
+  auto cost = [&](const Loop& l) -> double {
+    // If the inner kernel is a memcpy make sure the innermost dimension is the
+    // stride 1 dimensions. This is a requirement of the kernel.
+    if (inner_kernel_is_memcpy_ && l.dim_in_a == pos_stride1a) {
+      return l.tile_interior ? -2 : -1;
+    }
+    int64_t a_stride = (l.tile_interior && a_is_tiled_) ? lda_tile_[l.dim_in_a]
+                                                        : lda_[l.dim_in_a];
+    bool is_inner_dim_in_a =
+        (!a_is_tiled_ || l.tile_interior) && (l.dim_in_a == pos_stride1a);
+
+    if (!inner_kernel_is_memcpy_ && is_inner_dim_in_a) {
+      a_stride *= inner_block_elems_ * outer_block_elems_a_;
+    }
+    int b_dim = inverse_permutation[l.dim_in_a];
+    int64_t b_stride =
+        (l.tile_interior && b_is_tiled_) ? ldb_tile_[b_dim] : ldb_[b_dim];
+    bool is_inner_dim_in_b =
+        (!b_is_tiled_ || l.tile_interior) && (l.dim_in_a == pos_stride1b_in_a);
+    if (!inner_kernel_is_memcpy_ && is_inner_dim_in_b) {
+      b_stride *= inner_block_elems_ * outer_block_elems_b_;
+    }
+    // Add a small penalty to the input strides: given the choice between
+    // consecutive writes and consecutive reads, we would prefer consecutive
+    // writes.
+    double penalty = 1.01;
+    return std::min<double>(a_stride * penalty, b_stride);
+  };
+  absl::c_stable_sort(loop_order_, [&](const Loop& a, const Loop& b) {
+    return std::make_tuple(inner_kernel_is_memcpy_ && a.tile_interior,
+                           -cost(a)) <
+           std::make_tuple(inner_kernel_is_memcpy_ && b.tile_interior,
+                           -cost(b));
+  });
+  // It is a required invariant of the loop order that tile interiors always
+  // appear after the corresponding tile exterior. This is a consequence of the
+  // heuristic above, because the tile interior must have smaller strides in
+  // both input and output.
+
+  // The stride-1 loop must be innermost for a memcpy loop.
+  CHECK(!inner_kernel_is_memcpy_ || loop_order_.back().dim_in_a == ndim - 1);
 
   loop_parallelism_ = ChooseParallelizationStrategy(inverse_permutation);
   int num_threads =
