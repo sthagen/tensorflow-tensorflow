@@ -384,28 +384,12 @@ cc_library(
 )
 
 cc_library(
-    name = "hlo_execution_profiler",
-    srcs = ["hlo_execution_profiler.cc"],
-    hdrs = ["hlo_execution_profiler.h"],
-    deps = [
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_execution_profile",
-        "//tensorflow/compiler/xla/service:stream_pool",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:ptr_util",
-        "//tensorflow/core/platform:stream_executor_no_cuda",
-        "@com_google_absl//absl/memory",
-    ],
-)
-
-cc_library(
     name = "thunk",
     srcs = ["thunk.cc"],
     hdrs = ["thunk.h"],
     deps = [
         ":buffer_allocations",
         ":gpu_executable_run_options",
-        ":hlo_execution_profiler",
         "//tensorflow/compiler/xla:executable_run_options",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/core:lib",
@@ -628,7 +612,6 @@ cc_library(
         ":gpu_conv_runner",
         ":gpu_executable_run_options",
         ":gpu_types",
-        ":hlo_execution_profiler",
         ":io_feed_manager",
         ":ir_emission_utils",
         ":nccl_collective_thunks",
@@ -638,6 +621,7 @@ cc_library(
         ":thunk",
         "@llvm-project//mlir:IR",
         "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
+        "//tensorflow/compiler/xla/service:hlo_execution_profile",
         "//tensorflow/compiler/xla:array2d",
         "//tensorflow/compiler/xla:literal",
         "//tensorflow/compiler/xla:refcounting_hash_map",
@@ -654,7 +638,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_casting_utils",
         "//tensorflow/compiler/xla/service:hlo_dataflow_analysis",
-        "//tensorflow/compiler/xla/service:hlo_execution_profile",
         "//tensorflow/compiler/xla/service:logical_buffer",
         "//tensorflow/compiler/xla/service:shaped_buffer",
         "//tensorflow/compiler/xla/service:transfer_manager",
@@ -792,7 +775,6 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":buffer_allocations",
-        ":hlo_execution_profiler",
         ":ir_emission_utils",
         ":stream_executor_util",
         ":thunk",
@@ -1142,37 +1124,6 @@ tf_cc_test(
 )
 
 cc_library(
-    name = "fusion_bitcast_lift",
-    srcs = ["fusion_bitcast_lift.cc"],
-    hdrs = ["fusion_bitcast_lift.h"],
-    deps = [
-        "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_casting_utils",
-        "//tensorflow/compiler/xla/service:hlo_dce",
-        "//tensorflow/compiler/xla/service:hlo_pass",
-        "//tensorflow/compiler/xla/service:hlo_verifier",
-        "//tensorflow/core/platform:errors",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-tf_cc_test(
-    name = "fusion_bitcast_lift_test",
-    srcs = ["fusion_bitcast_lift_test.cc"],
-    tags = ["no_pip"],
-    deps = [
-        ":fusion_bitcast_lift",
-        "//tensorflow/compiler/xla/service:hlo_dce",
-        "//tensorflow/compiler/xla/service:hlo_parser",
-        "//tensorflow/compiler/xla/tests:filecheck",
-        "//tensorflow/compiler/xla/tests:hlo_test_base",
-        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-cc_library(
     name = "fusion_merger",
     srcs = ["fusion_merger.cc"],
     hdrs = ["fusion_merger.h"],
@@ -1413,7 +1364,6 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":cudnn_batchnorm_rewriter",
-        ":fusion_bitcast_lift",
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
         ":gemm_rewriter",

@@ -421,6 +421,8 @@ class HloParserImpl : public HloParser {
   bool ParseMetadata(OpMetadata* metadata);
   bool ParseSingleOrListMetadata(
       tensorflow::protobuf::RepeatedPtrField<OpMetadata>* metadata);
+  bool ParseOpShardingType(OpSharding::Type* type);
+  bool ParseListShardingType(std::vector<OpSharding::Type>* types);
   bool ParseSharding(OpSharding* sharding);
   bool ParseFrontendAttributes(FrontendAttributes* frontend_attributes);
   bool ParseSingleSharding(OpSharding* sharding, bool lbrace_pre_lexed);
@@ -827,11 +829,14 @@ bool HloParserImpl::ParseHloModule(HloModule* module) {
 
   absl::optional<bool> is_scheduled;
   absl::optional<AliasingData> aliasing_data;
+  absl::optional<bool> alias_passthrough_params;
   absl::flat_hash_map<std::string, AttrConfig> attrs;
 
   attrs["is_scheduled"] = {/*required=*/false, AttrTy::kBool, &is_scheduled};
   attrs["input_output_alias"] = {/*required=*/false, AttrTy::kAliasing,
                                  &aliasing_data};
+  attrs["alias_passthrough_params"] = {/*required=*/false, AttrTy::kBool,
+                                       &alias_passthrough_params};
   if (!ParseAttributes(attrs)) {
     return false;
   }
@@ -842,6 +847,11 @@ bool HloParserImpl::ParseHloModule(HloModule* module) {
 
   if (is_scheduled.has_value() && *is_scheduled) {
     TF_CHECK_OK(module->set_schedule(ScheduleFromInstructionOrder(module)));
+  }
+  if (alias_passthrough_params.has_value() && *alias_passthrough_params) {
+    HloModuleConfig config = module->config();
+    config.set_alias_passthrough_params(true);
+    module->set_config(config);
   }
   if (aliasing_data) {
     HloInputOutputAliasConfig alias_config(module->result_shape());
@@ -2834,6 +2844,7 @@ bool HloParserImpl::ParseFrontendAttributes(
 // dims ::= int_list device_list ::= int_list
 // metadata ::= single_metadata |
 //              ('{' [single_metadata (',' single_metadata)*] '}')
+// last_tile_dims ::= sharding_type_list
 bool HloParserImpl::ParseSingleSharding(OpSharding* sharding,
                                         bool lbrace_pre_lexed) {
   if (!lbrace_pre_lexed &&
@@ -2847,8 +2858,10 @@ bool HloParserImpl::ParseSingleSharding(OpSharding* sharding,
   bool replicated = false;
   bool manual = false;
   bool last_tile_dim_replicate = false;
+  bool last_tile_dims = false;
   std::vector<int64> devices;
   std::vector<int64> tile_assignment_dimensions;
+  std::vector<OpSharding::Type> sharding_types;
   while (lexer_.GetKind() != TokKind::kRbrace) {
     switch (lexer_.GetKind()) {
       case TokKind::kw_maximal:
@@ -2901,10 +2914,16 @@ bool HloParserImpl::ParseSingleSharding(OpSharding* sharding,
           if (!ParseSingleOrListMetadata(sharding->mutable_metadata())) {
             return false;
           }
+        } else if (lexer_.GetStrVal() == "last_tile_dims") {
+          last_tile_dims = true;
+          lexer_.Lex();
+          if (!ParseListShardingType(&sharding_types)) {
+            return false;
+          }
         } else {
           return TokenError(
-              "unknown attribute in sharding: expected device=, devices= or "
-              "metadata=");
+              "unknown attribute in sharding: expected device=, devices= "
+              "metadata= or last_tile_dims= ");
         }
         break;
       }
@@ -2956,7 +2975,14 @@ bool HloParserImpl::ParseSingleSharding(OpSharding* sharding,
     for (int64_t device : devices) {
       sharding->add_tile_assignment_devices(device);
     }
-    sharding->set_replicate_on_last_tile_dim(last_tile_dim_replicate);
+
+    if (last_tile_dims) {
+      for (OpSharding::Type type : sharding_types) {
+        sharding->add_last_tile_dims(type);
+      }
+    } else {
+      sharding->set_replicate_on_last_tile_dim(last_tile_dim_replicate);
+    }
   }
 
   lexer_.Lex();
@@ -5096,6 +5122,46 @@ bool HloParserImpl::ParseSingleOrListMetadata(
   }
 
   return ParseMetadata(metadata->Add());
+}
+
+bool HloParserImpl::ParseOpShardingType(OpSharding::Type* type) {
+  switch (lexer_.GetKind()) {
+    case TokKind::kw_maximal:
+      *type = OpSharding::MAXIMAL;
+      lexer_.Lex();
+      break;
+    case TokKind::kw_replicated:
+      *type = OpSharding::REPLICATED;
+      lexer_.Lex();
+      break;
+    case TokKind::kw_manual:
+      *type = OpSharding::MANUAL;
+      lexer_.Lex();
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool HloParserImpl::ParseListShardingType(
+    std::vector<OpSharding::Type>* types) {
+  if (!ParseToken(TokKind::kLbrace,
+                  "expected '{' to start sharding type list")) {
+    return false;
+  }
+
+  if (lexer_.GetKind() != TokKind::kRbrace) {
+    do {
+      OpSharding::Type type;
+      if (!ParseOpShardingType(&type)) {
+        return false;
+      }
+      types->emplace_back(type);
+    } while (EatIfPresent(TokKind::kComma));
+  }
+
+  return ParseToken(TokKind::kRbrace, "expected '}' to end sharding type list");
 }
 
 bool HloParserImpl::ParseOpcode(HloOpcode* result) {

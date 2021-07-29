@@ -1392,6 +1392,7 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/grappler/utils:transitive_fanin",
+        "//tensorflow/core/platform:crash_analysis",
         "//tensorflow/core/platform:types",
         "//tensorflow/stream_executor/lib",
         "@com_google_absl//absl/algorithm:container",
@@ -1683,6 +1684,7 @@ cc_library(
     deps = [
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:status",
+        "//tensorflow/core/util:managed_stack_trace",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ],
@@ -1854,6 +1856,7 @@ tf_cc_test(
         "//tensorflow/core:lib",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ],

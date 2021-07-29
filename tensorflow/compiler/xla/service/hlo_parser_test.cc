@@ -1921,6 +1921,17 @@ ENTRY Computation {
 
 )"
     },
+// custom-call with unknown dim labels.
+{
+"CustomCallWithUnknownDimLabels",
+R"(HloModule CustomCallWithUnknownDimLabels
+
+ENTRY Computation {
+  ROOT r = f32[100]{0} custom-call(), window={size=2x2}, dim_labels=?b01f_0?1io->b01?f, custom_call_target="target"
+}
+
+)"
+    },
 // is_scheduled=true attribute
 {
 "ScheduledModule",
@@ -2957,6 +2968,20 @@ TEST_F(HloParserTest, ParseShardingPartialReplication) {
       original);
 }
 
+TEST_F(HloParserTest, ParseShardingSubGroup) {
+  const string original =
+      "{devices=[2,2,2,2]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 "
+      "last_tile_dims={replicated, manual}}";
+  TF_ASSERT_OK_AND_ASSIGN(HloSharding sharding, ParseSharding(original));
+  EXPECT_EQ(sharding.ToString(), original);
+  Array<int64> tile_assignment({2, 2, 2, 2});
+  tile_assignment.FillIota(0);
+  std::vector<OpSharding::Type> sharding_types = {OpSharding::REPLICATED,
+                                                  OpSharding::MANUAL};
+  EXPECT_EQ(HloSharding::Subgroup(tile_assignment, sharding_types).ToString(),
+            original);
+}
+
 TEST_F(HloParserTest, ParseFrontendAttributes) {
   const string original =
       R"({attr_a="test_a",attr_b="b",attr_c="s64",attr_d="a/b"})";
@@ -3734,6 +3759,21 @@ ENTRY InferUnaryShape {
   EXPECT_TRUE(ShapeUtil::Equal(
       module->entry_computation()->ComputeProgramShape().result(),
       ShapeUtil::MakeScalarShape(F32)));
+}
+
+TEST_F(HloParserTest, CheckAliasPassthroughParams) {
+  const char* const hlo_string = R"(
+HloModule TestModule, alias_passthrough_params=true
+
+ENTRY TestComputation {
+    p0 = f16[2048,1024] parameter(0)
+    p1 = f16[2048,1024] parameter(1)
+    ROOT root = (f16[2048,1024], f16[2048,1024]) tuple(p0, p1)
+}
+)";
+  auto result = ParseAndReturnVerifiedModule(hlo_string);
+  TF_EXPECT_OK(result.status());
+  EXPECT_TRUE(result.ValueOrDie()->config().alias_passthrough_params());
 }
 
 }  // namespace
