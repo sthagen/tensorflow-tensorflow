@@ -13,16 +13,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PLATFORM_CRASH_ANALYSIS_H_
-#define TENSORFLOW_CORE_PLATFORM_CRASH_ANALYSIS_H_
+#ifndef TF_TYPES_TYPES
+#define TF_TYPES_TYPES
 
-#include "tensorflow/core/platform/platform.h"
+include "tensorflow/core/ir/types/dialect.td"
 
-// Include appropriate platform-dependent implementations
-#if defined(PLATFORM_GOOGLE)
-#include "tensorflow/core/platform/google/crash_analysis.h"
-#else
-#include "tensorflow/core/platform/default/crash_analysis.h"
-#endif
 
-#endif  // TENSORFLOW_CORE_PLATFORM_CRASH_ANALYSIS_H_
+// All of the types will extend this class.
+class TFType_Type<string name> : TypeDef<TFTypeDialect, name> { }
+
+def ControlType : TFType_Type<"Control"> {
+  let mnemonic = "control";
+  let description = [{
+    This type models a control dependency between two TensorFlow nodes.
+  }];
+}
+
+def OpaqueTensorType : TFType_Type<"OpaqueTensor"> {
+  let mnemonic = "tensor";
+  let description = [{
+    This type models an opaque tensor: the shape and dtypes are unknown. This is
+    particularly useful in generic functions.
+  }];
+}
+
+#endif // TYPES

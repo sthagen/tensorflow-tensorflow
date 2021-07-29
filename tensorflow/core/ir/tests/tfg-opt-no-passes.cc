@@ -13,19 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/platform/default/crash_analysis.h"
+#include "mlir/Support/MlirOptMain.h"  // from @llvm-project
+#include "mlir/Transforms/Passes.h"  // from @llvm-project
+#include "tensorflow/core/ir/types/dialect.h"
 
-#include <string>
-
-namespace tensorflow {
-namespace crash_analysis {
-
-BufferedDataSource* ReportProtoDataOnCrash(const std::string& file_name,
-                                           const protobuf::Message& message) {
-  return nullptr;
+int main(int argc, char **argv) {
+  mlir::DialectRegistry registry;
+  mlir::registerCanonicalizerPass();
+  registry.insert<mlir::tf_type::TFTypeDialect>();
+  return failed(
+      mlir::MlirOptMain(argc, argv, "TFGraph IR Test Driver", registry));
 }
-
-void RemoveReportData(const BufferedDataSource* data_source) {}
-
-}  // namespace crash_analysis
-}  // namespace tensorflow

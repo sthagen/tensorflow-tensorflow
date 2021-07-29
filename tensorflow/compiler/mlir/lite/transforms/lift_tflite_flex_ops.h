@@ -13,24 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PLATFORM_DEFAULT_CRASH_ANALYSIS_H_
-#define TENSORFLOW_CORE_PLATFORM_DEFAULT_CRASH_ANALYSIS_H_
+#ifndef TENSORFLOW_COMPILER_MLIR_LITE_TRANSFORMS_LIFT_TFLITE_FLEX_OPS_H_
+#define TENSORFLOW_COMPILER_MLIR_LITE_TRANSFORMS_LIFT_TFLITE_FLEX_OPS_H_
 
-#include <string>
+#include "mlir/Pass/Pass.h"  // from @llvm-project
 
-#include "tensorflow/core/platform/protobuf.h"
+namespace mlir {
+namespace TFL {
 
-namespace tensorflow {
-namespace crash_analysis {
+// Creates an instance of the lift TFLite Flex ops pass that lifts TFLite Flex
+// ops into TF dialect operations.
+std::unique_ptr<OperationPass<FuncOp>> CreateLiftTfliteFlexOpsPass();
 
-class BufferedDataSource {};
+}  // namespace TFL
+}  // namespace mlir
 
-BufferedDataSource* ReportProtoDataOnCrash(const std::string& file_name,
-                                           const protobuf::Message& message);
-
-void RemoveReportData(const BufferedDataSource* data_source);
-
-}  // namespace crash_analysis
-}  // namespace tensorflow
-
-#endif  // TENSORFLOW_CORE_PLATFORM_DEFAULT_CRASH_ANALYSIS_H_
+#endif  // TENSORFLOW_COMPILER_MLIR_LITE_TRANSFORMS_LIFT_TFLITE_FLEX_OPS_H_
