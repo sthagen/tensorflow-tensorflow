@@ -15,7 +15,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CC_EXPERIMENTAL_LIBTF_IMPL_SCALARS_H_
 #define TENSORFLOW_CC_EXPERIMENTAL_LIBTF_IMPL_SCALARS_H_
 
-#include <sys/types.h>
+#include <stdint.h>
 
 #include <iosfwd>
 #include <utility>

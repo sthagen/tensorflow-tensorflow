@@ -32,6 +32,7 @@ tensorflow/lite/delegates/gpu/cl/serialization_generated.h
 tensorflow/lite/delegates/gpu/common/task/serialization_base_generated.h
 tensorflow/lite/experimental/acceleration/mini_benchmark/libjpeg.h
 tensorflow/lite/experimental/acceleration/mini_benchmark/special_rules.bzl
+tensorflow/lite/ios/BUILD
 tensorflow/lite/java/src/main/native/BUILD
 tensorflow/lite/schema/schema_generated.h
 tensorflow/opensource_only/BUILD
@@ -254,7 +255,6 @@ tensorflow/tools/ci_build/release/windows/gpu_py36_full/release_pip_rename.sh
 tensorflow/tools/ci_build/release/windows/gpu_py37_full/release_pip_rename.sh
 tensorflow/tools/ci_build/release/windows/gpu_py38_full/release_pip_rename.sh
 tensorflow/tools/ci_build/release/windows/gpu_py39_full/release_pip_rename.sh
-tensorflow/tools/ci_build/remote/BUILD
 tensorflow/tools/def_file_filter/BUILD
 tensorflow/tools/def_file_filter/BUILD.tpl
 tensorflow/tools/def_file_filter/def_file_filter.py.tpl

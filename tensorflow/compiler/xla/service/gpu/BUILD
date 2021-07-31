@@ -548,34 +548,6 @@ config_setting(
 )
 
 cc_library(
-    name = "tfrt_utils",
-    srcs = ["tfrt_utils.cc"],
-    hdrs = ["tfrt_utils.h"],
-    local_defines = if_cuda_is_configured([
-        "GOOGLE_CUDA=1",
-    ]),
-    deps = [
-        "//tensorflow/compiler/xla:statusor",
-        "//tensorflow/core:lib",
-        "//tensorflow/core/platform:errors",
-        "//tensorflow/stream_executor:device_memory",
-        "//tensorflow/stream_executor:stream_header",
-        "@tf_runtime//:core_runtime",
-        "@tf_runtime//:hostcontext",
-        "@tf_runtime//backends/gpu:gpu_types",
-    ] + if_gpu_is_configured([
-        "//tensorflow/stream_executor/gpu:gpu_driver_header",
-        "//tensorflow/stream_executor/gpu:gpu_executor_header",
-        "//tensorflow/stream_executor/gpu:gpu_stream_header",
-        "//tensorflow/stream_executor/gpu:gpu_types_header",
-    ]) + if_cuda_is_configured([
-        "//tensorflow/stream_executor/cuda:cuda_driver",
-    ]) + if_rocm_is_configured([
-        "//tensorflow/stream_executor/rocm:rocm_driver",
-    ]),
-)
-
-cc_library(
     name = "gpu_executable",
     srcs = [
         "bef_thunk.cc",
@@ -646,7 +618,6 @@ cc_library(
         ":launch_dimensions",
         ":stream_assignment",
         ":stream_executor_util",
-        ":tfrt_utils",
         ":thunk",
         "@llvm-project//mlir:IR",
         "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
@@ -717,6 +688,9 @@ cc_library(
             "//tensorflow/compiler/xla/service:collective_ops_utils",
             "//tensorflow/core/tfrt/gpu:gpu_shared_context",
             "//tensorflow/core/tfrt/runtime:work_queue_interface",
+            "//tensorflow/stream_executor/cuda:cublas_plugin",
+            "//tensorflow/stream_executor/cuda:cuda_driver",
+            "//tensorflow/stream_executor/gpu:gpu_executor_header",
             "@tf_runtime//:basic_kernels_alwayslink",
             "@tf_runtime//:befexecutor",
             "@tf_runtime//:core_runtime",
@@ -2267,50 +2241,50 @@ cc_library(
     ],
 )
 
-gentbl_cc_library(
-    name = "xla_thunks_ops_inc_gen",
-    tbl_outs = [
-        (
-            ["-gen-op-decls"],
-            "ir/xla_thunks_ops.h.inc",
-        ),
-        (
-            ["-gen-op-defs"],
-            "ir/xla_thunks_ops.cc.inc",
-        ),
-        (
-            ["-gen-struct-attr-decls"],
-            "ir/xla_thunks_structs.h.inc",
-        ),
-        (
-            ["-gen-struct-attr-defs"],
-            "ir/xla_thunks_structs.cc.inc",
-        ),
-    ],
-    tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "ir/xla_thunks_ops.td",
-    deps = [
-        "@llvm-project//mlir:LLVMOpsTdFiles",
-    ],
-)
+# gentbl_cc_library(
+#    name = "xla_thunks_ops_inc_gen",
+#    tbl_outs = [
+#        (
+#            ["-gen-op-decls"],
+#            "ir/xla_thunks_ops.h.inc",
+#        ),
+#        (
+#            ["-gen-op-defs"],
+#            "ir/xla_thunks_ops.cc.inc",
+#        ),
+#        (
+#            ["-gen-struct-attr-decls"],
+#            "ir/xla_thunks_structs.h.inc",
+#        ),
+#        (
+#            ["-gen-struct-attr-defs"],
+#            "ir/xla_thunks_structs.cc.inc",
+#        ),
+#    ],
+#    tblgen = "@llvm-project//mlir:mlir-tblgen",
+#    td_file = "ir/xla_thunks_ops.td",
+#    deps = [
+#        "@llvm-project//mlir:LLVMOpsTdFiles",
+#    ],
+#)
 
-cc_library(
-    name = "xla_thunks_ops",
-    srcs = [
-        "ir/xla_thunks_ops.cc",
-        "ir/xla_thunks_ops.cc.inc",
-        "ir/xla_thunks_ops.h.inc",
-    ],
-    hdrs = [
-        "ir/xla_thunks_ops.h",
-    ],
-    deps = [
-        ":xla_thunks_ops_inc_gen",
-        "//tensorflow/compiler/mlir/hlo",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LLVMDialect",
-    ],
-)
+# cc_library(
+#     name = "xla_thunks_ops",
+#     srcs = [
+#         "ir/xla_thunks_ops.cc",
+#         "ir/xla_thunks_ops.cc.inc",
+#         "ir/xla_thunks_ops.h.inc",
+#     ],
+#     hdrs = [
+#         "ir/xla_thunks_ops.h",
+#     ],
+#     deps = [
+#         ":xla_thunks_ops_inc_gen",
+#         "@llvm-project//mlir:IR",
+#         "@llvm-project//mlir:LLVMDialect",
+#         "//tensorflow/compiler/mlir/hlo",
+#     ],
+# )
 
 cc_library(
     name = "gemm_broadcast_folding_rewriter",
