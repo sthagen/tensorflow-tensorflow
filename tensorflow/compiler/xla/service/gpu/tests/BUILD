@@ -299,33 +299,6 @@ tf_cc_test(
 )
 
 tf_cc_test(
-    name = "reduction_joiner_test",
-    srcs = [
-        "reduction_joiner_test.cc",
-    ],
-    tags = tf_cuda_tests_tags(),
-    deps = [
-        ":gpu_codegen_test",
-        "//tensorflow/compiler/xla:debug_options_flags",
-        "//tensorflow/compiler/xla:statusor",
-        "//tensorflow/compiler/xla/service:gpu_plugin",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_module_config",
-        "//tensorflow/compiler/xla/service:hlo_parser",
-        "//tensorflow/compiler/xla/service/gpu:gemm_rewriter",
-        "//tensorflow/compiler/xla/service/gpu:gpu_executable",
-        "//tensorflow/compiler/xla/tests:filecheck",
-        "//tensorflow/compiler/xla/tests:hlo_test_base",
-        "//tensorflow/compiler/xla/tests:llvm_irgen_test_base",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "//tensorflow/stream_executor/lib",
-        "@com_google_absl//absl/memory",
-    ],
-)
-
-tf_cc_test(
     name = "tree_reduction_rewriter_test",
     srcs = [
         "tree_reduction_rewriter_test.cc",
@@ -725,10 +698,7 @@ glob_lit_tests(
         "reduction_vectorization_sm_all.hlo": ["no_rocm"],
         "element_wise_row_vectorization.hlo": ["no_rocm"],
     },
-    test_file_exts = [
-        "hlo",
-        "mlir",
-    ],
+    test_file_exts = ["hlo"],
 )
 
 # Bundle together all of the test utilities that are used by tests.
@@ -737,23 +707,6 @@ filegroup(
     testonly = True,
     data = [
         ":hlo_to_llvm_ir",
-        # ":xla-thunks-opt",
         "@llvm-project//llvm:FileCheck",
     ],
 )
-
-# Binary with only the thunks dialect registered, for testing purposes.
-# tf_cc_binary(
-#    name = "xla-thunks-opt",
-#    srcs = ["xla_thunks_opt.cc"],
-#    deps = [
-#        "@llvm-project//mlir:AllPassesAndDialects",
-#        "@llvm-project//mlir:MlirOptLib",
-#        "@llvm-project//mlir:Shape",
-#        "//tensorflow/compiler/mlir:init_mlir",
-#        "//tensorflow/compiler/mlir/hlo:hlo_dialect_registration",
-#        "//tensorflow/compiler/mlir/tensorflow",
-#        "//tensorflow/compiler/xla/service/gpu:xla_thunks_ops",
-#        "//tensorflow/core:lib",
-#    ],
-#)

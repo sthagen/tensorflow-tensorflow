@@ -40,7 +40,6 @@ load("//tensorflow:tensorflow.bzl", "get_compatible_with_cloud")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "if_nccl")
-load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library")
 
 package(
     default_visibility = [":friends"],
@@ -1255,6 +1254,7 @@ tf_cc_test(
         ":ir_emission_utils",
         "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service:call_inliner",
         "//tensorflow/compiler/xla/service:hlo_parser",
         "//tensorflow/compiler/xla/service:pattern_matcher",
         "//tensorflow/compiler/xla/service:pattern_matcher_gmock",
@@ -1388,7 +1388,6 @@ cc_library(
         ":nccl_collective_thunks",
         ":reduction_degenerate_dim_remover",
         ":reduction_dimension_grouper",
-        ":reduction_joiner",
         ":reduction_layout_normalizer",
         ":reduction_splitter",
         ":stream_assignment",
@@ -1520,12 +1519,12 @@ cc_library(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/types:optional",
-        "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/compiler/xla:statusor",
-        "//tensorflow/compiler/xla:types",
-        "//tensorflow/compiler/xla:util",
+        "@llvm-project//llvm:IRReader",
+        "@llvm-project//llvm:Support",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
+        "//tensorflow/compiler/xla/service:call_inliner",
         "//tensorflow/compiler/xla/service:dump",
+        "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_constant_folding",
         "//tensorflow/compiler/xla/service:hlo_cse",
@@ -1534,18 +1533,19 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo_proto_cc",
         "//tensorflow/compiler/xla/service:hlo_verifier",
         "//tensorflow/compiler/xla/service:llvm_compiler",
-        "//tensorflow/compiler/xla/service:tuple_simplifier",
-        "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
-        "//tensorflow/core/platform:cuda_libdevice_path",
+        "//tensorflow/compiler/xla/service:tuple_simplifier",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla:util",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+        "//tensorflow/core/platform:cuda_libdevice_path",
         "//tensorflow/core/profiler/lib:traceme",
-        "//tensorflow/stream_executor:stream_executor_headers",
         "//tensorflow/stream_executor/cuda:cuda_diagnostics",
         "//tensorflow/stream_executor/gpu:asm_compiler",
-        "@llvm-project//llvm:IRReader",
-        "@llvm-project//llvm:Support",
+        "//tensorflow/stream_executor:stream_executor_headers",
     ]) + ["//tensorflow/stream_executor/gpu:gpu_driver_header"],
 )
 
@@ -2075,29 +2075,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "reduction_joiner",
-    srcs = ["reduction_joiner.cc"],
-    hdrs = ["reduction_joiner.h"],
-    deps = [
-        ":gpu_fusible",
-        ":ir_emission_utils",
-        "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/compiler/xla:statusor",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_creation_utils",
-        "//tensorflow/compiler/xla/service:hlo_pass",
-        "//tensorflow/compiler/xla/service:pattern_matcher",
-        "//tensorflow/compiler/xla/service:shape_inference",
-        "//tensorflow/core:lib",
-        "//tensorflow/core:lib_internal",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
 tf_cc_test(
     name = "horizontal_input_fusion_test",
     srcs = ["horizontal_input_fusion_test.cc"],
@@ -2240,51 +2217,6 @@ cc_library(
         "@com_google_absl//absl/types:span",
     ],
 )
-
-# gentbl_cc_library(
-#    name = "xla_thunks_ops_inc_gen",
-#    tbl_outs = [
-#        (
-#            ["-gen-op-decls"],
-#            "ir/xla_thunks_ops.h.inc",
-#        ),
-#        (
-#            ["-gen-op-defs"],
-#            "ir/xla_thunks_ops.cc.inc",
-#        ),
-#        (
-#            ["-gen-struct-attr-decls"],
-#            "ir/xla_thunks_structs.h.inc",
-#        ),
-#        (
-#            ["-gen-struct-attr-defs"],
-#            "ir/xla_thunks_structs.cc.inc",
-#        ),
-#    ],
-#    tblgen = "@llvm-project//mlir:mlir-tblgen",
-#    td_file = "ir/xla_thunks_ops.td",
-#    deps = [
-#        "@llvm-project//mlir:LLVMOpsTdFiles",
-#    ],
-#)
-
-# cc_library(
-#     name = "xla_thunks_ops",
-#     srcs = [
-#         "ir/xla_thunks_ops.cc",
-#         "ir/xla_thunks_ops.cc.inc",
-#         "ir/xla_thunks_ops.h.inc",
-#     ],
-#     hdrs = [
-#         "ir/xla_thunks_ops.h",
-#     ],
-#     deps = [
-#         ":xla_thunks_ops_inc_gen",
-#         "@llvm-project//mlir:IR",
-#         "@llvm-project//mlir:LLVMDialect",
-#         "//tensorflow/compiler/mlir/hlo",
-#     ],
-# )
 
 cc_library(
     name = "gemm_broadcast_folding_rewriter",

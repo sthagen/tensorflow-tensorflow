@@ -90,7 +90,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/nccl_all_gather_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_degenerate_dim_remover.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_dimension_grouper.h"
-#include "tensorflow/compiler/xla/service/gpu/reduction_joiner.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_layout_normalizer.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_splitter.h"
 #include "tensorflow/compiler/xla/service/gpu/stream_assignment.h"
@@ -542,10 +541,6 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<ReductionDimensionGrouper>();
   pipeline.AddPass<HloPassFix<ReductionSplitter>>();
 
-  // TODO(cheshire): Assert that we are *not* running in a fixed point,
-  // since the second pass we are doing partially undoes the first.
-  pipeline.AddPass<ReductionJoiner>();
-
   // The LayoutAssignment pass may leave behind kCopy instructions which are
   // duplicate or NOPs, so remove them with algebraic simplification and CSE.
   AlgebraicSimplifierOptions options;
@@ -564,7 +559,8 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 
   if (RequireDeterminism(hlo_module->config()) ||
       hlo_module->config().debug_options().xla_gpu_deterministic_reductions()) {
-    pipeline.AddPass<HloPassFix<GpuTreeReductionRewriter>>();
+    pipeline.AddPass<HloPassFix<GpuTreeReductionRewriter>>(
+        stream_exec->GetDeviceDescription().cuda_compute_capability());
   }
 
   // GemmRewriter assumes that all transposes are folded into gemms, but,
