@@ -26,9 +26,9 @@ limitations under the License.
 #include "grpcpp/support/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/optional.h"
+#include "tensorflow/core/data/service/common.h"
 #include "tensorflow/core/data/service/common.pb.h"
 #include "tensorflow/core/data/service/credentials_factory.h"
-#include "tensorflow/core/data/service/data_service.h"
 #include "tensorflow/core/data/service/dispatcher.grpc.pb.h"
 #include "tensorflow/core/data/service/dispatcher.pb.h"
 #include "tensorflow/core/data/service/grpc_util.h"
@@ -149,7 +149,7 @@ Status DataServiceDispatcherClient::RegisterDataset(
 Status DataServiceDispatcherClient::GetOrCreateJob(
     int64_t dataset_id, const ProcessingModeDef& processing_mode,
     const absl::optional<JobKey>& job_key, absl::optional<int64> num_consumers,
-    int64& job_client_id) {
+    int64& job_client_id, TargetWorkers target_workers) {
   TF_RETURN_IF_ERROR(EnsureInitialized());
   GetOrCreateJobRequest req;
   req.set_dataset_id(dataset_id);
@@ -160,6 +160,7 @@ Status DataServiceDispatcherClient::GetOrCreateJob(
   if (num_consumers.has_value()) {
     req.set_num_consumers(num_consumers.value());
   }
+  req.set_target_workers(target_workers);
   GetOrCreateJobResponse resp;
   grpc::ClientContext client_ctx;
   grpc::Status status = stub_->GetOrCreateJob(&client_ctx, req, &resp);

@@ -189,8 +189,8 @@ tf_kernel_library(
         "//tensorflow/core/data:dataset_utils",
         "//tensorflow/core/data:name_utils",
         "//tensorflow/core/data:serialization_utils",
+        "//tensorflow/core/data/service:common",
         "//tensorflow/core/data/service:common_proto_cc",
-        "//tensorflow/core/data/service:data_service",
         "//tensorflow/core/data/service:dispatcher_client",
         "//tensorflow/core/data/service:dispatcher_proto_cc",
         "//tensorflow/core/data/service:grpc_util",
@@ -521,6 +521,20 @@ tf_kernel_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+    ],
+)
+
+tf_kernel_library(
+    name = "random_access_ops",
+    srcs = ["random_access_ops.cc"],
+    hdrs = ["random_access_ops.h"],
+    deps = [
+        "//tensorflow/core:experimental_dataset_ops_op_lib",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core/kernels/data:iterator_ops",
+        "//tensorflow/core/platform",
     ],
 )
 

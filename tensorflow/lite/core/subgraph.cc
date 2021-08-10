@@ -953,11 +953,17 @@ TfLiteStatus Subgraph::OpPrepare(const TfLiteRegistration& op_reg,
     if (IsUnresolvedCustomOp(op_reg)) {
       if (IsFlexOp(op_reg.custom_name)) {
         ReportError(
-            "Regular TensorFlow ops are not supported by this interpreter. "
-            "Make sure you apply/link the Flex delegate before inference.");
+            "Select TensorFlow op(s), included in the given model, is(are) not "
+            "supported by this interpreter. Make sure you apply/link the Flex "
+            "delegate before inference. For the Android, it can be resolved by "
+            "adding \"org.tensorflow:tensorflow-lite-select-tf-ops\" "
+            "dependency. See instructions: "
+            "https://www.tensorflow.org/lite/guide/ops_select");
       } else {
-        ReportError("Encountered unresolved custom op: %s.",
-                    op_reg.custom_name ? op_reg.custom_name : "UnknownOp");
+        ReportError(
+            "Encountered unresolved custom op: %s.\nSee instructions: "
+            "https://www.tensorflow.org/lite/guide/ops_custom",
+            op_reg.custom_name ? op_reg.custom_name : "UnknownOp");
       }
       return kTfLiteError;
     }
@@ -1743,6 +1749,11 @@ void Subgraph::SetName(const char* name) {
 }
 
 const std::string& Subgraph::GetName() const { return name_; }
+
+void Subgraph::DumpMemoryPlannerDebugInfo() const {
+  if (memory_planner_ == nullptr) return;
+  memory_planner_->DumpDebugInfo(execution_plan());
+}
 
 TfLiteStatus Subgraph::PreserveAllTensorsExperimental() {
   if (memory_planner_) {

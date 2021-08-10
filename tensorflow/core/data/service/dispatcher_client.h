@@ -20,8 +20,8 @@ limitations under the License.
 #include <vector>
 
 #include "absl/types/optional.h"
+#include "tensorflow/core/data/service/common.h"
 #include "tensorflow/core/data/service/common.pb.h"
-#include "tensorflow/core/data/service/data_service.h"
 #include "tensorflow/core/data/service/data_transfer.h"
 #include "tensorflow/core/data/service/dispatcher.grpc.pb.h"
 #include "tensorflow/core/data/service/dispatcher.pb.h"
@@ -80,7 +80,7 @@ class DataServiceDispatcherClient : public DataServiceClientBase {
                         const ProcessingModeDef& processing_mode,
                         const absl::optional<JobKey>& job_key,
                         absl::optional<int64> num_consumers,
-                        int64& job_client_id);
+                        int64& job_client_id, TargetWorkers target_workers);
 
   // Releases a job client id, indicating that the id will no longer be used to
   // read from the job.

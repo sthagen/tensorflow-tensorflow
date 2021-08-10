@@ -21,7 +21,7 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
-#include "tensorflow/core/data/service/data_service.h"
+#include "tensorflow/core/data/service/common.h"
 #include "tensorflow/core/data/service/journal.h"
 #include "tensorflow/core/data/service/journal.pb.h"
 #include "tensorflow/core/platform/errors.h"
@@ -124,7 +124,8 @@ void DispatcherState::CreateJob(const CreateJobUpdate& create_job) {
   }
   auto job = std::make_shared<Job>(
       job_id, create_job.dataset_id(), create_job.processing_mode_def(),
-      create_job.num_split_providers(), named_job_key, num_consumers);
+      create_job.num_split_providers(), named_job_key, num_consumers,
+      create_job.target_workers());
   DCHECK(!jobs_.contains(job_id));
   jobs_[job_id] = job;
   tasks_by_job_[job_id] = std::vector<std::shared_ptr<Task>>();

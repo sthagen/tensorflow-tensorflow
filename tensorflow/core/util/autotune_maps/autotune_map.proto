@@ -13,15 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/lite/java/src/main/native/jni_utils.h"
+// Protocol messages for describing autotuning maps. This enables us to easily
+// serialize/deserialize existing autotune maps in the TF runtime.
+//
+// For Google-internal use only.
+syntax = "proto3";
 
-namespace tflite {
-namespace jni {
+package tensorflow;
 
-bool CheckJniInitializedOrThrow(JNIEnv* env) {
-  // No additional initialization is required.
-  return true;
+import "tensorflow/core/util/autotune_maps/conv_parameters.proto";
+import "tensorflow/stream_executor/dnn.proto";
+
+message ConvMapProto {
+  message Entry {
+    tensorflow.ConvParametersProto key = 1;
+    stream_executor.dnn.AlgorithmConfigProto value = 2;
+  }
+
+  repeated Entry kv_pairs = 1;
 }
 
-}  // namespace jni
-}  // namespace tflite
+// TODO(b/189530096): Support autotune maps for more ops.
+message AutotuneMapsProto {
+  ConvMapProto conv_map = 2;
+}

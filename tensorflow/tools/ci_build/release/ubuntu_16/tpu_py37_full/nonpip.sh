@@ -23,17 +23,12 @@ install_ubuntu_16_python_pip_deps python3.9
 install_bazelisk
 install_ctpu pip3.9
 
-# The remote bazel config assume python is at /usr/local/bin/python3.9 but the
-# local VM has it at /usr/bin/python3.9.
-sudo ln /usr/bin/python3.9 /usr/local/bin/python3.9
-
 test_patterns=(//tensorflow/... -//tensorflow/compiler/... -//tensorflow/lite/...)
 tag_filters="tpu,-tpu_pod,-no_tpu,-notpu,-no_oss,-no_oss_py37"
 
 bazel_args=(
-  --config=rbe_cpu_linux \
-  --config=rbe_linux_py3 \
-  --config=tensorflow_testing_rbe_linux \
+  --config=release_cpu_linux \
+  --repo_env=PYTHON_BIN_PATH="$(which python3.9)" \
   --build_tag_filters="${tag_filters}" \
   --test_tag_filters="${tag_filters}" \
   --test_output=errors --verbose_failures=true --keep_going

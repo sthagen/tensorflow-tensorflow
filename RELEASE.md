@@ -19,6 +19,13 @@
     replaced to raise a `RuntimeError` as they can be abused to cause arbitrary
     code execution. It is recommended to use JSON serialization instead of YAML,
     or, a better alternative, serialize to H5.
+  * `LinearModel` and `WideDeepModel` are moved to the
+    `tf.compat.v1.keras.models.`
+    namespace (`tf.compat.v1.keras.models.LinearModel`
+    and `tf.compat.v1.keras.models.WideDeepModel`),
+    and their `experimental` endpoints
+    (`tf.keras.experimental.models.LinearModel` and
+    `tf.keras.experimental.models.WideDeepModel`) are being deprecated.
 
 * `tf.lite`:
   * Rename fields `SignatureDef` table in schema to maximize the parity with
@@ -31,6 +38,9 @@
     *   `tensorflow/core/ir/` contains a new MLIR-based Graph dialect that is
         isomorphic to GraphDef and will be used to replace GraphDef-based (e.g.,
         Grappler) optimizations.
+    *   Deprecated and removed attrs() function in shape inference. All
+        attributes should be queried by name now (rather than range returned)
+        to enable changing the underlying storage there.
 
 ## Known Caveats
 
@@ -97,6 +107,8 @@
             # Author code uses std + 1e-5
             return super().convolution_op(inputs, (kernel - mean) / tf.sqrt(var + 1e-10))
       ```
+  * Added `merge_state()` method to `tf.keras.metrics.Metric` for use in
+    distributed computations.
 
 ## Bug Fixes and Other Changes
 
@@ -107,11 +119,21 @@
     * Random number generation (RNG) system
         *   Added argument `alg` to `tf.random.stateless_*` functions to explicitly select the RNG algorithm.
         *   Added `tf.nn.experimental.stateless_dropout`, a stateless version of `tf.nn.dropout`.
-        *   `tf.random.Generator` now can be created inside the scope of `tf.distribute.experimental.CentralStorageStrategy`.
+        *   `tf.random.Generator` now can be created inside the scope of `tf.distribute.experimental.ParameterServerStrategy` and `tf.distribute.experimental.CentralStorageStrategy`.
 *   `tf.data`:
     *   Promoting `tf.data.Options.experimental_deterministic` API to
         `tf.data.Options.deterministic` and deprecating the experimental
         endpoint.
+    *   Moving autotuning options from
+        `tf.data.Options.experimental_optimization.autotune*` to a newly created
+        `tf.data.Options.autotune.*` and removing support for
+        `tf.data.Options.experimental_optimization.autotune_buffers`.
+*   TF SavedModel:
+    *   Custom gradients are now saved by default. See `tf.saved_model.SaveOptions` to disable this.
+*   XLA:
+    * Added a new API that allows custom call functions to signal errors. The
+      old API will be deprecated in a future release. See
+      https://www.tensorflow.org/xla/custom_call for details.
 
 ## Thanks to our Contributors
 
@@ -318,6 +340,9 @@ This release contains contributions from many people at Google, as well as:
         `tf.data.ThreadingOptions` and deprecating the experimental endpoint.
     *   Promoting `tf.data.experimental.unique` API to
         `tf.data.Dataset.unique` and deprecating the experimental endpoint.
+    *   Promoting `tf.data.experimental.rejection_resample` API to
+        `tf.data.Dataset.rejection_resample` and deprecating the experimental
+        endpoint.
     *   Added `stop_on_empty_dataset` parameter to `sample_from_datasets` and
         `choose_from_datasets`. Setting `stop_on_empty_dataset=True` will stop
         sampling if it encounters an empty dataset. This preserves the sampling

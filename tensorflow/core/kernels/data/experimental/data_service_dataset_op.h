@@ -19,7 +19,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/strings/str_cat.h"
-#include "tensorflow/core/data/service/data_service.h"
+#include "tensorflow/core/data/service/common.h"
 #include "tensorflow/core/framework/dataset.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/resource_mgr.h"
@@ -88,7 +88,7 @@ class DataServiceDatasetOp : public DatasetOpKernel {
   DataTypeVector output_types_;
   std::vector<PartialTensorShape> output_shapes_;
   std::string data_transfer_protocol_;
-  TargetWorkers target_workers_ = TargetWorkers::AUTO;
+  TargetWorkers target_workers_ = TARGET_WORKERS_AUTO;
 };
 
 }  // namespace data

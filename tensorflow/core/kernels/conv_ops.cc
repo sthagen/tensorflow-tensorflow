@@ -63,6 +63,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/conv_ops_gpu.h"
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/protobuf/autotuning.pb.h"
+#include "tensorflow/core/util/autotune_maps/conv_autotune_maps.h"
 #include "tensorflow/core/util/autotune_maps/conv_parameters.h"
 #include "tensorflow/core/util/proto/proto_utils.h"
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -273,6 +274,12 @@ struct LaunchConv2DOp<CPUDevice, T> {
           " vs ", patch_depth));
       return;
     }
+    if (filter.NumElements() <= 0) {
+      ctx->SetStatus(
+          errors::InvalidArgument("filter must not have zero elements "
+                                  "(i.e. all dimensions must be non-zero)"));
+      return;
+    }
 
     const int64_t num_groups = in_depth / patch_depth;
     if (num_groups <= 0) {
@@ -324,6 +331,10 @@ struct LaunchConv2DOp<GPUDevice, int32> {
                     "attempted to be run because the input depth of ",
                     in_depth, " does not match the filter input depth of ",
                     filter.dim_size(2)));
+    OP_REQUIRES(
+        ctx, filter.NumElements() > 0,
+        errors::InvalidArgument("filter must not have zero elements "
+                                "(i.e. all dimensions must be non-zero)"));
 
     for (int64_t explicit_padding : explicit_paddings) {
       if (!FastBoundsCheck(explicit_padding, std::numeric_limits<int>::max())) {
@@ -760,14 +771,6 @@ int64 GetDnnWorkspaceLimit(const string& envvar_in_mb,
   return default_value_in_bytes;
 }
 
-// A dummy type to group forward convolution autotune results together.
-struct ConvAutotuneGroup {
-  static string name() { return "Conv"; }
-};
-
-typedef AutotuneSingleton<ConvAutotuneGroup, ConvParameters,
-                          se::dnn::AlgorithmConfig>
-    AutotuneConv;
 
 template <typename T>
 void LaunchConv2DOp<GPUDevice, T>::operator()(
@@ -797,6 +800,11 @@ void LaunchConv2DOp<GPUDevice, T>::operator()(
   const int64_t patch_rows = filter.dim_size(0);
   const int64_t patch_cols = filter.dim_size(1);
   const int64_t patch_depths = filter.dim_size(2);
+
+  OP_REQUIRES(
+      ctx, filter.NumElements() > 0,
+      errors::InvalidArgument("filter must not have zero elements "
+                              "(i.e. all dimensions must be non-zero)"));
 
   // If the filter in-depth (patch_depths) is 1 and smaller than the input
   // depth, it's a depthwise convolution. More generally, if the filter in-depth

@@ -1121,7 +1121,11 @@ class ConvertBiasAddOp : public OpRewritePattern<TF::BiasAddOp> {
         data_format, op.value().getType().cast<RankedTensorType>());
     auto bias_broadcast = Broadcast1DToFeatureDim(loc, op.value(), op.bias(),
                                                   feature_dim, rewriter);
-    rewriter.replaceOpWithNewOp<AddOp>(op, op.value(), bias_broadcast);
+    Value add = rewriter.create<AddOp>(loc, op.value(), bias_broadcast);
+    if (add.getType() != op.getType()) {
+      add = rewriter.create<tensor::CastOp>(loc, op.getType(), add);
+    }
+    rewriter.replaceOp(op, {add});
     return success();
   }
 };
@@ -2319,17 +2323,6 @@ class ConvertIdentityNOp : public OpRewritePattern<TF::IdentityNOp> {
   LogicalResult matchAndRewrite(TF::IdentityNOp op,
                                 PatternRewriter &rewriter) const override {
     rewriter.replaceOp(op, op.getOperands());
-    return success();
-  }
-};
-
-// Bypass _EagerConst
-class ConvertEagerConstOp : public OpRewritePattern<TF::_EagerConstOp> {
- public:
-  using OpRewritePattern<TF::_EagerConstOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(TF::_EagerConstOp op,
-                                PatternRewriter &rewriter) const override {
-    rewriter.replaceOp(op, op.getOperand());
     return success();
   }
 };
@@ -7347,6 +7340,9 @@ const llvm::DenseSet<mlir::TypeID> &MlirPreferredOps() {
     // within MLIR.
     TypeID::get<TF::ConstOp>(),
 
+    // AssertOp with string types are not supported by the fallback.
+    TypeID::get<TF::AssertOp>(),
+
     // TF2XLA fallback pattern doesn't support these op as MLIR hlo builder
     // doesn't override the necessary builder methods. These ops have simple
     // lowering pattern so this should be safe.
@@ -7486,7 +7482,6 @@ void PopulateLegalizeTfPatterns(MLIRContext *context,
     ConvertFusedBatchNormV3Op,
     ConvertInfeedDequeueTupleOp,
     ConvertIdentityNOp,
-    ConvertEagerConstOp,
     ConvertInplaceUpdateOp,
     ConvertLinSpaceOp,
     ConvertMaxOp,

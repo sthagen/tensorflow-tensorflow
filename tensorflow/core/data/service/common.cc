@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
-#include "tensorflow/core/data/service/data_service.h"
+#include "tensorflow/core/data/service/common.h"
 
 #include <string>
 
+#include "absl/strings/string_view.h"
+#include "tensorflow/core/data/service/common.pb.h"
 #include "tensorflow/core/framework/dataset_options.pb.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/status.h"
@@ -85,24 +86,24 @@ StatusOr<AutoShardPolicy> ToAutoShardPolicy(
 StatusOr<TargetWorkers> ParseTargetWorkers(absl::string_view s) {
   std::string str_upper = absl::AsciiStrToUpper(s);
   if (str_upper.empty() || str_upper == kAuto) {
-    return TargetWorkers::AUTO;
+    return TARGET_WORKERS_AUTO;
   }
   if (str_upper == kAny) {
-    return TargetWorkers::ANY;
+    return TARGET_WORKERS_ANY;
   }
   if (str_upper == kLocal) {
-    return TargetWorkers::LOCAL;
+    return TARGET_WORKERS_LOCAL;
   }
   return errors::InvalidArgument("Unrecognized target workers: ", s);
 }
 
 std::string TargetWorkersToString(TargetWorkers target_workers) {
   switch (target_workers) {
-    case TargetWorkers::AUTO:
+    case TARGET_WORKERS_AUTO:
       return kAuto;
-    case TargetWorkers::ANY:
+    case TARGET_WORKERS_ANY:
       return kAny;
-    case TargetWorkers::LOCAL:
+    case TARGET_WORKERS_LOCAL:
       return kLocal;
     default:
       DCHECK(false);
