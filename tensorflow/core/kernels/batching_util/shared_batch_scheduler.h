@@ -156,7 +156,7 @@ class SharedBatchScheduler
     //
     // The goal is to smooth out batch sizes under low request rates, and thus
     // avoid latency spikes.
-    int64 batch_timeout_micros = 0;
+    int64_t batch_timeout_micros = 0;
 
     // The maximum allowable number of enqueued (accepted by Schedule() but
     // not yet being processed on a batch thread) tasks in terms of batches.
@@ -230,6 +230,13 @@ class SharedBatchScheduler
   // queue declines to provide a batch to process, moves onto the next queue. If
   // no queues provide a batch to process, just sleeps briefly and exits.
   void ThreadLogic();
+
+  // Called by `AddQueue`.
+  Status AddQueueAfterRewritingOptions(
+      const QueueOptions& options,
+      std::function<void(std::unique_ptr<Batch<TaskType>>)>
+          process_batch_callback,
+      std::unique_ptr<BatchScheduler<TaskType>>* queue);
 
   const Options options_;
 
@@ -537,6 +544,27 @@ Status SharedBatchScheduler<TaskType>::AddQueue(
     std::function<void(std::unique_ptr<Batch<TaskType>>)>
         process_batch_callback,
     std::unique_ptr<BatchScheduler<TaskType>>* queue) {
+  QueueOptions rewrite_options = options;
+  if ((!rewrite_options.enable_large_batch_splitting) &&
+      rewrite_options.max_enqueued_batches == 0) {
+    // Many existing models (with very low QPS) rely on this option to be >0.
+    // Rewrite and set this to one and retain old behavior to allow such models
+    // to continue to work.
+    //
+    // Note, technically an invalid-argument error should be returned, but
+    // that may break such models.
+    rewrite_options.max_enqueued_batches = 1;
+  }
+  return AddQueueAfterRewritingOptions(rewrite_options, process_batch_callback,
+                                       queue);
+}
+
+template <typename TaskType>
+Status SharedBatchScheduler<TaskType>::AddQueueAfterRewritingOptions(
+    const QueueOptions& options,
+    std::function<void(std::unique_ptr<Batch<TaskType>>)>
+        process_batch_callback,
+    std::unique_ptr<BatchScheduler<TaskType>>* queue) {
   if (options.input_batch_size_limit == 0) {
     return errors::InvalidArgument(
         "input_batch_size_limit must be positive; was ",
@@ -827,7 +855,7 @@ Status Queue<TaskType>::ScheduleWithoutOrEagerSplit(
     }
 
     const int64_t open_batch_remaining_slot =
-        options_.max_execution_batch_size - batches_.back()->size();
+        max_execution_batch_size() - batches_.back()->size();
 
     const int64_t input_task_size = (*task)->size();
 
@@ -843,7 +871,7 @@ Status Queue<TaskType>::ScheduleWithoutOrEagerSplit(
 
     for (int i = 0; i < output_tasks.size(); ++i) {
       if (batches_.back()->size() + output_tasks[i]->size() >
-          options_.max_execution_batch_size) {
+          max_execution_batch_size()) {
         StartNewBatch();
       }
       if (batches_.back()->empty()) {

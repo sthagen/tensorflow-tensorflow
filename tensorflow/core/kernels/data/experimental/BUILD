@@ -315,6 +315,7 @@ tf_kernel_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/data:captured_function",
+        "//tensorflow/core/data:dataset_utils",
         "//tensorflow/core/data:hash_utils",
         "//tensorflow/core/data:name_utils",
         "//tensorflow/core/data:root_dataset",
@@ -773,6 +774,7 @@ tf_kernel_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+        "//tensorflow/core/data:dataset_utils",
     ],
 )
 
@@ -839,6 +841,7 @@ tf_kernel_library(
         ":parallel_interleave_dataset_op",
         ":parse_example_dataset_op",
         ":prefetching_kernels",
+        ":random_access_ops",
         ":random_dataset_op",
         ":rebatch_dataset_op",
         ":sampling_dataset_op",

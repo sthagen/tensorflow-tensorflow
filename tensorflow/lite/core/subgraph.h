@@ -217,9 +217,6 @@ class Subgraph {
   // Change the dimensionality of a given tensor. Note, this is only acceptable
   // for tensor indices that are inputs.
   // Returns status of failure or success.
-  // TODO(aselle): Consider implementing ArraySlice equivalent to make this
-  //   more adept at accepting data without an extra copy. Use absl::ArraySlice
-  //   if our partners determine that dependency is acceptable.
   TfLiteStatus ResizeInputTensor(int tensor_index,
                                  const std::vector<int>& dims);
 
@@ -278,7 +275,6 @@ class Subgraph {
   // Ensure the data in `tensor.data` is readable. In case delegate is used,
   // it might require to copy the data from delegate buffer to raw memory.
   // WARNING: This is an experimental API and subject to change.
-  // TODO(b/119495520): make this private when refactoring complete.
   TfLiteStatus EnsureTensorDataIsReadable(int tensor_index) {
     TfLiteTensor* t = &tensors_[tensor_index];
     TF_LITE_ENSURE(&context_, t != nullptr);
@@ -504,7 +500,6 @@ class Subgraph {
   TfLiteStatus ResizeTensorImpl(TfLiteTensor* tensor, TfLiteIntArray* new_size);
 
   // Report a detailed error string (will be printed to stderr).
-  // TODO(aselle): allow user of class to provide alternative destinations.
   void ReportErrorImpl(const char* format, va_list args);
 
   // Entry point for C node plugin API to request an tensor be resized.
@@ -791,6 +786,12 @@ class Subgraph {
   // public function).
   // The value is invalid before `PrepareOpStartingAt` is called.
   bool has_dynamic_tensors_ = true;
+
+  // WARNING: This is an experimental interface that is subject to change.
+  // This is the index of dynamic tensor which was checked at
+  // PrepareOpsStartingAt() when `has_dynamic_tensors_` is set. This information
+  // is kept only for user error message.
+  int dynamic_tensor_index_ = -1;
 
   // Reference to cancellation function that can cancel a request in the middle
   // of a call to Invoke(). When this function returns True, a kTfLiteError is
