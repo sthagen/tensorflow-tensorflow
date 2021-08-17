@@ -1,4 +1,4 @@
-/* Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,12 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_METRICS_H_
-#define TENSORFLOW_CORE_COMMON_RUNTIME_METRICS_H_
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_GPU_ASM_OPTS_UTIL_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_GPU_ASM_OPTS_UTIL_H_
 
-// TODO(jsimsa): Remove this forwarding header once all users are migrated to
-// using the one in framework.
+#include "tensorflow/compiler/xla/xla.pb.h"
+#include "tensorflow/stream_executor/gpu/gpu_asm_opts.h"
 
-#include "tensorflow/core/framework/metrics.h"
+namespace xla {
+namespace gpu {
 
-#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_METRICS_H_
+// Create GpuAsmOpts out of DebugOptions.
+stream_executor::GpuAsmOpts PtxOptsFromDebugOptions(
+    const DebugOptions& debug_options);
+
+}  // namespace gpu
+}  // namespace xla
+
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_GPU_ASM_OPTS_UTIL_H_

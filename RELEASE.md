@@ -30,6 +30,11 @@
 * `tf.lite`:
   * Rename fields `SignatureDef` table in schema to maximize the parity with
     TF SavedModel's Signature concept.
+  * Deprecate Makefile builds. Makefile users need to migrate their builds to
+    CMake or Bazel. Please refer to the
+    [Build TensorFlow Lite with CMake](https://www.tensorflow.org/lite/guide/build_cmake)
+    and [Build TensorFlow Lite for ARM boards](https://www.tensorflow.org/lite/guide/build_arm)
+    for the migration.
 
 * TF Core:
     *   `tf.Graph.get_name_scope()` now always returns a string, as documented.
@@ -136,6 +141,11 @@
         *   Added argument `alg` to `tf.random.stateless_*` functions to explicitly select the RNG algorithm.
         *   Added `tf.nn.experimental.stateless_dropout`, a stateless version of `tf.nn.dropout`.
         *   `tf.random.Generator` now can be created inside the scope of `tf.distribute.experimental.ParameterServerStrategy` and `tf.distribute.experimental.CentralStorageStrategy`.
+    * Added an experimental session config
+      `tf.experimental.disable_functional_ops_lowering` which disables
+      functional control flow op lowering optimization. This is useful when
+      executing within a portable runtime where control flow op kernels may not 
+      be loaded due to selective registration.
 *   `tf.data`:
     *   Promoting `tf.data.Options.experimental_deterministic` API to
         `tf.data.Options.deterministic` and deprecating the experimental
