@@ -26,6 +26,11 @@
     and their `experimental` endpoints
     (`tf.keras.experimental.models.LinearModel` and
     `tf.keras.experimental.models.WideDeepModel`) are being deprecated.
+  * RNG behavior change for all `tf.keras.initializers` classes. For any class
+    constructed with a fixed seed, it will no longer generate same value
+    when invoked multiple times. Instead, it will return different value, but a
+    determinisitic sequence. This change will make the initialize behavior align
+    between v1 and v2.
 
 * `tf.lite`:
   * Rename fields `SignatureDef` table in schema to maximize the parity with
@@ -130,6 +135,8 @@
       ```
   * Added `merge_state()` method to `tf.keras.metrics.Metric` for use in
     distributed computations.
+  * Added `sparse` and `ragged` options to `tf.keras.layers.TextVectorization`
+    to allow for `SparseTensor` and `RaggedTensor` outputs from the layer.
 
 ## Bug Fixes and Other Changes
 
@@ -275,6 +282,16 @@ This release contains contributions from many people at Google, as well as:
             coming soon.
         *   Old Converter (TOCO) is getting removed from next release. It's been
             deprecated for few releases already.
+    *   lite.experimental.authoring.compatible API:
+        *   A Python decorator to provide a way to check TFLite compatibility
+            issue of `tf.function`. This returns a callable object which
+            validates TFLite compatibility. If an incompatible operation is
+            encountered during execution, an exception will be raised with
+            information about the incompatible ops.
+    *   lite.experimental.Analyzer API:
+        *   An experimental tool to analyze TFLite flatbuffer models. This API
+            can be used to investigate TFLite model structure and check
+            compatibility with GPU delegate.
 
 *   `tf.saved_model`:
 
