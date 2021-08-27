@@ -13,13 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "pybind11/pybind11.h"
-#include "tensorflow/python/util/stack_trace.h"
+syntax = "proto3";
 
-namespace tensorflow {
+package tensorflow;
 
-PYBIND11_MODULE(_stack_trace_test_lib, m) {
-  m.def("GetStackTraceString", []() { return GetPythonStackTraceString(); });
+import "tensorflow/core/util/saved_tensor_slice.proto";
+
+// Input for the CheckpointReader fuzz test.
+message CheckpointReaderFuzzInput {
+  SavedTensorSliceMeta meta = 1;
+  repeated SavedSlice data = 2;
 }
-
-}  // namespace tensorflow
