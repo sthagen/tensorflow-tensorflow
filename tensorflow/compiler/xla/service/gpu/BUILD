@@ -12,6 +12,7 @@ load(
 )
 load(
     "//tensorflow:tensorflow.bzl",
+    "check_deps",
     "if_cuda_or_rocm",
     "tf_cc_test",
     "tf_copts",
@@ -51,6 +52,48 @@ package_group(
     name = "friends",
     includes = [
         "//tensorflow/compiler/xla:friends",
+    ],
+)
+
+# This target checks that we are not accidentally adding TFRT dependencies.
+# It captures the current state of dependencies and might need to get updated
+# from time to time.
+check_deps(
+    name = "tfrt_deps_check",
+    disallowed_deps = select({
+        ":is_bef_thunk_enabled": [],
+        ":is_bef_executable_enabled": [],
+        "//conditions:default": [
+            "@tf_runtime//:basic_kernels_alwayslink",
+            "@tf_runtime//:basic_kernels_opdefs",
+            "@tf_runtime//:befexecutor",
+            "@tf_runtime//:core_runtime",
+            "@tf_runtime//:hostcontext",
+            "@tf_runtime//:mlirtobef_translate",
+            "@tf_runtime//:support",
+            "@tf_runtime//:tensor_opdefs",
+            "@tf_runtime//:OpBaseTdFiles",
+            "@tf_runtime//backends/gpu:gpu_kernels_alwayslink",
+            "@tf_runtime//backends/gpu:gpu_opdefs",
+            "@tf_runtime//backends/gpu:gpu_types",
+            "@tf_runtime//backends/gpu:gpu_wrapper",
+            "@tf_runtime//backends/gpu:GpuOpBaseTdFile",
+        ],
+    }),
+    deps = [
+        # Targets that are included in CPU builds should not depend on TFRT.
+        ":gpu_device_info",
+        ":gpu_executable_run_options",
+        ":ir_emission_utils",
+        ":launch_dimensions",
+        ":parallel_loop_emitter",
+        ":target_util",
+        # XLIR targets should only depend on TFRT if BEF thunk/executable is
+        # enabled.
+        ":gpu_compiler",
+        ":gpu_executable",
+        ":xlir_kernels",
+        ":nccl_utils",
     ],
 )
 
@@ -1229,6 +1272,36 @@ tf_cc_test(
 )
 
 cc_library(
+    name = "fusion_bitcast_lift",
+    srcs = ["fusion_bitcast_lift.cc"],
+    hdrs = ["fusion_bitcast_lift.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_dce",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:hlo_verifier",
+        "//tensorflow/core/platform:errors",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+tf_cc_test(
+    name = "fusion_bitcast_lift_test",
+    srcs = ["fusion_bitcast_lift_test.cc"],
+    tags = ["no_pip"],
+    deps = [
+        ":fusion_bitcast_lift",
+        "//tensorflow/compiler/xla/service:hlo_dce",
+        "//tensorflow/compiler/xla/service:hlo_parser",
+        "//tensorflow/compiler/xla/tests:filecheck",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
     name = "fusion_merger",
     srcs = ["fusion_merger.cc"],
     hdrs = ["fusion_merger.h"],
@@ -1471,6 +1544,7 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":cudnn_batchnorm_rewriter",
+        ":fusion_bitcast_lift",
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
         ":gemm_rewriter",
@@ -1542,6 +1616,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:conditional_simplifier",
         "//tensorflow/compiler/xla/service:convolution_4d_expander",
         "//tensorflow/compiler/xla/service:dot_decomposer",
+        "//tensorflow/compiler/xla/service:dot_merger",
         "//tensorflow/compiler/xla/service:dump",
         "//tensorflow/compiler/xla/service:dynamic_index_splitter",
         "//tensorflow/compiler/xla/service:dynamic_padder",
