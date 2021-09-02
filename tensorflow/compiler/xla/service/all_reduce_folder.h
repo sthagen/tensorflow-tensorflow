@@ -13,30 +13,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_FUSION_BITCAST_LIFT_H_
-#define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_FUSION_BITCAST_LIFT_H_
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_ALL_REDUCE_FOLDER_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_ALL_REDUCE_FOLDER_H_
 
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
+#include "tensorflow/compiler/xla/statusor.h"
 
 namespace xla {
-namespace gpu {
 
-// Lift "rank-reducing bitcast" inside fusions to outside the fusion.
+// A pass that folds an all-reduce feeding into another all-reduce by expanding
+// the replica groups. As an example:
 //
-// Bitcast instruction are no-op, so we can duplicate them for free.
-// "rank-reducing bitcast" is defined to be a bitcast whose output have
-// a lower rank than the input.  Inside a fusion, we lift the
-// "rank-reducing bitcast" out of the fusion as this allow using simpler,
-// so faster, indexing.
-class FusionBitcastLift : public HloModulePass {
+//   ar0 = all-reduce(x) replica_groups={{0,1},{2,3},{4,5},{6,7}}
+//   ar1 = all-reduce(all-reduce0) replica_groups={{0,2},{1,3},{4,6},{5,7}}
+//
+//  Can be combined into a single all-reduce:
+//
+//   ar1 = all-reduce(x) replica_groups={{0,1,2,3},{4,5,6,7}}
+//
+
+class AllReduceFolder : public HloModulePass {
  public:
-  absl::string_view name() const override { return "fusion_bitcast_lift"; }
+  absl::string_view name() const override { return "all-reduce-folder"; }
 
   StatusOr<bool> Run(HloModule* module) override;
 };
 
-}  // namespace gpu
 }  // namespace xla
 
-#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_FUSION_BITCAST_LIFT_H_
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_ALL_REDUCE_FOLDER_H_

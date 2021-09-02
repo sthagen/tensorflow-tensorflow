@@ -164,6 +164,26 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "custom_call_thunk",
+    srcs = ["custom_call_thunk.cc"],
+    hdrs = ["custom_call_thunk.h"],
+    local_defines = if_cuda_is_configured([
+        "GOOGLE_CUDA=1",
+    ]),
+    deps = [
+        ":buffer_allocations",
+        ":thunk",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service:buffer_assignment",
+        "//tensorflow/compiler/xla/service:custom_call_status_internal",
+        "//tensorflow/core/platform:errors",
+        "//tensorflow/stream_executor/gpu:gpu_stream_header",
+        "//tensorflow/stream_executor/gpu:gpu_types_header",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
 tf_cc_test(
     name = "custom_call_test",
     srcs = if_cuda_or_rocm(["custom_call_test.cc"]),
@@ -687,7 +707,6 @@ cc_library(
         "convolution_thunk.cc",
         "copy_thunk.cc",
         "cudnn_batchnorm_thunk.cc",
-        "custom_call_thunk.cc",
         "fft_thunk.cc",
         "for_thunk.cc",
         "gpu_executable.cc",
@@ -740,6 +759,7 @@ cc_library(
         ":buffer_allocations",
         ":cusolver_context",
         ":cudnn_batchnorm_runner",
+        ":custom_call_thunk",
         ":gemm_thunk",
         ":gpu_constants",
         ":gpu_conv_runner",
@@ -1272,36 +1292,6 @@ tf_cc_test(
 )
 
 cc_library(
-    name = "fusion_bitcast_lift",
-    srcs = ["fusion_bitcast_lift.cc"],
-    hdrs = ["fusion_bitcast_lift.h"],
-    deps = [
-        "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/service:hlo",
-        "//tensorflow/compiler/xla/service:hlo_dce",
-        "//tensorflow/compiler/xla/service:hlo_pass",
-        "//tensorflow/compiler/xla/service:hlo_verifier",
-        "//tensorflow/core/platform:errors",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-tf_cc_test(
-    name = "fusion_bitcast_lift_test",
-    srcs = ["fusion_bitcast_lift_test.cc"],
-    tags = ["no_pip"],
-    deps = [
-        ":fusion_bitcast_lift",
-        "//tensorflow/compiler/xla/service:hlo_dce",
-        "//tensorflow/compiler/xla/service:hlo_parser",
-        "//tensorflow/compiler/xla/tests:filecheck",
-        "//tensorflow/compiler/xla/tests:hlo_test_base",
-        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-cc_library(
     name = "fusion_merger",
     srcs = ["fusion_merger.cc"],
     hdrs = ["fusion_merger.h"],
@@ -1544,7 +1534,6 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":cudnn_batchnorm_rewriter",
-        ":fusion_bitcast_lift",
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
         ":gemm_rewriter",
@@ -1603,6 +1592,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:all_gather_combiner",
         "//tensorflow/compiler/xla/service:all_gather_decomposer",
         "//tensorflow/compiler/xla/service:all_reduce_combiner",
+        "//tensorflow/compiler/xla/service:all_reduce_folder",
         "//tensorflow/compiler/xla/service:all_reduce_reassociate",
         "//tensorflow/compiler/xla/service:all_to_all_decomposer",
         "//tensorflow/compiler/xla/service:async_collective_creator",
