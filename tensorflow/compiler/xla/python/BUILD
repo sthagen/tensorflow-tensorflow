@@ -379,10 +379,12 @@ cc_library(
     deps = [
         ":jax_jit",
         ":py_client",
+        ":python_utils",
         ":types",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
         "//tensorflow/core/platform:logging",
+        "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",

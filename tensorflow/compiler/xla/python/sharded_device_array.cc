@@ -149,19 +149,67 @@ py::handle ShardedDeviceArray::AsHandle() {
 }
 
 /*static*/ xla::Status ShardedDeviceArray::RegisterTypes(py::module& m) {
-  TF_ASSIGN_OR_RETURN(
-      base_type_, jax::CreateHeapPythonBaseClass<ShardedDeviceArrayBaseObject>(
-                      "ShardedDeviceArrayBase"));
+  // We need to use heap-allocated type objects because we want to add
+  // additional methods dynamically.
+  // Similar to py_buffer.cc
+  {
+    py::str name = py::str("ShardedDeviceArrayBase");
+    py::str qualname = py::str("ShardedDeviceArrayBase");
+    PyHeapTypeObject* heap_type = reinterpret_cast<PyHeapTypeObject*>(
+        PyType_Type.tp_alloc(&PyType_Type, 0));
+    // Caution: we must not call any functions that might invoke the GC until
+    // PyType_Ready() is called. Otherwise the GC might see a half-constructed
+    // type object.
+    if (!heap_type) {
+      return xla::Internal("Unable to create heap type object");
+    }
+    heap_type->ht_name = name.release().ptr();
+    heap_type->ht_qualname = qualname.release().ptr();
+    PyTypeObject* type = &heap_type->ht_type;
+    type->tp_name = "ShardedDeviceArrayBase";
+    type->tp_basicsize = sizeof(ShardedDeviceArrayBaseObject);
+    type->tp_flags =
+        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_BASETYPE;
+    TF_RET_CHECK(PyType_Ready(type) == 0);
+    base_type_ = reinterpret_cast<PyObject*>(type);
+  }
   py::object base_type = py::reinterpret_borrow<py::object>(base_type_);
   base_type.attr("__module__") = m.attr("__name__");
   m.attr("ShardedDeviceArrayBase") = base_type;
 
-  TF_ASSIGN_OR_RETURN(type_,
-                      jax::CreateDeviceArrayLike<ShardedDeviceArrayObject>(
-                          "ShardedDeviceArray", /*base_type=*/base_type,
-                          /*tp_new=*/sharded_device_array_tp_new,
-                          /*tp_dealloc=*/sharded_device_array_tp_dealloc,
-                          /*tp_as_buffer=*/nullptr));
+  {
+    py::tuple bases = py::make_tuple(base_type);
+    py::str name = py::str("ShardedDeviceArray");
+    py::str qualname = py::str("ShardedDeviceArray");
+    PyHeapTypeObject* heap_type = reinterpret_cast<PyHeapTypeObject*>(
+        PyType_Type.tp_alloc(&PyType_Type, 0));
+    // Caution: we must not call any functions that might invoke the GC until
+    // PyType_Ready() is called below. Otherwise the GC might see a
+    // half-constructed type object.
+    if (!heap_type) {
+      return xla::Internal("Unable to create heap type object");
+    }
+    heap_type->ht_name = name.release().ptr();
+    heap_type->ht_qualname = qualname.release().ptr();
+    PyTypeObject* type = &heap_type->ht_type;
+    type->tp_name = "ShardedDeviceArray";
+    type->tp_basicsize = sizeof(ShardedDeviceArrayObject);
+    type->tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HEAPTYPE;
+    type->tp_bases = bases.release().ptr();
+    type->tp_dealloc = sharded_device_array_tp_dealloc;
+    type->tp_new = sharded_device_array_tp_new;
+    // Supported protocols
+    type->tp_as_number = &heap_type->as_number;
+    type->tp_as_sequence = &heap_type->as_sequence;
+    type->tp_as_mapping = &heap_type->as_mapping;
+    type->tp_as_buffer = nullptr;
+
+    // Allow weak references to DeviceArray objects.
+    type->tp_weaklistoffset = offsetof(ShardedDeviceArrayObject, weakrefs);
+
+    TF_RET_CHECK(PyType_Ready(type) == 0);
+    type_ = reinterpret_cast<PyObject*>(type);
+  }
   py::object type = py::reinterpret_borrow<py::object>(type_);
   type.attr("__module__") = m.attr("__name__");
   m.attr("ShardedDeviceArray") = type;

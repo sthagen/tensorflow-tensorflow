@@ -506,11 +506,11 @@ absl::flat_hash_set<string> GetExperiments(
 
 void LogAndRecordExperiments(const absl::flat_hash_set<string>& experiments) {
   if (!experiments.empty()) {
-    VLOG(1) << "The input pipeline is subject to tf.data experiments. "
-               "Please see `go/tf-data-experiments` for more details.";
+    LOG(INFO) << "The input pipeline is subject to tf.data experiments. "
+                 "Please see `go/tf-data-experiments` for more details.";
   }
   for (auto& experiment : experiments) {
-    VLOG(1) << "The experiment \"" << experiment << "\" is applied.";
+    LOG(INFO) << "The experiment \"" << experiment << "\" is applied.";
     metrics::RecordTFDataExperiment(experiment);
   }
 }
@@ -902,7 +902,8 @@ namespace {
 
 REGISTER_DATASET_EXPERIMENT("parallelize_batch_copy", 100);
 REGISTER_DATASET_EXPERIMENT("max_parallelism", 100);
-REGISTER_DATASET_EXPERIMENT("inject_prefetch", 5);
+REGISTER_DATASET_EXPERIMENT("min_outer_interleave_parallelism", 5);
+REGISTER_DATASET_EXPERIMENT("inject_prefetch", 50);
 }  // namespace
 }  // namespace data
 }  // namespace tensorflow

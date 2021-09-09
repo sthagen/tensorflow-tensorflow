@@ -682,6 +682,7 @@ cc_library(
         "//conditions:default": [],
     }),
     deps = [
+        ":custom_call_thunk",
         "@llvm-project//llvm:Support",
     ] + if_nccl([
         ":virtual_nccl",
@@ -691,6 +692,7 @@ cc_library(
         ":is_bef_thunk_enabled": [
             "@tf_runtime//:hostcontext",
             "@tf_runtime//:support",
+            "@tf_runtime//backends/gpu:gpu_kernels_detail",
             "@tf_runtime//backends/gpu:gpu_wrapper",
             "@tf_runtime//backends/gpu:gpu_types",
         ],
@@ -848,6 +850,7 @@ cc_library(
             "@tf_runtime//:basic_kernels_alwayslink",
             "@tf_runtime//:basic_kernels_opdefs",
             "@tf_runtime//:befexecutor",
+            "@tf_runtime//:bef",
             "@tf_runtime//:core_runtime",
             "@tf_runtime//:hostcontext",
             "@tf_runtime//:mlirtobef_translate",
@@ -862,6 +865,7 @@ cc_library(
             "//tensorflow/stream_executor/gpu:gpu_executor_header",
             "@tf_runtime//:basic_kernels_alwayslink",
             "@tf_runtime//:befexecutor",
+            "@tf_runtime//:bef",
             "@tf_runtime//:core_runtime",
             "@tf_runtime//:hostcontext",
             "@tf_runtime//:support",
@@ -1620,6 +1624,7 @@ cc_library(
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
         "//tensorflow/compiler/xla/service:all_gather_broadcast_reorder",
+        "//tensorflow/compiler/xla/service:dynamic_dimension_simplifier",
         "//tensorflow/compiler/xla/service:all_gather_combiner",
         "//tensorflow/compiler/xla/service:all_gather_decomposer",
         "//tensorflow/compiler/xla/service:all_reduce_combiner",
@@ -1692,6 +1697,7 @@ cc_library(
             "//tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu:pass",
             "@tf_runtime//:mlirtobef_translate",
             "@tf_runtime//:support",
+            "@tf_runtime//:bef",
         ],
         "//conditions:default": [],
     }),

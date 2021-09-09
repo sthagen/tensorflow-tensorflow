@@ -71,7 +71,6 @@ struct MlirEmitterContext {
 //
 // Examples of things that are not unnested computations:
 //
-//  - The reducer of a kReduce HLO.  This is emitted using IrEmitterNested.
 //  - The body of a fusion node.  IrEmitterUnnested emits the relevant code
 //    within a kernel function using FusedIrEmitter.  (FusedIrEmitter is not
 //    really an IrEmitter, but is more an "IR generator generator".)
@@ -543,19 +542,10 @@ class IrEmitterUnnested : public IrEmitter {
                           const Shape& input_shape,
                           const FusionLayoutAnalysis& layout_analysis);
 
-  // For each reducer, emits the shuffle-down loop to accumulate the partial
-  // result to the global result.
-  void EmitFullWarpShuffleDownLoopForAllReduces(
-      absl::Span<HloComputation* const> reducers,
-      absl::Span<llvm::AllocaInst* const> partial_result_addresses,
-      int threads_per_block);
-
   // Emits shuffle-down reduction for the `partial_result_address` using the
   // reduction computation `reducer` over types `element_type`.
-  void EmitFullWarpShuffleDownLoopForReduce(HloComputation* reducer,
-                                            llvm::Type* element_type,
-                                            llvm::Value* partial_result_address,
-                                            int threads_per_block);
+  void EmitFullWarpShuffleDownLoopForReduce(
+      HloComputation* reducer, llvm::Value* partial_result_address);
 
   StatusOr<std::unique_ptr<Thunk>> BuildKernelThunkImpl(
       absl::string_view name, Thunk::ThunkInfo thunk_info,

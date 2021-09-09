@@ -1991,7 +1991,7 @@ bool NNAPIDelegateKernel::Validate(
       }
     } break;
     case kTfLiteBuiltinConv2d: {
-      ExpectMaxOpVersion(version, 3, &val_ctx);
+      ExpectMaxOpVersion(version, 5, &val_ctx);
       if (android_sdk_version < kMinSdkVersionForNNAPI12) {
         Expect(!IsHybridOperator(context, builtin_code, node),
                NNAPIValidationFailureType::kUnsupportedHybridOperator,
@@ -2746,7 +2746,7 @@ bool NNAPIDelegateKernel::Validate(
     case kTfLiteBuiltinEqual:
     case kTfLiteBuiltinNotEqual: {
       ExpectMaxOpVersion(version, 2, &val_ctx);
-      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI11,
+      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI12,
                                  &val_ctx);
       const auto input_type = context->tensors[node->inputs->data[0]].type;
       EXPECT_INPUT_TYPE_IN(input_type, kTfLiteFloat32, kTfLiteUInt8,
@@ -2754,7 +2754,7 @@ bool NNAPIDelegateKernel::Validate(
     } break;
     case kTfLiteBuiltinNeg: {
       ExpectMaxOpVersion(version, 2, &val_ctx);
-      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI11,
+      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI12,
                                  &val_ctx);
       const auto input_type = context->tensors[node->inputs->data[0]].type;
       EXPECT_INPUT_TYPE_IN(input_type, kTfLiteFloat32, kTfLiteInt32);
@@ -2774,7 +2774,7 @@ bool NNAPIDelegateKernel::Validate(
     } break;
     case kTfLiteBuiltinSelect: {
       ExpectMaxOpVersion(version, 2, &val_ctx);
-      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI11,
+      ExpectMinAndroidSdkVersion(android_sdk_version, kMinSdkVersionForNNAPI12,
                                  &val_ctx);
       const auto value_type = context->tensors[node->inputs->data[1]].type;
       EXPECT_INPUT_TYPE_IN(value_type, kTfLiteFloat32, kTfLiteInt32,

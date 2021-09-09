@@ -534,6 +534,8 @@ cc_library(
         "//tensorflow/core/platform:platform_port",
         "//tensorflow/core/platform:thread_annotations",
         "//tensorflow/core/platform:types",
+        "//tensorflow/core/profiler/lib:scoped_memory_debug_annotation",
+        "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
     ],
@@ -1214,6 +1216,14 @@ tf_cc_test(
     ],
 )
 
+cc_library(
+    name = "op_kernel_test_base",
+    testonly = True,
+    textual_hdrs = [
+        "op_kernel_test_base.h",
+    ],
+)
+
 tf_cc_tests(
     name = "higher_level_tests",
     size = "small",
@@ -1226,6 +1236,7 @@ tf_cc_tests(
         "common_shape_fns_test.cc",
         "dataset_test.cc",
         "device_base_test.cc",
+        "disable_jit_test.cc",
         "function_test.cc",
         "graph_def_util_test.cc",
         "graph_to_functiondef_test.cc",
@@ -1267,6 +1278,7 @@ tf_cc_tests(
         "//tensorflow/core:__pkg__",
     ],
     deps = [
+        ":op_kernel_test_base",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/cc:cc_ops_internal",
         "//tensorflow/cc:function_ops",
@@ -1289,6 +1301,10 @@ tf_cc_tests(
         "//tensorflow/core/common_runtime:direct_session_internal",
         "//tensorflow/core/kernels:ops_util",
         "//tensorflow/core/platform:regexp",
+        "//tensorflow/core/profiler/lib:profiler_session",
+        "//tensorflow/core/profiler/protobuf:memory_profile_proto_cc",
+        "//tensorflow/core/profiler/utils:xplane_schema",
+        "//tensorflow/core/profiler/utils:xplane_visitor",
         "//tensorflow/core/util:protos_test_cc",
         "//third_party/eigen3",
         "@com_google_absl//absl/base",

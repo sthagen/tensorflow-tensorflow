@@ -926,9 +926,10 @@ class DatasetBase : public core::RefCounted {
     std::unique_ptr<IteratorBase> it;
     IteratorContext::Params params(ctx);
     params.is_restoring = true;
-    TF_RETURN_IF_ERROR(MakeIterator(IteratorContext(std::move(params)),
+    IteratorContext restore_ctx(std::move(params));
+    TF_RETURN_IF_ERROR(MakeIterator(&restore_ctx,
                                     /*parent=*/nullptr, output_prefix, &it));
-    TF_RETURN_IF_ERROR(it->Restore(ctx, reader));
+    TF_RETURN_IF_ERROR(it->Restore(&restore_ctx, reader));
     *iterator = std::move(it);
     return Status::OK();
   }
@@ -982,6 +983,9 @@ class DatasetBase : public core::RefCounted {
   // state. Otherwise, the method returns `Status::OK()`.
   virtual Status CheckExternalState() const = 0;
 
+  // Indicates whether the dataset is compatible with random access.
+  Status CheckRandomAccessCompatible(const int64 index) const;
+
   // Return the element at a particular index for a randomly accessible dataset.
   virtual Status Get(OpKernelContext* ctx, int64 index,
                      std::vector<Tensor>* out_tensors) const;
@@ -1034,6 +1038,9 @@ class DatasetBase : public core::RefCounted {
   void set_options(const Options& options) { options_ = options; }
 
  private:
+  // Computes and stores the cardinality of a given dataset.
+  Status ComputeCardinality();
+
   // Computes the number of source datasets feeding into this dataset. A source
   // dataset is a leaf in the subtree of dataset inputs.
   Status ComputeNumSources();
@@ -1050,6 +1057,7 @@ class DatasetBase : public core::RefCounted {
   // The number of source datasets feeding into the dataset. A source dataset is
   // a leaf in the subtree of dataset inputs.
   int64_t num_sources_ = -1;
+  int64_t cardinality_ = kUnknownCardinality;
 };
 
 // Represents an iterator that is associated with a particular dataset.

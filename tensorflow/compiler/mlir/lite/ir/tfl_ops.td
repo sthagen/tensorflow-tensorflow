@@ -1675,6 +1675,7 @@ shape(squeeze(t, [2, 4])) ==> [1, 2, 3, 1]
 
 def TFL_FillOp: TFL_Op<"fill", [
     NoSideEffect,
+    SameOperandsAndResultsScale,
     PredOpTrait<"input and result must have same element type",
       TFL_TCresVTEtIsSameAsOp<0, 1>>]> {
   let summary = "Fill the tensor with given value.";
@@ -3196,6 +3197,11 @@ def TFL_TransposeOp : TFL_Op<"transpose", [
     OpBuilder<(ins "Value":$input, "Value":$perm),
     [{ BuildTransposeOp(&$_builder, $_state, input, perm); }]>
   ];
+
+  let extraClassDeclaration = [{
+    // Quantized axes are verified in the Verify function.
+    bool RequiredSameQuantizedAxes() { return false; }
+  }];
 }
 
 def TFL_UnpackOp : TFL_Op<"unpack", [

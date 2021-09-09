@@ -194,7 +194,6 @@ H AbslHashValue(H h, const ShardingSpec& key) {
   return h;
 }
 
-
 // A ShardedDeviceArray is an ndarray sharded across devices.
 //
 // The purpose of a ShardedDeviceArray is to reduce the number of transfers when
@@ -219,7 +218,6 @@ class ShardedDeviceArray {
   // Delete all the underlying buffers (freeing memory on device).
   // The Numpy value on the host, if it exists, will also be deleted.
   void Delete();
-
   const ShardingSpec& GetShardingSpec() const { return sharding_spec_; }
   // Returns an error status iff the object has been deleted.
   xla::StatusOr<absl::Span<xla::PjRtBuffer* const>> GetPjRtBuffers();
