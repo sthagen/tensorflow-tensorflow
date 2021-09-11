@@ -504,6 +504,7 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/base",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:optional",
@@ -857,6 +858,7 @@ cc_library(
             "@tf_runtime//:support",
             "@tf_runtime//backends/gpu:gpu_kernels_alwayslink",
             "@tf_runtime//backends/gpu:gpu_opdefs",
+            "@tf_runtime//backends/gpu:gpu_passes",
             "@tf_runtime//backends/gpu:gpu_types",
         ],
         ":is_bef_executable_enabled": [
@@ -870,6 +872,7 @@ cc_library(
             "@tf_runtime//:hostcontext",
             "@tf_runtime//:support",
             "@tf_runtime//backends/gpu:gpu_kernels_alwayslink",
+            "@tf_runtime//backends/gpu:gpu_passes",
             "@tf_runtime//backends/gpu:gpu_types",
         ],
         "//conditions:default": [],
@@ -1126,10 +1129,6 @@ cc_library(
         "//tensorflow/core/platform:stream_executor_no_cuda",
         "//tensorflow/stream_executor:blas",
     ] + if_cuda_is_configured([
-        # copybara:uncomment-begin
-        # "@local_config_cuda//cuda:cublas_headers",
-        # "@local_config_cuda//cuda:cusolver_headers",
-        # copybara:uncomment-end
         "@local_config_cuda//cuda:cuda_headers",
         "//tensorflow/stream_executor/cuda:cusolver_lib",
     ]) + if_rocm_is_configured([
@@ -1698,6 +1697,7 @@ cc_library(
             "@tf_runtime//:mlirtobef_translate",
             "@tf_runtime//:support",
             "@tf_runtime//:bef",
+            "@tf_runtime//backends/gpu:gpu_passes",
         ],
         "//conditions:default": [],
     }),

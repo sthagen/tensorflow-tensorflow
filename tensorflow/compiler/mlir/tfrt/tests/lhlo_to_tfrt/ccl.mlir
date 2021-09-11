@@ -1,7 +1,7 @@
-// RUN: lhlo-tfrt-opt %s              \
-// RUN:   -lmhlo-gpu-async-conversion \
-// RUN:   -gpu-async-region           \
-// RUN:   -async-gpu-tfrt-conversion  \
+// RUN: lhlo-tfrt-opt %s    \
+// RUN:   -lmhlo-to-gpu     \
+// RUN:   -gpu-async-region \
+// RUN:   -gpu-to-tfrt-gpu  \
 // RUN: | FileCheck %s
 
 // CHECK:      func @all_gather(
@@ -179,5 +179,32 @@ func @all_to_all_split_dimension(%operand0: memref<2x2xf32>, %operand1: memref<2
 
   // CHECK-NOT: cast
   // CHECK: tfrt.return [[CHAIN3]] : !tfrt.chain
+  "lmhlo.terminator"() : () -> ()
+}
+
+// CHECK:      func @collective_permute(
+// CHECK-SAME:   %arg0: !tfrt.chain,
+// CHECK-SAME:   %arg1: !tfrt_gpu.stream,
+// CHECK-SAME:   %arg2: !tfrt_gpu.buffer,
+// CHECK-SAME:   %arg3: !tfrt_gpu.buffer
+// CHECK-SAME: ) -> !tfrt.chain
+func @collective_permute(%operand: memref<2x2xf32>, %result: memref<2x2xf32>) {
+  // CHECK-NOT: cast
+  // CHECK-NOT: async.execute
+
+  // CHECK: [[CONTEXT:%[0-9]+]] = tfrt_gpu.stream.get_context %arg1
+  // CHECK: [[HANDLE:%[0-9]+]] = xlir.ccl.create [[CONTEXT]]
+  // CHECK: [[CHAIN1:%[0-9]+]] = xlir.ccl.collective_permute [[HANDLE]],
+  // CHECK-SAME: %arg2, %arg3, ncclFloat32, %arg0
+  // CHECK: [[CHAIN2:%[0-9]+]] = tfrt_gpu.ccl.execute %arg1, [[HANDLE]],
+  // CHECK-SAME: [[CHAIN1]]
+
+  "lmhlo.collective_permute"(%operand, %result) {
+      source_target_pairs = dense<[[0, 1], [1, 2], [2, 3]]> : tensor<3x2xi64>,
+      channel_id = { handle = 5 : i64, type = 2 : i64 }
+  } : (memref<2x2xf32>, memref<2x2xf32>) -> ()
+
+  // CHECK-NOT: cast
+  // CHECK: tfrt.return [[CHAIN2]] : !tfrt.chain
   "lmhlo.terminator"() : () -> ()
 }

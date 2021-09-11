@@ -117,6 +117,7 @@ exports_files(
         "api_def.proto",
         "attr_value.proto",
         "cost_graph.proto",
+        "dataset_metadata.proto",
         "dataset_options.proto",
         "device_attributes.proto",
         "full_type.proto",
@@ -1219,8 +1220,28 @@ tf_cc_test(
 cc_library(
     name = "op_kernel_test_base",
     testonly = True,
-    textual_hdrs = [
+    hdrs = [
         "op_kernel_test_base.h",
+    ],
+    deps = [
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
+        "//tensorflow/cc:function_ops",
+        "//tensorflow/cc:sendrecv_ops",
+        "//tensorflow/core",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:core_cpu_internal",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:ops",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/common_runtime:direct_session_internal",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -1701,6 +1722,13 @@ tf_proto_library(
 )
 
 tf_proto_library(
+    name = "dataset_metadata_proto",
+    srcs = ["dataset_metadata.proto"],
+    cc_api_version = 2,
+    make_default_target_header_only = True,
+)
+
+tf_proto_library(
     name = "dataset_options_proto",
     srcs = ["dataset_options.proto"],
     cc_api_version = 2,
@@ -1716,6 +1744,7 @@ tf_proto_library(
         ":api_def_proto",
         ":attr_value_proto",
         ":cost_graph_proto",
+        ":dataset_metadata_proto",
         ":dataset_options_proto",
         ":device_attributes_proto",
         ":full_type_proto",

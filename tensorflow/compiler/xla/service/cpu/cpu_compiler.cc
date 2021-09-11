@@ -616,34 +616,25 @@ StatusOr<std::unique_ptr<HloModule>> CpuCompiler::RunHloPasses(
   return std::move(module);
 }
 
-StatusOr<
-    std::tuple<std::unique_ptr<HloModule>, std::unique_ptr<BufferAssignment>>>
-CpuCompiler::RunHloPassesAndBufferAssignement(std::unique_ptr<HloModule> module,
-                                              se::StreamExecutor* executor,
-                                              bool optimize,
-                                              const CompileOptions& options) {
-  if (optimize) {
-    TF_ASSIGN_OR_RETURN(module,
-                        RunHloPasses(std::move(module), executor, options));
-  }
-
+StatusOr<std::unique_ptr<BufferAssignment>> CpuCompiler::AssignBuffers(
+    const HloModule* module) {
   // Select an order for emitting the HLO instructions for each computation.
   // Using this sequence enables tighter buffer liveness analysis and reduced
   // memory usage (as compared to using DependencyHloOrdering).
   TF_ASSIGN_OR_RETURN(HloSchedule schedule,
-                      ScheduleModule(module.get(), BufferSizeBytesFunction(),
+                      ScheduleModule(module, BufferSizeBytesFunction(),
                                      ComputationSchedulerToModuleScheduler(
                                          DFSMemoryScheduler)));
 
   // Run buffer allocation on the HLO graph.
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<BufferAssignment> assignment,
-      BufferAssigner::Run(module.get(),
+      BufferAssigner::Run(module,
                           absl::make_unique<SequentialHloOrdering>(schedule),
                           BufferSizeBytesFunction(), memory_alignment,
                           /*allocate_buffers_for_constants=*/true));
 
-  return std::make_tuple(std::move(module), std::move(assignment));
+  return std::move(assignment);
 }
 
 namespace {

@@ -163,6 +163,7 @@ limitations under the License.
 
 #if BEF_EXECUTABLE
 #include "tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu/gpu_passes.h"
+#include "tfrt/gpu/pass/pass.h"  // from @tf_runtime
 #include "tfrt/bef/bef_buffer.h"  // from @tf_runtime
 #include "tfrt/bef_converter/mlir_to_bef_translate.h"  // from @tf_runtime
 #endif  // BEF_EXECUTABLE
@@ -676,21 +677,13 @@ static absl::optional<bool> DummyCanShareBufferFunction(const HloInstruction*,
   return absl::nullopt;
 }
 
-StatusOr<
-    std::tuple<std::unique_ptr<HloModule>, std::unique_ptr<BufferAssignment>>>
-GpuCompiler::RunHloPassesAndBufferAssignement(
-    std::unique_ptr<HloModule> hlo_module, se::StreamExecutor* executor,
-    bool optimize, const CompileOptions& options) {
-  if (optimize) {
-    TF_ASSIGN_OR_RETURN(hlo_module,
-                        RunHloPasses(std::move(hlo_module), executor, options));
-  }
-
+StatusOr<std::unique_ptr<BufferAssignment>> GpuCompiler::AssignBuffers(
+    const HloModule* hlo_module) {
   std::unique_ptr<StreamAssignment> stream_assignment =
       AssignStreams(*hlo_module);
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<GpuHloSchedule> hlo_schedule,
-                      GpuHloSchedule::Build(hlo_module.get(),
-                                            *stream_assignment, pointer_size_));
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<GpuHloSchedule> hlo_schedule,
+      GpuHloSchedule::Build(hlo_module, *stream_assignment, pointer_size_));
 
   auto buffer_size_bytes_function =
       [this](const BufferValue& buffer_value) -> int64_t {
@@ -700,7 +693,7 @@ GpuCompiler::RunHloPassesAndBufferAssignement(
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<BufferAssignment> assignment,
       BufferAssigner::Run(
-          hlo_module.get(), hlo_schedule->ConsumeHloOrdering(),
+          hlo_module, hlo_schedule->ConsumeHloOrdering(),
           buffer_size_bytes_function,
           /*color_alignment=*/
           [](LogicalBuffer::Color) { return kXlaAllocatedBufferAlignBytes; },
@@ -708,7 +701,7 @@ GpuCompiler::RunHloPassesAndBufferAssignement(
           /*colorer=*/BufferAssigner::DefaultColorer(),
           /*must_not_live_out=*/{}, GetCanShareBuffer()));
 
-  return std::make_tuple(std::move(hlo_module), std::move(assignment));
+  return std::move(assignment);
 }
 
 #if BEF_EXECUTABLE
@@ -723,7 +716,7 @@ static StatusOr<OwnedBefBuffer> LowerToBef(mlir::ModuleOp mlir_module) {
                        mlir::PassManager::Nesting::Implicit);
   pm.addPass(tensorflow::createLmhloGpuAsyncConversionPass());
   pm.addPass(mlir::createGpuAsyncRegionPass());
-  pm.addPass(tensorflow::createAsyncGpuTfrtConversionPass());
+  tfrt::gpu::populateGpuToTfrtGpuPasses(pm);
   if (pm.run(mlir_module).failed()) {
     return InternalError(
         "Failed to lower LHLO to TFRT Dialect with gpu kernels.");
