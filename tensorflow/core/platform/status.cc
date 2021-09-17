@@ -22,6 +22,7 @@ limitations under the License.
 #include "absl/base/call_once.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/match.h"
+#include "absl/types/optional.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/stacktrace.h"
 #include "tensorflow/core/platform/str_util.h"
@@ -214,11 +215,11 @@ void Status::SetPayload(tensorflow::StringPiece type_url,
   state_->payloads[std::string(type_url)] = std::string(payload);
 }
 
-tensorflow::StringPiece Status::GetPayload(
+absl::optional<tensorflow::StringPiece> Status::GetPayload(
     tensorflow::StringPiece type_url) const {
-  if (ok()) return tensorflow::StringPiece();
+  if (ok()) return absl::nullopt;
   auto payload_iter = state_->payloads.find(std::string(type_url));
-  if (payload_iter == state_->payloads.end()) return tensorflow::StringPiece();
+  if (payload_iter == state_->payloads.end()) return absl::nullopt;
   return tensorflow::StringPiece(payload_iter->second);
 }
 
@@ -230,17 +231,13 @@ bool Status::ErasePayload(tensorflow::StringPiece type_url) {
   return true;
 }
 
-const std::unordered_map<std::string, std::string> Status::GetAllPayloads()
-    const {
-  if (ok()) return {};
-  return state_->payloads;
-}
-
-void Status::ReplaceAllPayloads(
-    const std::unordered_map<std::string, std::string>& payloads) {
-  if (ok() || payloads.empty()) return;
-  if (state_ == nullptr) state_ = std::make_unique<State>();
-  state_->payloads = payloads;
+void Status::ForEachPayload(
+    const std::function<void(tensorflow::StringPiece, tensorflow::StringPiece)>&
+        visitor) const {
+  if (ok()) return;
+  for (const auto& payload : state_->payloads) {
+    visitor(payload.first, payload.second);
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const Status& x) {
@@ -305,17 +302,19 @@ static constexpr int kMaxAttachedLogMessageSize = 512;
 
 std::unordered_map<std::string, std::string> StatusGroup::GetPayloads() const {
   std::unordered_map<std::string, std::string> payloads;
+  auto capture_payload = [&payloads](tensorflow::StringPiece key,
+                                     tensorflow::StringPiece value) {
+    payloads[std::string(key)] = std::string(value);
+  };
+
   for (const auto& status : derived_) {
-    for (const auto& key_value_pair : status.GetAllPayloads()) {
-      payloads[key_value_pair.first] = key_value_pair.second;
-    }
+    status.ForEachPayload(capture_payload);
   }
+
   // If a key appears in both derived_ and non_derived_ payloads, then the
   // non_derived_ payload receives priority.
   for (const auto& status : non_derived_) {
-    for (const auto& key_value_pair : status.GetAllPayloads()) {
-      payloads[key_value_pair.first] = key_value_pair.second;
-    }
+    status.ForEachPayload(capture_payload);
   }
 
   return payloads;
