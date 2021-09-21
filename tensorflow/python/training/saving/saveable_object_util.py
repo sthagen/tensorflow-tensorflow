@@ -138,8 +138,10 @@ def _tensor_comes_from_variable(v):
   return isinstance(v, ops.Tensor) and v.op.type in _VARIABLE_OPS
 
 
-def create_saveables_from_factory(saveable_factory, checkpoint_key,
-                                  use_graph_element_for_variables=True):
+def create_saveables_from_factory(
+    saveable_factory, checkpoint_key,
+    call_with_mapped_captures=None,
+    use_graph_element_for_variables=True):
   """Runs the saveable factory to produce a tuple of SaveableObjects.
 
   `obj` and `attribute_name` are only used in the error produced in the
@@ -151,15 +153,17 @@ def create_saveables_from_factory(saveable_factory, checkpoint_key,
     checkpoint_key: A string that is uniquely generated to be used in the
       `saveable_factory`. The names of the produced SaveableObjects must contain
       this key.
+    call_with_mapped_captures: Helper that calls a tf.function while remapping
+      the captures.
     use_graph_element_for_variables: Boolean, whether to return the graph
       element of resource variables created under graph mode. This argument
       defaults to True for compatibility reasons.
-
   Returns:
     a tuple of SaveableObjects
   """
   if callable(saveable_factory):
-    maybe_saveable = saveable_factory(name=checkpoint_key)
+    maybe_saveable = create_saveable_object(saveable_factory, checkpoint_key,
+                                            call_with_mapped_captures)
   else:
     maybe_saveable = saveable_factory
   if isinstance(maybe_saveable, saveable_object.SaveableObject):
@@ -519,6 +523,37 @@ def restored_saved_object_factory(save_function, restore_function):
   return functools.partial(RestoredSaveableObject,
                            save_function=save_function,
                            restore_function=restore_function)
+
+
+def create_saveable_object(factory, name, call_with_mapped_captures):
+  """Creates a SaveableObject while potentially in a different graph.
+
+  When creating the frozen saver for SavedModel, the save and restore ops are
+  placed in a separate graph. Since RestoredSaveableObject uses tf.functions to
+  save and restore, the function captures must be mapped to the new graph.
+
+  Args:
+    factory: Factory method for creating the SaveableObject.
+    name: Checkpoint key of this SaveableObject.
+    call_with_mapped_captures: Helper that calls a tf.function while remapping
+      the captures.
+
+  Returns:
+    a SaveableObject.
+  """
+  if (call_with_mapped_captures is None or
+      not is_factory_for_restored_saveable_object(factory)):
+    return factory(name=name)
+
+  concrete_save_fn = factory.keywords["save_function"]
+  def save_fn(name):
+    return call_with_mapped_captures(concrete_save_fn, [name])
+
+  concrete_restore_fn = factory.keywords["restore_function"]
+  def restore_fn(*restored_tensors):
+    return call_with_mapped_captures(concrete_restore_fn, restored_tensors)
+
+  return factory(save_function=save_fn, restore_function=restore_fn, name=name)
 
 
 def is_factory_for_restored_saveable_object(factory):
