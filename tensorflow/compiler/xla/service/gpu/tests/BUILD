@@ -185,6 +185,7 @@ tf_cc_test(
         ":gpu_codegen_test",
         "//tensorflow/compiler/xla/service:hlo_module_config",
         "//tensorflow/compiler/xla/service:hlo_parser",
+        "//tensorflow/compiler/xla/service:hlo_query",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
@@ -659,6 +660,7 @@ xla_test(
     backends = ["gpu"],
     deps = [
         "//tensorflow/compiler/xla:array2d",
+        "//tensorflow/compiler/xla:reference_util",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/client:xla_builder",
         "//tensorflow/compiler/xla/tests:client_library_test_base",
