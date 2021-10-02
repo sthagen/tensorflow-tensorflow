@@ -20,6 +20,7 @@ load(
 )
 load(
     "@local_config_rocm//rocm:build_defs.bzl",
+    "if_rocm",
     "if_rocm_is_configured",
 )
 load(
@@ -527,7 +528,7 @@ tf_cuda_library(
         ":virtual_nccl",
         "//tensorflow/stream_executor/cuda:cuda_activation",
         "//tensorflow/stream_executor/cuda:cuda_gpu_executor",
-    ]) + if_rocm_is_configured([
+    ]) + if_rocm([
         ":virtual_rccl",
         "//tensorflow/stream_executor/rocm:rocm_activation",
         "//tensorflow/stream_executor/rocm:rocm_gpu_executor",
@@ -597,7 +598,7 @@ tf_cuda_library(
         "//tensorflow/stream_executor/lib",
     ]) + if_cuda_is_configured([
         ":virtual_nccl",
-    ]) + if_rocm_is_configured([
+    ]) + if_rocm([
         ":virtual_rccl",
     ]) + select({
         ":is_bef_thunk_enabled": [
@@ -693,7 +694,7 @@ cc_library(
         ":virtual_nccl_utils",
     ]) + if_cuda_is_configured([
         ":virtual_nccl",
-    ]) + if_rocm_is_configured([
+    ]) + if_rocm([
         ":virtual_rccl",
     ]) + select({
         ":is_bef_thunk_enabled": [
@@ -846,7 +847,7 @@ cc_library(
             "@llvm-project//mlir:GPUTransforms",
             "@llvm-project//mlir:Pass",
             "//tensorflow/compiler/mlir/hlo:lhlo",
-            "//tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu:pass",
+            "//tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu:passes",
             "//tensorflow/compiler/mlir/xla:attribute_exporter",
             "//tensorflow/compiler/xla/service:collective_ops_utils",
             "//tensorflow/core/tfrt/runtime:work_queue_interface",
@@ -1719,7 +1720,7 @@ cc_library(
         "//tensorflow/stream_executor:stream_executor_headers",
     ] + select({
         ":is_bef_executable_enabled": [
-            "//tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu:pass",
+            "//tensorflow/compiler/mlir/tfrt/transforms/lhlo_gpu_to_tfrt_gpu:passes",
             "@tf_runtime//:mlirtobef_translate",
             "@tf_runtime//:support",
             "@tf_runtime//:bef",

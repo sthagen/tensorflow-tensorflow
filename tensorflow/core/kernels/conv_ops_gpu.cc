@@ -31,9 +31,10 @@ limitations under the License.
 namespace tensorflow {
 
 #if GOOGLE_CUDA
+namespace {
 template <typename LaunchFunc>
 StatusOr<std::vector<tensorflow::AutotuneResult>> AutotuneConvImpl(
-    OpKernelContext* ctx, const std::vector<se::dnn::AlgorithmConfig>& configs,
+    OpKernelContext* ctx, std::vector<se::dnn::AlgorithmConfig>& configs,
     const LaunchFunc& launch_func, size_t scratch_size_limit,
     const se::RedzoneAllocator& rz_allocator) {
   auto* stream = ctx->op_device_context()->stream();
@@ -43,7 +44,7 @@ StatusOr<std::vector<tensorflow::AutotuneResult>> AutotuneConvImpl(
 
   std::vector<tensorflow::AutotuneResult> results;
   // TODO(reedwm): Warn if determinism is enabled after autotune is run
-  for (const auto& profile_config : configs) {
+  for (auto& profile_config : configs) {
     // TODO(zhengxq): profile each algorithm multiple times to better
     // accuracy.
     se::RedzoneAllocator rz_scratch_allocator(
@@ -96,6 +97,7 @@ StatusOr<std::vector<tensorflow::AutotuneResult>> AutotuneConvImpl(
 
   return results;
 }
+}  // namespace
 #endif  // GOOGLE_CUDA
 
 // Finds the best convolution algorithm for the given ConvLaunch (cuda
@@ -130,26 +132,30 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneFusedConv(
 
     // Find all candidate algorithms or execution plans (for CuDNN frontend
     // APIs).
-    std::vector<std::unique_ptr<se::dnn::ConvolveExecutionPlan>> plans;
+    std::vector<std::shared_ptr<const se::dnn::ConvolveExecutionPlan>> plans;
     std::vector<se::dnn::AlgorithmDesc> algorithms;
     std::vector<se::dnn::AlgorithmConfig> configs;
     if (CudnnUseFrontend()) {
+      std::vector<std::unique_ptr<se::dnn::ConvolveExecutionPlan>> unique_plans;
       if (!stream->parent()
                ->GetFusedConvolveExecutionPlans(
                    se::dnn::ConvolutionKind::FORWARD,
                    se::dnn::ToDataType<T>::value, conv_scale, side_input_scale,
                    stream, input_desc, filter_desc, bias_desc, output_desc,
-                   conv_desc, activation_mode, &plans)
+                   conv_desc, activation_mode, &unique_plans)
                .ok()) {
         return errors::Unknown(
             "Failed to get convolution plans. This is probably because cuDNN "
             "failed to initialize, so try looking to see if a warning log "
             "message was printed above.");
       }
+      std::move(unique_plans.begin(), unique_plans.end(),
+                std::back_inserter(plans));
       for (const auto& plan : plans) {
         configs.push_back(se::dnn::AlgorithmConfig(
             se::dnn::AlgorithmDesc{plan->getTag(), plan->get_raw_desc()},
             plan->getWorkspaceSize()));
+        configs.back().set_plan(plan);
       }
     } else {
       if (!stream->parent()->GetConvolveAlgorithms(
@@ -172,9 +178,12 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneFusedConv(
         WrapRedzoneBestEffort(&rz_allocator, output_ptr));
 
     auto launch_func = [&](se::ScratchAllocator* allocator_used,
-                           se::dnn::AlgorithmConfig profile_config,
+                           se::dnn::AlgorithmConfig& profile_config,
                            se::dnn::ProfileResult* profile_result) -> Status {
       if (CudnnUseFrontend()) {
+        TF_ASSIGN_OR_RETURN(
+            auto plan_and_scratch,
+            AllocateScratchOrFallback(allocator_used, profile_config));
         return stream->FusedConvolveWithExecutionPlan(
             input_desc, input_ptr,             // input
             conv_scale,                        // input_scale
@@ -184,7 +193,9 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneFusedConv(
             bias_desc, bias_ptr,               // bias
             activation_mode,                   // activation
             output_desc, &output_ptr_rz,       // output
-            allocator_used, profile_config, profile_result);
+            std::get<se::DeviceMemoryBase>(plan_and_scratch),
+            *std::get<const se::dnn::ConvolveExecutionPlan*>(plan_and_scratch),
+            profile_result);
       } else {
         return stream->FusedConvolveWithAlgorithm(
             input_desc, input_ptr,             // input
@@ -226,7 +237,7 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneFusedConv(
         algorithm_config = se::dnn::AlgorithmConfig(
             se::dnn::AlgorithmDesc{plan->getTag(), plan->get_raw_desc()},
             plan->getWorkspaceSize());
-        algorithm_config.set_plan(plan);
+        algorithm_config.set_plan(std::move(plan));
         break;
       }
     }
@@ -301,7 +312,7 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneUnfusedConv(
     if (!autotune_map->Find(conv_parameters, &algorithm_config)) {
       profiler::ScopedAnnotation annotation("cudnn_autotuning");
 
-      std::vector<std::unique_ptr<se::dnn::ConvolveExecutionPlan>> plans;
+      std::vector<std::shared_ptr<const se::dnn::ConvolveExecutionPlan>> plans;
 #if GOOGLE_CUDA
       std::vector<se::dnn::AlgorithmDesc> algorithms;
       std::vector<se::dnn::AlgorithmConfig> configs;
@@ -312,15 +323,20 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneUnfusedConv(
           "was printed above.");
 
       if (CudnnUseFrontend()) {
+        std::vector<std::unique_ptr<se::dnn::ConvolveExecutionPlan>>
+            unique_plans;
         if (!stream->parent()->GetConvolveExecutionPlans(
                 kind, se::dnn::ToDataType<T>::value, stream, input_desc,
-                filter_desc, output_desc, conv_desc, &plans)) {
+                filter_desc, output_desc, conv_desc, &unique_plans)) {
           return get_algo_failed_error;
         }
+        std::move(unique_plans.begin(), unique_plans.end(),
+                  std::back_inserter(plans));
         for (const auto& plan : plans) {
           configs.push_back(se::dnn::AlgorithmConfig(
               se::dnn::AlgorithmDesc{plan->getTag(), plan->get_raw_desc()},
               plan->getWorkspaceSize()));
+          configs.back().set_plan(plan);
         }
       } else {
         if (!stream->parent()->GetConvolveAlgorithms(kind, &algorithms)) {
@@ -358,12 +374,18 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneUnfusedConv(
       }
 
       auto launch_func = [&](se::ScratchAllocator* allocator_used,
-                             se::dnn::AlgorithmConfig profile_config,
+                             se::dnn::AlgorithmConfig& profile_config,
                              se::dnn::ProfileResult* profile_result) -> Status {
         if (CudnnUseFrontend()) {
+          TF_ASSIGN_OR_RETURN(
+              auto plan_and_scratch,
+              AllocateScratchOrFallback(allocator_used, profile_config));
           return stream->ConvolveWithExecutionPlan(
               kind, input_desc, input_ptr, filter_desc, filter_ptr, output_desc,
-              output_ptr, conv_desc, allocator_used, profile_config,
+              output_ptr, conv_desc,
+              std::get<se::DeviceMemoryBase>(plan_and_scratch),
+              *std::get<const se::dnn::ConvolveExecutionPlan*>(
+                  plan_and_scratch),
               profile_result);
         } else {
           return stream->ConvolveWithAlgorithm(
@@ -456,7 +478,7 @@ StatusOr<se::dnn::AlgorithmConfig> AutotuneUnfusedConv(
         algorithm_config = se::dnn::AlgorithmConfig(
             se::dnn::AlgorithmDesc{plan->getTag(), plan->get_raw_desc()},
             plan->getWorkspaceSize());
-        algorithm_config.set_plan(plan);
+        algorithm_config.set_plan(std::move(plan));
         break;
       }
     }
@@ -506,6 +528,39 @@ template StatusOr<se::dnn::AlgorithmConfig> AutotuneUnfusedConv<Eigen::half>(
     const se::dnn::ConvolutionDescriptor& conv_desc,
     const se::dnn::BatchDescriptor& output_desc,
     se::DeviceMemory<Eigen::half> output_ptr, int64_t scratch_size_limit);
+
+StatusOr<
+    std::tuple<const se::dnn::ConvolveExecutionPlan*, se::DeviceMemoryBase>>
+AllocateScratchOrFallback(se::ScratchAllocator* scratch_allocator,
+                          const se::dnn::AlgorithmConfig& algorithm_config) {
+  if (!algorithm_config.algorithm()) {
+    return errors::InvalidArgument(
+        "AllocateScratchOrFallback called with no execution plan.");
+  }
+
+  const se::dnn::ConvolveExecutionPlan* selected_plan =
+      algorithm_config.get_plan();
+  size_t workspace_size = selected_plan->getWorkspaceSize();
+
+  se::DeviceMemoryBase scratch_memory;
+  if (workspace_size > 0) {
+    auto scratch_or = scratch_allocator->AllocateBytes(workspace_size);
+    if (scratch_or.ok()) {
+      scratch_memory = scratch_or.ValueOrDie();
+    } else if ((selected_plan = algorithm_config.get_plan_no_scratch())) {
+      if (selected_plan->getWorkspaceSize() > 0) {
+        return errors::Internal(
+            "No-scratch fallback plan requires nonzero scratch space");
+      }
+    } else {
+      return errors::Unknown(
+          "CUDNN failed to allocate the scratch space for the plan or to find "
+          "a working no-scratch plan.");
+    }
+  }
+
+  return std::make_tuple(selected_plan, scratch_memory);
+}
 
 }  // namespace tensorflow
 

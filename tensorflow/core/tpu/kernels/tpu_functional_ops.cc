@@ -353,16 +353,12 @@ int64_t RemoveDescendantNodeOfArg(
 
 uint64 GetInputHash(OpKernelContext* ctx) {
   uint64 input_hash = 0;  // initialization for determinism.
-  // Use the input shape to compute hash.
-  // TODO(chiachenc): Handle collisions between programs with identical inputs
+  // Use the number of elements to compute hash.
+  // TODO(chiachenc): use fhe full shape to compute the hash.
   for (int i = 0; i < ctx->num_inputs(); ++i) {
     VLOG(4) << "InputHash, combine input " << i
-            << ", Shape:" << ctx->input(i).shape();
-    input_hash = Hash64Combine(input_hash, ctx->input(i).dtype());
-    input_hash = Hash64Combine(input_hash, ctx->input(i).dims());
-    for (int i = 0; i < ctx->input(i).dims(); ++i) {
-      input_hash = Hash64Combine(input_hash, ctx->input(i).dim_size(i));
-    }
+            << ", NumElements: " << ctx->input(i).NumElements();
+    input_hash = Hash64Combine(input_hash, ctx->input(i).NumElements());
   }
   return input_hash;
 }
@@ -1207,7 +1203,6 @@ void TPUPartitionedCallOp::ComputeAsync(OpKernelContext* ctx,
   uint64 input_hash = GetInputHash(ctx);
   int64_t ordinal_selector_req_id = -1;
   // Select a TPU core.
-  absl::ReleasableMutexLock lock(&mu_);
   int32_t device_ordinal = 0;
   OP_REQUIRES_OK_ASYNC(
       ctx,
@@ -1215,6 +1210,7 @@ void TPUPartitionedCallOp::ComputeAsync(OpKernelContext* ctx,
                         &device_ordinal),
       done);
   uint64 cache_hash = Hash64Combine(input_hash, device_ordinal);
+  absl::ReleasableMutexLock lock(&mu_);
 
   const std::vector<DeviceAndFHandle>* functions;
 
@@ -2553,7 +2549,6 @@ void TPUPartitionedCallOp::ExecuteRemoteFunction(
   std::vector<Tensor>* dummy_rets = new std::vector<Tensor>;
 
   profiler::TraceMe trace_me("TPUPartitionedCallOp-ExecuteRemote");
-  absl::ReaderMutexLock l(&mu_);
   library_runtime_->Run(opts, handle, dummy_args, dummy_rets,
                         [dummy_rets, done, ctx](const Status& status) {
                           if (!status.ok()) {
@@ -2580,7 +2575,6 @@ void TPUPartitionedCallOp::ExecuteLocalFunction(
   auto* rets = new std::vector<Tensor>;
 
   profiler::TraceMe trace_me("TPUPartitionedCallOp-ExecuteLocal");
-  absl::ReaderMutexLock l(&mu_);
   library_runtime_->Run(opts, handle, args, rets,
                         [rets, done, ctx](const Status& status) {
                           if (!status.ok()) {
