@@ -30,6 +30,7 @@ cc_library(
     name = "passes",
     srcs = [
         "ccl_pattern.cc",
+        "cholesky_pattern.cc",
         "custom_call_pattern.cc",
         "gemm_pattern.cc",
         "gpu_passes.cc",
@@ -56,6 +57,7 @@ cc_library(
         "//tensorflow/compiler/mlir/xla:type_to_shape",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/service/gpu:ir_emission_utils",
         "//tensorflow/compiler/xla/service/gpu:nccl_collective_thunks",
         "//tensorflow/compiler/xla/service/gpu:xlir_opdefs",
         "@com_google_absl//absl/strings",
@@ -73,6 +75,47 @@ cc_library(
         "@tf_runtime//backends/gpu:gpu_opdefs",
         "@tf_runtime//backends/gpu:gpu_passes",
         "@tf_runtime//backends/gpu:gpu_wrapper",
+    ],
+    alwayslink = 1,
+)
+
+# The lmhlo-to-gpu-binary pass is a separate target to avoid a dependcy cycle:
+# :lhlo_to_gpu_binary > xla/service/gpu:gpu_executable > :passes
+cc_library(
+    name = "lhlo_to_gpu_binary",
+    srcs = [
+        "fusion_pattern.cc",
+        "lmhlo_to_gpu_binary.cc",
+    ],
+    hdrs = [
+        "lmhlo_to_gpu_binary.h",
+    ],
+    tags = ["gpu"],
+    visibility = if_google([
+        "//platforms/xla/tests/gpu:__pkg__",
+    ]) + [
+        "//tensorflow/compiler/mlir/tfrt:__pkg__",
+        "//tensorflow/compiler/xla/service/gpu:__pkg__",
+    ],
+    deps = [
+        "//tensorflow/compiler/mlir/hlo:lhlo",
+        "//tensorflow/compiler/mlir/hlo:lhlo_gpu",
+        "//tensorflow/compiler/mlir/tensorflow",
+        "//tensorflow/compiler/mlir/xla:hlo_utils",
+        "//tensorflow/compiler/xla/service/gpu:buffer_allocations",
+        "//tensorflow/compiler/xla/service/gpu:gpu_executable",
+        "//tensorflow/compiler/xla/service/gpu:ir_emitter",
+        "//tensorflow/compiler/xla/service/gpu:launch_dimensions",
+        "//tensorflow/compiler/xla/service/gpu:nvptx_compiler",
+        "//tensorflow/compiler/xla/service/gpu:nvptx_compiler_impl",
+        "//tensorflow/compiler/xla/service/gpu/llvm_gpu_backend",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:GPUDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:StandardOps",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:Transforms",
     ],
     alwayslink = 1,
 )
