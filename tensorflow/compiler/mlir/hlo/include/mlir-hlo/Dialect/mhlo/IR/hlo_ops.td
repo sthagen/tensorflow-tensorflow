@@ -252,7 +252,7 @@ def HLO_FloorOp: HLO_UnaryElementwiseOp<"floor",
 }
 def HLO_ImagOp: HLO_UnaryElementwiseOp<"imag",
     [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>],
-    HLO_ComplexTensor> {
+    HLO_FpOrComplexTensor> {
   let summary = "Imag operator";
   let description = [{
     Returns `Imag(operand)` element-wise.
@@ -343,7 +343,7 @@ def HLO_PopulationCountOp: HLO_UnaryElementwiseOp<"popcnt",
 }
 def HLO_RealOp: HLO_UnaryElementwiseOp<"real",
     [NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>],
-    HLO_ComplexTensor> {
+    HLO_FpOrComplexTensor> {
   let summary = "Real operator";
   let description = [{
     Returns `Real(operand)` element-wise.
@@ -1521,6 +1521,9 @@ def HLO_DotOp: HLO_Op<"dot", [NoSideEffect]> {
     HLO_PrecisionConfigAttr:$precision_config
   );
   let results = (outs HLO_Tensor);
+  // Dot op required custom exporter to pass the preferred element type
+  // to Xla builder.
+  let hasCustomHLOConverter = 1;
 }
 
 def HLO_DotGeneralOp: HLO_Op<"dot_general", [NoSideEffect]> {
