@@ -104,10 +104,7 @@ class EagerContext : public ImmediateExecutionContext, public core::RefCounted {
       CollectiveExecutorMgrInterface* collective_executor_mgr = nullptr,
       bool run_eager_op_as_function = false);
 
-  void Release() override {
-    local_rendezvous_table_->CleanUpAll();
-    Unref();
-  }
+  void Release() override { Unref(); }
 
   AbstractTensorInterface* CreateInt64Scalar(int64_t value) override;
   AbstractTensorInterface* CreateUint64Scalar(uint64 value) override;
@@ -532,12 +529,18 @@ class EagerContext : public ImmediateExecutionContext, public core::RefCounted {
   void UpdateClusterFLRAndInitDevices(
       DistributedFunctionLibraryRuntime* cluster_flr);
 
+  // A constant representing the step id used for the global rendezvous.
+  // This is used to distibguish whether a user-specified step id should be set.
+  // Step id value of kGlobalRendezvous is reserved and should not be specified
+  // by the user.
+  static const int64_t kGlobalRendezvousId;
+
  private:
   // The class for wrapping a map of step_id to local rendezvous instances.
   class LocalRendezvousTable {
    public:
     LocalRendezvousTable() = default;
-    ~LocalRendezvousTable() = default;
+    ~LocalRendezvousTable();
 
     Rendezvous* FindOrCreate(int64_t step_id, DeviceMgr* device_mgr);
     void Remove(int64_t step_id);

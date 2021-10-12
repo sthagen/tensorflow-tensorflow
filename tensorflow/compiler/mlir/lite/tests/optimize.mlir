@@ -1522,6 +1522,17 @@ func @ConvertIdentityScatterNd(%arg0: tensor<4x3xf32>) -> tensor<4x3xf32> {
 // CHECK-NEXT: return %[[ARG]] : tensor<4x3xf32>
 }
 
+func @DontConvertIdentityScatterNdWithLargerOutputDimSize(%arg0: tensor<1xf32>) -> tensor<2xf32> {
+  %cst = constant dense<[[0]]> : tensor<1x1xi32>
+  %shape = constant dense<[2]> : tensor<1xi32>
+  %0 = "tfl.scatter_nd"(%cst, %arg0, %shape) : (tensor<1x1xi32>, tensor<1xf32>, tensor<1xi32>) -> tensor<2xf32>
+  return %0 : tensor<2xf32>
+
+// CHECK-LABEL: DontConvertIdentityScatterNdWithLargerOutputDimSize
+// CHECK: %[[SCATTER_ND:.*]] = "tfl.scatter_nd"(%{{.*}}, %arg0, %{{.*}})
+// CHECK-NEXT: return %[[SCATTER_ND]] : tensor<2xf32>
+}
+
 func @ReshapeAddUnknownShape(%arg0: tensor<*xf32>) -> tensor<3x4xf32> {
   %cst = constant dense<[3, 4]> : tensor<2xi32>
   %cst_0 = constant dense<1.000000e+00> : tensor<3x4xf32>
@@ -1798,6 +1809,17 @@ func @DontConvertConstSelectMixed(%arg0: tensor<2xf32>, %arg1: tensor<2xf32>) ->
   // CHECK: %0 = "tfl.select"(%cst, %arg0, %arg1) : (tensor<2xi1>, tensor<2xf32>, tensor<2xf32>) -> tensor<2xf32>
   // CHECK: %1 = "tfl.select_v2"(%cst, %arg0, %arg1) : (tensor<2xi1>, tensor<2xf32>, tensor<2xf32>) -> tensor<2xf32>
   // CHECK: return %0, %1
+}
+
+// CHECK-LABEL: CheckSelectNegated
+func @CheckSelectNegated(%arg0: tensor<1x2x3x4xi1>, %arg1: tensor<1x2x3x4xf32>, %arg2: tensor<1x2x3x4xf32>) -> (tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>) {
+  %not = "tfl.logical_not"(%arg0) : (tensor<1x2x3x4xi1>) -> tensor<1x2x3x4xi1>
+  %sel_v1 = "tfl.select"(%not, %arg1, %arg2) : (tensor<1x2x3x4xi1>, tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>) -> tensor<1x2x3x4xf32>
+  %sel_v2 = "tfl.select_v2"(%not, %arg1, %arg2) : (tensor<1x2x3x4xi1>, tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>) -> tensor<1x2x3x4xf32>
+  return %sel_v1, %sel_v2 : tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>
+  // CHECK: %[[SEL_V1:.*]] = "tfl.select"(%arg0, %arg2, %arg1) : (tensor<1x2x3x4xi1>, tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>) -> tensor<1x2x3x4xf32>
+  // CHECK: %[[SEL_V2:.*]] = "tfl.select_v2"(%arg0, %arg2, %arg1) : (tensor<1x2x3x4xi1>, tensor<1x2x3x4xf32>, tensor<1x2x3x4xf32>) -> tensor<1x2x3x4xf32>
+  // CHECK: return %[[SEL_V1]], %[[SEL_V2]]
 }
 
 // CHECK-LABEL: EliminateRedundantLogicalAnd

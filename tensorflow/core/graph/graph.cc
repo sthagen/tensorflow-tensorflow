@@ -174,6 +174,13 @@ void Node::UpdateProperties() {
   }
 }
 
+void Node::ClearTypeInfo() {
+  if (props_->node_def.has_experimental_type()) {
+    MaybeCopyOnWrite();
+    props_->node_def.clear_experimental_type();
+  }
+}
+
 void Node::RunForwardTypeInference() {
   if (props_->fwd_type_fn == nullptr) {
     return;
@@ -195,7 +202,7 @@ void Node::RunForwardTypeInference() {
   for (const auto* node : input_nodes) {
     if (node == nullptr) {
       // Incomplete inputs, bail.
-      props_->node_def.clear_experimental_type();
+      ClearTypeInfo();
       return;
     }
   }
@@ -206,7 +213,7 @@ void Node::RunForwardTypeInference() {
       input_types.emplace_back(node->def().experimental_type());
     } else {
       // Incomplete inputs, bail.
-      props_->node_def.clear_experimental_type();
+      ClearTypeInfo();
       return;
     }
   }
@@ -214,6 +221,7 @@ void Node::RunForwardTypeInference() {
   const auto infer_type = props_->fwd_type_fn(input_types);
   const FullTypeDef infer_typedef = infer_type.ValueOrDie();
   if (infer_typedef.type_id() != TFT_UNSET) {
+    MaybeCopyOnWrite();
     *(props_->node_def.mutable_experimental_type()) = infer_typedef;
   }
 }
@@ -254,6 +262,7 @@ gtl::iterator_range<NeighborIter> Node::in_nodes() const {
 }
 
 void Node::MaybeCopyOnWrite() {
+  // TODO(mdan): As nodes become more dynamic, this may not be worth the cost.
   // NodeProperties may be shared between Nodes. Make a copy if so.
   if (!props_.unique()) {
     props_ = std::make_shared<NodeProperties>(*props_);

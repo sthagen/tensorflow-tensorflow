@@ -742,17 +742,17 @@ def OptimizePow2ToRsqrt : Pat<
 
 def CanOptimizeIdentityGatherNdOrScatterNdOp : Constraint<CPred<
   "TFL::CanOptimizeIdentityGatherNdOrScatterNdOp("
-  "$0, $1.cast<DenseIntElementsAttr>())">>;
+  "$0, $1.cast<DenseIntElementsAttr>(), $2.getType())">>;
 
 def OptimizeIdentityGatherNdOp : Pat<
-  (TFL_GatherNdOp $params, (ConstantOp I32ElementsAttr: $indices)),
+  (TFL_GatherNdOp:$output $params, (ConstantOp I32ElementsAttr: $indices)),
   (replaceWithValue $params),
-  [(CanOptimizeIdentityGatherNdOrScatterNdOp $params, $indices)]>;
+  [(CanOptimizeIdentityGatherNdOrScatterNdOp $params, $indices, $output)]>;
 
 def OptimizeIdentityScatterNdOp : Pat<
-  (TFL_ScatterNdOp (ConstantOp I32ElementsAttr: $indices), $params, $ignored),
+  (TFL_ScatterNdOp:$output (ConstantOp I32ElementsAttr: $indices), $params, $ignored),
   (replaceWithValue $params),
-  [(CanOptimizeIdentityGatherNdOrScatterNdOp $params, $indices)]>;
+  [(CanOptimizeIdentityGatherNdOrScatterNdOp $params, $indices, $output)]>;
 
 def ShapeMatchesReduceWithKeepAxes : Constraint<CPred<
   "ShapeMatchesReduceWithKeepAxes($0, $1, $2)">>;
@@ -849,6 +849,10 @@ foreach SelectOp = [TFL_SelectOp, TFL_SelectV2Op] in {
     (replaceWithValue $input2),
     [(HaveSameType $input2, $result),
      (AllElementsAreBool<"false"> $constant)]>;
+  // select(logical_not(C), A, B) -> select(C, B, A)
+  def Optimize#SelectOp#Not : Pat<
+    (SelectOp (TFL_LogicalNotOp $condition), $input1, $input2),
+    (SelectOp $condition, $input2, $input1)>;
 }
 
 def EliminateLogicalAndTrue : Pat<
