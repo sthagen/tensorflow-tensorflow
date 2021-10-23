@@ -22,7 +22,6 @@ limitations under the License.
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
-#include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
 
 namespace mlir {
 
@@ -90,6 +89,9 @@ std::unique_ptr<OperationPass<FuncOp>> CreateUnrollBatchMatMulPassPass();
 
 // Optional pass which will map TF BatchMatMul to TF Einsum
 std::unique_ptr<OperationPass<FuncOp>> CreateBatchMatMulToEinsumPass();
+
+// Pass that transform Einsum to other TF Ops for the supported variants.
+std::unique_ptr<FunctionPass> CreateTransformEinsumPass();
 
 // Optimizes Tensorflow graph.
 std::unique_ptr<OperationPass<FuncOp>> CreateTFOptimizePass();
@@ -234,7 +236,7 @@ std::unique_ptr<OperationPass<ModuleOp>> CreateVerifySuitableForExportPass();
 
 // Returns pass that prepares TPU computation to be legal for export to
 // TensorFlow.
-std::unique_ptr<OperationPass<FuncOp>>
+std::unique_ptr<OperationPass<ModuleOp>>
 CreatePrepareTpuComputationForTfExportPass();
 
 // Rewrites ops that require quantized inputs or outputs to ops that allow

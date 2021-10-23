@@ -140,8 +140,7 @@ class IrEmitterUnnested : public IrEmitter {
   // A function to generate the code to emit the entire tile.
   using TileElementGenerator = std::function<void(
       const ThreadIdInfo& thread_id_info, const llvm_ir::IrArray::Index& index,
-      const string& loop_name, llvm::Value* tile_height,
-      llvm::Value* tile_width, KernelSupportLibrary* ksl)>;
+      std::array<llvm::Value*, 3> tile_dimensions)>;
 
   // Fusion root -> array of indexes, one per reduction output.
   using ReductionOutputMap =
@@ -216,6 +215,30 @@ class IrEmitterUnnested : public IrEmitter {
   void AddThunkToThunkSequence(std::unique_ptr<Thunk> thunk) {
     thunk_sequence_.emplace_back(std::move(thunk));
   }
+
+  // Load data from potentially unaligned address. If address is offset by
+  // `alignment_bytes`, data is read in the unit of `alignment_bytes` to avoid
+  // memory read misalignment in CUDA; otherwise, the entire data are loaded
+  // from the given memory address.
+  //
+  //   address: the memory address to load data from.
+  //   data_type: the type of data to load.
+  //   alignment_bytes: the number of bytes required to align. The number of
+  //     bytes of the data_type must be divisible by alignment_bytes.
+  llvm::Value* CreateLoad(llvm::Value* address, llvm::Type* data_type,
+                          int alignment_bytes);
+
+  // Store data at a potentially unaligned address. If the address is offset by
+  // `alignment_bytes`, data is stored in the unit of `alignment_bytes` to avoid
+  // memory write misalignment in CUDA; otherwise, the entire data is stored at
+  // the given memory address.
+  //
+  //   data: the data to be stored.
+  //   address: the memory address to store data.
+  //   alignment_bytes: the number of bytes required to align. The number of
+  //     bytes of the data_type must be divisible by alignment_bytes.
+  void CreateStore(llvm::Value* data, llvm::Value* address,
+                   int alignment_bytes);
 
   // Input = {static array, dynamic_dim0, dynamic_dim1}
   // Output = {dynamic array(with dynamic dimension meta data at the end)}
@@ -487,36 +510,35 @@ class IrEmitterUnnested : public IrEmitter {
       const TilingScheme& tiling_scheme, llvm::Type* index_ty,
       const TileElementGenerator& tile_element_generator);
 
-  // Emits code to process up to
-  // (tile_size_x/num_threads_x * tile_size_y/num_threads_y) elements in a tile,
-  // given `emit_elem_function` is the function to emit code to process one
-  // element, `thread_id_y` and `thread_id_x` are the intra-tile coordinates for
+  // Emits code to iterate through a 2-dimensional tile with a given tile
+  // dimensions and given strides, and call the callback at each iteration.,
+  //
+  // thread_id_y` and `thread_id_x` are the intra-tile coordinates for
   // the first element to process, and `index` is the index for the origin of
-  // the tile. Information about tile_size_x/y and num_threads_x/y are stored in
-  // `tiling_scheme`. Emits bounds check to ensure that each processed element
-  // is within the boundary defined by `tile_width` and `tile_height`.
+  // the tile. Emits bounds check to ensure that each processed element
+  // is within the boundary defined by `tile_dimensions`.
   //
-  // Pseudocode:
+  // Rough pseudocode:
   //
-  // for (y_loc = 0; y_loc < tile_height; y_loc += num_threads_y) {
-  //   for (j = 0; j < tile_size_x / num_threads_x; j++) { // unrolled
-  //     if (dilated) {
-  //       x_loc = x + j * num_threads_x;
-  //     } else {
-  //       x_loc = x * (tile_size_x / num_threads_x) + j;
-  //     }
+  // Given: tile_dimensions, x_offset, y_offset
+  //
+  // for (y = 0; y < tile_dimensions[Y]; y += num_threads_y) {
+  //   for (x = 0; x < tile_dimensions[X]; x++) {
+  //
+  //     y_pos = y_offset + y
+  //     x_pos = x_offset + x * stride
   //
   //     if (x_loc < tile_width) {
-  //       emit_elem_function(y + y_loc, x_loc);
+  //       emit_elem_function(y_offset + y, x_loc);
   //     }
   //   }
   // }
   //
   void EmitTile(
       const TilingScheme& tiling_scheme,
-      const llvm_ir::IrArray::Index& tile_origin_index, const string& loop_name,
-      KernelSupportLibrary* ksl, const ThreadIdInfo& thread_id_info,
-      llvm::Value* tile_height, llvm::Value* tile_width,
+      const llvm_ir::IrArray::Index& tile_origin_index,
+      const ThreadIdInfo& thread_id_info,
+      std::array<llvm::Value*, 3> tile_dimensions,
       const IrEmitterUnnested::EmitElementFunction& emit_elem_function);
 
   // Emits code to process a tensor element in a tile for the given kLoop
@@ -547,23 +569,28 @@ class IrEmitterUnnested : public IrEmitter {
       const ReductionCodegenState& reduction_codegen_state,
       const TilingKernelInfo& tiling_kernel_info);
 
+  // Returns the address to write the reduction output to.
+  llvm::Value* GetOutputAddressForReduction(
+      int partial_result_idx, llvm::Type* index_ty,
+      const ReductionCodegenState& reduction_codegen_state,
+      const TilingKernelInfo& tiling_kernel_info,
+      const IrEmitterUnnested::ReductionOutputMap& output_arrays,
+      const HloReduceInstruction* reduction, int output_idx);
+
   // `current_output`: the value the tile has calculated.
   // `output_address`: address where the output value has to be written.
   void EmitReductionOutputForRowReduction(
-      const IrEmitterUnnested::ThreadIdInfo& thread_id_info,
+      const TilingKernelInfo& tiling_kernel_info,
       const ReductionCodegenState& reduction_codegen_state,
       llvm::Type* index_ty, const ReductionOutputMap& output_arrays,
-      const llvm_ir::IrArray::Index& element_index,
       const HloReduceInstruction* reduction, int partial_result_idx);
 
   // Same arguments as EmitReductionOutputForRowReduction.
   void EmitReductionOutputForColumnReduction(
-      const IrEmitterUnnested::ThreadIdInfo& thread_id_info,
+      const TilingKernelInfo& tiling_kernel_info,
       const ReductionCodegenState& reduction_codegen_state,
       llvm::Type* index_ty, const ReductionOutputMap& output_arrays,
-      const llvm_ir::IrArray::Index& element_index,
-      const HloReduceInstruction* reduction, int partial_result_idx,
-      const TilingKernelInfo& tiling_kernel_info);
+      const HloReduceInstruction* reduction, int partial_result_idx);
 
   // Emits code for reductions in the output_instructions.
   void EmitIRForReduction(mlir::lmhlo::FusionOp fusion,
