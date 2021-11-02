@@ -21,6 +21,7 @@ from tensorflow.core.framework import attr_value_pb2
 from tensorflow.python.eager import context
 from tensorflow.python.framework import auto_control_deps_utils as utils
 from tensorflow.python.framework import dtypes as dtypes_module
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import op_def_registry
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import registry
@@ -36,7 +37,8 @@ from tensorflow.python.util import tf_decorator
 # LINT.IfChange
 # Op types that should not run in program order, e.g. because they need to run
 # asynchronously to avoid deadlock.
-ASYNC_STATEFUL_OPS = [
+
+ASYNC_STATEFUL_OPS = frozenset((
     "CollectiveGather",
     "CollectiveGatherV2",
     "CollectiveReduce",
@@ -50,9 +52,9 @@ ASYNC_STATEFUL_OPS = [
     # in order to avoid being pruned.
     "Recv",
     "CollectiveInitializeCommunicator",
-]
+))
 
-LEGACY_RANDOM_OPS = [
+LEGACY_RANDOM_OPS = frozenset((
     # These may be used in variable initializers -- thus their execution should
     # not be dependent on other stateful operations.  This is because although
     # according to program order, tf.Variables may be created in sequence,
@@ -96,20 +98,33 @@ LEGACY_RANDOM_OPS = [
     "RandomGammaGrad",
     "RandomPoisson",
     "RandomPoissonV2",
-]
+))
 
-_ORDER_INSENSITIVE_STATEFUL_OPS = [
-    "CudnnRNN", "CudnnRNNBackprop", "CudnnRNNV2", "CudnnRNNV3",
-    "CudnnRNNBackpropV2", "CudnnRNNBackpropV3",
-    "EnqueueTPUEmbeddingSparseBatch", "EnqueueTPUEmbeddingIntegerBatch",
+MUST_RUN_ORDER_INSENSITIVE_STATEFUL_OPS = frozenset((
+))
+
+# These ops are order-insensitive ans should in theory run, but at the moment
+# they either always have the necessary data dependencies, or have workarounds
+# in existing code that would break when adding new control deps. This
+# inconsistency should be eventually fixed, but it would be more effective to
+# retire the list instead.
+SKIPPED_ORDER_INSENSITIVE_STATEFUL_OPS = frozenset((
+    "CudnnRNN",
+    "CudnnRNNBackprop",
+    "CudnnRNNV2",
+    "CudnnRNNV3",
+    "CudnnRNNBackpropV2",
+    "CudnnRNNBackpropV3",
+    "EnqueueTPUEmbeddingSparseBatch",
+    "EnqueueTPUEmbeddingIntegerBatch",
     "EnqueueTPUEmbeddingSparseTensorBatch",
-    "EnqueueTPUEmbeddingRaggedTensorBatch", "RestoreV2", "SaveV2",
-    "InfeedEnqueue", "InfeedEnqueueTuple"]
+    "EnqueueTPUEmbeddingRaggedTensorBatch",
+    "RestoreV2",
+    "SaveV2",
+    "InfeedEnqueue",
+    "InfeedEnqueueTuple",
+))
 # LINT.ThenChange(//tensorflow/core/grappler/optimizers/function_optimizer.cc)
-
-_ALL_DENYLISTED_OPS = (
-    set(ASYNC_STATEFUL_OPS) | set(LEGACY_RANDOM_OPS)
-    | set(_ORDER_INSENSITIVE_STATEFUL_OPS))
 
 # Op types that are marked as stateless, but should be allowlisted to add auto
 # control dependencies.
@@ -127,8 +142,12 @@ _ALLOWLIST_STATELESS_OPS = [
 
 def op_is_stateful(op):
   # pylint: disable=protected-access
-  return (op._is_stateful and op.type not in _ALL_DENYLISTED_OPS) or (
-      op.type in _ALLOWLIST_STATELESS_OPS)
+  ret = ((op._is_stateful and
+          ((op.type not in ASYNC_STATEFUL_OPS) and
+           (op.type not in LEGACY_RANDOM_OPS) and
+           (op.type not in SKIPPED_ORDER_INSENSITIVE_STATEFUL_OPS))) or
+         (op.type in _ALLOWLIST_STATELESS_OPS))
+  return ret
 
 
 class ResourceType(enum.Enum):
@@ -204,12 +223,13 @@ class AutomaticControlDependencies(object):
     Returns:
       a copy of the `Tensor`.
     """
-    if isinstance(tensor, ops.IndexedSlices):
+    if isinstance(tensor, indexed_slices.IndexedSlices):
       values = array_ops.identity(tensor.values)
       indices = array_ops.identity(tensor.indices)
       self._returned_tensors.add(indices)
       self._returned_tensors.add(values)
-      return ops.IndexedSlices(values, indices, dense_shape=tensor.dense_shape)
+      return indexed_slices.IndexedSlices(
+          values, indices, dense_shape=tensor.dense_shape)
     elif isinstance(tensor, sparse_tensor.SparseTensor):
       values = array_ops.identity(tensor.values)
       indices = array_ops.identity(tensor.indices)
@@ -376,15 +396,18 @@ class AutomaticControlDependencies(object):
       if control_flow_util.IsInWhileLoop(op):
         continue
       control_inputs = set()
+
       # Ensure stateful ops run.
       # Read-only ops are added to control outputs if the read value is
       # consumed. This covers the case when the read value is returned from
       # the function since that goes through a tf.identity in mark_as_return.
-      if (op_def_registry.get(op.type) is None or
+      if ((op_def_registry.get(op.type) is None) or
           (op_is_stateful(op) and
            (op.type not in utils.RESOURCE_READ_OPS or
-            any(output.consumers() for output in op.outputs)))):
+            any(output.consumers() for output in op.outputs))) or
+          (op.type in MUST_RUN_ORDER_INSENSITIVE_STATEFUL_OPS)):
         ops_which_must_run.add(op)
+
       # Make a note of all opened manager_ids.
       if op.type == "NoOp":
         try:
@@ -560,25 +583,21 @@ def register_acd_resource_resolver(f):
 
   Example:
   @register_acd_resource_resolver
-  def ResolveIdentity(op, resource_reads, resource_writes):
+  def identity_resolver(op, resource_reads, resource_writes):
     # op: The `Operation` being processed by ACD currently.
     # resource_reads: An `ObjectIdentitySet` of read-only resources.
     # resource_writes: An `ObjectIdentitySet` of read-write resources.
-    if not resource_reads or resource_writes:
-      return False
     def update(resource_inputs):
-      to_add = []
       to_remove = []
-      for t in resource_inputs:
-        if t.op.type == "Identity":
-          to_remove.append(t)
-          to_add.append(t.op.inputs[0])
-      if not to_add and not to_remove:
-        return False
+      to_add = []
+      for resource in resource_inputs:
+        if resource.op.type == "Identity":
+          to_remove.append(resource)
+          to_add.extend(resource.op.inputs)
       for t in to_remove:
         resource_inputs.discard(t)
       resource_inputs.update(to_add)
-      return True
+      return to_add or to_remove
     return update(resource_reads) or update(resource_writes)
 
   Args:
@@ -590,6 +609,25 @@ def register_acd_resource_resolver(f):
   """
   _acd_resource_resolvers_registry.register(f)
   return f
+
+
+@register_acd_resource_resolver
+def _identity_resolver(op, resource_reads, resource_writes):
+  """Replaces Identity output with its input in resource_inputs."""
+  del op
+  def update(resource_inputs):
+    to_remove = []
+    to_add = []
+    for resource in resource_inputs:
+      if resource.op.type == "Identity":
+        to_remove.append(resource)
+        to_add.extend(resource.op.inputs)
+    for t in to_remove:
+      resource_inputs.discard(t)
+    resource_inputs.update(to_add)
+    return to_add or to_remove
+
+  return update(resource_reads) or update(resource_writes)
 
 
 def _get_resource_inputs(op):

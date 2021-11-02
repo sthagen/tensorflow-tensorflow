@@ -115,7 +115,7 @@ def _example_indexed_slices_without_dense_shape():
 
 def _spec_for_value(value):
   """Returns the (nested) TypeSpec for a value."""
-  if nest.is_sequence(value):
+  if nest.is_nested(value):
     return nest.map_structure(_spec_for_value, value)
   elif isinstance(value, (ops.Tensor, composite_tensor.CompositeTensor)):
     return type_spec.type_spec_from_value(value)
@@ -669,7 +669,7 @@ class FunctionTest(test.TestCase, parameterized.TestCase):
     # TODO(b/201533914): Remove this flag.
     if function.USE_FULL_TRACE_TYPE:
       expected_error = errors.InvalidArgumentError
-      expected_message = r'Could not determine tracing type of generic object'
+      expected_message = r'could not be represented through the generic tracing'
     else:
       expected_error = ValueError
       expected_message = r'got.*set'

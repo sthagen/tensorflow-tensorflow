@@ -114,6 +114,11 @@ def TensorFlowShapeInferencePass : Pass<"tf-shape-inference", "ModuleOp"> {
   ];
 }
 
+def StripNoinlineAttributePass : Pass<"tf-strip-noinline-attribute", "ModuleOp"> {
+  let summary = "Strip the tf._noinline attribute from top-level functions.";
+  let constructor = "TF::CreateStripNoinlineAttributePass()";
+}
+
 def ExecutorConvertControlToDataOutputsPass : Pass<"tf-executor-convert-control-to-data-outputs", "ModuleOp"> {
   let summary = "Chain control outputs of while loop body";
 
@@ -503,6 +508,19 @@ def ClusterOutliningPass : Pass<"tf-device-cluster-outlining", "ModuleOp"> {
   }];
 
   let constructor = "TFDevice::CreateClusterOutliningPass()";
+}
+
+def ConvertTfControlFlowToScfPass : Pass<"convert-tf-control-flow-to-scf", "ModuleOp"> {
+  let summary = "Convert TensorFlow control flow to SCF.";
+
+  let description = [{
+    This pass can be used for all direct control flow lowerings from the TensorFlow
+    dialect to the SCF dialect.
+  }];
+
+  let dependentDialects = ["scf::SCFDialect", "tensor::TensorDialect"];
+
+  let constructor = "TF::createConvertTfControlFlowToScfPass()";
 }
 
 def LaunchOutliningPass : Pass<"tf-device-launch-outlining", "ModuleOp"> {

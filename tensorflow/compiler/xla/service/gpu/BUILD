@@ -58,6 +58,7 @@ package_group(
 # This target checks that we are not accidentally adding TFRT dependencies.
 # It captures the current state of dependencies and might need to get updated
 # from time to time.
+# Note: private targets may depend on TFRT if they are tagged 'manual'.
 check_deps(
     name = "tfrt_deps_check",
     disallowed_deps = select({
@@ -92,7 +93,6 @@ check_deps(
         # enabled.
         ":gpu_compiler",
         ":gpu_executable",
-        ":xlir_kernels",
         ":nccl_utils",
     ],
 )
@@ -645,6 +645,7 @@ gentbl_cc_library(
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "xlir_ops.td",
+    visibility = ["//visibility:private"],
     deps = [
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
         "@llvm-project//mlir:SideEffectTdFiles",
@@ -671,10 +672,7 @@ cc_library(
 
 cc_library(
     name = "xlir_kernels",
-    srcs = select({
-        ":is_bef_thunk_enabled": ["xlir_kernels.cc"],
-        "//conditions:default": [],
-    }),
+    srcs = ["xlir_kernels.cc"],
     local_defines = if_cuda_is_configured([
         "GOOGLE_CUDA=1",
     ]) + if_nccl([
@@ -683,24 +681,23 @@ cc_library(
         ":is_bef_thunk_enabled": ["BEF_THUNKS=1"],
         "//conditions:default": [],
     }),
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
     deps = [
-        ":custom_call_thunk",
+        ":xlir_opdefs",
         "@llvm-project//llvm:Support",
+        "//tensorflow/compiler/xla/service:custom_call_status_internal",
+        "//tensorflow/compiler/xla/service:custom_call_target_registry",
+        "@tf_runtime//:hostcontext",
+        "@tf_runtime//:support",
+        "@tf_runtime//backends/gpu:gpu_kernels_detail",
+        "@tf_runtime//backends/gpu:gpu_wrapper",
+        "@tf_runtime//backends/gpu:gpu_types",
     ] + if_nccl([
         ":virtual_nccl",
         ":virtual_nccl_utils",
         ":virtual_rccl",
-    ]) + select({
-        ":is_bef_thunk_enabled": [
-            ":xlir_opdefs",
-            "@tf_runtime//:hostcontext",
-            "@tf_runtime//:support",
-            "@tf_runtime//backends/gpu:gpu_kernels_detail",
-            "@tf_runtime//backends/gpu:gpu_wrapper",
-            "@tf_runtime//backends/gpu:gpu_types",
-        ],
-        "//conditions:default": [],
-    }),
+    ]),
     alwayslink = True,  # Contains TFRT kernel registration
 )
 
@@ -840,8 +837,9 @@ cc_library(
             "@llvm-project//llvm:Support",
             "@llvm-project//mlir:GPUTransforms",
             "@llvm-project//mlir:Pass",
+            "@llvm-project//mlir:TransformUtils",
             "//tensorflow/compiler/mlir/hlo:lhlo",
-            "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:lmhlo_to_gpu",
+            "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:lmhlo_to_tfrt_gpu",
             "//tensorflow/compiler/mlir/xla:attribute_exporter",
             "//tensorflow/compiler/xla/service:collective_ops_utils",
             "//tensorflow/core/tfrt/runtime:work_queue_interface",
@@ -1744,6 +1742,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:result_caster",
         "//tensorflow/compiler/xla/service:rng_bit_generator_expander",
         "//tensorflow/compiler/xla/service:rng_expander",
+        "//tensorflow/compiler/xla/service:scatter_expander",
         "//tensorflow/compiler/xla/service:sharding_propagation",
         "//tensorflow/compiler/xla/service:sharding_remover",
         "//tensorflow/compiler/xla/service:slice_sinker",
@@ -1766,12 +1765,10 @@ cc_library(
         "//tensorflow/stream_executor:stream_executor_headers",
     ] + select({
         ":is_bef_executable_enabled": [
-            "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:lmhlo_to_gpu",
-            "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:lmhlo_to_gpu_binary",
+            "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:pass_utils",
             "@tf_runtime//:mlirtobef_translate",
             "@tf_runtime//:support",
             "@tf_runtime//:bef",
-            "@tf_runtime//backends/gpu:gpu_passes",
         ],
         "//conditions:default": [],
     }),
@@ -2651,5 +2648,6 @@ test_suite(
         "//tensorflow/compiler/xla/service/gpu/tests:scatter.hlo.test",
         "//tensorflow/compiler/xla/service/gpu/tests:sorting.hlo.test",
         "//tensorflow/compiler/xla/service/gpu/tests:sorting_test",
+        "//tensorflow/compiler/xla/service/gpu/tests:tree_reduction_rewriter_test",
     ],
 )

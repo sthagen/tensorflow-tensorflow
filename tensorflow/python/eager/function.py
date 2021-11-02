@@ -48,6 +48,7 @@ from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import error_interpolation
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import func_graph as func_graph_module
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_spec
@@ -728,7 +729,7 @@ class _DelayedRewriteGradientFunctions(object):
     cleaned_doutputs = []
     for doutput, placeholder in zip(doutputs, self._func_graph.outputs):
       if backprop_util.IsTrainable(placeholder):
-        if isinstance(doutput, ops.IndexedSlices):
+        if isinstance(doutput, indexed_slices.IndexedSlices):
           # Gradient passed to a backward ConcreteFunction must be tf.Tensor,
           # so we convert tf.IndexedSlices to tf.Tensor.
           cleaned_doutputs.append(ops.convert_to_tensor(doutput))
@@ -1219,7 +1220,7 @@ class _TapeGradientFunctions(object):
         # is only really effective when doing tf.gather(variable) as the
         # adjoint functions for most operations are unlikely to preserve the
         # sparsity in IndexedSlices.
-        if isinstance(arg, ops.IndexedSlices):
+        if isinstance(arg, indexed_slices.IndexedSlices):
           arg = ops.convert_to_tensor(arg)
         if output_index in skip_positions:
           continue
@@ -1537,14 +1538,7 @@ class ConcreteFunction(core.ConcreteFunction):
     """Enables the structured signature by supplying a function_spec."""
     self._function_spec = None
     self._pre_initialized_function_spec = function_spec
-
-    # Note: when ConcreteFunctions are built by recreate_function() in
-    # function_deserialization.py, they don't have a structured_input_signature
-    # yet.  In that case, _initialize_function_spec() gets called by
-    # _setup_functions_structures() in load.py.
-    if (function_spec is not None and
-        self.structured_input_signature is not None):
-      self._initialize_function_spec()
+    self._initialize_function_spec()
 
   def _initialize_function_spec(self):
     """Updates `self._function_spec` to include varargs and bound variables.
@@ -2323,7 +2317,7 @@ class ConcreteFunction(core.ConcreteFunction):
       """Returns a string describing the spec for a single argument."""
       if isinstance(spec, tensor_spec.TensorSpec):
         return "{} Tensor, shape={}".format(spec.dtype.name, spec.shape)
-      elif nest.is_sequence(spec):
+      elif nest.is_nested(spec):
         pieces = nest.flatten(spec, expand_composites=False)
         markers = [_Marker("<{}>".format(i + 1)) for i in range(len(pieces))]
         structure = nest.pack_sequence_as(spec, markers)
@@ -2395,7 +2389,7 @@ class ConcreteFunction(core.ConcreteFunction):
 
 _pywrap_utils.RegisterType("Tensor", ops.Tensor)
 _pywrap_utils.RegisterType("EagerTensor", ops.EagerTensor)
-_pywrap_utils.RegisterType("IndexedSlices", ops.IndexedSlices)
+_pywrap_utils.RegisterType("IndexedSlices", indexed_slices.IndexedSlices)
 
 
 def _deterministic_dict_values(dictionary):

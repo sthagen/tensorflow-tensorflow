@@ -877,6 +877,10 @@ def TFL_ConstOp : Op<TFL_Dialect, "pseudo_const", [ConstantLike, NoSideEffect,
       $_state.addTypes(value.getType());
     }]>
   ];
+
+  let extraClassDeclaration = [{
+    static bool isCompatibleReturnTypes(TypeRange l, TypeRange r);
+  }];
 }
 
 def TFL_SparseConstOp : Op<TFL_Dialect, "pseudo_sparse_const", [
@@ -925,7 +929,7 @@ def TFL_ExternalConstOp : Op<TFL_Dialect, "external_const",
 def TFL_Conv2DOp : TFL_ConvOp<"conv_2d", "Convolution", 0,
       [DeclareOpInterfaceMethods<InferTypeOpInterface>,
        DeclareOpInterfaceMethods<TFL_ArithmeticCount>,
-       DynamicQuantizableOp]> {
+       DynamicRangeQuantizableOp]> {
   let hasCanonicalizer = 1;
 
   let extraClassDeclaration = [{
@@ -987,7 +991,7 @@ def TFL_CumsumOp: TFL_Op<"cumsum", [
 def TFL_DepthwiseConv2DOp :
     TFL_ConvOp<"depthwise_conv_2d", "Depthwise-separable convolution", 3,
                 [DeclareOpInterfaceMethods<TFL_ArithmeticCount>,
-                DynamicQuantizableOp]> {
+                DynamicRangeQuantizableOp]> {
   let arguments = (
     ins TFL_TensorOf<[F32, QI8, QUI8, QI16]>:$input,
     TFL_TensorOf<[F32, QI8, QUI8]>:$filter,
@@ -1030,7 +1034,7 @@ def TFL_FullyConnectedOp : TFL_Op<"fully_connected", [
     AffineOpCoefficient<-1, 1>,
     TFL_SparseOp,
     DeclareOpInterfaceMethods<TFL_ArithmeticCount>,
-    DynamicQuantizableOp]> {
+    DynamicRangeQuantizableOp]> {
   let summary = "Fully connected op";
 
   let arguments = (ins
@@ -1076,7 +1080,7 @@ def TFL_BatchMatMulOp : TFL_Op<"batch_matmul", [
            And<[CPred<"getElementTypeOrSelf($_op.getOperand(0)).isInteger(8)">,
                 CPred<"getElementTypeOrSelf($_op.getOperand(1)).isInteger(8)">,
                 CPred<"getElementTypeOrSelf($_op.getResult(0)).isInteger(32)">]>]>>,
-   DynamicQuantizableOp]> {
+   DynamicRangeQuantizableOp]> {
 
   let summary = "Batch Matrix Multiply Operator";
 
@@ -5126,7 +5130,7 @@ broadcasted shape. `s0`, `s1` and `r0` are all integer vectors.
 }
 
 def TFL_BucketizeOp
-    : TFL_Op<"bucketize", [NoSideEffect, SameOperandsAndResultShape]> {
+    : TFL_Op<"bucketize", [NoSideEffect, NoQuantizableResult, SameOperandsAndResultShape]> {
   let summary = "Bucketizes 'input' based on 'boundaries'.";
 
   let description = [{
@@ -5145,6 +5149,8 @@ then the output will be `output = [[0, 3][3, 2][1, 3]]`.
   let results = (outs
     TFL_TensorOf<[I32]>:$output
   );
+
+  let hasOptions = 1;
 }
 
 #endif // TFL_OPS

@@ -56,6 +56,7 @@ from tensorflow.python.framework import errors
 from tensorflow.python.framework import errors_impl
 from tensorflow.python.framework import gpu_util
 from tensorflow.python.framework import importer
+from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import random_seed
 from tensorflow.python.framework import sparse_tensor
@@ -2469,8 +2470,8 @@ class TensorFlowTestCase(googletest.TestCase):
           return ragged_tensor_value.RaggedTensorValue(
               self._eval_tensor(tensor.values),
               self._eval_tensor(tensor.row_splits))
-        elif isinstance(tensor, ops.IndexedSlices):
-          return ops.IndexedSlicesValue(
+        elif isinstance(tensor, indexed_slices.IndexedSlices):
+          return indexed_slices.IndexedSlicesValue(
               values=tensor.values.numpy(),
               indices=tensor.indices.numpy(),
               dense_shape=tensor.dense_shape.numpy())
@@ -2866,6 +2867,8 @@ class TensorFlowTestCase(googletest.TestCase):
                                atol=1e-6,
                                path=None,
                                msg=None):
+    if ragged_tensor.is_ragged(a) or ragged_tensor.is_ragged(b):
+      return self._assertRaggedClose(a, b, rtol, atol, msg)
     path = path or []
     path_str = (("[" + "][".join(str(p) for p in path) + "]") if path else "")
     msg = msg if msg else ""
@@ -2961,8 +2964,6 @@ class TensorFlowTestCase(googletest.TestCase):
           to the nested structure, e.g. given `a = [(1, 1), {'d': (6, 7)}]` and
           `[p] = [1]['d']`, then `a[p] = (6, 7)`.
     """
-    if ragged_tensor.is_ragged(a) or ragged_tensor.is_ragged(b):
-      return self._assertRaggedClose(a, b, rtol, atol, msg)
     self._assertAllCloseRecursive(a, b, rtol=rtol, atol=atol, msg=msg)
 
   @py_func_if_in_function
