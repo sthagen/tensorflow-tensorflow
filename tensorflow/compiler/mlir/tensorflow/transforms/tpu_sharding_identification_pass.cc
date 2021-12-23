@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/Interfaces/CallInterfaces.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Pass/PassRegistry.h"  // from @llvm-project
+#include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/passes_detail.h"
@@ -46,6 +47,7 @@ namespace {
 constexpr char kReplicateSharding[] = "";
 constexpr char kShardingAttr[] = "mhlo.sharding";
 constexpr char kUseSpmdAttr[] = "use_spmd_for_xla_partitioning";
+constexpr char kAliasingAttr[] = "tf.aliasing_output";
 
 struct TPUShardingIdentificationPass
     : public TF::TPUShardingIdentificationPassBase<
@@ -77,6 +79,53 @@ llvm::Optional<llvm::StringRef> GetXlaShardingFromOperand(Value value) {
 bool IsMaximalVariable(Value value) {
   auto read_var = value.getDefiningOp<TF::ReadVariableOp>();
   return read_var && read_var->getParentOfType<tf_device::ReplicateOp>();
+}
+
+// Verify whether the given sharding can be applied to the given (tensor) type.
+// (A bad sharding might mean failing tf.Split ops if the graph later executes
+//  on CPU)
+// If the sharding is incorrect, return failure. If it's good, or if we can't
+// verify it, return success.
+LogicalResult VerifySharding(Type type, StringRef sharding_string) {
+  xla::OpSharding sharding;
+  if (!sharding.ParseFromString(sharding_string.str())) {
+    // Some test cases use \01\02\03 as sharding, to test propagation. Treat
+    // a non-proto sharding as valid, and don't verify further.
+    return success();
+  }
+  if (sharding.type() != xla::OpSharding::OTHER) {
+    // We currently only verify shardings that actually break a tensor apart.
+    return success();
+  }
+  if (RankedTensorType ranked_type = type.dyn_cast<RankedTensorType>()) {
+    if (ranked_type.getRank() < sharding.tile_assignment_dimensions_size()) {
+      return failure();
+    }
+  }
+  return success();
+}
+
+// Verify sharding for all arguments and return values.
+LogicalResult VerifyShardings(
+    mlir::FuncOp func,
+    const llvm::SmallVectorImpl<llvm::StringRef>& sharding_for_args,
+    const llvm::SmallVectorImpl<llvm::StringRef>& sharding_for_rets) {
+  Block& function_block = func.front();
+  for (auto sharding_and_arg :
+       llvm::zip(sharding_for_args, function_block.getArguments())) {
+    StringRef sharding = std::get<0>(sharding_and_arg);
+    BlockArgument arg = std::get<1>(sharding_and_arg);
+    if (failed(VerifySharding(arg.getType(), sharding))) return failure();
+  }
+  Operation* terminator = function_block.getTerminator();
+  for (auto sharding_and_retval :
+       llvm::zip(sharding_for_rets, terminator->getOpOperands())) {
+    StringRef sharding = std::get<0>(sharding_and_retval);
+    OpOperand& retval = std::get<1>(sharding_and_retval);
+    if (failed(VerifySharding(retval.get().getType(), sharding)))
+      return failure();
+  }
+  return success();
 }
 
 // Returns XLA sharding from a XlaSharding op connected to an argument value. If
@@ -202,6 +251,30 @@ llvm::Optional<llvm::StringRef> GetXlaShardingFromResult(Value value) {
   return llvm::None;
 }
 
+// Looks up arg->retval aliases for every argument, and builds a reverse map.
+void ExtractAliases(FuncOp func, llvm::SmallVectorImpl<int>& aliases) {
+  aliases.resize(func.getNumResults(), -1);
+  for (int i = 0; i < func.getNumArguments(); i++) {
+    if (auto v = func.getArgAttrOfType<mlir::IntegerAttr>(i, kAliasingAttr)) {
+      aliases[v.getInt()] = i;
+    }
+  }
+}
+
+// Returns XLA sharding from argument connected via tf.aliasing_output.
+llvm::Optional<StringRef> GetXlaShardingFromAlias(
+    Value value, llvm::SmallVectorImpl<int>& aliases,
+    const llvm::SmallVectorImpl<llvm::StringRef>& sharding_for_args) {
+  int retval_index = value.cast<OpResult>().getResultNumber();
+  if (retval_index >= 0 && retval_index < aliases.size()) {
+    int arg_index = aliases[retval_index];
+    if (arg_index >= 0 && arg_index < sharding_for_args.size()) {
+      return sharding_for_args[arg_index];
+    }
+  }
+  return llvm::None;
+}
+
 // Returns XLA sharding from XlaSharding op connected to a result value.
 // XlaSharding op may be direct user of inputs but it may also be followed by an
 // Identity op and, in the case where bfloat16 type is used, Cast op may be
@@ -245,10 +318,14 @@ llvm::Optional<StringRef> GetXlaShardingFromRetval(Value value) {
 void IdentifyXlaShardingForComputationOutputs(
     StringRef logical_core_0_sharding, bool use_spmd,
     tf_device::ClusterFuncOp cluster_func, FuncOp func, Builder* builder,
+    const llvm::SmallVectorImpl<llvm::StringRef>& sharding_for_args,
     llvm::SmallVectorImpl<llvm::StringRef>& sharding_for_rets) {
   Block& function_block = func.front();
   Operation* terminator = function_block.getTerminator();
   sharding_for_rets.reserve(terminator->getNumOperands());
+
+  llvm::SmallVector<int, 8> aliases;  // maps return value index to arg index
+  ExtractAliases(func, aliases);
 
   // Iterate through results of `cluster_func`. For output ops, look for
   // TPUPartitionedOutput ops.
@@ -273,6 +350,12 @@ void IdentifyXlaShardingForComputationOutputs(
       // If XLA SPMD is enabled, outputs all should have replicate sharding,
       // unless another sharding is set via a TPUPartitionedOutput op.
       sharding_for_rets.push_back(kReplicateSharding);
+      continue;
+    }
+
+    if (auto from_alias =
+            GetXlaShardingFromAlias(result, aliases, sharding_for_args)) {
+      sharding_for_rets.push_back(from_alias.getValue());
       continue;
     }
 
@@ -309,9 +392,9 @@ void IdentifyXlaShardingForTPUComputation(
                                           sharding_for_args);
 
   llvm::SmallVector<llvm::StringRef, 8> sharding_for_rets;
-  IdentifyXlaShardingForComputationOutputs(logical_core_0_sharding, use_spmd,
-                                           cluster_func, func, builder,
-                                           sharding_for_rets);
+  IdentifyXlaShardingForComputationOutputs(
+      logical_core_0_sharding, use_spmd, cluster_func, func, builder,
+      sharding_for_args, sharding_for_rets);
 
   auto has_maximal_sharding = [](llvm::StringRef sharding_string) -> bool {
     xla::OpSharding sharding;
@@ -321,9 +404,11 @@ void IdentifyXlaShardingForTPUComputation(
 
   // XLA SPMD only supports cases where all inputs/outputs exist on every
   // partition (sharded or replicated). If any of the inputs/outputs have
-  // maximal sharding, then fallback to MPMD.
-  if (use_spmd && (absl::c_any_of(sharding_for_args, has_maximal_sharding) ||
-                   absl::c_any_of(sharding_for_rets, has_maximal_sharding))) {
+  // maximal sharding, then fallback to MPMD. Also fall back if any of the
+  // shardings aren't compatible with the rank of their tensor.
+  if ((use_spmd && (absl::c_any_of(sharding_for_args, has_maximal_sharding) ||
+                    absl::c_any_of(sharding_for_rets, has_maximal_sharding))) ||
+      failed(VerifyShardings(func, sharding_for_args, sharding_for_rets))) {
     LOG(WARNING) << "XLA SPMD only supports cases where all inputs/outputs "
                     "exist on every partition (sharded or replicated). If any "
                     "of the inputs/outputs have maximal sharding, then "
@@ -336,7 +421,8 @@ void IdentifyXlaShardingForTPUComputation(
                                             func, builder, sharding_for_args);
     IdentifyXlaShardingForComputationOutputs(logical_core_0_sharding,
                                              /*use_spmd=*/false, cluster_func,
-                                             func, builder, sharding_for_rets);
+                                             func, builder, sharding_for_args,
+                                             sharding_for_rets);
   }
 
   // Update sharding on function arguments and returns.

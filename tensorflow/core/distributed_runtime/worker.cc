@@ -83,9 +83,9 @@ void Worker::RegisterGraphAsync(const RegisterGraphRequest* request,
   }
   if (s.ok()) {
     s = session->graph_mgr()->Register(
-        request->session_handle(), request->graph_def(), session.get(),
+        request->session_handle(), request->graph_def(),
         request->graph_options(), request->debug_options(),
-        request->config_proto(), request->collective_graph_key(),
+        request->config_proto(), request->collective_graph_key(), session.get(),
         session->cluster_flr(), response->mutable_graph_handle());
   }
   done(s);
@@ -110,7 +110,9 @@ void Worker::DeregisterGraphAsync(const DeregisterGraphRequest* request,
 }
 
 void Worker::AbortStep(int64_t step_id) {
-  Rendezvous* rendez = env_->rendezvous_mgr->Find(step_id);
+  RemoteRendezvous* rendez = env_->rendezvous_mgr->Find(step_id);
+  // Do not abort if it's a context global instance for eager op-by-op execution
+  if (rendez->IsRemoteEagerContextDefault()) return;
   SchedNonBlockingClosureAfter(1000000, [rendez, step_id]() {
     // Delay a bit before aborting the step. This way, the root
     // cause may return first back to the client instead of this
@@ -224,9 +226,8 @@ void Worker::DoRunGraph(CallOptions* opts, RunGraphRequestWrapper* request,
     return;
   }
   session->graph_mgr()->ExecuteAsync(
-      request->graph_handle(), step_id, session.get(), request->exec_opts(),
-      collector, response, cm, in,
-      env_->session_mgr->GetCoordinationServiceAgent(),
+      request->graph_handle(), step_id, request->exec_opts(), in, session.get(),
+      collector, response, cm, env_->session_mgr->GetCoordinationServiceAgent(),
       [this, step_id, response, session, cm, out, token, collector,
        device_profiler_session, opts, done](const Status& status) {
         Status s = status;
@@ -317,8 +318,8 @@ void Worker::DoPartialRunGraph(CallOptions* opts,
     cancellation_manager_.RegisterCallback(token,
                                            [cm]() { cm->StartCancel(); });
     session->graph_mgr()->ExecuteAsync(
-        graph_handle, step_id, session.get(), request->exec_opts(),
-        nullptr /* collector */, nullptr /* response */, cm, in,
+        graph_handle, step_id, request->exec_opts(), in, session.get(),
+        /*collector=*/nullptr, /*response=*/nullptr, cm,
         env_->session_mgr->GetCoordinationServiceAgent(),
         [this, token, step_id, session](Status s) {
           cancellation_manager_.DeregisterCallback(token);

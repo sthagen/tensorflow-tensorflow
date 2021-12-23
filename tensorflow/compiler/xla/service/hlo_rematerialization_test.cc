@@ -572,7 +572,7 @@ class CompressingRematerializationTest : public RematerializationTestBase {
     for (int64_t i = 0; i < descending_shape.rank(); ++i) {
       int64_t dim = descending_shape.dimensions(i);
       if (i == descending_shape.rank() - 1) {
-        dim = RoundUpToNearest<int64_t>(dim, 64);
+        dim = RoundUpTo<int64_t>(dim, 64);
       }
       size *= dim;
     }
@@ -615,7 +615,7 @@ class CompressingRematerializationTest : public RematerializationTestBase {
 
 // Test rematerialization only remats big buffer that pass certain limits.
 TEST_F(CompressingRematerializationTest, OnlyRematBigBuffer) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_float {
@@ -662,7 +662,7 @@ ENTRY %entry {
 
 // Test rematerialization of a single instruction.
 TEST_F(CompressingRematerializationTest, SingleRemat) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_float {
@@ -698,7 +698,7 @@ ENTRY %entry {
 }
 
 TEST_F(CompressingRematerializationTest, AllUsersUseSameCopy) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_float {
@@ -750,7 +750,7 @@ ENTRY %entry {
 // Test rematerialization of values through bitcasts
 // Its expected that the broadcast gets rematerialized
 TEST_F(HloRematerializationTest, ThroughBitcastRemat) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 ENTRY %mycomp (param: f32[1]) -> f32[1] {
@@ -815,7 +815,7 @@ ENTRY %mycomp (param: f32[1]) -> f32[1] {
 // Test that the "deny list for move remats" engages when we rematerialize
 // through bitcasts.
 TEST_F(HloRematerializationTest, ThroughBitcastRematInfiniteLoop) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 ENTRY %mycomp (param: f32[1]) -> f32[1024] {
@@ -847,7 +847,7 @@ ENTRY %mycomp (param: f32[1]) -> f32[1024] {
 }
 
 TEST_F(HloRematerializationTest, RematTupleShape) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_mul_comp {
@@ -890,7 +890,7 @@ ENTRY %entry {
 }
 
 TEST_F(HloRematerializationTest, RematTupleShapeDoubleUse) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_mul_comp {
@@ -943,7 +943,7 @@ ENTRY %entry {
 }
 
 TEST_F(HloRematerializationTest, RematTupleShapeThroughBitcasts) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_mul_comp {
@@ -990,7 +990,7 @@ ENTRY %entry {
 }
 
 TEST_F(HloRematerializationTest, RematThroughTuple) {
-  const string& hlo_string = R"(
+  const std::string& hlo_string = R"(
 HloModule fusion, is_scheduled=true
 
 %add_mul_comp {
@@ -1039,6 +1039,62 @@ ENTRY %entry {
                                              ::testing::Ne(fusion))),
                    op::Add()));
 }
+
+// Make sure when rematerializing all-gathers we increment channel_ids properly.
+TEST_F(HloRematerializationTest, AllGatherChannelId) {
+  const std::string& hlo_string = R"(
+HloModule fusion, is_scheduled=true
+
+ENTRY %mycomp (param: f32[1]) -> f32[1] {
+  %param = f32[1]{0} parameter(0)
+  %reshape = f32[] reshape(f32[1]{0} %param)
+  %broadcast = f32[256,1]{1,0} broadcast(f32[] %reshape), dimensions={}
+  %ag = f32[1024,1]{1,0} all-gather(f32[256,1]{1,0} %broadcast), dimensions={0},
+    channel_id=1, replica_groups={{0,1,2,3}}, use_global_device_ids=true
+  %bitcast = f32[1024]{0} bitcast(f32[1024,1]{1,0} %ag)
+  %negate = f32[1024,1]{1,0} negate(f32[1024,1]{1,0} %ag)
+  %concatenate = f32[2048,1]{1,0} concatenate(f32[1024,1]{1,0} %negate,
+    f32[1024,1]{1,0} %negate), dimensions={0}
+  %slice = f32[1,1]{1,0} slice(f32[2048,1]{1,0} %concatenate),
+    slice={[0:1], [0:1]}
+  %bitcast.1 = f32[1]{0} bitcast(f32[1,1]{1,0} %slice)
+  %concatenate.1 = f32[1025]{0} concatenate(f32[1024]{0} %bitcast,
+    f32[1]{0} %bitcast.1), dimensions={0}
+  ROOT %slice.1 = f32[1]{0} slice(f32[1025]{0} %concatenate.1), slice={[0:1]}
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+
+  auto* computation = module->entry_computation();
+  // Find and save the original broadcast instruction which should be
+  // rematerialized.
+  const HloInstruction* slice = computation->root_instruction();
+  ASSERT_THAT(slice, op::Slice(op::Concatenate(
+                         op::Bitcast(op::AllGather(op::Broadcast(_))), _)));
+
+  // Computation requires 16KB without rematerialization, but uses only 12KB
+  // with rematerialization so pick a memory limit between these values (14KB).
+  TF_ASSERT_OK_AND_ASSIGN(bool changed,
+                          RunHloRematerialization(
+                              /*memory_limit_bytes=*/14 * 1024, module.get()));
+  EXPECT_TRUE(changed);
+
+  // Root should not have changed.
+  EXPECT_EQ(computation->root_instruction(), slice);
+
+  // Original all-gather.
+  const HloInstruction* original_ag = FindInstruction(module.get(), "ag");
+  // The all-gather should have been rematerialized
+  const HloInstruction* remat_ag = FindInstruction(module.get(), "ag.remat");
+
+  EXPECT_NE(remat_ag, nullptr);
+  EXPECT_TRUE(original_ag->channel_id().has_value());
+  EXPECT_TRUE(remat_ag->channel_id().has_value());
+  EXPECT_EQ(*remat_ag->channel_id(), *original_ag->channel_id() + 1);
+}
+
 }  // namespace
 
 }  // namespace xla
