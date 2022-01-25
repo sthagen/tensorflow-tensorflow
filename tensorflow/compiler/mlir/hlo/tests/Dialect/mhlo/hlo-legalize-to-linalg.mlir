@@ -654,6 +654,18 @@ func @broadcast_scalar(%operand: tensor<f32>) -> tensor<7x10x6xf32> {
 
 // -----
 
+// CHECK-LABEL: @get_dim_size
+func @get_dim_size(%arg0: tensor<?xi32>) -> tensor<i32> {
+  // CHECK: %[[IDX:.+]] = arith.constant 0
+  // CHECK: %[[DIM:.+]] = tensor.dim %arg0, %[[IDX]]
+  // CHECK: %[[CAST:.+]] = arith.index_cast %[[DIM]]
+  // CHECK: %[[TENSOR:.+]] = tensor.from_elements %[[CAST]]
+  %0 = "mhlo.get_dimension_size"(%arg0) { dimension = 0 : i64 } : (tensor<?xi32>) -> tensor<i32>
+  return %0 : tensor<i32>
+}
+
+// -----
+
 // CHECK-DAG: #[[OPERAND_MAP:.*]] = affine_map<(d0, d1, d2, d3) -> (d1, d0, d3, d2)>
 // CHECK-DAG: #[[RESULT_MAP:.*]] = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 // CHECK-LABEL: func @transpose
@@ -2499,6 +2511,21 @@ func @pad_tensor(%arg0: tensor<12x4xf32>, %arg1: tensor<f32>) -> tensor<18x12xf3
 //       CHECK:   tensor.pad %[[ARG0]] low[%[[C4]], %[[C5]]] high[%[[C2]], %[[C3]]]
 //       CHECK:     tensor.yield %[[PAD]] : f32
 //       CHECK:   } : tensor<12x4xf32> to tensor<18x12xf32>
+
+// -----
+
+func @linalg.conv_0d_nc(%arg0: tensor<3x2xf32>, %arg1: tensor<2x3xf32>) -> tensor<3x3xf32> {
+
+  %0 = mhlo.convolution(%arg0, %arg1) dim_numbers = [b, f]x[i, o]->[b, f], window = {stride = [], pad = [], lhs_dilate = [], rhs_dilate = [], reverse = []} {batch_group_count = 1 : i64, feature_group_count = 1 : i64, precision_config = ["DEFAULT", "DEFAULT"]} : (tensor<3x2xf32>, tensor<2x3xf32>) -> tensor<3x3xf32>
+  return %0 : tensor<3x3xf32>
+}
+
+// CHECK-LABEL: @linalg.conv_0d_nc
+// CHECK-DAG: %[[CST:.+]] = arith.constant 0.000000e+00
+// CHECK-DAG: %[[INIT:.+]] = linalg.init_tensor [3, 3]
+// CHECK-DAG: %[[FILL:.+]] = linalg.fill(%cst, %[[INIT]])
+// CHECK-DAG: %[[PAD:.+]] = tensor.pad %arg0 low[0, 0] high[0, 0]
+// CHECK: linalg.matmul ins(%[[PAD]], %arg1 : tensor<3x2xf32>, tensor<2x3xf32>) outs(%[[FILL]] : tensor<3x3xf32>)
 
 // -----
 
