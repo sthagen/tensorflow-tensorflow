@@ -13,24 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/python/eager/eager_context.h"
+#include "tensorflow/core/config/flags.h"
 
-#include "tensorflow/c/eager/c_api.h"
+#include "absl/strings/ascii.h"
+#include "tensorflow/core/platform/stringpiece.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
-namespace eager {
+namespace config {
 
-namespace {
-// This object tracks the EagerContext owned by global_py_eager_context in
-// pywrap_tfe_src.cc. Since the vast majority of the Python API is dependent on
-// that global_py_eager_context (including memory management), the Py object
-// owns the C object, so this pointer is non-owning.
-TFE_Context* global_c_eager_context = nullptr;
-}  // namespace
+Flag::Flag(StringPiece flag, bool default_value) {
+  bool val = default_value;
+  if (ReadBoolFromEnvVar(absl::AsciiStrToUpper(flag), default_value, &val)
+          .ok()) {
+    value_ = val;
+    return;
+  }
+  value_ = default_value;
+}
 
-void TFE_Py_SetCEagerContext(TFE_Context* ctx) { global_c_eager_context = ctx; }
-
-TFE_Context* GetCEagerContext() { return global_c_eager_context; }
-
-}  // namespace eager
+}  // namespace config
 }  // namespace tensorflow

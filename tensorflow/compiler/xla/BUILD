@@ -262,7 +262,6 @@ tf_cc_test(
         ":types",
         ":util",
         "//tensorflow/core:test_main",
-        "//tensorflow/core/platform:bfloat16",
     ],
 )
 
@@ -348,7 +347,6 @@ cc_library(
         ":xla_data_proto_cc",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
-        "//tensorflow/core/platform:regexp",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -962,8 +960,7 @@ cc_library(
     hdrs = ["cpu_function_runtime.h"],
     visibility = [":friends"],
     deps = [
-        "//tensorflow/core/platform:dynamic_annotations",
-        "//tensorflow/core/platform:types",
+        "@com_google_absl//absl/base:dynamic_annotations",
     ],
 )
 
