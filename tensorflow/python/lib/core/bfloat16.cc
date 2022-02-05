@@ -133,6 +133,12 @@ bool CastToBfloat16(PyObject* arg, bfloat16* output) {
     *output = bfloat16(f);
     return true;
   }
+  if (PyArray_IsScalar(arg, LongDouble)) {
+    long double f;
+    PyArray_ScalarAsCtype(arg, &f);
+    *output = bfloat16(f);
+    return true;
+  }
   if (PyArray_IsZeroDim(arg)) {
     Safe_PyObjectPtr ref;
     PyArrayObject* arr = reinterpret_cast<PyArrayObject*>(arg);
@@ -687,6 +693,12 @@ struct TypeDescriptor<double> {
 };
 
 template <>
+struct TypeDescriptor<long double> {
+  typedef long double T;
+  static int Dtype() { return NPY_LONGDOUBLE; }
+};
+
+template <>
 struct TypeDescriptor<std::complex<float>> {
   typedef std::complex<float> T;
   static int Dtype() { return NPY_COMPLEX64; }
@@ -696,6 +708,12 @@ template <>
 struct TypeDescriptor<std::complex<double>> {
   typedef std::complex<double> T;
   static int Dtype() { return NPY_COMPLEX128; }
+};
+
+template <>
+struct TypeDescriptor<std::complex<long double>> {
+  typedef std::complex<long double> T;
+  static int Dtype() { return NPY_CLONGDOUBLE; }
 };
 
 // Performs a NumPy array cast from type 'From' to 'To'.
@@ -1404,6 +1422,9 @@ bool Initialize() {
   if (!RegisterBfloat16Cast<double>(NPY_DOUBLE)) {
     return false;
   }
+  if (!RegisterBfloat16Cast<long double>(NPY_LONGDOUBLE)) {
+    return false;
+  }
   if (!RegisterBfloat16Cast<bool>(NPY_BOOL)) {
     return false;
   }
@@ -1448,6 +1469,9 @@ bool Initialize() {
   if (!RegisterBfloat16Cast<std::complex<double>>(NPY_COMPLEX128)) {
     return false;
   }
+  if (!RegisterBfloat16Cast<std::complex<long double>>(NPY_CLONGDOUBLE)) {
+    return false;
+  }
 
   // Safe casts from bfloat16 to other types
   if (PyArray_RegisterCanCast(&NPyBfloat16_Descr, NPY_FLOAT, NPY_NOSCALAR) <
@@ -1458,11 +1482,19 @@ bool Initialize() {
       0) {
     return false;
   }
+  if (PyArray_RegisterCanCast(&NPyBfloat16_Descr, NPY_LONGDOUBLE,
+                              NPY_NOSCALAR) < 0) {
+    return false;
+  }
   if (PyArray_RegisterCanCast(&NPyBfloat16_Descr, NPY_COMPLEX64, NPY_NOSCALAR) <
       0) {
     return false;
   }
   if (PyArray_RegisterCanCast(&NPyBfloat16_Descr, NPY_COMPLEX128,
+                              NPY_NOSCALAR) < 0) {
+    return false;
+  }
+  if (PyArray_RegisterCanCast(&NPyBfloat16_Descr, NPY_CLONGDOUBLE,
                               NPY_NOSCALAR) < 0) {
     return false;
   }
