@@ -18,22 +18,25 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "absl/time/time.h"
 #include "tensorflow/core/distributed_runtime/coordination/coordination_service.h"
 #include "tensorflow/core/distributed_runtime/coordination/coordination_service_agent.h"
 #include "tensorflow/core/distributed_runtime/coordination/coordination_service_error_util.h"
 #include "tensorflow/core/platform/casts.h"
 #include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/protobuf/coordination_service.pb.h"
 
 namespace tensorflow {
 
 void CoordinationServiceRpcHandler::SetAgentInstance(
     CoordinationServiceAgent* agent) {
+  mutex_lock l(agent_mu_);
   agent_ = agent;
 }
 
-void CoordinationServiceRpcHandler::RegisterWorkerAsync(
-    const RegisterWorkerRequest* request, RegisterWorkerResponse* response,
+void CoordinationServiceRpcHandler::RegisterTaskAsync(
+    const RegisterTaskRequest* request, RegisterTaskResponse* response,
     StatusCallback done) {
   CoordinationServiceInterface* service =
       CoordinationServiceInterface::GetCoordinationServiceInstance();
@@ -42,15 +45,11 @@ void CoordinationServiceRpcHandler::RegisterWorkerAsync(
         errors::Internal("Coordination service is not enabled.")));
     return;
   }
-  const std::string& job_name = request->job();
-  const int task_id = request->task();
-  const uint64 incarnation = request->incarnation();
-  service->RegisterWorker(
-      job_name, task_id, incarnation,
-      [this, response, done = std::move(done)](Status s) {
-        response->set_leader_incarnation(leader_incarnation_id_);
-        done(s);
-      });
+  const CoordinatedTask& task = request->source_task();
+  const uint64_t incarnation = request->incarnation();
+  const uint64_t leader_incarnation = service->GetServiceIncarnation();
+  response->set_leader_incarnation(leader_incarnation);
+  done(service->RegisterTask(task, incarnation));
 }
 
 void CoordinationServiceRpcHandler::HeartbeatAsync(
@@ -63,15 +62,15 @@ void CoordinationServiceRpcHandler::HeartbeatAsync(
         errors::Internal("Coordination service is not enabled.")));
     return;
   }
-  const std::string& job_name = request->job();
-  const int task_id = request->task();
-  const uint64 incarnation = request->incarnation();
-  Status s = service->RecordHeartbeat(job_name, task_id, incarnation);
+  const CoordinatedTask& task = request->source_task();
+  const uint64_t incarnation = request->incarnation();
+  const uint64_t leader_incarnation = service->GetServiceIncarnation();
+  Status s = service->RecordHeartbeat(task, incarnation);
   if (!s.ok()) {
     done(s);
     return;
   }
-  response->set_leader_incarnation(leader_incarnation_id_);
+  response->set_leader_incarnation(leader_incarnation);
   done(Status::OK());
 }
 
@@ -86,7 +85,7 @@ void CoordinationServiceRpcHandler::WaitForAllTasksAsync(
     return;
   }
   service->WaitForAllTasks(
-      request->job(), request->task(), request->local_device_info(),
+      request->source_task(), request->local_device_info(),
       [response, service, done = std::move(done)](Status s) {
         if (s.ok()) {
           *response->mutable_cluster_device_info() =
@@ -96,14 +95,48 @@ void CoordinationServiceRpcHandler::WaitForAllTasksAsync(
       });
 }
 
-void CoordinationServiceRpcHandler::ReportErrorToAgentAsync(
-    const ReportErrorToAgentRequest* request,
-    ReportErrorToAgentResponse* response, StatusCallback done) {
+void CoordinationServiceRpcHandler::ShutdownTaskAsync(
+    const ShutdownTaskRequest* request, ShutdownTaskResponse* response,
+    StatusCallback done) {
+  CoordinationServiceInterface* service =
+      CoordinationServiceInterface::GetCoordinationServiceInstance();
+  if (service == nullptr) {
+    done(MakeCoordinationError(
+        errors::Internal("Coordination service is not enabled.")));
+    return;
+  }
+  service->ShutdownTaskAsync(request->source_task(),
+                             [done](Status s) { done(s); });
+}
+
+void CoordinationServiceRpcHandler::ResetTaskAsync(
+    const ResetTaskRequest* request, ResetTaskResponse* response,
+    StatusCallback done) {
+  CoordinationServiceInterface* service =
+      CoordinationServiceInterface::GetCoordinationServiceInstance();
+  if (service == nullptr) {
+    done(MakeCoordinationError(
+        errors::Internal("Coordination service is not enabled.")));
+    return;
+  }
+  done(service->ResetTask(request->source_task()));
+}
+
+void CoordinationServiceRpcHandler::ReportErrorToTaskAsync(
+    const ReportErrorToTaskRequest* request,
+    ReportErrorToTaskResponse* response, StatusCallback done) {
+  tf_shared_lock l(agent_mu_);
+  if (agent_ == nullptr) {
+    done(MakeCoordinationError(errors::Internal(
+        "CoordinationServiceAgent is uninitialized or has already shutdown.")));
+    return;
+  }
   const CoordinationServiceError& error_payload = request->error_payload();
   Status error(static_cast<error::Code>(request->error_code()),
-               strings::StrCat("Error reported from /job:", error_payload.job(),
-                               "/task:", error_payload.task(), ": ",
-                               request->error_message()));
+               strings::StrCat("Error reported from /job:",
+                               error_payload.source_task().job_name(),
+                               "/task:", error_payload.source_task().task_id(),
+                               ": ", request->error_message()));
   error = MakeCoordinationError(error, error_payload);
   agent_->SetError(error);
   done(Status::OK());
@@ -120,11 +153,11 @@ void CoordinationServiceRpcHandler::ReportErrorToServiceAsync(
     return;
   }
   done(service->ReportTaskError(
-      request->source_job(), request->source_task(),
+      request->error_origin(),
       MakeCoordinationError(
           Status{static_cast<error::Code>(request->error_code()),
                  request->error_message()},
-          request->source_job(), request->source_task(),
+          request->error_origin(),
           /*is_reported_error=*/true)));
 }
 
@@ -173,6 +206,38 @@ void CoordinationServiceRpcHandler::DeleteKeyValueAsync(
     return;
   }
   done(service->DeleteKeyValue(request->key()));
+}
+
+void CoordinationServiceRpcHandler::BarrierAsync(const BarrierRequest* request,
+                                                 BarrierResponse* response,
+                                                 StatusCallback done) {
+  CoordinationServiceInterface* service =
+      CoordinationServiceInterface::GetCoordinationServiceInstance();
+  if (service == nullptr) {
+    done(MakeCoordinationError(
+        errors::Internal("Coordination service is not enabled.")));
+    return;
+  }
+  std::vector<CoordinatedTask> tasks = {request->tasks().begin(),
+                                        request->tasks().end()};
+  service->BarrierAsync(
+      request->barrier_id(),
+      absl::Milliseconds(request->barrier_timeout_in_ms()),
+      request->source_task(), tasks,
+      [done = std::move(done)](const Status& status) { done(status); });
+}
+
+void CoordinationServiceRpcHandler::CancelBarrierAsync(
+    const CancelBarrierRequest* request, CancelBarrierResponse* response,
+    StatusCallback done) {
+  CoordinationServiceInterface* service =
+      CoordinationServiceInterface::GetCoordinationServiceInstance();
+  if (service == nullptr) {
+    done(MakeCoordinationError(
+        errors::Internal("Coordination service is not enabled.")));
+    return;
+  }
+  done(service->CancelBarrier(request->barrier_id(), request->source_task()));
 }
 
 }  // namespace tensorflow

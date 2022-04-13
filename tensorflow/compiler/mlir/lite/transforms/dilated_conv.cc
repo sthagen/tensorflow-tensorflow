@@ -22,6 +22,8 @@ namespace {
 
 struct IdentifyDilatedConvPass
     : public PassWrapper<IdentifyDilatedConvPass, OperationPass<FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(IdentifyDilatedConvPass)
+
   void runOnOperation() override;
 
   StringRef getArgument() const final {
@@ -39,8 +41,8 @@ void IdentifyDilatedConvPass::runOnOperation() {
   RewritePatternSet patterns(&getContext());
   auto func = getOperation();
 
-  patterns.insert<ConvertTFDilatedConvOp<TF::Conv2DOp>,
-                  ConvertTFDilatedConvOp<TF::DepthwiseConv2dNativeOp>>(
+  patterns.add<ConvertTFDilatedConvOp<TF::Conv2DOp>,
+               ConvertTFDilatedConvOp<TF::DepthwiseConv2dNativeOp>>(
       &getContext());
   (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
 }

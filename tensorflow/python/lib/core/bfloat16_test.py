@@ -18,6 +18,8 @@ import collections
 import copy
 import itertools
 import math
+import sys
+from typing import Type
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -38,29 +40,15 @@ def numpy_assert_allclose(a, b, **kwargs):
   return np.testing.assert_allclose(a, b, **kwargs)
 
 
-def type_bits(x):
-  if x == bfloat16:
-    return 16
-
-  return np.finfo(x).bits
-
-
-def promote_types(a, b):
-  num_bits_a = type_bits(a)
-  num_bits_b = type_bits(b)
-  # Pick the greater of the two types.
-  if num_bits_a < num_bits_b:
-    return b
-  if num_bits_b < num_bits_a:
-    return a
-  # Pick either type if both are equivalent.
-  if a == b:
-    return a
-  # The only possibility at this point is that the two types are bfloat16 and
-  # np.float16. We expect to have promoted to np.float32.
-  assert num_bits_a == 16
-  assert num_bits_b == 16
-  return np.float32
+def numpy_promote_types(a: Type[np.generic],
+                        b: Type[np.generic]) -> Type[np.generic]:
+  if a == bfloat16 and b == bfloat16:
+    return bfloat16
+  if a == bfloat16:
+    a = np.float32
+  if b == bfloat16:
+    b = np.float32
+  return np.promote_types(a, b)
 
 
 epsilon = float.fromhex("1.0p-7")
@@ -127,10 +115,25 @@ class Bfloat16Test(parameterized.TestCase):
     self.assertEqual("-inf", repr(bfloat16(float("-inf"))))
     self.assertEqual("nan", repr(bfloat16(float("nan"))))
 
-  def testHash(self):
-    self.assertEqual(0, hash(bfloat16(0.0)))
-    self.assertEqual(0x3f80, hash(bfloat16(1.0)))
-    self.assertEqual(0x7fc0, hash(bfloat16(float("nan"))))
+  def testHashZero(self):
+    """Tests that negative zero and zero hash to the same value."""
+    self.assertEqual(hash(bfloat16(-0.0)), hash(bfloat16(0.0)))
+
+  @parameterized.parameters(np.extract(np.isfinite(FLOAT_VALUES), FLOAT_VALUES))
+  def testHashNumbers(self, value):
+    self.assertEqual(hash(value), hash(bfloat16(value)), str(value))
+
+  @parameterized.named_parameters(("PositiveNan", bfloat16(float("nan"))),
+                                  ("NegativeNan", bfloat16(float("-nan"))))
+  def testHashNan(self, nan):
+    nan_hash = hash(nan)
+    nan_object_hash = object.__hash__(nan)
+    # The hash of a NaN is either 0 or a hash of the object pointer.
+    self.assertIn(nan_hash, (sys.hash_info.nan, nan_object_hash), str(nan))
+
+  def testHashInf(self):
+    self.assertEqual(sys.hash_info.inf, hash(bfloat16(float("inf"))), "inf")
+    self.assertEqual(-sys.hash_info.inf, hash(bfloat16(float("-inf"))), "-inf")
 
   # Tests for Python operations
   def testNegate(self):
@@ -149,12 +152,12 @@ class Bfloat16Test(parameterized.TestCase):
         float("-inf"), float(bfloat16(float("-inf")) + bfloat16(-2.25)))
     self.assertTrue(math.isnan(float(bfloat16(3.5) + bfloat16(float("nan")))))
 
-  def DISABLED_testAddScalarTypePromotion(self):
+  def testAddScalarTypePromotion(self):
     """Tests type promotion against Numpy scalar values."""
     types = [bfloat16, np.float16, np.float32, np.float64, np.longdouble]
     for lhs_type in types:
       for rhs_type in types:
-        expected_type = promote_types(lhs_type, rhs_type)
+        expected_type = numpy_promote_types(lhs_type, rhs_type)
         actual_type = type(lhs_type(3.5) + rhs_type(2.25))
         self.assertEqual(expected_type, actual_type)
 
@@ -501,6 +504,17 @@ class Bfloat16NumPyTest(parameterized.TestCase):
     mant2, exp2 = np.frexp(x.astype(np.float32))
     np.testing.assert_equal(exp1, exp2)
     numpy_assert_allclose(mant1, mant2, rtol=1e-2)
+
+  @parameterized.parameters(list(range(1, 128)))
+  def testCopySign(self, nan_payload):
+    inf_bits = 0x7f80
+    nan_bits = inf_bits | nan_payload
+    little_endian_uint16 = np.dtype(np.uint16).newbyteorder("L")
+    little_endian_bfloat = np.dtype(bfloat16).newbyteorder("L")
+    nan = little_endian_uint16.type(nan_bits).view(little_endian_bfloat)
+    nan_with_sign = np.copysign(nan, bfloat16(-1))
+    nan_with_sign_bits = nan_with_sign.view(little_endian_uint16)
+    np.testing.assert_equal(nan_bits | (1 << 15), nan_with_sign_bits)
 
   def testNextAfter(self):
     one = np.array(1., dtype=bfloat16)
