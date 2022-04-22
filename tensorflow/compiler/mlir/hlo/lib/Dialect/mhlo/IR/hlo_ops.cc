@@ -2071,34 +2071,6 @@ LogicalResult BroadcastOp::verify() {
         "broadcast_sizes has rank {0} instead of rank 1", sizesRank));
   }
 
-  auto resultType = getResult().getType().cast<RankedTensorType>();
-  auto resultRank = resultType.getRank();
-  auto operandType = operand().getType().cast<RankedTensorType>();
-  auto operandRank = operandType.getRank();
-  auto sizesSize = sizesType.getNumElements();
-  auto expectedRank = operandRank + sizesSize;
-
-  if (resultRank != expectedRank) {
-    return emitOpError(
-        llvm::formatv("result rank ({0}) does not match operand rank "
-                      "({1}) plus size of broadcast_sizes ({2})",
-                      resultRank, operandRank, sizesSize));
-  }
-
-  llvm::SmallVector<int64_t, 10> expectedShape(sizes.getValues<int64_t>());
-
-  auto operandShape = operandType.getShape();
-  expectedShape.insert(expectedShape.end(), operandShape.begin(),
-                       operandShape.end());
-
-  auto resultShape = resultType.getShape();
-  if (resultShape != llvm::makeArrayRef(expectedShape)) {
-    return emitOpError(llvm::formatv(
-        "result has shape [{0}] instead of [{1}]",
-        llvm::make_range(resultShape.begin(), resultShape.end()),
-        llvm::make_range(expectedShape.begin(), expectedShape.end())));
-  }
-
   return success();
 }
 
@@ -2130,6 +2102,29 @@ OpFoldResult BroadcastOp::fold(ArrayRef<Attribute> attrs) {
 
   return SplatElementsAttr::get(
       type, splatOperandAttr.getSplatValue<mlir::Attribute>());
+}
+
+LogicalResult BroadcastOp::inferReturnTypeComponents(
+    MLIRContext*, Optional<Location> location, ValueShapeRange operands,
+    DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+  BroadcastOp::Adaptor adaptor(operands, attributes, regions);
+  Value operand = adaptor.operand();
+  auto operand_type = operand.getType().dyn_cast<RankedTensorType>();
+  if (!operand_type) return failure();
+
+  Type element_ty = operand_type.getElementType();
+  auto dimension_attr = adaptor.broadcast_sizes();
+  for (int64_t size : dimension_attr.getValues<int64_t>()) {
+    if (size < 0)
+      return emitOptionalError(location,
+                               "Broadcast with negative dimension size ", size);
+  }
+  SmallVector<int64_t> shape_values(dimension_attr.getValues<int64_t>());
+  llvm::append_range(shape_values, operand_type.getShape());
+
+  inferredReturnShapes.emplace_back(shape_values, element_ty);
+  return success();
 }
 
 LogicalResult BroadcastOp::reifyReturnTypeShapes(
@@ -2619,6 +2614,19 @@ OpFoldResult RealOp::fold(ArrayRef<Attribute> operands) {
 //===----------------------------------------------------------------------===//
 
 namespace {
+class SingleOperandConcatenateToCast : public OpRewritePattern<ConcatenateOp> {
+ public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(ConcatenateOp op,
+                                PatternRewriter& rewriter) const override {
+    if (op.val().size() != 1) return failure();
+
+    rewriter.replaceOpWithNewOp<tensor::CastOp>(op, op.getType(),
+                                                op.val().front());
+    return success();
+  }
+};
+
 class ConcatenateOperandRemoval : public OpRewritePattern<ConcatenateOp> {
  public:
   using OpRewritePattern::OpRewritePattern;
@@ -2765,7 +2773,8 @@ LogicalResult ConcatenateOp::inferReturnTypes(
 
 void ConcatenateOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                 MLIRContext* context) {
-  results.add<ConcatenateOperandRemoval, ConcatenateForwarding>(context);
+  results.add<ConcatenateOperandRemoval, ConcatenateForwarding,
+              SingleOperandConcatenateToCast>(context);
 }
 
 template <typename T>
@@ -7765,10 +7774,12 @@ LogicalResult deriveShapeFromOperand(
 
 Operation* MhloDialect::materializeConstant(OpBuilder& builder, Attribute value,
                                             Type type, Location loc) {
+  // HLO dialect constants require the type of value and result to match.
+  if (type != value.getType()) return nullptr;
   // HLO dialect constants only support ElementsAttr unlike standard dialect
   // constant which supports all attributes.
-  if (value.isa<ElementsAttr>())
-    return builder.create<mhlo::ConstOp>(loc, type, value.cast<ElementsAttr>());
+  if (auto elementsAttr = value.dyn_cast<ElementsAttr>())
+    return builder.create<mhlo::ConstOp>(loc, type, elementsAttr);
   return nullptr;
 }
 

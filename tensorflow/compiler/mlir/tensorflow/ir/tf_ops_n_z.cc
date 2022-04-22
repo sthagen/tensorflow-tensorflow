@@ -467,7 +467,7 @@ static LogicalResult VerifyPartitionedCall(OpClass op) {
   SymbolRefAttr func = op->getAttr("f").template cast<SymbolRefAttr>();
 
   auto function =
-      dyn_cast_or_null<FuncOp>(SymbolTable::lookupSymbolIn(module, func));
+      dyn_cast_or_null<func::FuncOp>(SymbolTable::lookupSymbolIn(module, func));
 
   if (!function) {
     return op.emitError("'f' attribute refers to an undefined function: ")
@@ -724,6 +724,15 @@ void RealDivOp::getCanonicalizationPatterns(RewritePatternSet &results,
 
 OpFoldResult RealDivOp::fold(ArrayRef<Attribute> operands) {
   return IdentityArithmeticOpFolder<RealDivOp>(*this, operands);
+}
+
+//===----------------------------------------------------------------------===//
+// ReluOp
+//===----------------------------------------------------------------------===//
+
+void ReluOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                         MLIRContext *context) {
+  results.add<ReluOfMinimum6ToRelu6>(context);
 }
 
 //===----------------------------------------------------------------------===//
@@ -3068,13 +3077,10 @@ static LogicalResult VerifyWhileTypes(Operation *op, TypeRange cond_input,
 }
 
 LogicalResult WhileOp::verifySymbolUses(SymbolTableCollection &symbol_table) {
-  // TODO(jpienaar): Remove.
-  if (failed(WhileOpAdaptor(*this).verify(getLoc()))) return failure();
-
   auto cond_fn =
-      symbol_table.lookupNearestSymbolFrom<FuncOp>(*this, condAttr());
+      symbol_table.lookupNearestSymbolFrom<func::FuncOp>(*this, condAttr());
   auto body_fn =
-      symbol_table.lookupNearestSymbolFrom<FuncOp>(*this, bodyAttr());
+      symbol_table.lookupNearestSymbolFrom<func::FuncOp>(*this, bodyAttr());
   if (!cond_fn) {
     return emitOpError("cond refers to an undefined function : ") << cond();
   }
@@ -3255,12 +3261,7 @@ LogicalResult XlaBroadcastHelperOp::inferReturnTypeComponents(
     MLIRContext *context, Optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  auto loc = location ? *location : mlir::UnknownLoc::get(context);
   XlaBroadcastHelperOpAdaptor op(operands.getValues(), attributes);
-  if (failed(op.verify(loc))) {
-    return failure();
-  }
-
   Value lhs = op.lhs();
   Value rhs = op.rhs();
   auto set_unranked_results = [&]() {
@@ -3337,9 +3338,7 @@ LogicalResult XlaSetDynamicDimensionSizeOp::inferReturnTypeComponents(
     MLIRContext *context, Optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  auto loc = location ? *location : mlir::UnknownLoc::get(context);
   XlaSetDynamicDimensionSizeOpAdaptor op(operands.getValues(), attributes);
-  if (failed(op.verify(loc))) return failure();
 
   TensorType operand_ty = op.input().getType().cast<TensorType>();
   Type element_ty = operand_ty.getElementType();

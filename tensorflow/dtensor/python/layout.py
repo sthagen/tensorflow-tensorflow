@@ -190,6 +190,7 @@ class Mesh(object):
     return self._name
 
   def is_remote(self) -> bool:
+    """Returns True if a Mesh contains only remote devices."""
     return not self._local_device_ids and self._global_device_ids.size > 0
 
   def host_mesh(self):
@@ -220,9 +221,11 @@ class Mesh(object):
     return h_mesh
 
   def device_type(self) -> str:
+    """Returns the device_type of a Mesh."""
     return self._device_type
 
   def contains_dim(self, dim_name: str) -> bool:
+    """Returns True if a Mesh contains the given dimension name."""
     return dim_name in self._dim_dict
 
   def __contains__(self, dim_name: str) -> bool:
@@ -404,6 +407,7 @@ class Mesh(object):
                 global_devices)
 
   def shape(self) -> List[int]:
+    """Returns the shape of the mesh."""
     return [self.dim_size(dim) for dim in self._dim_names]
 
   @property
@@ -426,6 +430,13 @@ class Mesh(object):
           type(other), type(self)))
     return self.as_proto().SerializeToString() == other.as_proto(
     ).SerializeToString()
+
+  def __repr__(self) -> str:
+    dims = [tuple(self[dim_name]) for dim_name in self.dim_names]
+    return (
+        f'<Mesh object with dims={dims}, device_type="{self.device_type()}", '
+        f'num_local_devices={self.num_local_devices()}), '
+        f'size={self.size}>')
 
 
 # TODO(hthu): Consider making this class immutable.
@@ -621,7 +632,7 @@ class Layout(object):
     return self.serialized_string() == other.serialized_string()
 
   def __repr__(self) -> str:
-    return str(self.as_proto())
+    return f'Layout(sharding_specs={self.sharding_specs}, mesh={self.mesh})'
 
   @staticmethod
   def replicated(mesh: Mesh, rank: int) -> 'Layout':

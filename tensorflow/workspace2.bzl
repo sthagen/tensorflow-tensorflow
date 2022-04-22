@@ -134,9 +134,9 @@ def _tf_repositories():
     # LINT.IfChange
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "422d6a76dfcc9f8830b3fc1602d50c7db76ad565310df54e78bd1a3f3bf0852b",
-        strip_prefix = "XNNPACK-5b5b61f38ebfc0ed7e930654300750c29920ade7",
-        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/5b5b61f38ebfc0ed7e930654300750c29920ade7.zip"),
+        sha256 = "96c79f5f1706bec6919190fcf27e9135663d3fc840ed7aab157a082ebce67544",
+        strip_prefix = "XNNPACK-0bb24b694044b5170fda40e0c8c7806e34c3e64b",
+        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/0bb24b694044b5170fda40e0c8c7806e34c3e64b.zip"),
     )
     # LINT.ThenChange(//tensorflow/lite/tools/cmake/modules/xnnpack.cmake)
 
@@ -158,9 +158,9 @@ def _tf_repositories():
         name = "cudnn_frontend_archive",
         build_file = "//third_party:cudnn_frontend.BUILD",
         patch_file = ["//third_party:cudnn_frontend_header_fix.patch"],
-        sha256 = "fdf4234e9c9c481b3b3a80ad404bc278e6ecb761c5574beb4d3a2cde4a9002ad",
-        strip_prefix = "cudnn-frontend-73210a930333eaf66b42b01693bce7b70719c354",
-        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/73210a930333eaf66b42b01693bce7b70719c354.zip"),
+        sha256 = "42199b34ad892c48202a567ff5b982a9c2cc6a2ddff7d7b48754aa4b8f4308a0",
+        strip_prefix = "cudnn-frontend-0.6.1",
+        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v0.6.1.zip"),
     )
 
     tf_http_archive(
@@ -174,9 +174,9 @@ def _tf_repositories():
     tf_http_archive(
         name = "mkl_dnn_v1",
         build_file = "//third_party/mkl_dnn:mkldnn_v1.BUILD",
-        sha256 = "89495899d7cc17bef14c5dbf72070d6dfda4769fe804f8e88d86f71ad7ae0d51",
-        strip_prefix = "oneDNN-2.6-rc",
-        urls = tf_mirror_urls("https://github.com/oneapi-src/oneDNN/archive/refs/tags/v2.6-rc.tar.gz"),
+        sha256 = "9695640f55acd833ddcef4776af15e03446c4655f9296e5074b1b178dd7a4fb2",
+        strip_prefix = "oneDNN-2.6",
+        urls = tf_mirror_urls("https://github.com/oneapi-src/oneDNN/archive/refs/tags/v2.6.tar.gz"),
     )
 
     tf_http_archive(
@@ -836,9 +836,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "pybind11",
-        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.9.0.tar.gz"),
-        sha256 = "057fb68dafd972bc13afb855f3b0d8cf0fa1a78ef053e815d9af79be7ff567cb",
-        strip_prefix = "pybind11-2.9.0",
+        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.8.1.tar.gz"),
+        sha256 = "f1bcc07caa568eb312411dde5308b1e250bd0e1bc020fae855bf9f43209940cc",
+        strip_prefix = "pybind11-2.8.1",
         build_file = "//third_party:pybind11.BUILD",
         system_build_file = "//third_party/systemlibs:pybind11.BUILD",
     )
