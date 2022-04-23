@@ -870,7 +870,12 @@ PartitionedHlo::ReshardAsWindowedInput(const Window& window,
   if (target != sharding()) {
     return Reshard(target).ReshardAsWindowedInput(window, target, pad_value);
   }
-
+  if (Product(trimmed_target_sharding_tile_shape) == 1) {
+    // The trimmed sharding may have just one shard left. We can simply return
+    // hlo_ in this case.
+    return update_cache(WindowedInputShardReturnValue{
+        hlo_, shard_window, get_dynamic_slice_offset_on_output_if_needed()});
+  }
   if (target.ReplicateOnLastTileDim()) {
     trimmed_target_sharding_tile_shape.push_back(
         target.tile_assignment().dimensions().back());

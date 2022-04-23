@@ -10059,6 +10059,24 @@ ENTRY entry {
               AllOf(op::Copy(op::Parameter()), op::Shape("f32[1,2]")));
 }
 
+TEST_F(SpmdPartitioningTest, SliceTo1PartialReplicate) {
+  const char* const hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %input = f32[16] parameter(0),
+    sharding={devices=[2,2]0,1,2,3 last_tile_dim_replicate}
+  ROOT slice.134 = f32[1] slice(input), slice={[0:1]},
+    sharding={devices=[2,2]0,1,2,3 last_tile_dim_replicate}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
+  VLOG(1) << module->ToString();
+  EXPECT_THAT(module->entry_computation()->root_instruction(),
+              AllOf(op::Slice(op::Parameter()), op::Shape("f32[1]")));
+}
+
 TEST_F(SpmdPartitioningTest, SliceTo2) {
   const char* const hlo_string = R"(
 HloModule module
