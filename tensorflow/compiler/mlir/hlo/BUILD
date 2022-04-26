@@ -35,6 +35,7 @@ td_library(
         "@llvm-project//mlir:LoopLikeInterfaceTdFiles",
         "@llvm-project//mlir:MemRefOpsTdFiles",
         "@llvm-project//mlir:OpBaseTdFiles",
+        "@llvm-project//mlir:QuantizationOpsTdFiles",
         "@llvm-project//mlir:ShapeOpsTdFiles",
         "@llvm-project//mlir:SideEffectTdFiles",
         "@llvm-project//mlir:ViewLikeInterfaceTdFiles",
@@ -383,26 +384,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "lhlo_gpu_ops_enums",
-    srcs = [
-        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.cc.inc",
-        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.h.inc",
-        "lib/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.cc",
-    ],
-    hdrs = [
-        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.h",
-    ],
-    includes = ["include"],
-    deps = [
-        ":lhlo_gpu_ops_attrdefs_inc_gen",
-        ":lhlo_gpu_ops_dialect_inc_gen",
-        ":lhlo_gpu_ops_enums_inc_gen",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:IR",
-    ],
-)
-
 td_library(
     name = "lhlo_gpu_ops_td_files",
     srcs = glob(["include/mlir-hlo/Dialect/lhlo_gpu/IR/*.td"]),
@@ -596,6 +577,7 @@ cc_library(
         "@llvm-project//mlir:InferTypeOpInterface",
         "@llvm-project//mlir:MemRefDialect",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:Shape",
         "@llvm-project//mlir:SideEffects",
         "@llvm-project//mlir:SparseTensor",
@@ -648,7 +630,11 @@ cc_library(
 cc_library(
     name = "lhlo_gpu",
     srcs = [
+        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.cc.inc",
+        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.h",
+        "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.h.inc",
         "lib/Dialect/lhlo_gpu/IR/lhlo_gpu_ops.cc",
+        "lib/Dialect/lhlo_gpu/IR/lhlo_gpu_ops_enums.cc",
     ],
     hdrs = [
         "include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops.h",
@@ -662,7 +648,7 @@ cc_library(
         ":lhlo",
         ":lhlo_gpu_ops_attrdefs_inc_gen",
         ":lhlo_gpu_ops_dialect_inc_gen",
-        ":lhlo_gpu_ops_enums",
+        ":lhlo_gpu_ops_enums_inc_gen",
         ":lhlo_gpu_ops_inc_gen",
         ":lhlo_gpu_ops_ops",
         ":lhlo_gpu_ops_structs",
@@ -960,6 +946,7 @@ cc_library(
         ":type_conversion",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Shape",
@@ -1003,11 +990,30 @@ cc_library(
         ":hlo",
         ":mhlo_pass_details",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:InferTypeOpInterface",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Shape",
         "@llvm-project//mlir:TensorDialect",
+        "@llvm-project//mlir:Transforms",
+    ],
+)
+
+cc_library(
+    name = "constraint_fusion_pass",
+    srcs = ["lib/Dialect/mhlo/transforms/constraint_fusion_pass.cc"],
+    hdrs = [
+        "include/mlir-hlo/Dialect/mhlo/transforms/passes.h",
+    ],
+    deps = [
+        ":hlo",
+        ":mhlo_pass_details",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Shape",
         "@llvm-project//mlir:Transforms",
     ],
 )
@@ -1023,8 +1029,10 @@ cc_library(
         ":hlo",
         ":mhlo_pass_details",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:TensorDialect",
         "@llvm-project//mlir:Transforms",
     ],
 )
@@ -1037,8 +1045,11 @@ cc_library(
         ":hlo",
         ":mhlo_pass_details",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:DialectUtils",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:TensorDialect",
         "@llvm-project//mlir:Transforms",
     ],
 )
@@ -1120,6 +1131,8 @@ cc_library(
         ":hlo",
         ":mhlo_pass_details",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:TensorDialect",
     ],
 )
@@ -1407,6 +1420,7 @@ cc_library(
     deps = [
         ":hlo",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithmeticDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:TensorDialect",
@@ -1590,6 +1604,7 @@ cc_library(
         ":buffer_reuse",
         ":chlo_legalize_to_hlo",
         ":collapse_elementwise_map",
+        ":constraint_fusion_pass",
         ":copy_removal",
         ":expand_hlo_tuples",
         ":gml_st_passes_inc_gen",
@@ -1659,6 +1674,7 @@ cc_library(
     deps = [
         ":gml_st_test_passes_inc_gen",
         ":gml_st_transforms",
+        "@llvm-project//mlir:Affine",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Transforms",
@@ -1731,6 +1747,7 @@ cc_library(
         ":hlo",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Shape",
         "@llvm-project//mlir:TensorDialect",
@@ -1814,10 +1831,13 @@ cc_library(
         ":shape_component_analysis",
         ":transforms_pass_inc_gen",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:LinalgOps",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Shape",
+        "@llvm-project//mlir:TensorDialect",
         "@llvm-project//mlir:Transforms",
     ],
 )
@@ -1834,6 +1854,7 @@ cc_library(
     deps = [
         ":hlo",
         ":transforms_pass_inc_gen",
+        "@llvm-project//mlir:ArithmeticDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
