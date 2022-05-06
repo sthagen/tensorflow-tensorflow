@@ -566,6 +566,7 @@ cc_library(
         "//tensorflow/core/profiler/lib:profiler_session",
         "//tensorflow/core/profiler/rpc:profiler_server_impl",
         "//tensorflow/core/profiler/rpc/client:capture_profile",
+        "//tensorflow/core/profiler/rpc/client:profiler_client",
         "//tensorflow/python/profiler/internal:traceme_wrapper",
         "@pybind11",
     ],
@@ -656,7 +657,6 @@ pybind_extension(
     srcs = [
         "xla.cc",
     ],
-    module_name = "xla_extension",
     pytype_deps = [
         "//third_party/py/numpy",
     ],
@@ -707,9 +707,6 @@ pybind_extension(
         "//tensorflow/python:bfloat16_lib",
     ] + select({
         ":enable_gpu": ["//tensorflow/compiler/xla/service:gpu_plugin"],
-        "//tensorflow:with_tpu_support": [
-            "//tensorflow/core/tpu:tpu_api_dlsym_initializer",
-        ],
         "//conditions:default": [],
     }),
 )
