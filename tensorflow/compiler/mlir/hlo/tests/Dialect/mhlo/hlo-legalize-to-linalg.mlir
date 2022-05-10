@@ -782,7 +782,7 @@ func.func @real_dynamic_slice(%input: tensor<256x?xf32>, %start_indices: tensor<
 // CHECK-LABEL: real_dynamic_slice_with_int
 // Verify that legalization of real_dynamic_slice legalization with integer
 // dims work & passes verification.
-func public @real_dynamic_slice_with_int(%arg0: tensor<10xi32> , %arg1: tensor<1xi32> ) -> tensor<?xi32> {
+func.func public @real_dynamic_slice_with_int(%arg0: tensor<10xi32> , %arg1: tensor<1xi32> ) -> tensor<?xi32> {
   %0 = mhlo.constant dense<0> : tensor<1xi32>
   %1 = mhlo.constant dense<1> : tensor<1xi32>
   %2 = mhlo.constant dense<0> : tensor<i32>
@@ -792,7 +792,7 @@ func public @real_dynamic_slice_with_int(%arg0: tensor<10xi32> , %arg1: tensor<1
 // CHECK: %[[SIZE2:.*]] = arith.index_cast %[[SIZE1]] : i32 to index
 // CHECK: arith.subi %{{.*}}, %[[SIZE2]] : index
   %4 = "mhlo.real_dynamic_slice"(%arg0, %0, %arg1, %1) : (tensor<10xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<?xi32>
-  return %4 : tensor<?xi32>
+  func.return %4 : tensor<?xi32>
 }
 
 // -----
