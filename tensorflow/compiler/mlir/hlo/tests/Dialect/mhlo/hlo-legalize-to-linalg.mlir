@@ -375,6 +375,16 @@ func.func @integer_xor(%lhs: tensor<2x2xi32>,
 
 // -----
 
+// CHECK-LABEL: func @count_leading_zeros
+func.func @count_leading_zeros(%lhs: tensor<2x2xi32>) -> tensor<2x2xi32> {
+  // CHECK: linalg.generic
+  // CHECK: math.ctlz
+  %0 = "mhlo.count_leading_zeros"(%lhs) : (tensor<2x2xi32>) -> tensor<2x2xi32>
+  func.return %0 : tensor<2x2xi32>
+}
+
+// -----
+
 // CHECK-LABEL: func @float_cmp
 func.func @float_cmp(%lhs: tensor<2x2xf32>,
                 %rhs: tensor<2x2xf32>) -> (tensor<2x2xi1>) {
@@ -1743,6 +1753,27 @@ func.func @dot_matmul(%arg0: tensor<2x3xf32>,
 // CHECK-SAME: ins(%[[ARG0]], %[[ARG1]] : tensor<2x3xf32>, tensor<3x?xf32>)
 // CHECK-SAME: outs(%[[FILL]] : tensor<2x?xf32>)
 
+// -----
+
+func.func @dot_matmul_complex(%arg0: tensor<2x3xcomplex<f32>>,
+                 %arg1: tensor<3x?xcomplex<f32>>) -> tensor<2x?xcomplex<f32>> {
+  %0 = "mhlo.dot"(%arg0, %arg1) {someattr}
+           : (tensor<2x3xcomplex<f32>>, tensor<3x?xcomplex<f32>>) -> tensor<2x?xcomplex<f32>>
+  func.return %0 : tensor<2x?xcomplex<f32>>
+}
+// CHECK-LABEL: func @dot_matmul_complex(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x3xcomplex<f32>>, %[[ARG1:.*]]: tensor<3x?xcomplex<f32>>)
+// CHECK: %[[C1:.*]] = arith.constant 1 : index
+// CHECK: %[[D1:.*]] = tensor.dim %[[ARG1]], %[[C1]]
+// CHECK: %[[INIT:.*]] = linalg.init_tensor [2, %[[D1]]]
+// CHECK: %[[FILL:.*]] = linalg.fill ins(%{{.*}}{{.*}}outs(%[[INIT]]
+// CHECK: linalg.matmul
+// CHECK-SAME: {someattr}
+// CHECK-SAME: ins(%[[ARG0]], %[[ARG1]] : tensor<2x3xcomplex<f32>>, tensor<3x?xcomplex<f32>>)
+// CHECK-SAME: outs(%[[FILL]] : tensor<2x?xcomplex<f32>>)
+
+// -----
+
 func.func @dot_matmul_i8_i8_i32(%arg0: tensor<2x3xi8>,
                  %arg1: tensor<3x?xi8>) -> tensor<2x?xi32> {
   %0 = "mhlo.dot"(%arg0, %arg1) : (tensor<2x3xi8>,
@@ -2225,6 +2256,23 @@ func.func @reduce_add(%arg0: tensor<5x4xi32>, %arg1: tensor<i32>) -> tensor<5xi3
 // CHECK-NEXT: ^bb0(%[[LHS_IN:.*]]: i32, %[[RHS_IN:.*]]: i32):
 // CHECK-NEXT:   %[[RESULT:.*]] = arith.addi %[[LHS_IN]], %[[RHS_IN]] : i32
 // CHECK-NEXT:   linalg.yield %[[RESULT]] : i32
+
+// -----
+
+func.func @reduce_add_complex(%arg0: tensor<5x4xcomplex<f32>>) -> tensor<5xcomplex<f32>> {
+  %cst = mhlo.constant dense<(0.000000e+00,0.000000e+00)> : tensor<complex<f32>>
+  %0 = "mhlo.reduce"(%arg0, %cst) ({
+  ^bb0(%arg3: tensor<complex<f32>>, %arg4 : tensor<complex<f32>>):
+    %1 = mhlo.add %arg3, %arg4 : tensor<complex<f32>>
+    "mhlo.return"(%1) : (tensor<complex<f32>>) -> ()
+  }) {dimensions = dense<1> : tensor<1xi64>, someattr} : (tensor<5x4xcomplex<f32>>, tensor<complex<f32>>) -> tensor<5xcomplex<f32>>
+  func.return %0 : tensor<5xcomplex<f32>>
+}
+
+// CHECK-LABEL: @reduce_add_complex
+// CHECK: %[[INIT:.*]] = complex.constant [0.000000e+00 : f32, 0.000000e+00 : f32] : complex<f32>
+// CHECK: linalg.fill ins(%[[INIT]]
+// CHECK: complex.add
 
 // -----
 
@@ -2760,6 +2808,27 @@ func.func @pad_tensor(%arg0: tensor<12x4xf32>, %arg1: tensor<f32>) -> tensor<18x
 //       CHECK:   tensor.pad %[[ARG0]] low[4, 5] high[2, 3]
 //       CHECK:     tensor.yield %[[PAD]] : f32
 //       CHECK:   } : tensor<12x4xf32> to tensor<18x12xf32>
+
+// -----
+
+func.func @pad_interior(%arg0: tensor<12x4xui32>, %arg1: tensor<ui32>) -> tensor<29x15xui32> {
+  %0 = arith.constant dense<0> : tensor<ui32>
+  %1 = "mhlo.pad"(%arg0, %arg1) {
+    edge_padding_high = dense<[2, 3]> : tensor<2xi64>,
+    edge_padding_low = dense<[4, 5]> : tensor<2xi64>,
+    interior_padding = dense<[1, 1]> : tensor<2xi64>
+  } : (tensor<12x4xui32>, tensor<ui32>) -> tensor<29x15xui32>
+  func.return %1 : tensor<29x15xui32>
+}
+// CHECK-LABEL: func @pad_interior
+// CHECK-SAME:    %[[ARG0:[a-zA-Z0-9_]*]]
+//  CHECK-SAME:   %[[ARG1:[a-zA-Z0-9_]*]]
+//   CHECK-DAG: %[[CAST0:.+]] = builtin.unrealized_conversion_cast %[[ARG0]] : tensor<12x4xui32> to tensor<12x4xi32>
+//   CHECK-DAG: %[[CAST1:.+]] = builtin.unrealized_conversion_cast %[[ARG1]] : tensor<ui32> to tensor<i32>
+//   CHECK-DAG: %[[PAD:.+]] = tensor.extract %[[CAST1]][] : tensor<i32>
+//       CHECK: %[[INIT:.+]] = linalg.init_tensor [29, 15] : tensor<29x15xi32>
+//       CHECK: %[[FILL:.+]] = linalg.fill ins(%[[PAD]] : i32) outs(%[[INIT]] : tensor<29x15xi32>) -> tensor<29x15xi32>
+//       CHECK: %[[INSERT:.+]] = tensor.insert_slice %[[CAST0]] into %[[FILL]][4, 5] [12, 4] [2, 2] : tensor<12x4xi32> into tensor<29x15xi32>
 
 // -----
 
@@ -3479,6 +3548,26 @@ func.func @gather(%operand : tensor<1x4x8xi32>, %start_indices : tensor<1x8x2xi3
 // CHECK:             %[[Y:.+]] = tensor.extract %[[OPERAND]][%[[IN0]], %[[IN1]], %[[IN2]]] : tensor<1x4x8xi32>
 // CHECK:             linalg.yield %[[Y]] : i32
 // CHECK-DAG:       return %[[RES]]
+
+// -----
+
+func.func @gather_unsigned(%operand : tensor<1x4x8xui32>, %start_indices : tensor<1x8x2xi32>) -> tensor<1x8x8xui32> {
+  %res = "mhlo.gather"(%operand, %start_indices) {
+    dimension_numbers = #mhlo.gather<
+      collapsed_slice_dims = [0, 1],
+      index_vector_dim = 2,
+      offset_dims = [2],
+      start_index_map = [0, 1]
+    >,
+    indices_are_sorted = false,
+    slice_sizes = dense<[1, 1, 8]> : tensor<3xi64>
+  } : (tensor<1x4x8xui32>, tensor<1x8x2xi32>) -> tensor<1x8x8xui32>
+  func.return %res : tensor<1x8x8xui32>
+}
+
+// CHECK-LABEL:   func @gather_unsigned(
+// CHECK:           linalg.generic
+// CHECK-SAME:           outs(%{{.*}} : tensor<1x8x8xi32>)
 
 // -----
 
@@ -4404,7 +4493,7 @@ func.func @dot_general(%arg0: tensor<?x?x?xf32>,
 // CHECK-SAME: {someattr}
 // CHECK:   ^bb0(%[[ARG2:.*]]: f32, %[[ARG3:.*]]: f32, %[[ARG4:.*]]: f32):
 // CHECK:     %[[MUL:.*]] = arith.mulf %[[ARG2]], %[[ARG3]] : f32
-// CHECK:     %[[SUM:.*]] = arith.addf %[[MUL]], %[[ARG4]] : f32
+// CHECK:     %[[SUM:.*]] = arith.addf %[[ARG4]], %[[MUL]] : f32
 // CHECK:     linalg.yield %[[SUM]] : f32
 // CHECK: } -> tensor<?x?x?xf32>
 
@@ -4429,3 +4518,52 @@ func.func @dot_general_unsigned(%arg0: tensor<?x?x?xui32>,
 // CHECK: linalg.generic
 // CHECK-SAME: ins({{.*}} : tensor<?x?x?xi32>, tensor<?x?x?xi32>)
 // CHECK-SAME: outs({{.*}} : tensor<?x?x?xi32>)
+
+// -----
+
+func.func @dot_general_complex(%arg0: tensor<?x?x?xcomplex<f32>>,
+                  %arg1: tensor<?x?x?xcomplex<f32>>) -> tensor<?x?x?xcomplex<f32>> {
+  %0 = "mhlo.dot_general"(%arg0, %arg1) {
+    dot_dimension_numbers = #mhlo.dot<
+      lhs_batching_dimensions = [1],
+      lhs_contracting_dimensions = [2],
+      rhs_batching_dimensions = [2],
+      rhs_contracting_dimensions = [1]
+    >,
+    precision_config = [#mhlo<"precision DEFAULT">, #mhlo<"precision DEFAULT">],
+    someattr
+  } : (tensor<?x?x?xcomplex<f32>>, tensor<?x?x?xcomplex<f32>>) -> tensor<?x?x?xcomplex<f32>>
+  func.return %0 : tensor<?x?x?xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @dot_general_complex(
+// CHECK: linalg.generic
+// CHECK: complex.mul
+// CHECK: complex.add
+
+// -----
+
+func.func @dot_general_multiple_batch_dimensions(%arg0: tensor<3x4x2x4xi32>,
+             %arg1: tensor<3x4x3x2xi32>) -> tensor<3x4x4x3xi32> {
+  %0 = "mhlo.dot_general"(%arg0, %arg1) {
+    dot_dimension_numbers = #mhlo.dot<
+      lhs_batching_dimensions = [0, 1],
+      rhs_batching_dimensions = [0, 1],
+      lhs_contracting_dimensions = [2],
+      rhs_contracting_dimensions = [3]>,
+    precision_config = [#mhlo<"precision DEFAULT">, #mhlo<"precision DEFAULT">],
+    someattr
+  } : (tensor<3x4x2x4xi32>, tensor<3x4x3x2xi32>) -> tensor<3x4x4x3xi32>
+  return %0 : tensor<3x4x4x3xi32>
+}
+
+// CHECK: #[[MAP0:.*]] = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d4, d2)>
+// CHECK: #[[MAP1:.*]] = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d3, d4)>
+// CHECK: #[[MAP2:.*]] = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d2, d3)>
+// CHECK-LABEL: func @dot_general_multiple_batch_dimensions(
+// CHECK: linalg.generic
+// CHECK-SAME: indexing_maps = [#[[MAP0]], #[[MAP1]], #[[MAP2]]]
+// CHECK-SAME: iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction"]}
+// CHECK-SAME: ins(%[[ARG0]], %[[ARG1]] : tensor<3x4x2x4xi32>, tensor<3x4x3x2xi32>)
+// CHECK-SAME: outs({{.*}} : tensor<3x4x4x3xi32>)
+// CHECK-SAME: {someattr}

@@ -694,6 +694,14 @@ func.func @cholesky_invalid_elt(%arg0: tensor<1x2x2xi32>) -> tensor<1x2x2xi32> {
 
 // -----
 
+func.func @cholesky_wrong_infer_shape(%arg0: tensor<1x2x2xf32>) -> tensor<1x2x2x2xf32> {
+  // expected-error@+1 {{'mhlo.cholesky' op inferred type(s) 'tensor<1x2x2xf32>' are incompatible with return type(s) of operation 'tensor<1x2x2x2xf32>'}}
+  %0 = "mhlo.cholesky"(%arg0) { lower = true } : (tensor<1x2x2xf32>) -> tensor<1x2x2x2xf32>
+  func.return %0: tensor<1x2x2x2xf32>
+}
+
+// -----
+
 // CHECK-LABEL: func @dot_vector
 func.func @dot_vector(%arg0: tensor<1x2xi32>, %arg1: tensor<2x1xi32>) -> tensor<1x1xi32> {
   %0 = "mhlo.dot"(%arg0, %arg1) : (tensor<1x2xi32>, tensor<2x1xi32>) -> tensor<1x1xi32>
@@ -1504,7 +1512,7 @@ func.func @sort(%input0: tensor<16x16xf32>, %input1: tensor<16x16xi32>) {
 // -----
 
 func.func @sort_no_operands() {
-  // expected-error @+1 {{expected named operation to have atleast 1 result}}
+  // expected-error @+1 {{expected named operation to have at least 1 result}}
   %0:0 = "mhlo.sort"() ({
   ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>, %arg3: tensor<i32>, %arg4: tensor<i32>):
     %7 = "mhlo.compare"(%arg1, %arg2) {comparison_direction = #mhlo<"comparison_direction GT">} : (tensor<f32>, tensor<f32>) -> tensor<i1>
@@ -2900,7 +2908,7 @@ module attributes {
 // -----
 
 module attributes {
-  // expected-error@+4 {{expected '>'}}
+  // expected-error@+3 {{expected '>'}}
   // expected-error@+3 {{failed parsing dot dimension numbers}}
   mhlo.dot = #mhlo.dot<
       rhs_batching_dimensions = [1]

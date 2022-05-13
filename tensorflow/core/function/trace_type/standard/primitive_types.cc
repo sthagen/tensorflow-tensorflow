@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -41,7 +42,7 @@ bool None::is_subtype_of(const TraceType& other) const {
   return *this == other;
 }
 
-std::unique_ptr<TraceType> None::most_specific_common_supertype(
+std::unique_ptr<TraceType> None::join(
     const std::vector<const TraceType*>& others) const {
   for (const auto& other : others) {
     if (*this != *other) return nullptr;
@@ -95,7 +96,7 @@ bool Any::is_subtype_of(const TraceType& other) const {
   return base_.value()->is_subtype_of(*casted_other->base().value());
 }
 
-std::unique_ptr<TraceType> Any::most_specific_common_supertype(
+std::unique_ptr<TraceType> Any::join(
     const std::vector<const TraceType*>& others) const {
   std::vector<const Any*> casted_others;
   for (const auto& other : others) {
@@ -118,8 +119,7 @@ std::unique_ptr<TraceType> Any::most_specific_common_supertype(
     raw_ptrs.push_back(casted_other->base().value());
   }
 
-  std::unique_ptr<TraceType> result(
-      base_.value()->most_specific_common_supertype(raw_ptrs));
+  std::unique_ptr<TraceType> result(base_.value()->join(raw_ptrs));
 
   if (result == nullptr) {
     return std::unique_ptr<TraceType>(new Any(absl::nullopt));
@@ -184,7 +184,7 @@ bool Product::is_subtype_of(const TraceType& other) const {
                        const TraceType* r) { return l->is_subtype_of(*r); });
 }
 
-std::unique_ptr<TraceType> Product::most_specific_common_supertype(
+std::unique_ptr<TraceType> Product::join(
     const std::vector<const TraceType*>& others) const {
   std::vector<const Product*> collection_others;
   for (const auto& other : others) {
@@ -204,8 +204,7 @@ std::unique_ptr<TraceType> Product::most_specific_common_supertype(
     for (const auto& collection_other : collection_others) {
       raw_ptrs.push_back(collection_other->elements()[i]);
     }
-    std::unique_ptr<TraceType> supertype =
-        elements_[i]->most_specific_common_supertype(raw_ptrs);
+    std::unique_ptr<TraceType> supertype = elements_[i]->join(raw_ptrs);
     if (supertype == nullptr) return nullptr;
     element_supertypes.push_back(std::move(supertype));
   }
@@ -250,6 +249,199 @@ bool Product::operator==(const TraceType& other) const {
                     collection_other->elements().begin(),
                     [](const std::unique_ptr<TraceType>& l,
                        const TraceType* r) { return *l == *r; });
+}
+
+Record::Record(std::vector<std::unique_ptr<TraceType>> keys,
+               std::vector<std::unique_ptr<TraceType>> values)
+    : owned_keys_(std::move(keys)), owned_values_(std::move(values)) {
+  assert(owned_keys_.size() == owned_values_.size());
+
+  for (int i = 0; i < owned_keys_.size(); i++) {
+    fields_.insert(
+        std::make_pair(owned_keys_[i].get(), owned_values_[i].get()));
+  }
+}
+
+std::unique_ptr<TraceType> Record::clone() const {
+  std::vector<std::unique_ptr<TraceType>> new_keys;
+  std::vector<std::unique_ptr<TraceType>> new_values;
+
+  for (const auto& key_val_pair : fields_) {
+    new_keys.push_back(std::unique_ptr<TraceType>(key_val_pair.first->clone()));
+    new_values.push_back(
+        std::unique_ptr<TraceType>(key_val_pair.second->clone()));
+  }
+
+  return std::unique_ptr<TraceType>(
+      new Record(std::move(new_keys), std::move(new_values)));
+}
+
+const RecordMap& Record::fields() const { return fields_; }
+
+bool Record::is_subtype_of(const TraceType& other) const {
+  const Record* record_other = dynamic_cast<const Record*>(&other);
+  if (record_other == nullptr ||
+      record_other->fields().size() != fields_.size()) {
+    return false;
+  }
+
+  for (const auto& key_val_pair : fields_) {
+    const TraceType* key = key_val_pair.first;
+    const TraceType* value = key_val_pair.second;
+    if (record_other->fields().contains(key)) {
+      const TraceType* other_value = record_other->fields().at(key);
+      if (!value->is_subtype_of(*other_value)) return false;
+    } else {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::unique_ptr<TraceType> Record::join(
+    const std::vector<const TraceType*>& others) const {
+  std::vector<const Record*> record_others;
+  for (const auto& other : others) {
+    const Record* record_other = dynamic_cast<const Record*>(other);
+    if (record_other == nullptr ||
+        record_other->fields().size() != fields_.size()) {
+      return nullptr;
+    }
+    record_others.push_back(record_other);
+  }
+
+  std::vector<std::unique_ptr<TraceType>> keys;
+  std::vector<std::unique_ptr<TraceType>> value_supertypes;
+
+  for (const auto& key_val_pair : fields_) {
+    const TraceType* key = key_val_pair.first;
+    const TraceType* value = key_val_pair.second;
+    keys.push_back(key->clone());
+
+    std::vector<const TraceType*> raw_ptrs;
+    raw_ptrs.reserve(record_others.size());
+    for (const auto& record_other : record_others) {
+      if (record_other->fields().contains(key)) {
+        raw_ptrs.push_back(record_other->fields().at(key));
+      } else {
+        return nullptr;
+      }
+    }
+    std::unique_ptr<TraceType> supertype = value->join(raw_ptrs);
+    if (supertype == nullptr) return nullptr;
+    value_supertypes.push_back(std::move(supertype));
+  }
+
+  return std::unique_ptr<TraceType>(
+      new Record(std::move(keys), std::move(value_supertypes)));
+}
+
+std::string Record::to_string() const {
+  std::ostringstream ss;
+  ss << "Record<";
+
+  bool first = true;
+  for (const auto& key_val_pair : fields_) {
+    if (first) {
+      first = false;
+    } else {
+      ss << ", ";
+    }
+    ss << key_val_pair.first->to_string();
+    ss << ":";
+    ss << key_val_pair.second->to_string();
+  }
+
+  ss << ">";
+  return std::string(ss.str());
+}
+
+std::size_t Record::hash() const {
+  std::set<std::size_t> hashes;
+  for (const auto& key_val_pair : fields_) {
+    hashes.insert(key_val_pair.first->hash());
+  }
+  return absl::HashOf(hashes);
+}
+
+bool Record::operator==(const TraceType& other) const {
+  const Record* record_other = dynamic_cast<const Record*>(&other);
+  if (record_other == nullptr ||
+      record_other->fields().size() != fields_.size()) {
+    return false;
+  }
+
+  for (const auto& key_val_pair : fields_) {
+    const TraceType* key = key_val_pair.first;
+    const TraceType* value = key_val_pair.second;
+    if (record_other->fields().contains(key)) {
+      const TraceType* other_value = record_other->fields().at(key);
+      if (*value != *other_value) return false;
+    } else {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+UserDefinedType::UserDefinedType(std::string name,
+                                 std::unique_ptr<TraceType> base)
+    : name_(name), base_(std::move(base)) {}
+
+std::unique_ptr<TraceType> UserDefinedType::clone() const {
+  return std::unique_ptr<TraceType>(new UserDefinedType(name_, base_->clone()));
+}
+
+const std::string& UserDefinedType::name() const { return name_; }
+
+const TraceType* UserDefinedType::base() const { return base_.get(); }
+
+bool UserDefinedType::is_subtype_of(const TraceType& other) const {
+  const UserDefinedType* casted_other =
+      dynamic_cast<const UserDefinedType*>(&other);
+  if (casted_other == nullptr || casted_other->name() != name_) {
+    return false;
+  }
+  return base_->is_subtype_of(*casted_other->base());
+}
+
+std::unique_ptr<TraceType> UserDefinedType::join(
+    const std::vector<const TraceType*>& others) const {
+  std::vector<const TraceType*> base_others;
+  for (const auto& other : others) {
+    const UserDefinedType* casted_other =
+        dynamic_cast<const UserDefinedType*>(other);
+    if (casted_other == nullptr || casted_other->name() != name_) {
+      return nullptr;
+    }
+    base_others.push_back(casted_other->base());
+  }
+
+  std::unique_ptr<TraceType> result(base_->join(base_others));
+
+  if (result == nullptr) {
+    return nullptr;
+  } else {
+    return std::unique_ptr<TraceType>(
+        new UserDefinedType(name_, std::move(result)));
+  }
+}
+
+std::string UserDefinedType::to_string() const {
+  return name_ + "<" + base_->to_string() + ">";
+}
+
+std::size_t UserDefinedType::hash() const {
+  return absl::HashOf(name_, base_->hash());
+}
+
+bool UserDefinedType::operator==(const TraceType& other) const {
+  const UserDefinedType* casted_other =
+      dynamic_cast<const UserDefinedType*>(&other);
+  return casted_other != nullptr && casted_other->name() == name_ &&
+         *casted_other->base() == *base_;
 }
 
 }  // namespace trace_type
