@@ -163,6 +163,46 @@ Value fillTensorWithZeros(OpBuilder& builder, Location loc, Value tensor) {
   return builder.create<linalg::FillOp>(loc, zero, tensor).result();
 }
 
+/// Sparsifies a (block of) operation(s) that cannot be handled directly
+/// by the sparse compiler but has well-known semi-ring semantics.
+///
+/// This yields something of the following form:
+///
+///   %result = sparse_tensor.unary %values[0]
+///     present={
+///       ^bb1(%val):
+///         ... codegen proceeds here using %val ....
+///         sparse_tensor.yield
+///     }
+///     absent={}
+///   linalg.yield %result
+Value PreSparsify(Operation* op, llvm::SmallVector<Value, 2>& values,
+                  OpBuilder* b) {
+  if (auto signop = dyn_cast<mhlo::SignOp>(op)) {
+    if (!sparse_tensor::getSparseTensorEncoding(signop.result().getType()) &&
+        !sparse_tensor::getSparseTensorEncoding(signop.operand().getType()))
+      return Value();
+    Type rtp = values[0].getType();
+    Location loc = op->getLoc();
+    auto semiring = b->create<sparse_tensor::UnaryOp>(loc, rtp, values[0]);
+    Block* present = b->createBlock(&semiring.presentRegion(), {}, rtp, loc);
+    b->setInsertionPointToStart(&semiring.presentRegion().front());
+    values[0] = present->getArgument(0);
+    return semiring;
+  }
+  return Value();
+}
+
+/// Finalizes sparse semi-ring construction.
+Value PostSparsify(Operation* op, Value semiring, Value result, OpBuilder* b) {
+  if (semiring) {
+    b->create<sparse_tensor::YieldOp>(op->getLoc(), result);
+    b->setInsertionPointAfter(semiring.getDefiningOp());
+    return semiring;
+  }
+  return result;
+}
+
 SmallVector<int64_t, 4> Extract1DVector(DenseIntElementsAttr elements) {
   SmallVector<int64_t, 4> ret;
   for (const APInt& element : elements) {
@@ -690,12 +730,14 @@ class PointwiseToLinalgConverter : public OpConversionPattern<OpTy> {
         [&](OpBuilder& nested_builder, Location /*nested_loc*/,
             ValueRange args) {
           Type inner_result_ty = getElementTypeOrSelf(output);
+          auto argvec = llvm::to_vector<2>(args.take_front(inputs.size()));
+          auto semiring = PreSparsify(op, argvec, &rewriter);
           Value inner_result = mhlo::MhloOpToStdScalarOp::map<OpTy>(
-              op, inner_result_ty,
-              llvm::to_vector<2>(args.take_front(inputs.size())), &rewriter);
+              op, inner_result_ty, argvec, &rewriter);
           if (inner_result == nullptr) {
             failed = true;
           } else {
+            inner_result = PostSparsify(op, semiring, inner_result, &rewriter);
             nested_builder.create<linalg::YieldOp>(loc, inner_result);
           }
         },
@@ -2013,28 +2055,26 @@ struct DepthwiseConvOpConversion : public OpConversionPattern<mhlo::ConvOp> {
           op, "non-one lhs- dialation unsupported yet");
     }
 
-    if (const mhlo::ConvDimensionNumbersAttr& dimension_numbers =
-            op.dimension_numbers()) {
-      // Make sure that this is 2-D convolution.
-      const auto spatial_rank =
-          llvm::size(dimension_numbers.getInputSpatialDimensions());
-      if (spatial_rank != 2) {
-        return rewriter.notifyMatchFailure(op,
-                                           "only support 2-D cases for now");
-      }
+    const mhlo::ConvDimensionNumbersAttr& dimension_numbers =
+        op.dimension_numbers();
+    // Make sure that this is 2-D convolution.
+    const auto spatial_rank =
+        llvm::size(dimension_numbers.getInputSpatialDimensions());
+    if (spatial_rank != 2) {
+      return rewriter.notifyMatchFailure(op, "only support 2-D cases for now");
+    }
 
-      // Make sure that this is depthwise convolution.
-      int64_t input_feature_dim = dimension_numbers.getInputFeatureDimension();
-      int64_t input_feature_count =
-          op.lhs().getType().cast<ShapedType>().getDimSize(input_feature_dim);
-      if (op.feature_group_count() != input_feature_count) {
-        return rewriter.notifyMatchFailure(op, "not depth-wise convolution");
-      }
+    // Make sure that this is depthwise convolution.
+    int64_t input_feature_dim = dimension_numbers.getInputFeatureDimension();
+    int64_t input_feature_count =
+        op.lhs().getType().cast<ShapedType>().getDimSize(input_feature_dim);
+    if (op.feature_group_count() != input_feature_count) {
+      return rewriter.notifyMatchFailure(op, "not depth-wise convolution");
+    }
 
-      // Make sure that this convolution has a canonical form.
-      if (!HasCanonicalDimensionNumbers(dimension_numbers)) {
-        return rewriter.notifyMatchFailure(op, "does not have canonical form");
-      }
+    // Make sure that this convolution has a canonical form.
+    if (!HasCanonicalDimensionNumbers(dimension_numbers)) {
+      return rewriter.notifyMatchFailure(op, "does not have canonical form");
     }
 
     DenseIntElementsAttr window_strides;
@@ -2085,10 +2125,38 @@ struct DepthwiseConvOpConversion : public OpConversionPattern<mhlo::ConvOp> {
       return llvm::to_vector<2>(llvm::seq<int64_t>(start, end));
     };
 
-    if (filter_dims[2] * filter_dims[3] != op.feature_group_count()) {
+    int64_t kernel_input_feature_dimension =
+        dimension_numbers.getKernelInputFeatureDimension();
+    int64_t kernel_output_feature_dimension =
+        dimension_numbers.getKernelOutputFeatureDimension();
+    if (filter_dims[kernel_input_feature_dimension] *
+            filter_dims[kernel_output_feature_dimension] !=
+        op.feature_group_count()) {
       // For cases where channel multiplier != 1
+
+      // Reshaping filter shape
+      //   [filter_height, filter_width, 1, kernel-output-feature].
+      // to
+      //   [filter_height, filter_width, feature_group_count,
+      //      kernel-output-feature/feature_group_count ]
+      SmallVector<int64_t> reshaped_filter_dims;
+      reshaped_filter_dims.assign(filter_dims.begin(), filter_dims.end());
+      auto reshaped_filter = filter;
+      if (filter_dims[kernel_input_feature_dimension] == 1) {
+        reshaped_filter_dims[kernel_input_feature_dimension] =
+            op.feature_group_count();
+        reshaped_filter_dims[kernel_output_feature_dimension] /=
+            op.feature_group_count();
+        auto reshaped_filter_type = RankedTensorType::get(
+            reshaped_filter_dims,
+            op.rhs().getType().cast<RankedTensorType>().getElementType());
+
+        reshaped_filter =
+            rewriter.create<mhlo::ReshapeOp>(loc, reshaped_filter_type, filter);
+      }
+
       auto output_dims = result_type.getShape();
-      auto channel_multiplier = filter_dims[3];
+      auto channel_multiplier = reshaped_filter_dims[3];
       SmallVector<int64_t> reshaped_output_dims;
       reshaped_output_dims.assign(output_dims.begin(), output_dims.end());
       reshaped_output_dims.push_back(channel_multiplier);
@@ -2101,7 +2169,7 @@ struct DepthwiseConvOpConversion : public OpConversionPattern<mhlo::ConvOp> {
       auto reshaped_output_type = RankedTensorType::get(
           reshaped_output_dims, result_type.getElementType());
       auto conv = rewriter.create<linalg::DepthwiseConv2DNhwcHwcmOp>(
-          op.getLoc(), reshaped_output_type, ValueRange{input, filter},
+          loc, reshaped_output_type, ValueRange{input, reshaped_filter},
           ValueRange{zero_tensor}, window_strides, rhs_dilation,
           PruneAttributeList(op));
 
