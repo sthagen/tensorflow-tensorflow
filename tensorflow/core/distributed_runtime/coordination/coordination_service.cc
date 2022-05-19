@@ -191,16 +191,13 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
     //   DISCONNECTED -------> CONNECTED --------> ERROR (timeout)
     //                              |   ReportError
     //                              +--------------> ERROR
-    //                              |    Register
-    //                              ---------------> RESTARTED
     //
-    // When task state becomes ERROR or RESTARTED, propagate this status to
-    // other CONNECTED tasks in the cluster.
+    // When task state becomes ERROR, propagate this status to other CONNECTED
+    // tasks in the cluster.
     enum class State {
       DISCONNECTED,
       CONNECTED,
       ERROR,
-      RESTARTED,
     };
 
     State GetState() { return state_; }
@@ -214,6 +211,8 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
     // the service recording the state change and the agent stopping heartbeats.
     uint64_t GetDisconnectedGracePeriodMicros();
     void SetError(Status status);
+    bool GetDeviceInfoCollected() { return device_info_collected_; }
+    void MarkDeviceInfoCollected() { device_info_collected_ = true; }
     absl::flat_hash_set<std::string> GetOngoingBarriers();
     void JoinBarrier(absl::string_view barrier_id);
     void ExitBarrier(absl::string_view barrier_id);
@@ -230,6 +229,9 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
     // disconnected task. This grace period accounts for the lag time between
     // the service recording the state change and the agent stopping heartbeats.
     uint64_t disconnect_grace_period_us_ = 0;
+    // Checks if task has called WaitForAllTasks() previously, which gathers the
+    // local device info.
+    bool device_info_collected_ = false;
     // For now, we assume there won't be many simultaneous barriers so we simply
     // use a set.
     absl::flat_hash_set<std::string> ongoing_barriers_for_task_;
@@ -515,22 +517,23 @@ Status CoordinationServiceStandaloneImpl::RegisterTask(
       // be propagated to other tasks.
       return MakeCoordinationError(errors::InvalidArgument(
           "Unexpected task registered with task_name=", task_name));
-    } else if (cluster_state_[task_name]->GetState() ==
-               TaskState::State::CONNECTED) {
-      Status s = MakeCoordinationError(
-          errors::Aborted("Duplicate task registration with task_name=",
-                          task_name),
-          task);
-      status = s;
-      SetTaskError(task_name, status);
-    } else {
-      // Hit this path when the task is registering itself for the first time,
-      // or it's already in ERROR state and now register again. In both cases,
-      // the service allows it to be registered.
+    }
+    if (cluster_state_[task_name]->GetState() ==
+        TaskState::State::DISCONNECTED) {
+      // This task is currently disconnected (registering for the first time or
+      // has called ResetTask() previously).
       cluster_state_[task_name]->SetConnected(incarnation);
       LOG(INFO) << task_name
                 << " has connected to coordination service. Incarnation: "
                 << incarnation;
+    } else {
+      // This task is connected or already in error, which implies it has
+      // registered previously.
+      status = MakeCoordinationError(
+          errors::Aborted("Duplicate task registration with task_name=",
+                          task_name),
+          task);
+      SetTaskError(task_name, status);
     }
   }
   if (!status.ok()) {
@@ -544,7 +547,14 @@ void CoordinationServiceStandaloneImpl::WaitForAllTasks(
     StatusCallback done) {
   {
     mutex_lock l(state_mu_);
-    cluster_devices_.MergeFrom(devices);
+    const auto& task_state = cluster_state_.find(GetTaskName(task));
+    // Add task device info to global device state for the first time that task
+    // has called WaitForAllTasks().
+    if (task_state != cluster_state_.end() &&
+        !task_state->second->GetDeviceInfoCollected()) {
+      cluster_devices_.MergeFrom(devices);
+      task_state->second->MarkDeviceInfoCollected();
+    }
   }
   BarrierAsync(device_propagation_barrier_id_, kDevicePropagationTimeout, task,
                {}, std::move(done));

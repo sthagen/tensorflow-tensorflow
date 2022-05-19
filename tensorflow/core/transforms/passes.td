@@ -95,6 +95,39 @@ def GraphToFunc : Pass<"tfg-lift-graph-to-func", "ModuleOp"> {
   ];
 }
 
+def FuncToGraph : Pass<"tfg-lower-func-to-graph", "ModuleOp"> {
+  let summary = "Turns a function back to a graph";
+  let description = [{
+    This pass converts a function which was lifted from a graph back to the
+    graph. Note that only functions lifted by `tfg-lift-graph-to-func` pass are
+    valid for this conversion.
+
+    For example,
+
+    ```mlir
+    tfg.func @_mlir_lifted_graph(%FooA0: tensor<*xf32> {tfg.name = "Foo:0"})
+         -> (tensor<*xf32> {tfg.name = "Bar:0"})
+          attributes {tfg.lifted_graph_version =
+                      #tf_type.version<producer = 34, min_consumer = 5>} {
+      %Foo, %ctl = Foo name("Foo") {dtype = i32} : () -> (tensor<*xf32>)
+      %Bar, %ctl_1 = Bar(%Foo) name("Bar") : (tensor<*xf32>) -> (tensor<*xf32>)
+      return (%Bar) [%ctl] : tensor<*xf32>
+    }
+    ```
+
+    will be turned into
+
+    ```mlir
+    tfg.graph #tf_type.version<producer = 34, min_consumer = 5> {
+      %Foo, %ctl = Foo name("Foo") {dtype = i32} : () -> (tensor<*xf32>)
+      %Bar, %ctl_1 = Bar(%Foo) name("Bar") : (tensor<*xf32>) -> (tensor<*xf32>)
+    }
+    ```
+
+  }];
+  let constructor = "CreateFuncToGraphPass()";
+}
+
 def FunctionalToRegion : Pass<"tfg-functional-to-region", "ModuleOp"> {
   let summary = "Convert functional control-flow ops to region-based.";
   let description = [{
@@ -254,7 +287,7 @@ def ControlFlowSink : Pass<"tfg-cf-sink", "GraphFuncOp"> {
   ];
 }
 
-def Remapper : Pass<"remapper"> {
+def Remapper : Pass<"tfg-remapper"> {
   let summary = "Remap operations to decrease amount of operations";
   let description = [{
     This is TF-level instruction selection. It remaps operations onto other
@@ -384,7 +417,7 @@ def EliminatePassthroughIterArgs : Pass<"tfg-eliminate-passthrough-iter-args",
   let dependentDialects = ["tfg::TFGraphDialect"];
 }
 
-def ShapeInference : Pass<"shape-inference"> {
+def ShapeInference : Pass<"tfg-shape-inference"> {
   let summary = "Infer the output shape of operations";
   let description = [{
     Infer the result shape of an operation if possible. Besides inferring the op
@@ -398,7 +431,7 @@ def ShapeInference : Pass<"shape-inference"> {
   let constructor = "CreateShapeInferencePass()";
 }
 
-def ConstantFoldingPass : Pass<"constant-folding"> {
+def ConstantFoldingPass : Pass<"tfg-constant-folding"> {
   let summary = "constant-folding on tfg";
   let description = [{
     This pass will fold operations into constants and do full/partial propagte
