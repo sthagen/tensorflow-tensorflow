@@ -537,6 +537,7 @@ cc_library(
     hdrs = ["include/mlir-hlo/utils/convert_op_folder.h"],
     includes = ["include"],
     deps = [
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ],
 )
@@ -1346,6 +1347,7 @@ cc_library(
         ":mhlo_pass_details",
         ":type_conversion",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithmeticDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -1682,6 +1684,19 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "gpu_passes",
+    hdrs = [
+        "include/mlir-hlo/Transforms/gpu_passes.h",
+        "include/mlir-hlo/Transforms/register_gpu_passes.h",
+    ],
+    deps = [
+        ":gpu_kernel_lowering_passes",
+        ":gpu_transforms_pass_inc_gen",
+        "@llvm-project//mlir:Pass",
+    ],
+)
+
 gentbl_cc_library(
     name = "gml_st_test_passes_inc_gen",
     compatible_with = get_compatible_with_cloud(),
@@ -1755,6 +1770,26 @@ cc_library(
         "@llvm-project//mlir:Affine",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+    ],
+)
+
+gentbl_cc_library(
+    name = "gpu_transforms_pass_inc_gen",
+    compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = "include",
+    tbl_outs = [
+        (
+            [
+                "-gen-pass-decls",
+                "-name=LMHLOGPUTransforms",
+            ],
+            "include/mlir-hlo/Transforms/gpu_passes.h.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "include/mlir-hlo/Transforms/gpu_passes.td",
+    deps = [
+        "@llvm-project//mlir:PassBaseTdFiles",
     ],
 )
 
@@ -1859,6 +1894,35 @@ cc_library(
         "@llvm-project//mlir:CopyOpInterface",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Transforms",
+    ],
+)
+
+cc_library(
+    name = "gpu_kernel_lowering_passes",
+    srcs = ["lib/Transforms/gpu_kernel_lowering_passes.cc"],
+    hdrs = [
+        "include/mlir-hlo/Transforms/GPUPassDetail.h",
+        "include/mlir-hlo/Transforms/gpu_passes.h",
+    ],
+    deps = [
+        ":gpu_transforms_pass_inc_gen",
+        ":hlo",
+        ":lhlo",
+        "@llvm-project//mlir:ArithmeticToLLVM",
+        "@llvm-project//mlir:ComplexToLLVM",
+        "@llvm-project//mlir:ControlFlowToLLVM",
+        "@llvm-project//mlir:FuncToLLVM",
+        "@llvm-project//mlir:GPUDialect",
+        "@llvm-project//mlir:GPUToNVVMTransforms",
+        "@llvm-project//mlir:GPUToROCDLTransforms",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:LLVMCommonConversion",
+        "@llvm-project//mlir:MathToLLVM",
+        "@llvm-project//mlir:MemRefToLLVM",
+        "@llvm-project//mlir:NVVMDialect",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:ROCDLDialect",
         "@llvm-project//mlir:Transforms",
     ],
 )
@@ -2148,6 +2212,7 @@ cc_binary(
         ":all_passes",
         ":all_test_passes",
         ":gml_st",
+        ":gpu_passes",
         ":hlo_dialect_registration",
         ":lhlo",
         ":lhlo_gpu",

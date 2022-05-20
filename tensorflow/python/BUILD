@@ -67,6 +67,7 @@ visibility = [
     "//third_party/py/tensorflow_numerics:__subpackages__",
     "//third_party/py/tensorflow_privacy:__subpackages__",
     "//third_party/reverb:__subpackages__",
+    "//research/graph/fairness/inproc_fair_reg:__subpackages__",
 ]
 
 package(
@@ -2962,7 +2963,9 @@ cuda_py_test(
     size = "medium",
     srcs = ["ops/math_ops_test.py"],
     python_version = "PY3",
-    tags = ["no_windows_gpu"],
+    tags = [
+        "no_windows_gpu",
+    ],
     deps = [
         ":array_ops",
         ":gradients",
