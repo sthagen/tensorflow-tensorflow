@@ -18,11 +18,10 @@ limitations under the License.
 #ifndef GML_ST_OPS
 #define GML_ST_OPS
 
-include "mlir/Interfaces/InferTypeOpInterface.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir-hlo/Dialect/gml_st/IR/gml_st_ops_base.td"
 include "mlir-hlo/Dialect/gml_st/IR/gml_st_subset_ops.td"
 include "mlir-hlo/Dialect/gml_st/IR/gml_st_legacy_ops.td"
-
 
 def GMLST_MaterializeOp : GMLST_Op<"materialize",
     [DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
@@ -30,6 +29,34 @@ def GMLST_MaterializeOp : GMLST_Op<"materialize",
   let results = (outs AnyType:$result);
   let assemblyFormat = [{
     $source `at` $subset attr-dict `:` type($source) `at` type($subset)
+  }];
+  let hasVerifier = 0;
+}
+
+def GMLST_DimOp : GMLST_Op<"dim", []> {
+  let summary = [{Returns the size of a tile in a given dimension}];
+  let arguments = (ins AnySubset:$tile, Index:$dim);
+  let results = (outs Index:$result);
+  let assemblyFormat = [{
+    $tile `[` $dim `]` attr-dict `:` type($tile)
+  }];
+  let hasVerifier = 0;
+}
+
+def GMLST_DynamicBroadcastInDimOp : GMLST_Op<"dynamic_broadcast_in_dim", [
+    NoSideEffect]> {
+  let summary = [{Destination-style twin for `mhlo.dynamic_broadcast_in_dim`}];
+  let arguments = (ins
+    AnyTensor:$init,
+    AnyTensor:$operand,
+    I64ElementsAttr:$broadcast_dimensions,
+    OptionalAttr<I64ElementsAttr>:$known_expanding_dimensions,
+    OptionalAttr<I64ElementsAttr>:$known_nonexpanding_dimensions
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = [{
+    $init `,` $operand `,` custom<I64ElementsAttr>($broadcast_dimensions)
+    attr-dict `:` type($init) `,` type($operand) `->` type($result)
   }];
   let hasVerifier = 0;
 }

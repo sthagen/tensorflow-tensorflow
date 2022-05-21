@@ -24,7 +24,6 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
-#include "tensorflow/core/graph/tensor_id.h"
 #include "tensorflow/core/ir/dialect.h"
 #include "tensorflow/core/ir/ops.h"
 #include "tensorflow/core/ir/tf_op_wrapper.h"
@@ -57,7 +56,7 @@ static ArrayAttr createLiftedValueAttr(OpBuilder &builder, OpResult value) {
 
 tensorflow::Status GraphToFunc(GraphOp graph, ArrayRef<Value> feeds,
                                ArrayRef<Value> fetches,
-                               ArrayRef<Value> control_rets, StringRef name) {
+                               ArrayRef<Value> control_rets) {
   OpBuilder builder(graph);
   ControlType control_ty = ControlType::get(graph.getContext());
   llvm::SmallVector<Type> arg_types;
@@ -67,9 +66,13 @@ tensorflow::Status GraphToFunc(GraphOp graph, ArrayRef<Value> feeds,
     arg_types.push_back(control_ty);
   }
   for (Value fetch : fetches) ret_types.push_back(fetch.getType());
+
+  auto *dialect = cast<TFGraphDialect>(graph->getDialect());
+  StringRef func_name = dialect->getLiftedGraphFuncNameKey();
+
   FunctionType func_type = builder.getFunctionType(arg_types, ret_types);
   auto loc = graph.getLoc();
-  auto func_op = builder.create<GraphFuncOp>(loc, name, func_type,
+  auto func_op = builder.create<GraphFuncOp>(loc, func_name, func_type,
                                              /*generic=*/false);
   func_op->setAttr("tfg.lifted_graph_version", graph.version());
   func_op.getRegion().takeBody(graph.getRegion());
@@ -79,7 +82,6 @@ tensorflow::Status GraphToFunc(GraphOp graph, ArrayRef<Value> feeds,
   OpBuilder body_builder = OpBuilder::atBlockEnd(func_op.getBody());
   body_builder.create<ReturnOp>(loc, fetches, control_rets);
 
-  auto *dialect = cast<TFGraphDialect>(func_op->getDialect());
   StringAttr tfg_name = dialect->getTfgNameAttrIdentifier();
   StringAttr lifted_value_name = builder.getStringAttr("tfg.lifted_value_attr");
 
@@ -114,7 +116,7 @@ tensorflow::Status GraphToFunc(GraphOp graph, ArrayRef<Value> feeds,
 
 Status GraphToFunc(GraphOp graph, ArrayRef<std::string> feeds_names,
                    ArrayRef<std::string> fetches_names,
-                   ArrayRef<std::string> control_rets_names, StringRef name) {
+                   ArrayRef<std::string> control_rets_names) {
   DenseMap<StringRef, int> feeds_to_position;
   feeds_to_position.reserve(feeds_names.size());
   for (const auto &indexed_name : llvm::enumerate(feeds_names)) {
@@ -169,8 +171,7 @@ Status GraphToFunc(GraphOp graph, ArrayRef<std::string> feeds_names,
 
   llvm::erase_if(control_rets, [](Value value) { return !value; });
 
-  return GraphToFunc(graph, flattened_feeds, flattened_fetches, control_rets,
-                     name);
+  return GraphToFunc(graph, flattened_feeds, flattened_fetches, control_rets);
 }
 
 }  // namespace tfg
