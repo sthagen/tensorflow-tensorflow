@@ -15,6 +15,7 @@
 #include "tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu/lmhlo_to_jitrt.h"
 
 #include <cstdint>
+#include <numeric>
 #include <utility>
 
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
@@ -48,7 +49,6 @@ namespace {
 #define GEN_PASS_CLASSES
 #include "tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu/jitrt_passes.h.inc"
 
-using lmhlo_gpu::GEMM_BiasOp;
 using mlir::DialectRegistry;
 using mlir::FunctionType;
 using mlir::MLIRContext;
@@ -70,11 +70,19 @@ using mlir::gpu::LaunchFuncOp;
 using mlir::gpu::MemcpyOp;
 using mlir::lmhlo::TerminatorOp;
 using mlir::lmhlo::WhileOp;
+using mlir::lmhlo_gpu::CholeskyOp;
+using mlir::lmhlo_gpu::GEMM_BiasOp;
 using mlir::lmhlo_gpu::GEMMOp;
 using mlir::memref::GetGlobalOp;
 
 class ConvertLmhloConstantToArgPass
     : public ConvertLmhloConstantToArgPassBase<ConvertLmhloConstantToArgPass> {
+ public:
+  ConvertLmhloConstantToArgPass() = default;
+  explicit ConvertLmhloConstantToArgPass(int64_t min_num_elements) {
+    this->min_num_elements_ = min_num_elements;
+  }
+
   void runOnOperation() override;
 
   void getDependentDialects(DialectRegistry& registry) const override {
@@ -454,6 +462,62 @@ class GetGlobalOpLowering : public OpRewritePattern<GetGlobalOp> {
 
 // -------------------------------------------------------------------------- //
 
+class CholeskyOpLowering : public OpRewritePattern<CholeskyOp> {
+ public:
+  explicit CholeskyOpLowering(MLIRContext* ctx)
+      : OpRewritePattern<CholeskyOp>(ctx) {}
+
+  LogicalResult matchAndRewrite(CholeskyOp op,
+                                PatternRewriter& rewriter) const override {
+    MLIRContext* ctx = this->getContext();
+    ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+
+    // Custom call target.
+    NamedAttribute target(b.getStringAttr("rt.direct_custom_call"),
+                          b.getStringAttr("xla.gpu.cholesky"));
+
+    // Create a custom call function declaration.
+    auto custom_call_type =
+        FunctionType::get(ctx, op.getOperandTypes(), TypeRange());
+    auto custom_call_attrs = ArrayRef<NamedAttribute>(target);
+    auto custom_call = FuncOp::create(op.getLoc(), "cholesky", custom_call_type,
+                                      custom_call_attrs);
+    custom_call.setPrivate();
+
+    SymbolTable sym_table(module);
+    auto inserted = sym_table.insert(custom_call);
+    rewriter.notifyOperationInserted(custom_call);
+
+    // Convert Cholesky to a function call.
+    auto call = rewriter.create<CallOp>(op.getLoc(), inserted, TypeRange(),
+                                        op.getOperands());
+
+    const auto& dims = op.input().getType().cast<mlir::MemRefType>().getShape();
+    if (dims.size() < 2)
+      return op.emitOpError() << "Input's dimension count (" << dims.size()
+                              << ") must be 2 or greater.";
+    int64_t n = dims[dims.size() - 1];
+    int64_t batch_size =
+        std::accumulate(dims.begin(), dims.end() - 2, int64_t{1},
+                        [](int64_t a, int64_t b) { return a * b; });
+
+    // Copy backend specific attributes.
+    call->setAttr(b.getStringAttr("batch_size"),
+                  b.getI64IntegerAttr(batch_size));
+    call->setAttr(b.getStringAttr("n"), b.getI64IntegerAttr(n));
+    call->setAttr(b.getStringAttr("uplo"), b.getI64IntegerAttr(op.is_lower()));
+
+    // Erase the original Cholesky operation.
+    rewriter.eraseOp(op);
+
+    return success();
+  }
+};
+
+// -------------------------------------------------------------------------- //
+
 void ConvertLmhloConstantToArgPass::runOnOperation() {
   ModuleOp module = getOperation();
   MLIRContext* ctx = module.getContext();
@@ -463,11 +527,20 @@ void ConvertLmhloConstantToArgPass::runOnOperation() {
   GlobalConstantsArgs cst_args = GetConstantArgs(module);
   patterns.insert<GetGlobalOpLowering>(ctx, cst_args);
 
-  // Set up conversion target to rewrite only GetGlobalOp and avoid any other
-  // canonicalizations that can break later passes.
+  // Set up conversion target to rewrite only GetGlobalOp larger than the
+  // threshold and avoid any other canonicalizations that can break later
+  // passes.
   ConversionTarget target(*ctx);
-  target.addIllegalOp<GetGlobalOp>();
+  target.addDynamicallyLegalOp<GetGlobalOp>([&](GetGlobalOp op) {
+    auto memref = op.getType();
+    return memref.getNumElements() < min_num_elements_;
+  });
   target.addLegalOp<ConstantOp, memref::ViewOp>();
+
+  // TODO(ezhulenev): By adding MHLO and LMHLO to a set of legal dialects, we
+  // suppress any rewrites for these dialects (there are canonicalization
+  // patterns that interact badly with downstream Gpu binary code generation).
+  target.addLegalDialect<mhlo::MhloDialect, lmhlo::LmhloDialect>();
 
   if (failed(applyPartialConversion(module, target, std::move(patterns))))
     signalPassFailure();
@@ -495,7 +568,8 @@ void ConvertLmhloGpuToJitRtPass::runOnOperation() {
   // Convert lmhlo_gpu operations to JitRt gpu runtime custom calls.
   RewritePatternSet patterns(ctx);
   patterns.insert<GemmOpLowering, GemmBiasOpLowering>(ctx, uid);
-  patterns.insert<WhileOpLowering, TerminatorOpLowering>(ctx);
+  patterns.insert<CholeskyOpLowering, WhileOpLowering, TerminatorOpLowering>(
+      ctx);
 
   if (failed(applyPatternsAndFoldGreedily(module, std::move(patterns))))
     return signalPassFailure();
@@ -509,13 +583,31 @@ std::unique_ptr<OperationPass<ModuleOp>> createConvertLmhloConstantToArgPass() {
   return std::make_unique<ConvertLmhloConstantToArgPass>();
 }
 
+std::unique_ptr<OperationPass<ModuleOp>> createConvertLmhloConstantToArgPass(
+    int64_t min_num_elements) {
+  return std::make_unique<ConvertLmhloConstantToArgPass>(min_num_elements);
+}
+
 std::unique_ptr<OperationPass<ModuleOp>> createConvertLmhloGpuToJitRtPass() {
   return std::make_unique<ConvertLmhloGpuToJitRtPass>();
 }
 
 void populateLmhloToJitRtPasses(mlir::OpPassManager& pm) {
-  pm.addPass(createConvertLmhloConstantToArgPass());
+  // Convert large global memrefs corresponding to XLA constants with arguments,
+  // so that compiled device kernels do not capture them.
+  //
+  // TODO(ezhulenev): Threshold should be consistent with the device kernel
+  // code generation. If constant will be embedded into the device module, we
+  // should not inline it too early. Currently it's hardcoded to `1` element.
+  pm.addPass(createConvertLmhloConstantToArgPass(/*min_num_elements=*/2));
+
+  // Small global constants will be embedded into the device modules.
   pm.addPass(createConvertLmhloToGpuBinaryPass());
+
+  // Convert remaining small global memrefs corresponding to constant arguments.
+  pm.addPass(createConvertLmhloConstantToArgPass());
+
+  // Lower all Gpu operations to the JitRt Gpu runtime intrinsics.
   pm.addPass(createConvertLmhloGpuToJitRtPass());
   pm.addPass(createConvertGpuToJitRtPass());
 }

@@ -83,6 +83,7 @@ struct MhloToScalarOp<mhlo::ExpOp> {
 template <>
 struct MhloToScalarOp<mhlo::Expm1Op> {
   using FOp = ::mlir::math::ExpM1Op;
+  using COp = ::mlir::complex::Expm1Op;
 };
 template <>
 struct MhloToScalarOp<mhlo::FloorOp> {
@@ -130,6 +131,7 @@ struct MhloToScalarOp<mhlo::PopulationCountOp> {
 template <>
 struct MhloToScalarOp<mhlo::RsqrtOp> {
   using FOp = ::mlir::math::RsqrtOp;
+  using COp = ::mlir::complex::RsqrtOp;
 };
 template <>
 struct MhloToScalarOp<mhlo::SubOp> {
@@ -690,16 +692,12 @@ inline Value MapMhloOpToStdScalarOp<mhlo::ClampOp>(Location loc,
                                                    ArrayRef<Type> arg_types,
                                                    ValueRange args,
                                                    OpBuilder* b) {
-  assert(args.size() == 3 && "expected 3 arguments");
-  Value lb = args[0];
-  Value x = args[1];
-  Value ub = args[2];
-
-  // clamp(lb, x, ub) = max(min(x, ub), lb)
-  Value min_x_ub = MapMhloOpToStdScalarOp<mhlo::MinOp>(loc, result_types,
-                                                       arg_types, {x, ub}, b);
-  return MapMhloOpToStdScalarOp<mhlo::MaxOp>(loc, result_types, arg_types,
-                                             {min_x_ub, lb}, b);
+  mhlo::ClampOp::Adaptor op(args);
+  // clamp(lb, x, ub) = min(max(lb, x), ub)
+  Value max_lb_x = MapMhloOpToStdScalarOp<mhlo::MaxOp>(
+      loc, result_types, arg_types, {op.min(), op.operand()}, b);
+  return MapMhloOpToStdScalarOp<mhlo::MinOp>(loc, result_types, arg_types,
+                                             {max_lb_x, op.max()}, b);
 }
 
 template <typename U, typename S>

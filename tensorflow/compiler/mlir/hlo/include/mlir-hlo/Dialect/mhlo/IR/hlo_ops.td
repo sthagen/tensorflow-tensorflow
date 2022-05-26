@@ -42,7 +42,7 @@ class HLO_ShapedInterfaceOp<string mnemonic, list<Trait> traits> :
 //===----------------------------------------------------------------------===//
 
 def HLO_ConstOp : HLO_Op<"constant",
-    [ConstantLike, NoSideEffect, AllTypesMatch<["value", "output"]>]> {
+    [ConstantLike, NoSideEffect, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "Constant operator";
   let description = [{
     Represents a constant value.
@@ -64,6 +64,10 @@ def HLO_ConstOp : HLO_Op<"constant",
 
   // Constant has special conversion logic to HLO.
   let hasCustomHLOConverter = 1;
+
+  let extraClassDeclaration = [{
+    static bool isCompatibleReturnTypes(TypeRange l, TypeRange r);
+  }];
 }
 
 def HLO_IotaOp : HLO_Op<"iota", [NoSideEffect]> {
@@ -2020,6 +2024,20 @@ def HLO_ReverseOp: HLO_Op<"reverse",
   let results = (outs HLO_Tensor);
 
   let hasFolder = 1;
+}
+
+def HLO_PartitionIdOp : HLO_Op<"partition_id", []> {
+  let summary = "PartitionId operator";
+  let description = [{
+    Returns the value of the partition id of the currently executing device.
+    XLA supports two mechanisms for parallel execution: replication and
+    partition. A module can be replicated to run on multiple devices
+    (replicas) and a module can also be partitioned to split the work
+    between devices. replica-id and partition-id returns the id values of the
+    current device.
+  }];
+  let results = (outs TensorOf<[UI32]>);
+  let hasCustomHLOConverter = 1;
 }
 
 def HLO_PadOp: HLO_Op<"pad",

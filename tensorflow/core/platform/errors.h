@@ -20,6 +20,7 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/str_join.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -65,7 +66,7 @@ inline std::unordered_map<std::string, std::string> GetPayloads(
     const ::tensorflow::Status& status) {
   std::unordered_map<std::string, std::string> payloads;
   status.ForEachPayload(
-      [&payloads](tensorflow::StringPiece key, tensorflow::StringPiece value) {
+      [&payloads](tensorflow::StringPiece key, const absl::Cord& value) {
         payloads[std::string(key)] = std::string(value);
       });
   return payloads;
@@ -77,7 +78,7 @@ inline void InsertPayloads(
     ::tensorflow::Status& status,
     const std::unordered_map<std::string, std::string>& payloads) {
   for (const auto& payload : payloads) {
-    status.SetPayload(payload.first, payload.second);
+    status.SetPayload(payload.first, absl::Cord(payload.second));
   }
 }
 
@@ -86,7 +87,7 @@ inline void InsertPayloads(
 inline void CopyPayloads(const ::tensorflow::Status& from,
                          ::tensorflow::Status& to) {
   from.ForEachPayload(
-      [&to](tensorflow::StringPiece key, tensorflow::StringPiece value) {
+      [&to](tensorflow::StringPiece key, const absl::Cord& value) {
         to.SetPayload(key, value);
       });
 }
@@ -111,11 +112,9 @@ inline ::tensorflow::Status CreateWithUpdatedMessage(
 // to be several layers of additional context.
 template <typename... Args>
 void AppendToMessage(::tensorflow::Status* status, Args... args) {
-  std::vector<StackFrame> stack_trace = status->stack_trace();
   auto new_status = ::tensorflow::Status(
       status->code(),
-      ::tensorflow::strings::StrCat(status->error_message(), "\n\t", args...),
-      std::move(stack_trace));
+      ::tensorflow::strings::StrCat(status->error_message(), "\n\t", args...));
   CopyPayloads(*status, new_status);
   *status = std::move(new_status);
 }
@@ -142,19 +141,20 @@ void AppendToMessage(::tensorflow::Status* status, Args... args) {
 //   if (errors::IsInvalidArgument(status)) { ... }
 //   switch (status.code()) { case error::INVALID_ARGUMENT: ... }
 
-#define DECLARE_ERROR(FUNC, CONST)                                        \
-  template <typename... Args>                                             \
-  ::tensorflow::Status FUNC(Args... args) {                               \
-    return ::tensorflow::Status(                                          \
-        ::tensorflow::error::CONST,                                       \
-        ::tensorflow::strings::StrCat(                                    \
-            ::tensorflow::errors::internal::PrepareForStrCat(args)...));  \
-  }                                                                       \
-  template <typename... Args>                                             \
-  ::tensorflow::Status FUNC##WithPayloads(                                \
-      const ::tensorflow::StringPiece& message,                           \
-      const std::unordered_map<std::string, std::string>& payloads) {     \
-    return errors::Create(::tensorflow::error::CONST, message, payloads); \
+#define DECLARE_ERROR(FUNC, CONST)                                             \
+  template <typename... Args>                                                  \
+  ABSL_DEPRECATED("Use tensorflow::FUNC##Error() instead")::tensorflow::Status \
+  FUNC(Args... args) {                                                         \
+    return ::tensorflow::Status(                                               \
+        ::tensorflow::error::CONST,                                            \
+        ::tensorflow::strings::StrCat(                                         \
+            ::tensorflow::errors::internal::PrepareForStrCat(args)...));       \
+  }                                                                            \
+  template <typename... Args>                                                  \
+  ::tensorflow::Status FUNC##WithPayloads(                                     \
+      const ::tensorflow::StringPiece& message,                                \
+      const std::unordered_map<std::string, std::string>& payloads) {          \
+    return errors::Create(::tensorflow::error::CONST, message, payloads);      \
   }
 
 DECLARE_ERROR(Cancelled, CANCELLED)
@@ -174,24 +174,40 @@ DECLARE_ERROR(Unknown, UNKNOWN)
 DECLARE_ERROR(PermissionDenied, PERMISSION_DENIED)
 DECLARE_ERROR(Unauthenticated, UNAUTHENTICATED)
 
-bool IsAborted(const Status& status);
-bool IsAlreadyExists(const Status& status);
-bool IsCancelled(const Status& status);
-bool IsDataLoss(const Status& status);
-bool IsDeadlineExceeded(const Status& status);
-bool IsFailedPrecondition(const Status& status);
-bool IsInternal(const Status& status);
-bool IsInvalidArgument(const Status& status);
-bool IsNotFound(const Status& status);
-bool IsOutOfRange(const Status& status);
-bool IsPermissionDenied(const Status& status);
-bool IsResourceExhausted(const Status& status);
-bool IsUnauthenticated(const Status& status);
-bool IsUnavailable(const Status& status);
-bool IsUnimplemented(const Status& status);
-bool IsUnknown(const Status& status);
-
 #undef DECLARE_ERROR
+
+ABSL_DEPRECATED("Use tensorflow::IsAborted() instead")
+bool IsAborted(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsAlreadyExists() instead")
+bool IsAlreadyExists(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsCancelled() instead")
+bool IsCancelled(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsDataLoss() instead")
+bool IsDataLoss(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsDeadlineExceeded() instead")
+bool IsDeadlineExceeded(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsFailedPrecondition() instead")
+bool IsFailedPrecondition(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsInternal() instead")
+bool IsInternal(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsInvalidArgument() instead")
+bool IsInvalidArgument(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsNotFound() instead")
+bool IsNotFound(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsOutOfRange() instead")
+bool IsOutOfRange(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsPermissionDenied() instead")
+bool IsPermissionDenied(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsResourceExhausted() instead")
+bool IsResourceExhausted(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsUnauthenticated() instead")
+bool IsUnauthenticated(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsUnavailable() instead")
+bool IsUnavailable(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsUnimplemented() instead")
+bool IsUnimplemented(const Status& status);
+ABSL_DEPRECATED("Use tensorflow::IsUnknown() instead")
+bool IsUnknown(const Status& status);
 
 // Produces a formatted string pattern from the name which can uniquely identify
 // this node upstream to produce an informative error message. The pattern
@@ -230,7 +246,7 @@ inline std::string FormatFunctionForError(const std::string& name) {
 
 inline Status ReplaceErrorFromNonCommunicationOps(const Status s,
                                                   const std::string& op_name) {
-  assert(IsUnavailable(s));
+  assert(::tensorflow::errors::IsUnavailable(s));
   return Status(
       error::INTERNAL,
       strings::StrCat(
