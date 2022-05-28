@@ -123,9 +123,12 @@ cc_library(
     compatible_with = get_compatible_with_cloud(),
     visibility = ["//visibility:public"],
     deps = [
+        "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla/service:executable",
         "//tensorflow/compiler/xla/service:global_device_id",
+        "//tensorflow/core/platform:stream_executor_no_cuda",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/types:optional",
     ],
@@ -648,7 +651,9 @@ cc_library(
     deps = [
         ":cholesky_thunk",
         ":gpu_asm_opts_util",
+        ":io_feed_manager",
         ":matmul_utils",
+        ":nccl_collective_thunks",
         ":stream_executor_util",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla/service:executable",
@@ -2800,6 +2805,11 @@ test_suite(
     name = "jitrt_executable_tests",
     tests = [
         "//tensorflow/compiler/xla/service/gpu/tests:gpu_fusion_test",
+        "//tensorflow/compiler/xla/service/gpu/tests:gpu_infeed_test",
+        "//tensorflow/compiler/xla/service/gpu/tests:gpu_kernel_tiling_test",
+        "//tensorflow/compiler/xla/service/gpu/tests:kernel_launch_test",
+        "//tensorflow/compiler/xla/tests:cholesky_test_gpu",
+        "//tensorflow/compiler/xla/tests:dot_operation_test_gpu",
     ],
 )
 

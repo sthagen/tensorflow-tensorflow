@@ -16,13 +16,18 @@
 
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <utility>
 
 #include "llvm/ExecutionEngine/Orc/Mangling.h"
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/service/gpu/cholesky_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_asm_opts_util.h"
+#include "tensorflow/compiler/xla/service/gpu/infeed_manager.h"
 #include "tensorflow/compiler/xla/service/gpu/matmul_utils.h"
+#include "tensorflow/compiler/xla/service/gpu/nccl_all_reduce_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/nccl_collective_thunk.h"
+#include "tensorflow/compiler/xla/service/gpu/outfeed_manager.h"
 #include "tensorflow/compiler/xla/service/gpu/stream_executor_util.h"
 #include "tensorflow/compiler/xla/service/service_executable_run_options.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -468,6 +473,141 @@ static bool GemmBias(runtime::KernelContext* ctx, void** args, void** attrs) {
 // -------------------------------------------------------------------------- //
 
 namespace {
+struct Infeed {
+  LogicalResult operator()(const ServiceExecutableRunOptions* run_options,
+                           CustomCall::RemainingArgs args,
+                           StringRef config) const;
+  static Infeed Handler() { return Infeed(); }
+};
+}  // namespace
+
+LogicalResult Infeed::operator()(const ServiceExecutableRunOptions* run_options,
+                                 CustomCall::RemainingArgs args,
+                                 StringRef config) const {
+  VLOG(3) << "Infeeding to GPU";
+
+  se::Stream* stream = run_options->stream();
+  ShapeTree<se::ScopedDeviceMemory<uint8_t>> source_buffers =
+      GetOrCreateInfeedManager(stream->parent())->BlockingGetNextDestination();
+
+  // Check that we have correct number of arguments.
+  if (args.size() != source_buffers.leaf_count()) return failure();
+
+  // TODO(ezhulenev): Report human-readable error messages through errors.
+  size_t index = 0;
+  for (auto& source : source_buffers.leaves()) {
+    // Get the destination buffer.
+    auto dest = args.get<jitrt::StridedMemrefView>(index);
+    if (failed(dest)) return failure();
+
+    // Get the source buffer shape.
+    const Shape& source_shape =
+        ShapeUtil::GetSubshape(source_buffers.shape(), source.first);
+
+    // Check that destination shape matches the source shape.
+    // TODO(ezhulenev): Report human-readable error similar to infeed_thunk.
+    Shape dest_shape = ToShape(*dest);
+    if (!ShapeUtil::Equal(dest_shape, source_shape)) return failure();
+
+    se::DeviceMemoryBase dest_address = GetDeviceAddress(*dest);
+    se::ScopedDeviceMemory<uint8_t>& buffer = source.second;
+    stream->ThenMemcpy(&dest_address, *buffer.ptr(), buffer.ptr()->size());
+
+    ++index;
+  }
+
+  // TODO(ezhulenev): Make this function async?
+  Status block_status = stream->BlockHostUntilDone();
+  if (!block_status.ok()) return failure();
+
+  VLOG(3) << "Infeeding to GPU complete";
+
+  return success();
+}
+
+static bool Infeed(runtime::KernelContext* ctx, void** args, void** attrs) {
+  static auto* handler = CustomCall::Bind("xla.gpu.infeed")
+                             .UserData<const ServiceExecutableRunOptions*>()
+                             .Arg<CustomCall::RemainingArgs>()  // args
+                             .Attr<StringRef>("config")
+                             .To<RuntimeChecks()>(Infeed::Handler())
+                             .release();
+
+  return succeeded(handler->call(args, attrs, Executable::GetUserData(ctx)));
+}
+
+// -------------------------------------------------------------------------- //
+
+namespace {
+struct Outfeed {
+  LogicalResult operator()(const ServiceExecutableRunOptions* run_options,
+                           CustomCall::RemainingArgs args,
+                           StringRef config) const;
+  static Outfeed Handler() { return Outfeed(); }
+};
+}  // namespace
+
+LogicalResult Outfeed::operator()(
+    const ServiceExecutableRunOptions* run_options,
+    CustomCall::RemainingArgs args, StringRef config) const {
+  VLOG(3) << "Outfeeding from GPU";
+
+  se::Stream* stream = run_options->stream();
+  OutfeedManager* outfeed_manager = GetOrCreateOutfeedManager(stream->parent());
+  ShapeTree<std::unique_ptr<OutfeedBuffer>>* dest_buffers =
+      outfeed_manager->BlockingGetNextDestination();
+
+  // Check that we have correct number of arguments.
+  if (args.size() != dest_buffers->leaf_count()) return failure();
+
+  size_t index = 0;
+  for (auto& dest : dest_buffers->leaves()) {
+    // Get the source buffer.
+    auto source = args.get<jitrt::StridedMemrefView>(index);
+    if (failed(source)) return failure();
+
+    // Get the source buffer shape.
+    const Shape& dest_shape =
+        ShapeUtil::GetSubshape(dest_buffers->shape(), dest.first);
+
+    // Check that destination shape matches the source shape.
+    // TODO(ezhulenev): Report human-readable error similar to outfeed_thunk.
+    Shape source_shape = ToShape(*source);
+    if (!ShapeUtil::Equal(dest_shape, source_shape)) return failure();
+
+    se::DeviceMemoryBase source_address = GetDeviceAddress(*source);
+    std::unique_ptr<OutfeedBuffer>& buffer = dest.second;
+
+    // Schedule the memory transfer.
+    auto* dest_address = buffer->destination()->untyped_data();
+    stream->ThenMemcpy(dest_address, source_address, buffer->length())
+        .ThenDoHostCallback([&buffer]() { buffer->Done(); });
+
+    ++index;
+  }
+
+  Status block_status = stream->BlockHostUntilDone();
+  if (!block_status.ok()) return failure();
+
+  VLOG(3) << "Outfeeding from GPU complete";
+
+  return success();
+}
+
+static bool Outfeed(runtime::KernelContext* ctx, void** args, void** attrs) {
+  static auto* handler = CustomCall::Bind("xla.gpu.outfeed")
+                             .UserData<const ServiceExecutableRunOptions*>()
+                             .Arg<CustomCall::RemainingArgs>()  // args
+                             .Attr<StringRef>("config")
+                             .To<RuntimeChecks()>(Outfeed::Handler())
+                             .release();
+
+  return succeeded(handler->call(args, attrs, Executable::GetUserData(ctx)));
+}
+
+// -------------------------------------------------------------------------- //
+
+namespace {
 
 enum class MemcpyDirection { kDeviceToDevice, kDeviceToHost, kHostToDevice };
 
@@ -587,6 +727,95 @@ static bool Cholesky(runtime::KernelContext* ctx, void** args, void** attrs) {
 
 // -------------------------------------------------------------------------- //
 
+namespace {
+struct AllReduce {
+  LLVM_ATTRIBUTE_ALWAYS_INLINE
+  LogicalResult operator()(const ServiceExecutableRunOptions* run_options,
+                           CustomCall::RemainingArgs args, int64_t group_mode,
+                           int64_t op_id, int64_t reduction_kind,
+                           ArrayRef<int64_t> replica_group_offsets,
+                           ArrayRef<int64_t> replica_group_values) const;
+  static AllReduce Handler() { return AllReduce(); }
+};
+}  // namespace
+
+LogicalResult AllReduce::operator()(
+    const ServiceExecutableRunOptions* run_options,
+    CustomCall::RemainingArgs args, int64_t group_mode, int64_t op_id,
+    int64_t reduction_kind, ArrayRef<int64_t> replica_group_offsets,
+    ArrayRef<int64_t> replica_group_values) const {
+#if XLA_ENABLE_XCCL
+  VLOG(3) << "Running AllReduce";
+  se::Stream* stream = run_options->stream();
+  NcclExecuteParams params(*run_options, stream);
+
+  // TODO(b/233930690): Pass the attribute below as a nested array.
+  // Pass an array of arrays using two vectors; one specifying all the values
+  // and another specifying the (ending) offsets of each array in the other
+  // vector. Example: [ [10, 20, 30, 40], [50, 60], [70, 80, 90] ] turns into
+  // offsets=[4, 6, 9] values=[10, 20, 30, 40, 50, 60, 70, 80, 90].
+  std::vector<ReplicaGroup> replica_groups;
+  int i = 0;
+  for (int64_t replica_group_end : replica_group_offsets) {
+    ReplicaGroup replica_group;
+    while (i < replica_group_end)
+      replica_group.add_replica_ids(replica_group_values[i++]);
+    replica_groups.push_back(replica_group);
+  }
+
+  auto comm =
+      LockNcclComm(params, replica_groups,
+                   static_cast<CollectiveOpGroupMode>(group_mode), op_id);
+  if (!comm.ok()) return failure();
+
+  // Add MemRef arguments as buffer arguments.
+  const int buffer_pairs = args.size() / 2;
+  std::vector<DeviceBufferPair> device_buffers;
+  device_buffers.reserve(buffer_pairs);
+  for (int i = 0; i < buffer_pairs; ++i) {
+    auto source = args.get<jitrt::MemrefView>(i);
+    auto destination = args.get<jitrt::MemrefView>(i + buffer_pairs);
+    if (failed(source) || failed(destination)) {
+      // Unsupported argument type.
+      return failure();
+    }
+
+    int element_count = 1;
+    for (int size : source->sizes) element_count *= size;
+    device_buffers.emplace_back(DeviceBufferPair{
+        ToPrimitiveType(source->dtype), element_count,
+        GetDeviceAddress(*source), GetDeviceAddress(*destination)});
+  }
+
+  auto executed = RunAllReduce(static_cast<ReductionKind>(reduction_kind),
+                               device_buffers, *stream, *comm.value());
+  if (!executed.ok()) return failure();
+
+  return success();
+#else   // XLA_ENABLE_XCCL
+  // NCCL disabled.
+  return failure();
+#endif  // XLA_ENABLE_XCCL
+}
+
+static bool AllReduce(runtime::KernelContext* ctx, void** args, void** attrs) {
+  static auto* handler =
+      CustomCall::Bind("xla.gpu.all_reduce")
+          .UserData<const ServiceExecutableRunOptions*>()
+          .RemainingArgs()              // args
+          .Attr<int64_t>("group_mode")  // CollectiveOpGroupMode
+          .Attr<int64_t>("op_id")
+          .Attr<int64_t>("reduction_kind")  // ReductionKind
+          .Attr<ArrayRef<int64_t>>("replica_group_offsets")
+          .Attr<ArrayRef<int64_t>>("replica_group_values")
+          .To<RuntimeChecks()>(AllReduce::Handler())
+          .release();
+
+  return succeeded(handler->call(args, attrs, Executable::GetUserData(ctx)));
+}
+
+// -------------------------------------------------------------------------- //
+
 SymbolMap JitRtCustomCallsSymbolMap(MangleAndInterner mangle) {
   SymbolMap symbol_map;
 
@@ -595,6 +824,7 @@ SymbolMap JitRtCustomCallsSymbolMap(MangleAndInterner mangle) {
         llvm::pointerToJITTargetAddress(symbol_ptr), llvm::JITSymbolFlags());
   };
 
+  bind("xla.gpu.all_reduce", &xla::gpu::AllReduce);
   bind("xla.gpu.cholesky", &xla::gpu::Cholesky);
   bind("xla.gpu.func.launch", &xla::gpu::LaunchFunc);
   bind("xla.gpu.gemm", &xla::gpu::Gemm);
@@ -602,6 +832,8 @@ SymbolMap JitRtCustomCallsSymbolMap(MangleAndInterner mangle) {
   bind("xla.gpu.memcpy.d2d", &MemcpyFn<MemcpyDirection::kDeviceToDevice>);
   bind("xla.gpu.memcpy.h2d", &MemcpyFn<MemcpyDirection::kHostToDevice>);
   bind("xla.gpu.memcpy.d2h", &MemcpyFn<MemcpyDirection::kDeviceToHost>);
+  bind("xla.gpu.infeed", &xla::gpu::Infeed);
+  bind("xla.gpu.outfeed", &xla::gpu::Outfeed);
 
   return symbol_map;
 }
