@@ -42,6 +42,10 @@
         argument, for returning both dataset splits at once, as a tuple.
     *   Added `tf.keras.utils.split_dataset` utility to split a `Dataset` object
         or a list/tuple of arrays into two `Dataset` objects (e.g. train/test).
+    *   Added step granualarity to `BackupAndRestore` callback for handling
+        distributed training failures & restarts. The training state can now be
+        restored at the exact epoch and step at which it was previously saved
+        before failing.
 
 *   `tf.data`:
 
@@ -71,6 +75,9 @@
     *   Added an optional parameter: `warn`. This parameter controls whether or
         not warnings will be printed when operations in the provided `fn` fall
         back to a while loop.
+
+*   XLA:
+    *   MWMS is now compilable with XLA.
 
 ## Bug Fixes and Other Changes
 
