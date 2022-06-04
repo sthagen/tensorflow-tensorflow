@@ -770,9 +770,10 @@ def copy_assets_to_destination_dir(asset_filename_map, destination_dir):
         compat.as_bytes(assets_destination_dir),
         compat.as_bytes(asset_basename))
 
-    # Copy asset file to the destination.
-    file_io.copy(
-        asset_source_filepath, asset_destination_filepath, overwrite=True)
+    # Copy asset file to the destination if source is a non-empty path.
+    if asset_source_filepath:
+      file_io.copy(
+          asset_source_filepath, asset_destination_filepath, overwrite=True)
 
   tf_logging.info("Assets written to: %s",
                   compat.as_text(assets_destination_dir))
