@@ -74,8 +74,7 @@ ProgramShape GetProgramShapeWithLayout(const HloModule& module) {
 
 HloTestBase::HloTestBase(bool verifier_layout_sensitive,
                          bool allow_mixed_precision_in_hlo_verifier,
-                         std::function<bool(const HloInstruction*)>
-                             instruction_can_change_layout_func)
+                         HloPredicate instruction_can_change_layout_func)
     : HloTestBase(GetTestPlatform(), GetReferencePlatform(),
                   verifier_layout_sensitive,
                   allow_mixed_precision_in_hlo_verifier,
@@ -85,8 +84,7 @@ HloTestBase::HloTestBase(se::Platform* test_platform,
                          se::Platform* reference_platform,
                          bool verifier_layout_sensitive,
                          bool allow_mixed_precision_in_hlo_verifier,
-                         std::function<bool(const HloInstruction*)>
-                             instruction_can_change_layout_func)
+                         HloPredicate instruction_can_change_layout_func)
     : test_runner_(test_platform),
       reference_runner_(reference_platform),
       verifier_layout_sensitive_(verifier_layout_sensitive),
@@ -253,13 +251,15 @@ StatusOr<std::vector<Literal>> HloTestBase::ExecuteReplicated(
     std::function<Executable*(int64_t)> executable_provider,
     std::function<int64_t(int64_t)> argument_count_provider,
     std::function<const Literal*(int64_t, int64_t)> argument_provider,
-    int64_t num_replicas, bool run_hlo_passes) {
+    int64_t num_replicas, bool run_hlo_passes,
+    DeviceAssignment* device_assignment) {
   HloRunner::ReplicatedExecuteOptions options;
   options.num_replicas = num_replicas;
   options.run_hlo_passes = run_hlo_passes;
   options.use_threads = true;
   return test_runner_.ExecuteReplicated(
-      executable_provider, argument_count_provider, argument_provider, options);
+      executable_provider, argument_count_provider, argument_provider, options,
+      device_assignment);
 }
 
 StatusOr<std::unique_ptr<HloModule>> HloTestBase::MakeReferenceModule(

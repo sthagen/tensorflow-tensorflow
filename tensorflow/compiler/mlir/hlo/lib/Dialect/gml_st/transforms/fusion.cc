@@ -17,11 +17,13 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir-hlo/Dialect/gml_st/IR/gml_st_ops.h"
+#include "mlir-hlo/Dialect/gml_st/transforms/fusion_interface.h"
 #include "mlir-hlo/Dialect/gml_st/transforms/pass_detail.h"
 #include "mlir-hlo/Dialect/gml_st/transforms/passes.h"
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -53,16 +55,16 @@ Value materializeSpaceFromTensor(Value operand, const SmallVector<Value>& dims,
   return rewriter.create<SpaceOp>(loc, spaceTy, dynamicDims, staticDimsAttr);
 }
 
-// TODO(frgossen): This should become a tiling interface.
-Value whatWillBeTheTilingIface(gml_st::DynamicBroadcastInDimOp op, Value tile,
+// TODO(frgossen): This should become a fusion interface.
+Value whatWillBeTheFusionIface(gml_st::DynamicBroadcastInDimOp op, Value tile,
                                PatternRewriter& rewriter) {
   auto loc = op.getLoc();
-  DenseMap<int64_t, Value> localCsts;
-  auto getCst = [&](int64_t c) -> Value {
-    auto it = localCsts.find(c);
-    if (it != localCsts.end()) return it->second;
+  DenseMap<uint64_t, Value> localIndexCsts;
+  auto getIndexCst = [&](uint64_t c) -> Value {
+    auto it = localIndexCsts.find(c);
+    if (it != localIndexCsts.end()) return it->second;
     auto cst = rewriter.create<arith::ConstantIndexOp>(loc, c);
-    localCsts[c] = cst;
+    localIndexCsts[c] = cst;
     return cst;
   };
 
@@ -94,8 +96,8 @@ Value whatWillBeTheTilingIface(gml_st::DynamicBroadcastInDimOp op, Value tile,
   SmallVector<Value> argTileOffsets;
   SmallVector<Value> argTileSizes;
   for (const auto& it : llvm::enumerate(op.broadcast_dimensions())) {
-    Value argIdx = getCst(it.index());
-    Value resultIdx = getCst(it.value().getLimitedValue());
+    Value argIdx = getIndexCst(it.index());
+    Value resultIdx = getIndexCst(it.value().getLimitedValue());
 
     // If corresponding operand and result dimensions are different, the
     // dimension is expanding.
@@ -108,9 +110,9 @@ Value whatWillBeTheTilingIface(gml_st::DynamicBroadcastInDimOp op, Value tile,
     auto tileOffset = rewriter.create<OffsetOp>(loc, collapsedTile, argIdx);
     auto tileSize = rewriter.create<SizeOp>(loc, collapsedTile, argIdx);
     argTileOffsets.push_back(rewriter.create<arith::SelectOp>(
-        loc, isExpanding, getCst(0), tileOffset));
+        loc, isExpanding, getIndexCst(0), tileOffset));
     argTileSizes.push_back(rewriter.create<arith::SelectOp>(
-        loc, isExpanding, getCst(1), tileSize));
+        loc, isExpanding, getIndexCst(1), tileSize));
   }
 
   // Materialize operand tile.
@@ -140,36 +142,27 @@ Value whatWillBeTheTilingIface(gml_st::DynamicBroadcastInDimOp op, Value tile,
       op.known_nonexpanding_dimensionsAttr());
 }
 
-// TODO(frgossen): This should become a tiling interface.
-Value whatWillBeTheTilingIface(mhlo::AddOp op, Value tile,
-                               PatternRewriter& rewriter) {
-  auto loc = op.getLoc();
-  auto lhsSub = rewriter.create<MaterializeOp>(loc, op.lhs(), tile);
-  auto rhsSub = rewriter.create<MaterializeOp>(loc, op.rhs(), tile);
-  return rewriter.create<mhlo::AddOp>(loc, lhsSub, rhsSub);
-}
-
-struct TilingPattern : public OpRewritePattern<gml_st::MaterializeOp> {
+struct FusionPattern : public OpRewritePattern<gml_st::MaterializeOp> {
   using OpRewritePattern<gml_st::MaterializeOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(gml_st::MaterializeOp op,
                                 PatternRewriter& rewriter) const override {
     Operation* def = op.source().getDefiningOp();
 
+    if (auto iface = llvm::dyn_cast_or_null<FusionIterface>(def)) {
+      if (Value fused = iface.fuse(op, rewriter)) {
+        rewriter.replaceOp(op, fused);
+        return success();
+      }
+    }
+
     // TODO(frgossen): The below cases should eventually be replaced by the use
-    // of a common tiling interface.
+    // of a common fusion interface.
 
     // Case `dynamic_broadcast_in_dim`.
     if (auto bcast =
             llvm::dyn_cast_or_null<gml_st::DynamicBroadcastInDimOp>(def)) {
-      Value result = whatWillBeTheTilingIface(bcast, op.subset(), rewriter);
-      rewriter.replaceOp(op, result);
-      return success();
-    }
-
-    // Case `add`.
-    if (auto add = llvm::dyn_cast_or_null<mhlo::AddOp>(def)) {
-      Value result = whatWillBeTheTilingIface(add, op.subset(), rewriter);
+      Value result = whatWillBeTheFusionIface(bcast, op.subset(), rewriter);
       rewriter.replaceOp(op, result);
       return success();
     }
@@ -180,7 +173,9 @@ struct TilingPattern : public OpRewritePattern<gml_st::MaterializeOp> {
 
 class FusionPass : public FusionPassBase<FusionPass> {
   void getDependentDialects(DialectRegistry& registry) const final {
-    registry.insert<GmlStDialect>();
+    registry
+        .insert<GmlStDialect, math::MathDialect, arith::ArithmeticDialect>();
+    registerFusionInterfaceExternalModels(registry);
   }
 
   void runOnOperation() final {
@@ -188,7 +183,7 @@ class FusionPass : public FusionPassBase<FusionPass> {
     RewritePatternSet patterns(ctx);
 
     // List of patterns.
-    patterns.insert<TilingPattern>(ctx);
+    patterns.insert<FusionPattern>(ctx);
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             std::move(patterns)))) {
