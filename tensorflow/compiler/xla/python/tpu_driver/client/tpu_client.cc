@@ -168,7 +168,7 @@ Status PyTpuClient::CheckDeviceId(int device_id,
     return InvalidArgument("%s got bad device_id: %d (num_devices=%d).",
                            caller_name, device_id, device_count());
   }
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 static Status CheckDataType(xla::PrimitiveType dtype) {
@@ -178,7 +178,7 @@ static Status CheckDataType(xla::PrimitiveType dtype) {
         "64-bit data types are not yet supported on the TPU driver API. "
         "Convert inputs to float32/int32_t before using.");
   }
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 /* static */
@@ -269,7 +269,7 @@ StatusOr<std::unique_ptr<PyTpuBuffer>> PyTpuBuffer::MakeTuple(
   auto tuple_device_buffer = std::make_shared<TpuSharedBuffer>(
       client->driver(), std::move(tuple_handle), std::move(child_events),
       std::move(device));
-  return absl::make_unique<PyTpuBuffer>(
+  return std::make_unique<PyTpuBuffer>(
       tuple_shape, std::move(tuple_device_buffer),
       std::move(child_device_buffers), std::move(client));
 }
@@ -303,7 +303,7 @@ Status PyTpuBuffer::CopyToHostAsync() {
 
     if (host_value_) {
       // The host value has already been requested or is available.
-      return ::tensorflow::OkStatus();
+      return OkStatus();
     }
 
     host_value->value = std::make_shared<Literal>(on_host_shape_);
@@ -350,7 +350,7 @@ Status PyTpuBuffer::CopyToHostAsync() {
       }
     });
   }
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 StatusOr<std::shared_ptr<Literal>> PyTpuBuffer::ToLiteral() {
@@ -392,7 +392,7 @@ PyTpuBuffer::DestructureTuple() {
   std::vector<std::unique_ptr<PyTpuBuffer>> results;
   results.reserve(num_children);
   for (int i = 0; i < num_children; ++i) {
-    results.push_back(absl::make_unique<PyTpuBuffer>(
+    results.push_back(std::make_unique<PyTpuBuffer>(
         on_host_shape_.tuple_shapes(i), child_buffers_.at(i),
         std::vector<std::shared_ptr<TpuSharedBuffer>>(), client_));
   }
@@ -408,7 +408,7 @@ StatusOr<std::unique_ptr<PyTpuBuffer>> PyTpuBuffer::CopyToDevice(
 
   std::shared_ptr<TpuSharedBuffer> src_device_buffer = DeviceBuffer();
   if (dst_device->id() == device_->id()) {
-    return absl::make_unique<PyTpuBuffer>(
+    return std::make_unique<PyTpuBuffer>(
         on_host_shape_, src_device_buffer,
         std::vector<std::shared_ptr<TpuSharedBuffer>>(), client_);
   }
@@ -505,7 +505,7 @@ StatusOr<std::unique_ptr<PyTpuBuffer>> PyTpuBuffer::CreateBuffer(
       client->driver(), std::move(handle), std::move(wait_for_use),
       std::move(device));
 
-  return absl::make_unique<PyTpuBuffer>(
+  return std::make_unique<PyTpuBuffer>(
       non_tuple_shape, std::move(device_buffer),
       std::vector<std::shared_ptr<TpuSharedBuffer>>(), client);
 }
@@ -870,7 +870,7 @@ PyTpuExecutable::ExecuteShardedOnLocalDevices(
   }
   VLOG(1) << "Got result shape: " << result_layout.DebugString();
 
-  return absl::make_unique<PyTpuExecutable>(
+  return std::make_unique<PyTpuExecutable>(
       std::move(compiled_program), std::move(*device_assignment),
       std::move(client), std::move(result_layout), tuple_arguments);
 }

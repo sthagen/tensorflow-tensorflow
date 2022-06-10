@@ -183,7 +183,7 @@ struct GpuExecutable::BefExecutable {
       return InternalError("Failed to get '%s' function", func_name);
     }
 
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 
  public:
@@ -222,7 +222,7 @@ class GpuExecutable::JitRtExecutable {
     opts.register_dialects = jitrt::RegisterDefaultJitRtDialects;
 
     // Register JitRt Gpu runtime custom calls with the linker.
-    opts.runtime_symbol_map = JitRtCustomCallsSymbolMap;
+    opts.runtime_symbol_map = GetSymbolsBinding(JitRtGpuCustomCalls());
 
     // We just use the default compilation pipeline provided by the JitRt.
     // Alternatively instead of having a separate JitRtProgram (LMHLO lowered to
@@ -250,6 +250,7 @@ class GpuExecutable::JitRtExecutable {
   jitrt::Executable& default_executable() { return *default_executable_; }
   JitRtKernelsCache& kernels_cache() { return kernels_cache_; }
   JitRtGemmConfigCache& gemm_configs_cache() { return gemm_configs_cache_; }
+  JitRtCollectiveSupport& collectives() { return collectives_; }
 
   // We pass a pointer to the buffer size to the compiled function, so we return
   // a reference to a stable memory location.
@@ -278,6 +279,9 @@ class GpuExecutable::JitRtExecutable {
 
   // Keep a cache of gemm configs for all gemm operation in the program.
   JitRtGemmConfigCache gemm_configs_cache_;
+
+  // Support for running collective operations.
+  JitRtCollectiveSupport collectives_;
 };
 #endif  // XLA_ENABLE_XLIR
 
@@ -404,7 +408,7 @@ Status GpuExecutable::CheckCompatibilityWithServiceExecutableRunOptions(
     return InternalError("Unknown platform: %d", platform_kind);
   }
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 namespace {
@@ -468,7 +472,7 @@ Status ExecuteThunks(const std::string& module_name,
         async_comms_stream.ok() ? async_comms_stream->get() : nullptr};
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));
     if (thunk_schedule.Depended(thunk.get())) {
-      auto finish_event = absl::make_unique<se::Event>(main_stream->parent());
+      auto finish_event = std::make_unique<se::Event>(main_stream->parent());
       finish_event->Init();
       stream->ThenRecordEvent(finish_event.get());
       thunk_to_finish_event[thunk.get()] = std::move(finish_event);
@@ -507,7 +511,7 @@ Status MaybeSyncAndProfile(const ServiceExecutableRunOptions* run_options,
     profile->set_compute_time_ns(std::max(nanoseconds, 1.0));
   }
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 }  // namespace
@@ -656,7 +660,7 @@ static Status CheckAlignment(const BufferAllocation& allocation,
         "was %p",
         arg_idx, expected_alignment, buffer.opaque());
   }
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 StatusOr<BufferAllocations> GpuExecutable::GenerateBufferAllocations(
@@ -878,11 +882,24 @@ static Status ExecuteJitRt(const std::string& module_name,
   opts.async_task_runner =
       reinterpret_cast<jitrt::AsyncTaskRunner*>(0XDEADBEEF);
 
+  // Get the async communications stream for async collectives.
+  int device_ordinal = run_options->stream()->parent()->device_ordinal();
+  StatusOr<StreamPool::Ptr> async_comms_stream =
+      run_options->BorrowStream(device_ordinal);
+
+  // Async collective support instantiated for each Gpu executable run, so that
+  // concurrent executions can run independenty using a separate set of events
+  // for communication.
+  JitRtAsyncCollectiveSupport async_collectives(
+      async_comms_stream.ok() ? async_comms_stream->get() : nullptr);
+
   // Pass auxiliary data to the custom call handlers.
   jitrt::CustomCall::UserData user_data;
-  user_data.insert_all(run_options, &jitrt_executable->debug_options(),
-                       &jitrt_executable->kernels_cache(),
-                       &jitrt_executable->gemm_configs_cache());
+  user_data.insert_all(
+      run_options, &jitrt_executable->debug_options(),
+      &jitrt_executable->kernels_cache(),
+      &jitrt_executable->gemm_configs_cache(), &jitrt_executable->collectives(),
+      async_collectives.async_comm_stream() ? &async_collectives : nullptr);
   opts.custom_call_data = &user_data;
 
   // Get the default executable. We do not support specialization because
@@ -1186,7 +1203,7 @@ Status GpuExecutable::SetUpMlirAllocation(
                      .getValue()
                      .str()));
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 #if XLA_ENABLE_XLIR
@@ -1367,7 +1384,7 @@ GetOutputInfo(const HloModule& hlo_module, const BufferAssignment& assignment) {
         output[index].alias_config =
             hlo_module.input_output_alias_config().GetAliasedParameter(index);
 
-        return ::tensorflow::OkStatus();
+        return OkStatus();
       }));
   return output;
 }

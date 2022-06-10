@@ -17,7 +17,7 @@ include_directories(BEFORE
     ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(LLVM_OPTIONAL_SOURCES
-  bufferizable_op_interface_impl.cpp
+  bufferizable_op_interface_impl.cc
 )
 
 add_mlir_library(GmlStFusionInterface
@@ -32,8 +32,18 @@ add_mlir_library(GmlStFusionInterface
   MLIRGmlStFusionInterfaceIncGen
 )
 
+add_mlir_library(GmlStFusionInterfaceImpl
+  fusion_interface_impl.cc
+
+  LINK_LIBS PUBLIC
+  GmlStFusionInterface
+  MLIRArithmetic
+  MLIRIR
+  MLIRSupport
+)
+
 add_mlir_library(GmlStBufferizableOpInterface
-  bufferizable_op_interface_impl.cpp
+  bufferizable_op_interface_impl.cc
 
   LINK_LIBS PUBLIC
   MLIRBufferization
@@ -57,6 +67,7 @@ add_mlir_library(GmlStPasses
 
   LINK_LIBS PUBLIC
   GmlStFusionInterface
+  GmlStFusionInterfaceImpl
   MLIRIR
   MLIRPass
   MLIRSupport

@@ -35,6 +35,7 @@ namespace {
     if (p != nullptr) return p;                                        \
   }
 
+using xla::OkStatus;
 using xla::Status;
 using xla::WorkerThread;
 
@@ -94,7 +95,7 @@ class CombinedEvent : public PodEvent {
     for (auto& event : events_) {
       TF_RETURN_IF_ERROR(event->Await());
     }
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 
   absl::optional<xla::Status> AwaitWithTimeout(
@@ -109,7 +110,7 @@ class CombinedEvent : public PodEvent {
         TF_RETURN_IF_ERROR(status.value());
       }
     }
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 
   void AddCallback(std::function<void(Status)> callback)
@@ -344,7 +345,7 @@ class PodTpuDriver : public TpuDriver {
     for (auto& driver : drivers_) {
       TF_RETURN_IF_ERROR(driver.second->Reset());
     }
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 
   std::unique_ptr<BufferHandle> Allocate(
@@ -365,7 +366,7 @@ class PodTpuDriver : public TpuDriver {
             },
         deps);
 
-    return absl::make_unique<PodBufferHandle>(this, operation_id, num_bytes,
+    return std::make_unique<PodBufferHandle>(this, operation_id, num_bytes,
                                               absl::nullopt, core_id);
   }
 
@@ -387,7 +388,7 @@ class PodTpuDriver : public TpuDriver {
             },
         deps);
 
-    return absl::make_unique<PodBufferHandle>(
+    return std::make_unique<PodBufferHandle>(
         this, operation_id, ComputeBytesFromShape(shape), shape, core_id);
   }
 
@@ -429,7 +430,7 @@ class PodTpuDriver : public TpuDriver {
             },
         deps);
 
-    return absl::make_unique<PodBufferHandle>(this, operation_id, 0,
+    return std::make_unique<PodBufferHandle>(this, operation_id, 0,
                                               absl::nullopt, core_id);
   }
 
@@ -587,7 +588,7 @@ class PodTpuDriver : public TpuDriver {
         },
         deps);
 
-    return absl::make_unique<PodCompiledProgramHandle>(this, operation_id);
+    return std::make_unique<PodCompiledProgramHandle>(this, operation_id);
   }
 
   std::unique_ptr<LoadedProgramHandle> LoadProgram(
@@ -618,7 +619,7 @@ class PodTpuDriver : public TpuDriver {
             },
         deps);
 
-    return absl::make_unique<PodLoadedProgramHandle>(this, operation_id,
+    return std::make_unique<PodLoadedProgramHandle>(this, operation_id,
                                                      core_id);
   }
 
@@ -733,7 +734,7 @@ class PodTpuDriver : public TpuDriver {
       if (event == events_.end()) {
         auto event_status = abnormal_event_status_.find(event_id);
         if (event_status == abnormal_event_status_.end()) {
-          return ::tensorflow::OkStatus();
+          return OkStatus();
         } else {
           return event_status->second;
         }
@@ -768,7 +769,7 @@ class PodTpuDriver : public TpuDriver {
       absl::MutexLock l(&mu_);
       auto event_status = abnormal_event_status_.find(event_id);
       if (event_status == abnormal_event_status_.end()) {
-        return ::tensorflow::OkStatus();
+        return OkStatus();
       } else {
         return event_status->second;
       }
@@ -783,7 +784,7 @@ class PodTpuDriver : public TpuDriver {
     if (event == events_.end()) {
       auto event_status = abnormal_event_status_.find(event_id);
       if (event_status == abnormal_event_status_.end()) {
-        fn(::tensorflow::OkStatus());
+        fn(OkStatus());
       } else {
         fn(event_status->second);
       }
@@ -900,7 +901,7 @@ class PodTpuDriver : public TpuDriver {
     absl::btree_map<int64_t, std::unique_ptr<EventInFlight>>::iterator event;
     absl::flat_hash_set<int64_t> incomplete_deps;
 
-    event = events_.insert({operation_id, absl::make_unique<EventInFlight>()})
+    event = events_.insert({operation_id, std::make_unique<EventInFlight>()})
                 .first;
     for (const auto& dep : deps) {
       if (events_.count(dep) > 0) incomplete_deps.insert(dep);

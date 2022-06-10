@@ -400,7 +400,7 @@ class LiteralBase {
   // Note: It's an antipattern to use this method then immediately call
   // MutableLiteralBase::Populate on the result (since that results in zero
   // initialization, then reinitialization. Consider if a call to
-  // absl::make_unique<Literal>(shape), followed by the call to
+  // std::make_unique<Literal>(shape), followed by the call to
   // MutableLiteralBase::Populate can be used instead.
   static Literal CreateFromShape(const Shape& shape);
 
@@ -554,7 +554,7 @@ class LiteralBase {
       return ForEachHelper(
                  [&func](const ShapeIndex& index, const Piece& piece) {
                    func(index, piece);
-                   return ::tensorflow::OkStatus();
+                   return OkStatus();
                  },
                  *this, &index)
           .IgnoreError();
@@ -583,7 +583,7 @@ class LiteralBase {
       return ForEachMutableHelper(
                  [&func](const ShapeIndex& index, Piece* piece) {
                    func(index, piece);
-                   return ::tensorflow::OkStatus();
+                   return OkStatus();
                  },
                  const_cast<xla::LiteralBase::Piece*>(this), &index)
           .IgnoreError();
@@ -698,7 +698,7 @@ class LiteralBase {
           index->pop_back();
         }
       }
-      return ::tensorflow::OkStatus();
+      return OkStatus();
     }
     template <typename Fn>
     bool ForEachHelperBool(const Fn& func, const Piece& piece,
@@ -729,7 +729,7 @@ class LiteralBase {
           index->pop_back();
         }
       }
-      return ::tensorflow::OkStatus();
+      return OkStatus();
     }
 
     // Recursive helper for EqualElements.
@@ -1425,7 +1425,7 @@ Status MutableLiteralBase::PopulateInternal(const FnType& generator,
     // For scalars.
     literal_data.at(0) = generator({}, /*thread_id=*/-1);
   }
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 template <typename NativeT, typename FnType>
 Status MutableLiteralBase::Populate(const FnType& generator) {

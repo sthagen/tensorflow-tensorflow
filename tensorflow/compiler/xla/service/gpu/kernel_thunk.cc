@@ -65,14 +65,14 @@ Status KernelThunk::Initialize(const GpuExecutable& executable,
     kernel_cache_.emplace(executor, std::move(kernel));
   }
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 static void PrintBufferContents(
     se::Stream* stream, absl::Span<const se::DeviceMemoryBase> buffer_args) {
   int input_idx = 0;
   for (const se::DeviceMemoryBase& buf : buffer_args) {
-    auto host_buffer = absl::make_unique<char[]>(buf.size());
+    auto host_buffer = std::make_unique<char[]>(buf.size());
     CHECK(stream->ThenMemcpy(host_buffer.get(), buf, buf.size()).ok());
     CHECK(stream->BlockHostUntilDone().ok());
 

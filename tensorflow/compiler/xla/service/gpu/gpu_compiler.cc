@@ -315,7 +315,7 @@ Status GpuCompiler::OptimizeHloModule(
     se::DeviceMemoryAllocator* device_allocator) {
   // Save proto state before optimizations if we want a snapshot.
   if (DumpingEnabledForHloModule(*hlo_module)) {
-    hlo_proto_ = absl::make_unique<HloProto>();
+    hlo_proto_ = std::make_unique<HloProto>();
     *hlo_proto_->mutable_hlo_module() = hlo_module->ToProto();
   }
 
@@ -676,7 +676,7 @@ Status GpuCompiler::OptimizeHloModule(
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 // Modifies the given HLO module so that it will be accepted by IrEmitter.
@@ -802,7 +802,7 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
   TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
 
-  return ::tensorflow::OkStatus();
+  return OkStatus();
 }
 
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
@@ -989,7 +989,7 @@ static Status CompileModuleToLlvmIrImpl(
     const HloDataflowAnalysis::CanShareBuffer& can_share_buffer_function,
     int pointer_size, CompileModuleResults* results,
     se::StreamExecutor* stream_exec = nullptr) {
-  results->llvm_module = absl::make_unique<llvm::Module>("", *llvm_context);
+  results->llvm_module = std::make_unique<llvm::Module>("", *llvm_context);
   results->llvm_module->setTargetTriple(target_triple);
   results->llvm_module->setDataLayout(data_layout);
 
@@ -1099,7 +1099,7 @@ static Status CompileModuleToLlvmIrImpl(
                           GpuExecutable::CreatePreloadedGpuContextCache(
                               bef_array, stream_exec));
     }
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 
   if (IsJitRtExecutableEnabled(hlo_module->config())) {
@@ -1110,13 +1110,13 @@ static Status CompileModuleToLlvmIrImpl(
     TF_ASSIGN_OR_RETURN(results->executable,
                         LowerToJitRt(*mlir_module, entry_function.getName(),
                                      buffer_sizes, hlo_module));
-    return ::tensorflow::OkStatus();
+    return OkStatus();
   }
 #endif  // XLA_ENABLE_XLIR
 
   results->executable =
-      absl::make_unique<ThunkSchedule>(ir_emitter->ConsumeThunkSequence());
-  return ::tensorflow::OkStatus();
+      std::make_unique<ThunkSchedule>(ir_emitter->ConsumeThunkSequence());
+  return OkStatus();
 }
 
 static void NullDiagnosticHandler(const llvm::DiagnosticInfo& diag_info,
@@ -1429,7 +1429,7 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   // dump or embed_ir_in_executable is enabled.
   if (embed_ir_in_executable ||
       DumpingEnabledForHloModule(gpu_executable->module())) {
-    auto hlo_proto = absl::make_unique<HloProto>();
+    auto hlo_proto = std::make_unique<HloProto>();
     if (hlo_proto_) {
       *hlo_proto = *hlo_proto_;
     } else {
@@ -1545,7 +1545,7 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     const std::string bef(reinterpret_cast<char*>(bef_buffer.get()),
                           bef_buffer.get_deleter().size);
 
-    results.emplace_back(absl::make_unique<GpuAotCompilationResult>(
+    results.emplace_back(std::make_unique<GpuAotCompilationResult>(
         module->ToProto(), bef, compile_module_results.entry_func_attrs));
   }
 
@@ -1691,7 +1691,7 @@ StatusOr<std::unique_ptr<Executable>> CompileLmhloToExecutable(
   }
 
   auto thunk_schedule =
-      absl::make_unique<ThunkSchedule>(ir_emitter->ConsumeThunkSequence());
+      std::make_unique<ThunkSchedule>(ir_emitter->ConsumeThunkSequence());
 
   using BackendCompileResult = std::pair<std::string, std::vector<uint8_t>>;
   TF_ASSIGN_OR_RETURN(BackendCompileResult backend_result,
