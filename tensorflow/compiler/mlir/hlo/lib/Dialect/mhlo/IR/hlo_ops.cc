@@ -4458,19 +4458,17 @@ OpFoldResult ReverseOp::fold(ArrayRef<Attribute> operands) {
   auto input = operand();
 
   // No dimensions to reverse.
-  if (dimensions().getNumElements() == 0) return input;
+  auto dims = dimensions();
+  if (dims.getNumElements() == 0) return input;
 
-  llvm::SmallVector<APInt, 5> newDims;
-  newDims.reserve(dimensions().getNumElements());
-
+  // If the dimensions to reverse are all statically 1, then the reverse is a
+  // no-op.
   auto shapedType = input.getType().cast<ShapedType>();
-  for (auto dim : dimensions().getValues<APInt>()) {
-    if (shapedType.getDimSize(dim.getLimitedValue()) != 1) {
-      return nullptr;
-    }
-  }
-
-  return input;
+  if (llvm::all_of(dims.getValues<int64_t>(), [&](int64_t dim) {
+        return shapedType.getDimSize(dim) == 1;
+      }))
+    return input;
+  return {};
 }
 
 //===----------------------------------------------------------------------===//
@@ -7667,6 +7665,19 @@ ParseResult WhileOp::parse(OpAsmParser& parser, OperationState& result) {
       parser.parseKeyword("do") ||
       parser.parseRegion(*result.addRegion(), args))
     return failure();
+  return success();
+}
+
+LogicalResult WhileOp::fold(ArrayRef<Attribute> /*operands*/,
+                            SmallVectorImpl<OpFoldResult>& results) {
+  DenseIntElementsAttr condValue;
+  auto condReturnOp = cast<ReturnOp>(cond().front().back());
+  if (!matchPattern(condReturnOp.getOperand(0), m_Constant(&condValue)))
+    return failure();
+  if (condValue.getSplatValue<BoolAttr>().getValue())
+    return failure();  // TODO(mhlo): this is an infinite loop, should we fold?
+
+  results.append(getOperands().begin(), getOperands().end());
   return success();
 }
 
