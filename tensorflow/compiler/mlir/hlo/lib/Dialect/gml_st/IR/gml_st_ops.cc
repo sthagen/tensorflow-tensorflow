@@ -16,6 +16,7 @@ limitations under the License.
 #include "mlir-hlo/Dialect/gml_st/IR/gml_st_ops.h"
 
 #include "llvm/ADT/TypeSwitch.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
@@ -578,17 +579,17 @@ ParseResult parseLoopLikeOp(OpAsmParser &parser, OperationState &result) {
 
   // Parse the body.
   SmallVector<Type, 4> regionTypes(ivs.size(), builder.getIndexType());
-  SmallVector<OpAsmParser::UnresolvedOperand, 4> region_operands(ivs);
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> regionOperands(ivs);
 
   if (!outputRegionArgs.empty()) {
-    region_operands.append(outputRegionArgs);
+    regionOperands.append(outputRegionArgs);
     regionTypes.append(outputTypes);
   }
 
   SmallVector<OpAsmParser::Argument, 4> regionArgs;
-  for (auto arg_and_type : llvm::zip(region_operands, regionTypes)) {
+  for (auto argAndType : llvm::zip(regionOperands, regionTypes)) {
     auto &arg = regionArgs.emplace_back();
-    std::tie(arg.ssaName, arg.type) = arg_and_type;
+    std::tie(arg.ssaName, arg.type) = argAndType;
   }
   Region *body = result.addRegion();
   if (parser.parseRegion(*body, regionArgs)) return failure();
@@ -697,9 +698,9 @@ void ForOp::print(OpAsmPrinter &p) {
     llvm::interleaveComma(
         llvm::zip(getRegionOutputArgs(), outputs(), subsets()), p,
         [&](auto it) {
-          Value output_region_arg, output, subset;
-          std::tie(output_region_arg, output, subset) = it;
-          p << output_region_arg << " = " << output << " at " << subset << ": "
+          Value outputRegionArg, output, subset;
+          std::tie(outputRegionArg, output, subset) = it;
+          p << outputRegionArg << " = " << output << " at " << subset << ": "
             << output.getType() << " at " << subset.getType();
         });
     p << ")";
@@ -1425,6 +1426,105 @@ LogicalResult CollapseTileOp::inferReturnTypes(
 //===----------------------------------------------------------------------===//
 
 LogicalResult SubsetYieldOp::verify() { return success(); }
+
+//===----------------------------------------------------------------------===//
+// DynamicBroadcastInDimOp
+//===----------------------------------------------------------------------===//
+
+Value DynamicBroadcastInDimOp::fuse(Location loc, Value subset,
+                                    OpBuilder &builder) {
+  // Supports tile subsets.
+  Type subsetTy = subset.getType();
+  if (!subsetTy.isa<TileType>()) return {};
+  Value tile = subset;
+
+  // Create the needed constants only once.
+  DenseMap<uint64_t, Value> localIndexConstants;
+  auto getIndexConstant = [&](uint64_t c) -> Value {
+    auto it = localIndexConstants.find(c);
+    if (it != localIndexConstants.end()) return it->second;
+    auto cst = builder.create<arith::ConstantIndexOp>(loc, c);
+    localIndexConstants[c] = cst;
+    return cst;
+  };
+
+  auto operandTy = operand().getType().cast<RankedTensorType>();
+  auto tileTy = tile.getType().cast<TileType>();
+  auto resultTy = getType().cast<RankedTensorType>();
+
+  // Materialize operand and result root space.
+  auto spaceTy = builder.getType<TileType>(operandTy.getShape());
+  SmallVector<Value> dynamicDims;
+  for (const auto &it : llvm::enumerate(operandTy.getShape())) {
+    if (it.value() == ShapedType::kDynamicSize) {
+      dynamicDims.push_back(
+          builder.create<tensor::DimOp>(loc, operand(), it.index()));
+    }
+  }
+  auto staticDims = builder.getI64ArrayAttr(operandTy.getShape());
+  Value operandSpace =
+      builder.create<SpaceOp>(loc, spaceTy, dynamicDims, staticDims);
+
+  // Materiaize operand dimensions.
+  SmallVector<Value> operandDims;
+  int64_t dynamicDimsIdx = 0;
+  operandDims.reserve(operandTy.getRank());
+  for (const auto &it : llvm::enumerate(operandTy.getShape())) {
+    int64_t d = it.value();
+    Value dim = d == ShapedType::kDynamicSize ? dynamicDims[dynamicDimsIdx++]
+                                              : getIndexConstant(d);
+    operandDims.push_back(dim);
+  }
+
+  // Materialize offsets and sizes for operand tile.
+  auto collapsedTile =
+      builder.create<CollapseTileOp>(loc, tile, broadcast_dimensions());
+  SmallVector<Value> argTileOffsets;
+  SmallVector<Value> argTileSizes;
+  for (const auto &it : llvm::enumerate(broadcast_dimensions())) {
+    Value argIdx = getIndexConstant(it.index());
+    Value resultIdx = getIndexConstant(it.value().getLimitedValue());
+
+    // If corresponding operand and result dimensions are different, the
+    // dimension is expanding.
+    auto argDim = operandDims[it.index()];
+    auto resultDim = builder.create<tensor::DimOp>(loc, init(), resultIdx);
+    auto isExpanding = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::ne, argDim, resultDim);
+
+    // Copy offset for non-expanding dimensions and index at 0, otherwise.
+    auto tileOffset = builder.create<OffsetOp>(loc, collapsedTile, argIdx);
+    auto tileSize = builder.create<SizeOp>(loc, collapsedTile, argIdx);
+    argTileOffsets.push_back(builder.create<arith::SelectOp>(
+        loc, isExpanding, getIndexConstant(0), tileOffset));
+    argTileSizes.push_back(builder.create<arith::SelectOp>(
+        loc, isExpanding, getIndexConstant(1), tileSize));
+  }
+
+  // Materialize operand tile.
+  int64_t rank = operandTy.getRank();
+  auto staticOffsets = builder.getI64ArrayAttr(
+      SmallVector<int64_t>(rank, ShapedType::kDynamicStrideOrOffset));
+  SmallVector<int64_t> allDynamicSizes(rank, ShapedType::kDynamicSize);
+  auto staticSizes = builder.getI64ArrayAttr(allDynamicSizes);
+  auto staticStrides = builder.getI64ArrayAttr(SmallVector<int64_t>(rank, 1));
+  auto operandTileTy = builder.getType<TileType>(allDynamicSizes);
+  auto operandTile = builder.create<TileOp>(
+      loc, operandTileTy, operandSpace, argTileOffsets, argTileSizes,
+      ValueRange{}, staticOffsets, staticSizes, staticStrides);
+
+  // Materialize operands' subsets.
+  Value tiledInit = builder.create<MaterializeOp>(loc, init(), tile);
+  Value tiledOperand =
+      builder.create<MaterializeOp>(loc, operand(), operandTile);
+
+  // Finally, materialize tiled broadcast.
+  auto tiledResultTy =
+      RankedTensorType::get(tileTy.getShape(), resultTy.getElementType());
+  return builder.create<DynamicBroadcastInDimOp>(
+      loc, tiledResultTy, tiledInit, tiledOperand, broadcast_dimensions(),
+      known_expanding_dimensionsAttr(), known_nonexpanding_dimensionsAttr());
+}
 
 }  // namespace gml_st
 }  // namespace mlir

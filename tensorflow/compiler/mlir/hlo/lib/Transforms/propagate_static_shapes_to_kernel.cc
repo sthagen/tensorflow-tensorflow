@@ -25,7 +25,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir-hlo/Transforms/PassDetail.h"
 #include "mlir-hlo/Transforms/passes.h"
-#include "mlir/Dialect/GPU/GPUDialect.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -157,7 +157,7 @@ LogicalResult PropagateStaticShapesPattern::matchAndRewrite(
   }
 
   rewriter.setInsertionPointToStart(&funcOp.front());
-  BitVector args_to_drop(funcOp.getNumArguments());
+  BitVector argsToDrop(funcOp.getNumArguments());
   // Loop over the launch_op's 'operands' containing scalars and memrefs and the
   // func_ops's 'arguments' containing scalars and flattened memrefs. When an
   // operand is a staticlly shaped memref, replace the range of arguments
@@ -189,15 +189,15 @@ LogicalResult PropagateStaticShapesPattern::matchAndRewrite(
       replaceStaticMemRefArguments(memrefArgs, memref, pointerType, rewriter);
       unsigned argNumber = arguments.front().getArgNumber();
       // Drop all but 'base' from the flattened memref arguments.
-      args_to_drop.set(argNumber + 1, argNumber + numArgs);
+      argsToDrop.set(argNumber + 1, argNumber + numArgs);
     }
     arguments = arguments.drop_front(numArgs);
   }
-  if (args_to_drop.none()) {
+  if (argsToDrop.none()) {
     return rewriter.notifyMatchFailure(funcOp, "no static shapes");
   }
   rewriter.updateRootInPlace(funcOp, [&] {
-    funcOp.eraseArguments(args_to_drop);
+    funcOp.eraseArguments(argsToDrop);
     auto argTypes = llvm::to_vector(TypeRange(funcOp.getArguments()));
     funcOp.setType(LLVM::LLVMFunctionType::get(
         funcOp.getFunctionType().getReturnType(), argTypes));
