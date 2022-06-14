@@ -428,7 +428,6 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ],
@@ -558,6 +557,7 @@ cc_library(
     ],
     deps = [
         ":compilation_environments",
+        ":computation_placer_hdr",
         ":hlo_module_config",
         ":hlo_proto_cc",
         ":mapped_ptr_container_sorter",
@@ -6360,7 +6360,7 @@ cc_library(
     hdrs = ["compilation_environments.h"],
     deps = [
         "//tensorflow/core:lib",  # fixdeps: keep
-        "//tensorflow/core:portable_gif_internal",
+        "//tensorflow/core/platform:logging",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
     ],

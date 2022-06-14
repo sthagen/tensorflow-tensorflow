@@ -98,22 +98,10 @@ void createArgs(ArrayRef<OpAsmParser::UnresolvedOperand> operands,
 // Utilities for the canonicalize patterns
 //===----------------------------------------------------------------------===//
 
-// This is an arbitrary limit into how many elements can a splat attribute
-// covers before we prevent folding from happening. Without such limit we can
-// expand a single element splat to a multi-GB large tensor.
-// The limit is arbitrary set low to allow expanding small computations, like
-// shape manipulations for example.
-// TODO(b/210478841): Define a constant folding policy that generalizes this.
-constexpr int64_t kFoldExpandSplatEltLimit = 16;
-
-// Similarly to the constant above, this is an arbitrary limit into how many
-// elements can be folded by a binary operation folder.
-// This limit doesn't apply to the following special cases:
-//   1) Adding a zero.
-//   2) Multiplying by one.
-//   3) When both operands are splats.
-// TODO(b/210478841): Define a constant folding policy that generalizes this.
-constexpr int64_t kFoldBinaryOpEltLimit = 65536;
+// This is an upper limit on how many elements can be folded by an op folder.
+// This limit doesn't apply to some special cases like adding a zero,
+// multiplying by one, doing many operations with splats.
+constexpr int64_t kFoldOpEltLimit = 65536;
 
 // Clamps value to the range [lower, upper].  Requires lower <= upper.
 template <typename T>
@@ -2191,12 +2179,13 @@ OpFoldResult ConvertOp::fold(ArrayRef<Attribute> operands) {
   if (!resultTy.hasStaticShape()) return {};
 
   // If the operand is constant, we can do the conversion now.
-  if (auto elementsAttr = operands.front().dyn_cast_or_null<ElementsAttr>()) {
-    return hlo::ConvertElementsAttr(elementsAttr,
-                                    getElementTypeOrSelf(getResult()));
-  }
+  auto elementsAttr = operands.front().dyn_cast_or_null<ElementsAttr>();
+  if (!elementsAttr) return {};
 
-  return {};
+  // Prevent folding if the result is too large.
+  if (elementsAttr.getNumElements() > kFoldOpEltLimit) return {};
+  return hlo::ConvertElementsAttr(elementsAttr,
+                                  getElementTypeOrSelf(getResult()));
 }
 
 namespace {
@@ -3153,18 +3142,9 @@ LogicalResult ClampOp::reifyReturnTypeShapes(
 LogicalResult ComplexOp::inferReturnTypes(
     MLIRContext*, Optional<Location>, ValueRange operands, DictionaryAttr,
     RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
-  auto type = operands[0].getType();
-  auto elementTy = ComplexType::get(getElementTypeOrSelf(type));
-  Type resultTy;
-  if (auto rankedType = type.dyn_cast<RankedTensorType>()) {
-    resultTy = RankedTensorType::get(rankedType.getShape(), elementTy,
-                                     rankedType.getEncoding());
-  } else if (type.isa<UnrankedTensorType>()) {
-    resultTy = UnrankedTensorType::get(elementTy);
-  } else {
-    resultTy = elementTy;
-  }
-  inferredReturnTypes.push_back(resultTy);
+  TensorType operandType = operands[0].getType().cast<TensorType>();
+  ComplexType elementTy = ComplexType::get(operandType.getElementType());
+  inferredReturnTypes.push_back(getSameShapeTensorType(operandType, elementTy));
   return success();
 }
 
@@ -3183,28 +3163,20 @@ OpFoldResult ComplexOp::fold(ArrayRef<Attribute> operands) {
 //===----------------------------------------------------------------------===//
 
 namespace {
-Type createRealType(Type type) {
-  auto elementTy = getElementTypeOrSelf(type);
+Type createRealType(TensorType type) {
+  auto elementTy = type.getElementType();
   if (auto complexTy = elementTy.dyn_cast<ComplexType>()) {
     elementTy = complexTy.getElementType();
   }
-
-  if (auto rankedType = type.dyn_cast<RankedTensorType>()) {
-    return RankedTensorType::get(rankedType.getShape(), elementTy,
-                                 rankedType.getEncoding());
-  }
-  if (type.dyn_cast<UnrankedTensorType>()) {
-    return UnrankedTensorType::get(elementTy);
-  }
-
-  return elementTy;
+  return getSameShapeTensorType(type, elementTy);
 }
 }  // namespace
 
 LogicalResult ImagOp::inferReturnTypes(
     MLIRContext*, Optional<Location>, ValueRange operands, DictionaryAttr,
     RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
-  inferredReturnTypes.push_back(createRealType(operands[0].getType()));
+  inferredReturnTypes.push_back(
+      createRealType(operands[0].getType().cast<TensorType>()));
   return success();
 }
 
@@ -3222,7 +3194,8 @@ OpFoldResult ImagOp::fold(ArrayRef<Attribute> operands) {
 
 TensorType getSameShapeTensorType(TensorType tensorType, Type elementType) {
   if (auto rankedTensorTy = tensorType.dyn_cast<RankedTensorType>()) {
-    return RankedTensorType::get(rankedTensorTy.getShape(), elementType);
+    return RankedTensorType::get(rankedTensorTy.getShape(), elementType,
+                                 rankedTensorTy.getEncoding());
   }
   if (auto unrankedTensorTy = tensorType.dyn_cast<UnrankedTensorType>()) {
     return UnrankedTensorType::get(elementType);
@@ -3246,7 +3219,8 @@ LogicalResult IsFiniteOp::inferReturnTypes(
 LogicalResult RealOp::inferReturnTypes(
     MLIRContext*, Optional<Location>, ValueRange operands, DictionaryAttr,
     RegionRange, SmallVectorImpl<Type>& inferredReturnTypes) {
-  inferredReturnTypes.push_back(createRealType(operands[0].getType()));
+  inferredReturnTypes.push_back(
+      createRealType(operands[0].getType().cast<TensorType>()));
   return success();
 }
 
@@ -3354,13 +3328,6 @@ LogicalResult ConcatenateOp::inferReturnTypes(
   auto firstType = (*operands.begin()).getType().cast<ShapedType>();
   auto outElement = firstType.getElementType();
 
-  for (auto operand : operands.getTypes()) {
-    auto elementType = getElementTypeOrSelf(operand);
-    if (elementType != outElement) {
-      return failure();
-    }
-  }
-
   // Find the first ranked input to determine the output rank.
   for (auto type : operands.getTypes()) {
     auto shapedType = type.cast<ShapedType>();
@@ -3375,9 +3342,6 @@ LogicalResult ConcatenateOp::inferReturnTypes(
     inferredReturnTypes.push_back(UnrankedTensorType::get(outElement));
     return success();
   }
-
-  if (firstType.getRank() == 0)
-    return emitOptionalError(location, "rank-0 values cannot be concatenated");
 
   auto outShape = llvm::to_vector<6>(firstType.getShape());
 
@@ -3407,8 +3371,8 @@ LogicalResult ConcatenateOp::inferReturnTypes(
 
     // If the dimension is dynamic we know the output dimension is dynamic.
     auto dim = type.getShape()[dimension];
-    if (dim == -1) {
-      outShape[dimension] = -1;
+    if (ShapedType::isDynamic(dim)) {
+      outShape[dimension] = ShapedType::kDynamicSize;
       break;
     }
 
@@ -3438,10 +3402,8 @@ static Attribute foldConcatenateHelper(ConcatenateOp* op,
     topSize = topSize * shape[i];
   }
 
-  // TODO(b/210478841): Define a constant folding policy that generalizes this.
-  if (type.getNumElements() * op->getNumOperands() > UINT32_MAX) {
-    return {};
-  }
+  // Prevent folding if the result is too large.
+  if (type.getNumElements() > kFoldOpEltLimit) return {};
 
   SmallVector<T, 6> values;
   for (size_t i = 0; i < topSize; i++) {
@@ -3497,39 +3459,51 @@ OpFoldResult ConcatenateOp::fold(ArrayRef<Attribute> operands) {
 }
 
 LogicalResult ConcatenateOp::verify() {
-  Type elementType = getElementTypeOrSelf(getOperand(0).getType());
   RankedTensorType firstRankedType;
+  int firstRankedIndex;
   int numOperands = getNumOperands();
+  int64_t concatDimension = static_cast<int64_t>(dimension());
+  if (concatDimension < 0) {
+    return emitOpError(
+        llvm::formatv("dimension {0} is negative", concatDimension));
+  }
   for (int i = 0; i < numOperands; i++) {
     auto secondType = getOperand(i).getType().dyn_cast<ShapedType>();
-    if (secondType.getElementType() != elementType) {
-      return emitOpError(
-          llvm::formatv("operands (0) and ({0}) do not match element type", i));
-    }
-
     if (!secondType.hasRank()) {
       continue;
     }
 
     if (!firstRankedType) {
       firstRankedType = secondType.cast<RankedTensorType>();
+      firstRankedIndex = i;
+      if (firstRankedType.getRank() == 0)
+        return emitOpError(
+            llvm::formatv("rank-0 values cannot be concatenated"));
+      if (concatDimension >= firstRankedType.getRank()) {
+        return emitOpError(
+            llvm::formatv("dimension {0} is out-of-bounds for input rank {1}",
+                          concatDimension, firstRankedType.getRank()));
+      }
       continue;
     }
 
     if (firstRankedType.getRank() != secondType.getRank()) {
-      return emitOpError(
-          llvm::formatv("operands (0) and ({0}) do not match rank", i));
+      return emitOpError(llvm::formatv(
+          "operands ({0}) and ({1}) do not match rank", firstRankedIndex, i));
     }
 
-    auto firstShape = secondType.getShape();
+    auto firstShape = firstRankedType.getShape();
     auto secondShape = secondType.getShape();
     for (int d = 0; d < firstRankedType.getRank(); ++d) {
-      if (firstShape[d] != secondShape[d] && d != dimension()) {
+      if (!ShapedType::isDynamic(firstShape[d]) &&
+          !ShapedType::isDynamic(secondShape[d]) &&
+          firstShape[d] != secondShape[d] && d != concatDimension) {
         return emitOpError(llvm::formatv(
-            "operands (0) and ({0}) non-concat dimensions do not match "
-            "({1}) != ({2})",
-            i, llvm::make_range(firstShape.begin(), firstShape.end()),
-            llvm::make_range(secondShape.begin(), secondShape.end())));
+            "shapes of operand ({0}) and ({1}) do not match at non-concat "
+            "index: ({2}) != ({3}) at non-concat index {4}",
+            firstRankedIndex, i,
+            llvm::make_range(firstShape.begin(), firstShape.end()),
+            llvm::make_range(secondShape.begin(), secondShape.end()), d));
       }
     }
   }
@@ -5259,6 +5233,9 @@ OpFoldResult padOpFoldHelper(DenseElementsAttr input, DenseElementsAttr padding,
                              DenseIntElementsAttr edgePaddingLow,
                              DenseIntElementsAttr edge_padding_high,
                              DenseIntElementsAttr interiorPadding) {
+  // Prevent folding if the result is too large.
+  if (returnType.getNumElements() > kFoldOpEltLimit) return {};
+
   // Fill the full result tensor with the padding value.
   llvm::SmallVector<T, 4> result(returnType.getNumElements(),
                                  padding.getValues<T>()[0]);
@@ -5624,6 +5601,9 @@ OpFoldResult SqrtOp::fold(ArrayRef<Attribute> operands) {
   auto shapedType = getType().cast<ShapedType>();
   if (!shapedType.hasStaticShape()) return {};
 
+  // Prevent folding if the result is too large.
+  if (val.getNumElements() > kFoldOpEltLimit) return {};
+
   int bitWidth = type.getIntOrFloatBitWidth();
   llvm::SmallVector<APFloat, 4> values;
   values.reserve(val.getNumElements());
@@ -5707,6 +5687,9 @@ static Attribute UnaryFolder(Op* op, ArrayRef<Attribute> attrs) {
   if (!etype.isa<ElementType>()) {
     return {};
   }
+
+  // Prevent folding if the result is too large.
+  if (val.getNumElements() > kFoldOpEltLimit) return {};
 
   SmallVector<ValType, 6> values;
   values.reserve(val.getNumElements());
@@ -5875,10 +5858,8 @@ static Attribute BinaryFolder(Op* op, ArrayRef<Attribute> attrs) {
                              : Attribute();
   }
 
-  // Prevent folding if lhs/rhs are too large.
-  if (lhs.getNumElements() > kFoldBinaryOpEltLimit) {
-    return {};
-  }
+  // Prevent folding if the result is too large.
+  if (lhs.getNumElements() > kFoldOpEltLimit) return {};
 
   SmallVector<ValType, 6> values;
   values.reserve(lhs.getNumElements());
@@ -6214,6 +6195,7 @@ static Attribute foldSlice(SliceOp* op, I values) {
   auto limit = llvm::to_vector<6>(op->limit_indices().getValues<int64_t>());
   auto stride = llvm::to_vector<6>(op->strides().getValues<int64_t>());
 
+  // TODO(b/235903849): This should be op->getType().case<ShapedType>().
   auto resultType = op->operand().getType().cast<ShapedType>();
   if (!resultType.hasStaticShape()) return {};
 
@@ -6232,6 +6214,9 @@ static Attribute foldSlice(SliceOp* op, I values) {
     count = count / v;
     sizes.push_back(count);
   }
+
+  // Prevent folding if the result is too large.
+  if (resultType.getNumElements() > kFoldOpEltLimit) return {};
 
   llvm::SmallVector<E, 6> outValues;
   outValues.reserve(resultType.getNumElements());
@@ -6867,6 +6852,9 @@ static Attribute CompareFolder(CompareOp op, ArrayRef<Attribute> attrs) {
     return {};
   }
 
+  // Prevent folding if the result is too large.
+  if (lhs.getNumElements() > kFoldOpEltLimit) return {};
+
   SmallVector<bool, 6> values;
   values.reserve(lhs.getNumElements());
   for (const auto zip :
@@ -7427,10 +7415,6 @@ LogicalResult ScatterOp::fold(
   auto update = args[2].dyn_cast_or_null<DenseElementsAttr>();
   if (!base || !update) return failure();
 
-  // Prevent splat to be expanded if too large.
-  if (base.isSplat() && base.getNumElements() > kFoldExpandSplatEltLimit)
-    return failure();
-
   // Add the virtual trailing dimension of size 1 if indexVectorDim equals to
   // indexType.rank.
   const int64_t indexVectorDim =
@@ -7454,6 +7438,9 @@ LogicalResult ScatterOp::fold(
     }
     return false;
   };
+
+  // Prevent folding if the result is too large.
+  if (base.getNumElements() > kFoldOpEltLimit) return failure();
 
   // Iterate over all elements of the update tensor, then find the corresponding
   // value in the indices tensor to determine which location we have to update
