@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,17 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef HLO_OPS_BASE_STRUCTS
-#define HLO_OPS_BASE_STRUCTS
+#include "tensorflow/lite/logger.h"
 
+#include "tensorflow/lite/minimal_logging.h"
 
-// Represents a unique identifier for each Send/Recv instruction pair or
-// optionally for collective instructions (AllReduce, CollectivePermute,
-// AllToAll). Non-positive channel_id handle is equivalent to no channel id.
-def ChannelHandle : StructAttr<"ChannelHandle", HLO_Dialect, [
-                StructFieldAttr<"handle", I64Attr>,
-                StructFieldAttr<"type", I64Attr>]> {
-  let summary = "two 64-bit integers 'handle' and 'type'";
+namespace tflite {
+
+LogSeverity LoggerOptions::GetMinimumLogSeverity() {
+  return tflite::logging_internal::MinimalLogger::GetMinimumLogSeverity();
 }
 
-#endif // HLO_OPS_BASE_STRUCTS
+LogSeverity LoggerOptions::SetMinimumLogSeverity(LogSeverity new_severity) {
+  return tflite::logging_internal::MinimalLogger::SetMinimumLogSeverity(
+      new_severity);
+}
+
+}  // namespace tflite

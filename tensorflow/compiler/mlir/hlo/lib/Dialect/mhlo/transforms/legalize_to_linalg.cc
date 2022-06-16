@@ -27,7 +27,6 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSet.h"
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "mlir-hlo/Dialect/mhlo/IR/hlo_ops_base_attrs.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/PassDetail.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/map_mhlo_to_scalar_op.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/rewriters.h"
@@ -1347,12 +1346,12 @@ struct ConcatenateConverter : public OpConversionPattern<mhlo::ConcatenateOp> {
   }
 };
 
-class ConstConverterTensor : public OpConversionPattern<mhlo::ConstOp> {
+class ConstConverterTensor : public OpConversionPattern<mhlo::ConstantOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
 
   LogicalResult matchAndRewrite(
-      mhlo::ConstOp constOp, OpAdaptor /*adaptor*/,
+      mhlo::ConstantOp constOp, OpAdaptor /*adaptor*/,
       ConversionPatternRewriter& rewriter) const final {
     auto valueAttr = constOp.value().cast<DenseElementsAttr>();
     auto type =

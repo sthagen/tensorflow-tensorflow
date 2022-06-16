@@ -89,7 +89,6 @@ objc_library(
     sdk_frameworks = ["XCTest"],
     deps = [
         ":common",
-        "//tensorflow/lite/delegates/gpu/metal/kernels:test_util",
     ],
 )
 
@@ -174,7 +173,6 @@ objc_library(
         "//tensorflow/lite/delegates/gpu/common/task:serialization_base",
         "//tensorflow/lite/delegates/gpu/common/task:storage_type_util",
         "//tensorflow/lite/delegates/gpu/common/task:tuning_type",
-        "//third_party/apple_frameworks:Metal",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
@@ -265,7 +263,6 @@ objc_library(
         "//tensorflow/lite/delegates/gpu/common/task:gpu_tensor",
         "//tensorflow/lite/delegates/gpu/common/task:tensor_desc",
         "//tensorflow/lite/delegates/gpu/common/task:texture2d_desc",
-        "//third_party/apple_frameworks:Metal",
     ],
 )
 
@@ -353,15 +350,11 @@ objc_library(
     ],
     sdk_frameworks = ["XCTest"],
     deps = [
-        "//tensorflow/lite/delegates/gpu/common:gpu_info",
         "//tensorflow/lite/delegates/gpu/common:types",
         "//tensorflow/lite/delegates/gpu/metal:buffer",
         "//tensorflow/lite/delegates/gpu/metal:common",
-        "//tensorflow/lite/delegates/gpu/metal:inference_context",
         "//tensorflow/lite/delegates/gpu/metal:metal_spatial_tensor",
         "//tensorflow/lite/delegates/gpu/metal:texture2d",
-        "//tensorflow/lite/delegates/gpu/metal/kernels:test_util",
-        "@com_google_absl//absl/memory",
     ],
 )
 

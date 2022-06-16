@@ -247,7 +247,7 @@ absl::Status ReserveGraphTensors(const CreateGpuModelInfo& create_info,
           tensor_desc.UpdateToSupportedStorageType(gpu_info, shape));
       if (gpu_info.IsApiMetal() &&
           storage_type == TensorStorageType::TEXTURE_2D) {
-        tensor_desc.use_buffer_for_write_only_2d_texture = true;
+        tensor_desc.SetUseBufferForWriteOnlyTexture2d(true);
       }
     }
     tensor_desc.SetBHWCShape(shape);
@@ -337,17 +337,13 @@ absl::Status ConvertOperations(const GpuInfo& gpu_info,
     absl::flat_hash_map<int, ValueId> mapping_to_global_ids;
     for (int j = 0; j < gpu_subgraph.new_tensors.size(); ++j) {
       const auto& t = gpu_subgraph.new_tensors[j];
-      if (!t.second.GetData().empty()) {  // constant tensor
+      if (!t.GetData().empty()) {  // constant tensor
         auto global_id = tensor_reserver->GetNewId();
         gpu_model->const_tensors[global_id] =
-            std::move(gpu_subgraph.new_tensors[j].second);
-        const auto& shape = gpu_subgraph.new_tensors[j].first;
-        gpu_model->const_tensors[global_id].SetBHWCShape(shape);
+            std::move(gpu_subgraph.new_tensors[j]);
         mapping_to_global_ids[j] = global_id;
       } else {
-        TensorDescriptor td = t.second;
-        td.SetBHWCShape(t.first);
-        auto global_id = tensor_reserver->Add(td);
+        auto global_id = tensor_reserver->Add(t);
         mapping_to_global_ids[j] = global_id;
       }
     }
