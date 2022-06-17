@@ -2721,7 +2721,7 @@ func.func @reduce_lexicographic_min_complex(%arg0: tensor<?x3x4xcomplex<f64>>,
    : (tensor<?x3x4xcomplex<f64>>, tensor<complex<f64>>) -> tensor<complex<f64>>
    reducer(%arg3: tensor<complex<f64>>, %arg4: tensor<complex<f64>>)  {
     %1 = mhlo.real(%arg3) : (tensor<complex<f64>>) -> tensor<f64>
-    %2 = mhlo.real(%arg4) : (tensor<complex<f64>>) -> tensor<f64>
+    %2 = mhlo.convert(%arg4) : (tensor<complex<f64>>) -> tensor<f64>
     %3 = "mhlo.compare"(%1, %2)
       {comparison_direction = #mhlo<"comparison_direction EQ">}
       : (tensor<f64>, tensor<f64>) -> tensor<i1>
@@ -3539,6 +3539,112 @@ func.func @depthwise_conv_multiplier_1_with_padding(
 // CHECK-SAME:      {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>}
 // CHECK-SAME:       ins(%[[PAD]], %[[RESHAPED_FILTER]] : tensor<1x115x117x96xf32>, tensor<3x3x96xf32>)
 // CHECK-SAME:       outs(%[[FILL]] : tensor<1x57x58x96xf32>) -> tensor<1x57x58x96xf32>
+
+// -----
+
+func.func @depthwise_conv1d(%arg0: tensor<1x10x8xf32>,
+                            %arg1: tensor<3x1x16xf32>) -> tensor<1x10x16xf32> {
+  %0 = mhlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {
+      stride = [1],
+      pad = [[1, 1]],
+      lhs_dilate = [1],
+      rhs_dilate = [1],
+      reverse = [0]} {
+    batch_group_count = 1 : i64,
+    feature_group_count = 8 : i64,
+    someattr} : (tensor<1x10x8xf32>, tensor<3x1x16xf32>) -> tensor<1x10x16xf32>
+  func.return %0 : tensor<1x10x16xf32>
+}
+
+// CHECK:      func @depthwise_conv1d
+// CHECK-SAME:   %[[IN:[a-zA-Z0-9_]*]]
+// CHECK-SAME:   %[[FILTER:[a-zA-Z0-9_]*]]
+
+// CHECK:       %[[CONV:.+]] = linalg.depthwise_conv_1d_nwc_wcm
+// CHECK:       %[[OUT:.+]] = tensor.collapse_shape %[[CONV]]
+// CHECK:       return %[[OUT]]
+
+// -----
+
+func.func @depthwise_conv1d_m1(%arg0: tensor<1x10x8xf32>,
+                               %arg1: tensor<3x1x8xf32>) -> tensor<1x10x8xf32> {
+  %0 = mhlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {
+      stride = [1],
+      pad = [[1, 1]],
+      lhs_dilate = [1],
+      rhs_dilate = [1],
+      reverse = [0]} {
+    batch_group_count = 1 : i64,
+    feature_group_count = 8 : i64,
+    someattr} : (tensor<1x10x8xf32>, tensor<3x1x8xf32>) -> tensor<1x10x8xf32>
+  func.return %0 : tensor<1x10x8xf32>
+}
+
+// CHECK:      func @depthwise_conv1d
+// CHECK-SAME:   %[[IN:[a-zA-Z0-9_]*]]
+// CHECK-SAME:   %[[FILTER:[a-zA-Z0-9_]*]]
+
+// CHECK:       %[[CONV:.+]] = linalg.depthwise_conv_1d_nwc_wc
+// CHECK:       return %[[CONV]]
+
+// -----
+
+func.func @depthwise_conv3d(%arg0: tensor<2x3x5x4x6xf32>,
+                            %arg1: tensor<2x1x3x1x36xf32>)
+                            -> tensor<2x3x13x4x36xf32> {
+  %0 = mhlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, 2, f]x[0, 1, 2, i, o]->[b, 0, 1, 2, f],
+    window = {
+      stride = [2, 1, 3],
+      pad = [[1, 2], [5, 3], [3, 5]],
+      lhs_dilate = [1, 1, 1],
+      rhs_dilate = [1, 1, 1],
+      reverse = [0, 0, 0]} {
+    batch_group_count = 1 : i64,
+    feature_group_count = 6 : i64,
+    someattr} : (tensor<2x3x5x4x6xf32>, tensor<2x1x3x1x36xf32>)
+              -> tensor<2x3x13x4x36xf32>
+  func.return %0 : tensor<2x3x13x4x36xf32>
+}
+
+// CHECK:      func @depthwise_conv3d
+// CHECK-SAME:   %[[IN:[a-zA-Z0-9_]*]]
+// CHECK-SAME:   %[[FILTER:[a-zA-Z0-9_]*]]
+
+// CHECK:       %[[CONV:.+]] = linalg.depthwise_conv_3d_ndhwc_dhwcm
+// CHECK:       %[[OUT:.+]] = tensor.collapse_shape %[[CONV]]
+// CHECK:       return %[[OUT]]
+
+// -----
+
+func.func @depthwise_conv3d_m1(%arg0: tensor<2x3x5x4x6xf32>,
+                               %arg1: tensor<2x1x3x1x6xf32>)
+                               -> tensor<2x3x13x4x6xf32> {
+  %0 = mhlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, 2, f]x[0, 1, 2, i, o]->[b, 0, 1, 2, f],
+    window = {
+      stride = [2, 1, 3],
+      pad = [[1, 2], [5, 3], [3, 5]],
+      lhs_dilate = [1, 1, 1],
+      rhs_dilate = [1, 1, 1],
+      reverse = [0, 0, 0]} {
+    batch_group_count = 1 : i64,
+    feature_group_count = 6 : i64,
+    someattr} : (tensor<2x3x5x4x6xf32>, tensor<2x1x3x1x6xf32>)
+              -> tensor<2x3x13x4x6xf32>
+  func.return %0 : tensor<2x3x13x4x6xf32>
+}
+
+// CHECK:      func @depthwise_conv3d
+// CHECK-SAME:   %[[IN:[a-zA-Z0-9_]*]]
+// CHECK-SAME:   %[[FILTER:[a-zA-Z0-9_]*]]
+
+// CHECK:       %[[CONV:.+]] = linalg.depthwise_conv_3d_ndhwc_dhwc
+// CHECK:       return %[[CONV]]
 
 // -----
 

@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/lite/delegates/gpu/common/selectors/operation_selector.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -159,7 +160,7 @@ absl::Status AddDynamicConv(ModelHints hints, const GpuInfo& gpu_info,
                             const BHWC& src_shape, const OHWI& weights_shape,
                             const BHWC& dst_shape, int src_id, int weights_id,
                             int dst_id, GPUOperationsSubgraph* gpu_subgraph,
-                            void* attr) {
+                            void* attr = nullptr) {
   gpu_subgraph->operations.reserve(gpu_subgraph->operations.size() + 2);
   gpu_subgraph->operations.push_back({});
   auto& converter_op = gpu_subgraph->operations.back();
@@ -189,11 +190,9 @@ absl::Status AddDynamicConv(ModelHints hints, const GpuInfo& gpu_info,
     conv_op.operation->flops_ =
         GetConvolutionTransposedFlops(src_shape, weights_shape);
   } else if (op_type == OperationType::BATCHED_MATMUL) {
-    Convolution2DAttributes* conv_attr =
-        reinterpret_cast<Convolution2DAttributes*>(attr);
-    conv_op.operation = SelectConvolutionWithDynamicWeights(
-        *conv_attr, weights_shape_bhwc, dst_shape, gpu_info, conv_temp_def,
-        hints, &weights_desc);
+    conv_op.operation =
+        SelectConvolutionBatchedMatMul(weights_shape, dst_shape, gpu_info,
+                                       conv_temp_def, hints, &weights_desc);
     conv_op.name = "mat_mul_as_convolution";
     conv_op.operation->flops_ = GetConvolutionFlops(dst_shape, weights_shape);
   } else {
@@ -343,7 +342,7 @@ absl::Status GPUOperationFromNodePart0(
       // Currently only batch = 1 is supported.
       // Matmul replaced with this sequence:
       //   1) Transpose second tensor(weights). (1xBxHxW)->(Wx1xBxH)
-      //   2) Run cconvolution with runtime weights
+      //   2) Run convolution with runtime weights
       auto second_shape = inputs[1]->tensor.shape;
       auto dst_shape = outputs[0]->tensor.shape;
       if (dst_shape.b != 1) {
@@ -354,13 +353,6 @@ absl::Status GPUOperationFromNodePart0(
                                second_shape.w);
       const BHWC weights_shape_bhwc(weights_shape.o, weights_shape.h,
                                     weights_shape.w, weights_shape.i);
-      Convolution2DAttributes attr;
-      attr.strides = HW(1, 1);
-      attr.dilations = HW(1, 1);
-      attr.padding.appended = HW(0, 0);
-      attr.padding.prepended = HW(0, 0);
-      attr.bias.shape = Linear(weights_shape.o);
-      attr.bias.data.resize(weights_shape.o, 0.0f);
 
       gpu_subgraph->operations.clear();
       TensorDescriptor transposed_desc = {op_def.src_tensors[1].data_type,
@@ -391,14 +383,19 @@ absl::Status GPUOperationFromNodePart0(
       return AddDynamicConv(hints, gpu_info, conv_def, op_type,
                             inputs[0]->tensor.shape, weights_shape, dst_shape,
                             inputs[0]->id, transposed_id, outputs[0]->id,
-                            gpu_subgraph, &attr);
+                            gpu_subgraph);
     }
     case OperationType::CAST:
       SelectCast(op_def, gpu_info, gpu_op);
       return absl::OkStatus();
     case OperationType::CONCAT: {
       auto attr = absl::any_cast<ConcatAttributes>(node.operation.attributes);
-      const int max_inputs = gpu_info.GetMaxImageArguments() - 8;
+      int max_inputs = gpu_info.GetMaxImageArguments() - 8;
+      if (gpu_info.IsMali()) {
+        // Mali can fail clEnqueueNDRangeKernel with "Out of resources" when it
+        // receives too big kernel.
+        max_inputs = std::min(8, max_inputs);
+      }
       if (inputs.size() >= max_inputs) {
         int groups = DivideRoundUp(inputs.size(), max_inputs);
         gpu_subgraph->operations.clear();
@@ -666,6 +663,34 @@ absl::Status GPUOperationFromNodePart0(
         channels.push_back(output->tensor.shape.c);
       }
       auto attr = absl::any_cast<SplitAttributes>(node.operation.attributes);
+      if (gpu_info.IsMali()) {
+        // Mali can fail clEnqueueNDRangeKernel with "Out of resources" when it
+        // receives too big kernel.
+        // Replace single complex split to N with N simple kernels.
+        gpu_subgraph->operations.clear();
+        gpu_subgraph->operations.resize(outputs.size());
+        int split_offset = 0;
+        for (int i = 0; i < outputs.size(); ++i) {
+          auto& op = gpu_subgraph->operations[i];
+          op.input_ids = {static_cast<int>(inputs[0]->id)};
+          op.output_ids = {static_cast<int>(outputs[i]->id)};
+          OperationDef new_def;
+          new_def.precision = op_def.precision;
+          new_def.src_tensors.push_back(op_def.src_tensors[0]);
+          new_def.dst_tensors.push_back(op_def.dst_tensors[i]);
+          SliceAttributes new_attr;
+          new_attr.starts = BHWC(0, 0, 0, 0);
+          new_attr.ends = inputs[0]->tensor.shape;
+          new_attr.strides = BHWC(1, 1, 1, 1);
+          new_attr.starts.set(attr.axis, split_offset);
+          new_attr.ends.set(
+              attr.axis,
+              split_offset + outputs[i]->tensor.shape.get(attr.axis));
+          split_offset += outputs[i]->tensor.shape.get(attr.axis);
+          SelectStridedSlice(new_attr, new_def, &op.operation);
+        }
+        return absl::OkStatus();
+      }
       SelectSplit(attr, gpu_info, channels, op_def, gpu_op);
       return absl::OkStatus();
     }
