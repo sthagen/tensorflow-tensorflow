@@ -107,6 +107,15 @@ class DefaultTypesTest(test.TestCase):
             MockSupertypes2With3(3), MockSupertypes2With3(3),
             MockSupertypes2With3(3)))
 
+  def testListSerialization(self):
+    list_original = default_types.List(
+        default_types.Literal(1), default_types.Literal(2),
+        default_types.Literal(3))
+
+    self.assertEqual(
+        serialization.deserialize(serialization.serialize(list_original)),
+        list_original)
+
   def testTupleSupertype(self):
     tuple_a = default_types.Tuple(
         MockSupertypes2With3(1), MockSupertypes2With3(2),
@@ -123,12 +132,21 @@ class DefaultTypesTest(test.TestCase):
             MockSupertypes2With3(3), MockSupertypes2With3(3),
             MockSupertypes2With3(3)))
 
+  def testTupleSerialization(self):
+    tuple_original = default_types.Tuple(
+        default_types.Literal(1), default_types.Literal(2),
+        default_types.Literal(3))
+
+    self.assertEqual(
+        serialization.deserialize(serialization.serialize(tuple_original)),
+        tuple_original)
+
   def testNamedTupleSupertype(self):
     named_tuple_type = collections.namedtuple('MyNamedTuple', 'x y z')
-    tuple_a = default_types.NamedTuple(
+    tuple_a = default_types.NamedTuple.from_type_and_attributes(
         named_tuple_type, (MockSupertypes2With3(1), MockSupertypes2With3(2),
                            MockSupertypes2With3(3)))
-    tuple_b = default_types.NamedTuple(
+    tuple_b = default_types.NamedTuple.from_type_and_attributes(
         named_tuple_type, (MockSupertypes2With3(2), MockSupertypes2With3(2),
                            MockSupertypes2With3(2)))
 
@@ -136,7 +154,7 @@ class DefaultTypesTest(test.TestCase):
     self.assertIsNone(tuple_a.most_specific_common_supertype([tuple_b]))
     self.assertEqual(
         tuple_b.most_specific_common_supertype([tuple_a]),
-        default_types.NamedTuple(
+        default_types.NamedTuple.from_type_and_attributes(
             named_tuple_type, (MockSupertypes2With3(3), MockSupertypes2With3(3),
                                MockSupertypes2With3(3))))
 
