@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_PJRT_C_PJRT_C_API_WRAPPER_IMPL_H_
 #define TENSORFLOW_COMPILER_XLA_PJRT_C_PJRT_C_API_WRAPPER_IMPL_H_
 
+#include <memory>
 #include <string>
 
 #include "tensorflow/compiler/xla/pjrt/c/pjrt_c_api.h"
@@ -29,6 +30,15 @@ struct PJRT_Client {
   std::unique_ptr<xla::PjRtClient> client;
 };
 
+struct PJRT_Device {
+  // The device is owned by the corresponding xla::PjRtClient
+  xla::PjRtDevice* device;
+};
+
+struct PJRT_Executable {
+  std::unique_ptr<xla::PjRtExecutable> executable;
+};
+
 namespace pjrt {
 
 // C API definitions
@@ -37,6 +47,13 @@ void PJRT_Error_Destroy(PJRT_Error_Destroy_Args* args);
 void PJRT_Error_Message(PJRT_Error_Message_Args* args);
 
 PJRT_Error* PJRT_Client_Destroy(PJRT_Client_Destroy_Args* args);
+PJRT_Error* PJRT_Client_PlatformName(PJRT_Client_PlatformName_Args* args);
+PJRT_Error* PJRT_Client_ProcessIndex(PJRT_Client_ProcessIndex_Args* args);
+PJRT_Error* PJRT_Client_PlatformVersion(PJRT_Client_PlatformVersion_Args* args);
+
+PJRT_Error* PJRT_Device_Id(PJRT_Device_Id_Args* args);
+
+PJRT_Error* PJRT_Executable_Name(PJRT_Executable_Name_Args* args);
 
 // Helper macros and functions
 

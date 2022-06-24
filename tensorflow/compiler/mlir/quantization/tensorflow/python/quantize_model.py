@@ -15,7 +15,7 @@
 """Defines TF Quantization API from SavedModel to SavedModel."""
 
 import tempfile
-from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 import uuid
 import warnings
 
@@ -25,6 +25,7 @@ import numpy as np
 from tensorflow.python import pywrap_tensorflow  # pylint: disable=unused-import
 
 from tensorflow.compiler.mlir.quantization.tensorflow.python import pywrap_quantize_model as quantize_model_wrapper
+from tensorflow.compiler.mlir.quantization.tensorflow.python import representative_dataset as repr_dataset
 from tensorflow.compiler.mlir.quantization.tensorflow import quantization_options_pb2 as quant_opts_pb2
 from tensorflow.core.framework import graph_pb2
 from tensorflow.core.protobuf import meta_graph_pb2
@@ -47,16 +48,6 @@ _INIT_OP_SIGNATURE_KEY = '__saved_model_init_op'
 # Type aliases for quant_opts_pb2 messages.
 _Method = quant_opts_pb2.QuantizationMethod.Method
 _ExperimentalMethod = quant_opts_pb2.QuantizationMethod.ExperimentalMethod
-
-# Types required for representative dataset. A representative dataset can be
-# any iterable of representative samples:
-# A representative sample should be either:
-# 1. (signature_key, {input_name -> input_tensor}) tuple, or
-# 2. {input_name -> input_tensor} mappings.
-# TODO(b/236218728): Support data types other than Tensor (such as np.ndarrays).
-_RepresentativeSample = Union[Tuple[str, Mapping[str, core.Tensor]],
-                              Mapping[str, core.Tensor]]
-_RepresentativeDataset = Iterable[_RepresentativeSample]
 
 
 def _legalize_tensor_name(tensor_name: str) -> str:
@@ -162,7 +153,7 @@ def _fix_tensor_names(signatures, exported_graph):
 
 
 def _get_signature_key_and_input(
-    representative_sample: _RepresentativeSample,
+    representative_sample: repr_dataset.RepresentativeSample,
     signature_keys: List[str],
 ) -> Tuple[str, Mapping[str, core.Tensor]]:
   """Gets the signature key and input data from `representative_sample`.
@@ -191,7 +182,6 @@ def _get_signature_key_and_input(
     ValueError: When the format of `representative_sample` is invalid, or when
     the length of `signature_keys` not 1 when `representative_sample` is `dict`.
   """
-  # TODO(b/214311251): Add a test case with multiple signatures.
   if isinstance(representative_sample, tuple):
     if (not isinstance(representative_sample[1], dict) or
         len(representative_sample) != 2):
@@ -250,7 +240,7 @@ def _create_feed_dict_from_input_data(
 
 def _run_graph_for_calibration_graph_mode(
     model_dir: str, signature_keys: List[str], tags: Set[str],
-    representative_dataset: _RepresentativeDataset) -> None:
+    representative_dataset: repr_dataset.RepresentativeDataset) -> None:
   """Runs the graph for calibration in graph mode.
 
   This function assumes _graph mode_ (used when legacy TF1 is used or when eager
@@ -295,7 +285,7 @@ def _run_graph_for_calibration_graph_mode(
 
 def _run_graph_for_calibration_eager_mode(
     model_dir: str, signature_keys: List[str], tags: Set[str],
-    representative_dataset: _RepresentativeDataset) -> None:
+    representative_dataset: repr_dataset.RepresentativeDataset) -> None:
   """Runs the graph for calibration in eager mode.
 
   This function assumes _eager mode_ (enabled in TF2 by default) when running
@@ -332,7 +322,8 @@ def _static_range_quantize(
     signature_keys: List[str],
     tags: Set[str],
     output_directory: str,
-    representative_dataset: Optional[_RepresentativeDataset] = None) ->...:
+    representative_dataset: Optional[repr_dataset.RepresentativeDataset] = None
+) ->...:
   """Quantizes the given SavedModel via static range quantization.
 
   Args:
@@ -548,7 +539,8 @@ def quantize(
     tags: Optional[Iterable[str]] = None,
     output_directory: Optional[str] = None,
     quantization_options: Optional[quant_opts_pb2.QuantizationOptions] = None,
-    representative_dataset: Optional[_RepresentativeDataset] = None) ->...:
+    representative_dataset: Optional[repr_dataset.RepresentativeDataset] = None,
+) ->...:
   """Quantizes the given SavedModel.
 
   Args:
