@@ -412,26 +412,15 @@ TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
   PartitionGraphIntoIndependentNodeSubsets(&info, nodes_to_replace,
                                            &node_subsets);
 
-#ifdef __ANDROID__
   // On Android the log message below is used for diagnosing delegation success
-  // also in production builds. Delegation happens sufficiently rarely that the
-  // message isn't spammy.
+  // also in production builds. Use VERBOSE here so that the logging is turned
+  // off in production builds on other platforms.
   TFLITE_LOG_PROD(
-      tflite::TFLITE_LOG_INFO,
+      tflite::TFLITE_LOG_VERBOSE,
       "Replacing %d node(s) with delegate (%s) node, yielding %zu partitions.",
       nodes_to_replace->size,
       registration.custom_name ? registration.custom_name : "unknown",
       node_subsets.size());
-#else   // !__ANDROID__
-  // Server-side, delegation may happen so often as to make logging spammy + we
-  // don't have a clear need for the diagnostic in production builds.
-  TFLITE_LOG(
-      tflite::TFLITE_LOG_INFO,
-      "Replacing %d node(s) with delegate (%s) node, yielding %zu partitions.",
-      nodes_to_replace->size,
-      registration.custom_name ? registration.custom_name : "unknown",
-      node_subsets.size());
-#endif  // __ANDROID__
 
   execution_plan_.clear();
 
@@ -1089,9 +1078,9 @@ TfLiteStatus Subgraph::PrepareOpsAndTensors() {
 #ifdef TFLITE_USE_SIMPLE_MEMORY_PLANNER
     memory_planner_.reset(new SimplePlanner(&context_, CreateGraphInfo()));
 #else
-    memory_planner_.reset(new ArenaPlanner(&context_, CreateGraphInfo(),
-                                           ShouldPreserveAllTensors(),
-                                           kDefaultTensorAlignment));
+    memory_planner_ = std::make_unique<ArenaPlanner>(
+        &context_, CreateGraphInfo(), ShouldPreserveAllTensors(),
+        kDefaultTensorAlignment);
 #endif
     memory_planner_->PlanAllocations();
   }
