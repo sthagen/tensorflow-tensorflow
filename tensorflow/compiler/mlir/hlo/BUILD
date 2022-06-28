@@ -2190,11 +2190,14 @@ cc_library(
     srcs = ["lib/Transforms/gml_st_pipeline.cc"],
     hdrs = ["include/mlir-hlo/Transforms/gml_st_pipeline.h"],
     deps = [
+        ":bufferize_pass",
         ":gml_st_tiling",
         ":legalize_mhlo_to_gml",
         ":legalize_to_linalg",
+        "@llvm-project//mlir:BufferizationTransforms",
         "@llvm-project//mlir:LinalgTransforms",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Transforms",
     ],
 )
 
@@ -2475,6 +2478,8 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:LinalgDialect",
+        "@llvm-project//mlir:LinalgTransforms",
         "@llvm-project//mlir:Support",
     ],
 )
@@ -2533,15 +2538,9 @@ cc_library(
         ":fusion_interface_impl",
         ":gml_st",
         ":gml_st_passes_inc_gen",
-        ":hlo",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:ArithmeticDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:MathDialect",
         "@llvm-project//mlir:Pass",
-        "@llvm-project//mlir:Support",
-        "@llvm-project//mlir:TensorDialect",
         "@llvm-project//mlir:Transforms",
     ],
 )

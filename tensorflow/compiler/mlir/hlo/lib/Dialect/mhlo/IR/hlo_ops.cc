@@ -1083,7 +1083,7 @@ LogicalResult DotGeneralOp::reifyReturnTypeShapes(
 LogicalResult FftOp::verify() {
   // P1.
   auto fftRank = fft_length().size();
-  if (!(fftRank <= 3 && fftRank >= 1)) {
+  if (fftRank > 3 || fftRank < 1) {
     return emitOpError() << "rank must be between 1 and 3, but got " << fftRank
                          << ".";
   }
@@ -1263,7 +1263,7 @@ void getSliceSizeValues(GatherOp* gather, OpBuilder& builder, Location loc,
   }
 }
 
-void getSliceSizeValues(DynamicGatherOp* d_gather, OpBuilder& builder,
+void getSliceSizeValues(DynamicGatherOp* /*dGather*/, OpBuilder& builder,
                         Location loc, ValueRange operands,
                         SmallVectorImpl<Value>& sliceSizeValues) {
   DynamicGatherOp::Adaptor adaptor(operands);
@@ -1915,7 +1915,7 @@ LogicalResult isSpatialDimensionsValid(ConvOp op) {
 
   const auto hasDuplicates = [](SmallVector<int64_t>& dnums) {
     std::sort(dnums.begin(), dnums.end());
-    auto last = std::unique(dnums.begin(), dnums.end());
+    auto* last = std::unique(dnums.begin(), dnums.end());
     return last != dnums.end();
   };
 
@@ -3011,7 +3011,7 @@ class DynamicBroadcastInDimOpNotActuallyDynamic
                                 PatternRewriter& rewriter) const override {
     auto type = op.getType().dyn_cast<RankedTensorType>();
     auto operandType = op.operand().getType().dyn_cast<RankedTensorType>();
-    auto outputDimOp = op.output_dimensions().getDefiningOp();
+    auto* outputDimOp = op.output_dimensions().getDefiningOp();
     if (!type || !operandType || !operandType.hasStaticShape()) {
       return rewriter.notifyMatchFailure(op, "requires operand static shape");
     }
@@ -3771,15 +3771,16 @@ LogicalResult DynamicSliceOp::verify() {
   }
 
   for (int i = 0; i < numSliceSizes; ++i) {
-    int64_t slice_size = slice_sizes().getValues<int64_t>()[i];
-    if (slice_size < 0) {
+    int64_t sliceSize = slice_sizes().getValues<int64_t>()[i];
+    if (sliceSize < 0) {
       return emitOpError() << "has negative size index to dynamic slice: "
-                           << slice_size;
-    } else if (!operandType.isDynamicDim(i)) {
-      int64_t dim_size = operandType.getDimSize(i);
-      if (slice_size > dim_size) {
-        return emitOpError() << "has slice size " << slice_size
-                             << " greater than dimension size " << dim_size
+                           << sliceSize;
+    }
+    if (!operandType.isDynamicDim(i)) {
+      int64_t dimSize = operandType.getDimSize(i);
+      if (sliceSize > dimSize) {
+        return emitOpError() << "has slice size " << sliceSize
+                             << " greater than dimension size " << dimSize
                              << " in dimension " << i << " of operand";
       }
     }
@@ -5236,7 +5237,7 @@ template <typename T>
 OpFoldResult padOpFoldHelper(DenseElementsAttr input, DenseElementsAttr padding,
                              RankedTensorType returnType,
                              DenseIntElementsAttr edgePaddingLow,
-                             DenseIntElementsAttr edge_padding_high,
+                             DenseIntElementsAttr /*edgePaddingHigh*/,
                              DenseIntElementsAttr interiorPadding) {
   // Prevent folding if the result is too large.
   if (returnType.getNumElements() > kFoldOpEltLimit) return {};
@@ -5964,7 +5965,8 @@ bool isSplatZero(SplatElementsAttr attr) {
   if (!attr) return false;
   if (attr.getElementType().isa<FloatType>()) {
     return attr.getSplatValue<APFloat>().isZero();
-  } else if (attr.getElementType().isa<IntegerType>()) {
+  }
+  if (attr.getElementType().isa<IntegerType>()) {
     return attr.getSplatValue<APInt>().isZero();
   } else {
     return false;
@@ -5989,7 +5991,8 @@ bool isSplatOne(SplatElementsAttr attr) {
   if (!attr) return false;
   if (attr.getElementType().isa<FloatType>()) {
     return attr.getSplatValue<APFloat>().convertToDouble() == 1.0;
-  } else if (attr.getElementType().isa<IntegerType>()) {
+  }
+  if (attr.getElementType().isa<IntegerType>()) {
     return attr.getSplatValue<APInt>().getSExtValue() == 1;
   } else {
     return false;
@@ -6621,10 +6624,38 @@ static LogicalResult eliminateBroadcastInDimTranspose(
   return success();
 }
 
+// simplify Transpose: replace Transpose with Reshape if they are equivalent
+static LogicalResult simplifyTranspose(TransposeOp op,
+                                       PatternRewriter& rewriter) {
+  auto operandType = op.operand().getType().dyn_cast<RankedTensorType>();
+  auto resultType = op.getResult().getType().dyn_cast<RankedTensorType>();
+  if (!operandType || !resultType) {
+    return failure();
+  }
+  // Not support dynamic shape a.t.m. BTW, when it's dynamic shape,
+  // maybe Transpose should be replaced by DynamicReshape.
+  if (!operandType.hasStaticShape() || !resultType.hasStaticShape()) {
+    return failure();
+  }
+  auto permutation = op.permutation().getValues<int64_t>();
+  llvm::SmallVector<int64_t> sortedPermutation;
+  for (int64_t i = 0, e = resultType.getRank(); i < e; i++) {
+    if (resultType.getDimSize(i) != 1) {
+      sortedPermutation.push_back(permutation[i]);
+    }
+  }
+  if (llvm::is_sorted(sortedPermutation)) {
+    rewriter.replaceOpWithNewOp<ReshapeOp>(op, op.getType(), op.operand());
+    return success();
+  }
+  return failure();
+}
+
 void TransposeOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* /*context*/) {
   results.add(eliminateRedundantTranspse);
   results.add(eliminateBroadcastInDimTranspose);
+  results.add(simplifyTranspose);
 }
 
 LogicalResult TransposeOp::reifyReturnTypeShapes(
@@ -7112,7 +7143,7 @@ LogicalResult validateScatterDimensionNumbers(
     ScatterDimensionNumbersAttr dimNumbers, Location loc) {
   const auto hasDuplicates = [](SmallVector<int64_t>& nums) {
     if (!llvm::is_sorted(nums)) std::sort(nums.begin(), nums.end());
-    auto last = std::unique(nums.begin(), nums.end());
+    auto* last = std::unique(nums.begin(), nums.end());
     return last != nums.end();
   };
 
@@ -8689,7 +8720,7 @@ Operation* MhloDialect::materializeConstant(OpBuilder& builder, Attribute value,
 }
 
 LogicalResult MhloDialect::verifyRegionArgAttribute(Operation* op,
-                                                    unsigned region_index,
+                                                    unsigned /*regionIndex*/,
                                                     unsigned argIndex,
                                                     NamedAttribute attr) {
   if (auto aliasAttr = attr.getValue().dyn_cast<ArgResultAliasAttr>()) {

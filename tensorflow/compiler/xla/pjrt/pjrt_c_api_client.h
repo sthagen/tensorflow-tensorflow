@@ -45,11 +45,11 @@ class PjRtCApiDevice : public PjRtDevice {
 
   PjRtClient* client() const override;
 
-  bool IsAddressable() const override { return wrapped_->IsAddressable(); }
+  bool IsAddressable() const override;
 
   int id() const override;
 
-  int process_index() const override { return wrapped_->process_index(); }
+  int process_index() const override;
 
   int local_hardware_id() const override {
     return wrapped_->local_hardware_id();
