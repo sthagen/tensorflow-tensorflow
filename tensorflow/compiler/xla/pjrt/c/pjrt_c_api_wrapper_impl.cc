@@ -98,6 +98,25 @@ PJRT_Error* PJRT_Client_PlatformVersion(
   return nullptr;
 }
 
+PJRT_Error* PJRT_Client_Devices(PJRT_Client_Devices_Args* args) {
+  PJRT_RETURN_IF_ERROR(CheckMatchingStructSizes(
+      "PJRT_Client_Devices_Args", PJRT_Client_Devices_Args_STRUCT_SIZE,
+      args->struct_size));
+  args->num_devices = args->client->devices.size();
+  args->devices = args->client->devices.data();
+  return nullptr;
+}
+
+PJRT_Error* PJRT_Client_AddressableDevices(
+    PJRT_Client_AddressableDevices_Args* args) {
+  PJRT_RETURN_IF_ERROR(CheckMatchingStructSizes(
+      "PJRT_Client_AddressableDevices_Args",
+      PJRT_Client_AddressableDevices_Args_STRUCT_SIZE, args->struct_size));
+  args->num_addressable_devices = args->client->addressable_devices.size();
+  args->addressable_devices = args->client->addressable_devices.data();
+  return nullptr;
+}
+
 PJRT_Error* PJRT_Device_Id(PJRT_Device_Id_Args* args) {
   PJRT_RETURN_IF_ERROR(CheckMatchingStructSizes("PJRT_Device_Id_Args",
                                                 PJRT_Device_Id_Args_STRUCT_SIZE,
@@ -130,6 +149,22 @@ PJRT_Error* PJRT_Executable_Name(PJRT_Executable_Name_Args* args) {
   absl::string_view executable_name = args->executable->executable->name();
   args->executable_name = executable_name.data();
   args->executable_name_size = executable_name.size();
+  return nullptr;
+}
+
+PJRT_Error* PJRT_Buffer_Delete(PJRT_Buffer_Delete_Args* args) {
+  PJRT_RETURN_IF_ERROR(CheckMatchingStructSizes(
+      "PJRT_Buffer_Delete_Args", PJRT_Buffer_Delete_Args_STRUCT_SIZE,
+      args->struct_size));
+  args->buffer->buffer->Delete();
+  return nullptr;
+}
+
+PJRT_Error* PJRT_Buffer_IsDeleted(PJRT_Buffer_IsDeleted_Args* args) {
+  PJRT_RETURN_IF_ERROR(CheckMatchingStructSizes(
+      "PJRT_Buffer_IsDeleted_Args", PJRT_Buffer_IsDeleted_Args_STRUCT_SIZE,
+      args->struct_size));
+  args->is_deleted = args->buffer->buffer->IsDeleted();
   return nullptr;
 }
 
