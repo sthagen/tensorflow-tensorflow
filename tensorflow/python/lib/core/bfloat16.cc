@@ -465,7 +465,7 @@ PyArray_Descr CustomFloatTypeDescriptor<T>::npy_descr = {
     /*kind=*/TypeDescriptor<T>::kNpyDescrKind,
     /*type=*/TypeDescriptor<T>::kNpyDescrType,
     /*byteorder=*/TypeDescriptor<T>::kNpyDescrByteorder,
-    /*flags=*/NPY_NEEDS_PYAPI | NPY_USE_SETITEM,
+    /*flags=*/NPY_NEEDS_PYAPI | NPY_USE_GETITEM | NPY_USE_SETITEM,
     /*type_num=*/0,
     /*elsize=*/sizeof(T),
     /*alignment=*/alignof(T),
@@ -484,7 +484,7 @@ template <typename T>
 PyObject* NPyCustomFloat_GetItem(void* data, void* arr) {
   T x;
   memcpy(&x, data, sizeof(T));
-  return PyFloat_FromDouble(static_cast<float>(x));
+  return PyCustomFloat_FromT<T>(x).release();
 }
 
 template <typename T>
@@ -561,7 +561,7 @@ void NPyCustomFloat_CopySwap(void* dst, void* src, int swap, void* arr) {
   if (!src) {
     return;
   }
-  memcpy(dst, src, sizeof(uint16_t));
+  memcpy(dst, src, sizeof(T));
   static_assert(sizeof(T) == sizeof(int16_t) || sizeof(T) == sizeof(int8_t),
                 "Not supported");
   if (swap && sizeof(T) == sizeof(int16_t)) {
