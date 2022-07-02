@@ -702,6 +702,7 @@ pybind_extension(
         "//third_party/py/numpy",
     ],
     pytype_srcs = glob(["xla_extension/*.pyi"]),
+    visibility = ["//visibility:public"],
     deps = [
                ":dlpack",
                ":jax_jit",
@@ -743,6 +744,7 @@ pybind_extension(
                # without any TF dependencies as "jaxlib" on Pypi, and "jaxlib" does
                # not require Tensorflow.
                "//tensorflow/core:lib_internal_impl",  # buildcleaner: keep
+               "//tensorflow/core/distributed_runtime/preemption:preemption_sync_manager",
                "//tensorflow/python:bfloat16_lib",
            ] + select({
                ":gpu_enabled": [
