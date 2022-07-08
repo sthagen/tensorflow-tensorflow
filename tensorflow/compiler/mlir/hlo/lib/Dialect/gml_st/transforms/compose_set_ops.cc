@@ -18,7 +18,7 @@ limitations under the License.
 #include <utility>
 
 #include "mlir-hlo/Dialect/gml_st/IR/gml_st_ops.h"
-#include "mlir-hlo/Dialect/gml_st/transforms/compose_tile_interface.h"
+#include "mlir-hlo/Dialect/gml_st/transforms/compose_set_interface.h"
 #include "mlir-hlo/Dialect/gml_st/transforms/pass_detail.h"
 #include "mlir-hlo/Dialect/gml_st/transforms/passes.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
@@ -30,19 +30,17 @@ namespace mlir {
 namespace gml_st {
 namespace {
 
-template <typename TilingOp>
-struct ComposePattern : public OpRewritePattern<TilingOp> {
-  using OpRewritePattern<TilingOp>::OpRewritePattern;
+struct ComposeSetPattern
+    : public OpInterfaceRewritePattern<ComposeSetInterface> {
+  using OpInterfaceRewritePattern<
+      ComposeSetInterface>::OpInterfaceRewritePattern;
 
-  LogicalResult matchAndRewrite(TilingOp op,
+  LogicalResult matchAndRewrite(ComposeSetInterface iface,
                                 PatternRewriter& rewriter) const override {
-    auto iface = llvm::dyn_cast<ComposeTileInterface>(op.getOperation());
-    if (!iface) return failure();
+    Value composed = iface.compose(rewriter);
+    if (!composed) return failure();
 
-    Value composedTile = iface.compose(rewriter);
-    if (!composedTile) return failure();
-
-    rewriter.replaceOp(op, composedTile);
+    rewriter.replaceOp(iface.getOperation(), composed);
     return success();
   }
 };
@@ -54,12 +52,15 @@ class ComposeSetOpsPass : public ComposeSetOpsPassBase<ComposeSetOpsPass> {
 
   void runOnOperation() final {
     MLIRContext* ctx = &getContext();
+
     RewritePatternSet patterns(ctx);
-    patterns.insert<ComposePattern<TileOp>>(ctx);
-    mlir::GreedyRewriteConfig config;
+    patterns.insert<ComposeSetPattern>(ctx);
+
     // Apply patterns from the top down. This makes sure that we have already
     // composed the operand of a tiling op.
+    mlir::GreedyRewriteConfig config;
     config.useTopDownTraversal = true;
+
     if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns),
                                             config))) {
       return signalPassFailure();

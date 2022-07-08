@@ -1803,6 +1803,13 @@ OpFoldResult DynamicUpdateSliceOp::fold(ArrayRef<Attribute> operands) {
   auto operandShape = this->operand().getType().cast<RankedTensorType>();
   auto updateShape = this->update().getType().cast<RankedTensorType>();
 
+  // If any of the dimensions are length-0, the update does nothing.
+  for (auto dim : updateShape.getShape()) {
+    if (dim == 0) {
+      return this->operand();
+    }
+  }
+
   if (operandShape != updateShape || !operandShape.hasStaticShape()) {
     return {};
   }
@@ -4945,10 +4952,23 @@ LogicalResult RngBitGeneratorOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// RngNormalOp
+// RngOp
 //===----------------------------------------------------------------------===//
 
-LogicalResult RngNormalOp::inferReturnTypeComponents(
+LogicalResult RngOp::verify() {
+  auto dist = rng_distribution();
+  if (dist == RngDistribution::UNIFORM) {
+    return success();
+  }
+  auto muTy = a().getType().cast<TensorType>().getElementType();
+  auto sigmaTy = b().getType().cast<TensorType>().getElementType();
+  if (muTy.isa<FloatType>() && sigmaTy.isa<FloatType>()) {
+    return success();
+  }
+  return emitOpError() << "mu and sigma must be floats";
+}
+
+LogicalResult RngOp::inferReturnTypeComponents(
     MLIRContext* context, Optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
@@ -4956,31 +4976,10 @@ LogicalResult RngNormalOp::inferReturnTypeComponents(
                                       regions, inferredReturnShapes);
 }
 
-LogicalResult RngNormalOp::reifyReturnTypeShapes(
+LogicalResult RngOp::reifyReturnTypeShapes(
     OpBuilder& builder, ValueRange operands,
     SmallVectorImpl<Value>& reifiedReturnShapes) {
-  RngNormalOp::Adaptor adaptor(operands);
-  reifiedReturnShapes.push_back(
-      castToIndexTensor(builder, getLoc(), adaptor.shape()));
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
-// RngUniformOp
-//===----------------------------------------------------------------------===//
-
-LogicalResult RngUniformOp::inferReturnTypeComponents(
-    MLIRContext* context, Optional<Location> location, ValueShapeRange operands,
-    DictionaryAttr attributes, RegionRange regions,
-    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
-  return rngInferReturnTypeComponents(context, location, operands, attributes,
-                                      regions, inferredReturnShapes);
-}
-
-LogicalResult RngUniformOp::reifyReturnTypeShapes(
-    OpBuilder& builder, ValueRange operands,
-    SmallVectorImpl<Value>& reifiedReturnShapes) {
-  RngUniformOp::Adaptor adaptor(operands);
+  RngOp::Adaptor adaptor(operands);
   reifiedReturnShapes.push_back(
       castToIndexTensor(builder, getLoc(), adaptor.shape()));
   return success();
@@ -6697,10 +6696,10 @@ LogicalResult TransposeOp::reifyReturnTypeShapes(
 
 // Method for InferTypeOpInterface: infer the return type from the operand type
 // and the permutation.
-LogicalResult TransposeOp::inferReturnTypeComponents(
-    MLIRContext* context, Optional<Location> loc, ValueShapeRange operands,
+LogicalResult TransposeOp::inferReturnTypes(
+    MLIRContext* /*context*/, Optional<Location> loc, ValueRange operands,
     DictionaryAttr attributes, RegionRange,
-    SmallVectorImpl<ShapedTypeComponents>& inferredReturnTypes) {
+    SmallVectorImpl<Type>& inferredReturnTypes) {
   auto type = operands[0].getType();
   auto rankedTy = type.dyn_cast<RankedTensorType>();
   if (!rankedTy) {
@@ -6733,7 +6732,8 @@ LogicalResult TransposeOp::inferReturnTypeComponents(
   for (int64_t dim : permutation.getValues<int64_t>()) {
     resultShape.push_back(inputShape[dim]);
   }
-  inferredReturnTypes.emplace_back(resultShape, rankedTy.getElementType());
+  inferredReturnTypes.emplace_back(RankedTensorType::get(
+      resultShape, rankedTy.getElementType(), rankedTy.getEncoding()));
   return success();
 }
 
