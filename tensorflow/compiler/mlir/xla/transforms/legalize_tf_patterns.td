@@ -646,7 +646,7 @@ foreach Mapping = [
                    [TF_CoshOp, CHLO_CoshOp],
                    [TF_ComplexAbsOp, HLO_AbsOp],
                    [TF_ConjOp, CHLO_ConjOp],
-                   [TF_CosOp, HLO_CosOp],
+                   [TF_CosOp, HLO_CosineOp],
                    [TF_DigammaOp, CHLO_DigammaOp],
                    [TF_ExpOp, HLO_ExpOp],
                    [TF_Expm1Op, HLO_Expm1Op],
@@ -666,7 +666,7 @@ foreach Mapping = [
                    [TF_RsqrtOp, HLO_RsqrtOp],
                    [TF_SigmoidOp, HLO_LogisticOp],
                    [TF_SinhOp, CHLO_SinhOp],
-                   [TF_SinOp, HLO_SinOp],
+                   [TF_SinOp, HLO_SineOp],
                    [TF_SqrtOp, HLO_SqrtOp],
                    [TF_TanhOp, HLO_TanhOp],
                    [TF_TanOp, CHLO_TanOp]

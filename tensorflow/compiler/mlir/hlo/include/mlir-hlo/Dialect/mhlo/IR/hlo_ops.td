@@ -219,7 +219,8 @@ def HLO_ClzOp: HLO_UnaryElementwiseOp<"count_leading_zeros",
     https://www.tensorflow.org/xla/operation_semantics#element-wise_unary_functions.
   }];
 }
-def HLO_CosOp: HLO_UnaryElementwiseOp<"cosine",
+
+def HLO_CosineOp: HLO_UnaryElementwiseOp<"cosine",
     [NoSideEffect, HLO_CompatibleOperandsAndResultType], HLO_FpOrComplexTensor> {
   let summary = "Cos operator";
   let description = [{
@@ -228,7 +229,10 @@ def HLO_CosOp: HLO_UnaryElementwiseOp<"cosine",
     See
     https://www.tensorflow.org/xla/operation_semantics#element-wise_unary_functions.
   }];
+
+  let hasCustomHLOConverter = 1;
 }
+
 def HLO_ExpOp: HLO_UnaryElementwiseOp<"exponential",
     [NoSideEffect, HLO_CompatibleOperandsAndResultType], HLO_FpOrComplexTensor> {
   let summary = "Exponential operator";
@@ -416,7 +420,8 @@ def HLO_SignOp: HLO_UnaryElementwiseOp<"sign",
   }];
   let hasFolder = 1;
 }
-def HLO_SinOp: HLO_UnaryElementwiseOp<"sine",
+
+def HLO_SineOp: HLO_UnaryElementwiseOp<"sine",
     [NoSideEffect, HLO_CompatibleOperandsAndResultType], HLO_FpOrComplexTensor> {
   let summary = "Sin operator";
   let description = [{
@@ -425,7 +430,9 @@ def HLO_SinOp: HLO_UnaryElementwiseOp<"sine",
     See
     https://www.tensorflow.org/xla/operation_semantics#element-wise_unary_functions.
   }];
+  let hasCustomHLOConverter = 1;
 }
+
 def HLO_SqrtOp: HLO_UnaryElementwiseOp<"sqrt",
     [NoSideEffect, HLO_CompatibleOperandsAndResultType], HLO_FpOrComplexTensor> {
   let summary = "Square-root operator";
@@ -1561,7 +1568,7 @@ def HLO_CollectivePermuteOp: HLO_Op<"collective_permute",
   let hasVerifier = 1;
 }
 
-def HLO_ConvOp : HLO_Op<"convolution", [NoSideEffect]> {
+def HLO_ConvolutionOp : HLO_Op<"convolution", [NoSideEffect]> {
   let summary = "Convolution operator";
   let description = [{
     Computes a convolution of the kind used in neural networks.
