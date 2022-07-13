@@ -689,7 +689,7 @@ INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(ShiftRightLogicalOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SignOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SineOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SqrtOp)
-INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SubOp)
+INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(SubtractOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(TanhOp)
 INFER_RETURN_TYPE_COMPONENTS_FROM_OPERANDS(XorOp)
 
@@ -5153,6 +5153,47 @@ OpFoldResult SetDimensionSizeOp::fold(ArrayRef<Attribute> operands) {
   return {};
 }
 
+// TODO(hinsu): Switch to inferReturnTypeComponents after adding support for
+// the encoding upstream.
+LogicalResult SetDimensionSizeOp::inferReturnTypes(
+    MLIRContext* context, Optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
+  Location loc = location.getValueOr(UnknownLoc::get(context));
+
+  SetDimensionSizeOp::Adaptor adaptor(operands, attributes, regions);
+  if (failed(adaptor.verify(loc))) return failure();
+
+  auto inputType = adaptor.operand().getType().dyn_cast<RankedTensorType>();
+  if (!inputType) {
+    inferredReturnTypes.push_back(adaptor.operand().getType());
+    return success();
+  }
+
+  int64_t dim = adaptor.dimension();
+  int64_t rank = inputType.getRank();
+  if (dim < 0 || dim >= rank) {
+    return mlir::emitError(loc) << "expects dimension to be in range [0, "
+                                << rank << "); got: [" << dim << "].";
+  }
+
+  auto shape = llvm::to_vector<4>(inputType.getShape());
+  llvm::SmallVector<int64_t, 4> bounds(rank, ShapedType::kDynamicSize);
+  if (auto encoding =
+          inputType.getEncoding().dyn_cast_or_null<TypeExtensionsAttr>())
+    bounds = llvm::to_vector<4>(encoding.getBounds());
+
+  // TODO(hinsu): Handle the case when the size operand is a constant.
+  if (shape[dim] != ShapedType::kDynamicSize) bounds[dim] = shape[dim];
+  shape[dim] = ShapedType::kDynamicSize;
+
+  auto extensions = TypeExtensionsAttr::get(context, bounds);
+  auto resultType =
+      RankedTensorType::get(shape, inputType.getElementType(), extensions);
+  inferredReturnTypes.push_back(resultType);
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // PadOp
 //===----------------------------------------------------------------------===//
@@ -5963,7 +6004,7 @@ struct Xor {
 // Due to the other ops behaving differently in signed vs unsigned integers,
 // APInts need a special implementation. Currently, it replicates signed int
 // op behavior.
-BINARY_FOLDER(SubOp, std::minus);
+BINARY_FOLDER(SubtractOp, std::minus);
 BINARY_FOLDER(DivOp, Divide);
 BINARY_FOLDER(RemOp, Remainder);
 BINARY_FOLDER(MaxOp, Max);
