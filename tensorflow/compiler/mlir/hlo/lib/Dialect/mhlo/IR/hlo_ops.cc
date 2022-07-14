@@ -228,7 +228,7 @@ DenseElementsAttr reshape(DenseElementsAttr attr, ShapedType newType) {
 // Convert a 1D dense int64 attribute to a list of values.
 SmallVector<int64_t> convertDenseIntAttr(
     llvm::Optional<mlir::DenseIntElementsAttr> optionalAttr) {
-  if (!optionalAttr.hasValue()) return SmallVector<int64_t>{};
+  if (!optionalAttr.has_value()) return SmallVector<int64_t>{};
 
   mlir::DenseIntElementsAttr attr = *optionalAttr;
   auto values = attr.getValues<int64_t>();
@@ -238,7 +238,7 @@ SmallVector<int64_t> convertDenseIntAttr(
 // Convert a 1D or Nx2 dense int64 attribute to a list of tuples.
 FailureOr<SmallVector<std::pair<int64_t, int64_t>>> convertNx2Attribute(
     llvm::Optional<mlir::DenseIntElementsAttr> optionalAttr, Location loc) {
-  if (!optionalAttr.hasValue())
+  if (!optionalAttr.has_value())
     return SmallVector<std::pair<int64_t, int64_t>>{};
   mlir::DenseIntElementsAttr attr = *optionalAttr;
 
@@ -799,12 +799,12 @@ void ConstantOp::print(::mlir::OpAsmPrinter& p) {
 LogicalResult CustomCallOp::verify() {
   // If both operand and result layout attributes are not specified then nothing
   // to verify.
-  if (!operand_layouts().hasValue() && !result_layouts().hasValue())
+  if (!operand_layouts().has_value() && !result_layouts().has_value())
     return success();
 
   // Layout constraints for either both operands & results or none should be
   // specified.
-  if (operand_layouts().hasValue() != result_layouts().hasValue())
+  if (operand_layouts().has_value() != result_layouts().has_value())
     return emitOpError() << "Layout attributes should be specified for "
                             "either both operands and results or none.";
 
@@ -5153,8 +5153,8 @@ OpFoldResult SetDimensionSizeOp::fold(ArrayRef<Attribute> operands) {
   return {};
 }
 
-// TODO(hinsu): Switch to inferReturnTypeComponents after adding support for
-// the encoding upstream.
+// TODO(b/238903565): Switch to inferReturnTypeComponents after adding support
+// for the encoding upstream.
 LogicalResult SetDimensionSizeOp::inferReturnTypes(
     MLIRContext* context, Optional<Location> location, ValueRange operands,
     DictionaryAttr attributes, RegionRange regions,
@@ -7914,12 +7914,9 @@ void MhloDialect::printType(Type type, DialectAsmPrinter& os) const {
 Attribute MhloDialect::parseAttribute(DialectAsmParser& parser,
                                       Type type) const {
   StringRef attrTag;
-  if (failed(parser.parseKeyword(&attrTag))) return Attribute();
-  {
-    Attribute attr;
-    auto parseResult = generatedAttributeParser(parser, attrTag, type, attr);
-    if (parseResult.hasValue()) return attr;
-  }
+  Attribute attr;
+  auto parseResult = generatedAttributeParser(parser, &attrTag, type, attr);
+  if (parseResult.hasValue()) return attr;
   parser.emitError(parser.getNameLoc(), "unknown mhlo attribute");
   return Attribute();
 }

@@ -335,43 +335,31 @@ class CastOperationParser : public TFLiteOperationParser {
   absl::Status IsSupported(const TfLiteContext* context,
                            const TfLiteNode* tflite_node,
                            const TfLiteRegistration* registration) final {
-    TensorInfo input_tensor_info;
-    RETURN_IF_ERROR(GetTensorInfo(context, tflite_node->inputs->data[0],
-                                  &input_tensor_info));
-    if (input_tensor_info.producers.size() != 1 ||
-        input_tensor_info.consumers.size() != 1) {
-      return absl::UnavailableError("Not supported cast case");
+    TfLiteType src_type = context->tensors[tflite_node->inputs->data[0]].type;
+    TfLiteType dst_type = context->tensors[tflite_node->outputs->data[0]].type;
+    if (src_type == kTfLiteBool &&
+        (dst_type == kTfLiteFloat16 || dst_type == kTfLiteFloat32)) {
+      // check that we have next sequence:
+      //   logical_op->bool_tensor->CAST->float_tensor.
+      TensorInfo input_tensor_info;
+      RETURN_IF_ERROR(GetTensorInfo(context, tflite_node->inputs->data[0],
+                                    &input_tensor_info));
+      if (input_tensor_info.producers.size() != 1 ||
+          input_tensor_info.consumers.size() != 1 ||
+          !IsLogicalCode(input_tensor_info.producers[0].second->builtin_code)) {
+        return absl::UnavailableError("Not supported cast case");
+      }
     }
-    if (IsLogicalCode(input_tensor_info.producers[0].second->builtin_code)) {
-      return CheckGpuDelegateCompatibility(context, tflite_node, registration);
-    } else if (context->tensors[tflite_node->inputs->data[0]].type !=
-               kTfLiteBool) {
-      return CheckGpuDelegateCompatibility(context, tflite_node, registration);
-    }
-    return absl::UnimplementedError("Not supported Cast case.");
+    return CheckGpuDelegateCompatibility(context, tflite_node, registration);
   }
 
   absl::Status Parse(const TfLiteNode* tflite_node,
                      const TfLiteRegistration* registration,
                      GraphFloat32* graph, ObjectReader* reader) final {
     Node* node = graph->NewNode();
-    TfLiteType tflite_type = reader->GetInputTensor(0)->type;
-    if (tflite_type == kTfLiteBool) {
-      // Adding Identity reshape that will be removed with bool type.
-      node->operation.type = ToString(OperationType::RESHAPE);
-      RETURN_IF_ERROR(reader->AddInput(node, 0));
-      RETURN_IF_ERROR(reader->AddOutputs(node));
-      // New shape comes from output shape.
-      ReshapeAttributes attr;
-      attr.new_shape = graph->FindOutputs(node->id)[0]->tensor.shape;
-      node->operation.attributes = attr;
-      return absl::OkStatus();
-    }
     node->operation.type = ToString(OperationType::CAST);
     RETURN_IF_ERROR(reader->AddInput(node, 0));
     RETURN_IF_ERROR(reader->AddOutputs(node));
-    Value* output = graph->FindOutputs(node->id)[0];
-    output->tensor.type = ToDataType(reader->GetOutputTensor(0)->type);
     return absl::OkStatus();
   }
 };
@@ -1023,11 +1011,8 @@ class ElementwiseOperationParser : public TFLiteOperationParser {
       // TODO(b/166831113): Support the same inputs for operations.
       if (input0 == input1) {
         if (operation_type_ == OperationType::MUL) {
-          // replace MUL(A, A) with POW(A, 2.0)
-          node->operation.type = ToString(OperationType::POW);
-          ElementwiseAttributes attr;
-          attr.param = 2.0f;
-          node->operation.attributes = std::move(attr);
+          // replace MUL(A, A) with SQUARE(A)
+          node->operation.type = ToString(OperationType::SQUARE);
           RETURN_IF_ERROR(reader->AddInput(node, 0));
         } else if (operation_type_ == OperationType::ADD) {
           // replace ADD(A, A) with MUL(A, 2.0)
@@ -1674,7 +1659,6 @@ class ReduceOperationParser : public TFLiteOperationParser {
     Node* node = graph->NewNode();
     node->operation.type = ToString(operation_type_);
     RETURN_IF_ERROR(reader->AddInput(node, 0));
-    RETURN_IF_ERROR(reader->AddOutputs(node));
 
     const TfLiteReducerParams* tf_options;
     RETURN_IF_ERROR(RetrieveBuiltinData(tflite_node, &tf_options));
@@ -1688,6 +1672,31 @@ class ReduceOperationParser : public TFLiteOperationParser {
       attr.dims.insert(axis);
     }
     node->operation.attributes = attr;
+
+    if (!tf_options->keep_dims) {
+      // GPU delegates does not support implicit shapes transformations
+      // adding explicit Reshape
+      const auto& input_tensor = graph->FindInputs(node->id)[0]->tensor;
+      auto reduce_output_shape = input_tensor.shape;
+      for (auto axis : attr.dims) {
+        reduce_output_shape.set(axis, 1);
+      }
+      Node* node_reshape = graph->NewNode();
+      node_reshape->operation.type = ToString(OperationType::RESHAPE);
+      ReshapeAttributes reshape_attr;
+      const TfLiteTensor* output = reader->GetOutputTensor(0);
+      RETURN_IF_ERROR(ExtractTensorShape(*output, &reshape_attr.new_shape));
+      node_reshape->operation.attributes = reshape_attr;
+      Value* reduce_result = graph->NewValue();
+      reduce_result->tensor.type = input_tensor.type;
+      reduce_result->tensor.shape = reduce_output_shape;
+
+      RETURN_IF_ERROR(graph->SetProducer(node->id, reduce_result->id));
+      RETURN_IF_ERROR(graph->AddConsumer(node_reshape->id, reduce_result->id));
+      RETURN_IF_ERROR(reader->AddOutputs(node_reshape));
+    } else {
+      RETURN_IF_ERROR(reader->AddOutputs(node));
+    }
     return absl::OkStatus();
   }
 

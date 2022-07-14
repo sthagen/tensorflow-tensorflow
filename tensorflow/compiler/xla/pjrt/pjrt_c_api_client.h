@@ -53,9 +53,7 @@ class PjRtCApiDevice : public PjRtDevice {
     return wrapped_->local_hardware_id();
   }
 
-  absl::string_view device_kind() const override {
-    return wrapped_->device_kind();
-  }
+  absl::string_view device_kind() const override;
 
   std::string DebugString() const override { return wrapped_->DebugString(); }
 
@@ -301,9 +299,7 @@ class PjRtCApiBuffer : public PjRtBuffer {
     return wrapped_->ToLiteral(literal);
   }
 
-  StatusOr<size_t> GetOnDeviceSizeInBytes() const override {
-    return wrapped_->GetOnDeviceSizeInBytes();
-  }
+  StatusOr<size_t> GetOnDeviceSizeInBytes() const override;
 
   PjRtFuture<Status> CopyRawToHost(void* dst, int64_t offset,
                                    int64_t transfer_size) override {
@@ -363,6 +359,8 @@ class PjRtCApiBuffer : public PjRtBuffer {
     }
     return wrapped;
   }
+
+  const PJRT_Api* pjrt_c_api() const { return client_->pjrt_c_api(); }
 
  private:
   PjRtCApiClient* client_;

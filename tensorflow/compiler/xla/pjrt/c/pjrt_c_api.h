@@ -227,6 +227,22 @@ const size_t PJRT_Device_IsAddressable_Args_STRUCT_SIZE =
 typedef PJRT_Error* PJRT_Device_IsAddressable(
     PJRT_Device_IsAddressable_Args* args);
 
+typedef struct {
+  size_t struct_size;
+  void* priv;
+  PJRT_Device* device;
+  // `device_kind` string is owned by `device` and has same lifetime as
+  // `device`.
+  const char* device_kind;  // out
+  size_t device_kind_size;  // out
+} PJRT_Device_Kind_Args;
+const size_t PJRT_Device_Kind_Args_STRUCT_SIZE =
+    PJRT_STRUCT_SIZE(PJRT_Device_Kind_Args, device_kind_size);
+
+// A vendor-dependent string that uniquely identifies the kind of device,
+// e.g., "Tesla V100-SXM2-16GB".
+typedef PJRT_Error* PJRT_Device_Kind(PJRT_Device_Kind_Args* args);
+
 // ------------------------------- Executables ---------------------------------
 
 typedef struct PJRT_Executable PJRT_Executable;
@@ -311,6 +327,20 @@ typedef struct {
   size_t struct_size;
   void* priv;
   PJRT_Buffer* buffer;
+  size_t on_device_size_in_bytes;  // out
+} PJRT_Buffer_OnDeviceSizeInBytes_Args;
+const size_t PJRT_Buffer_OnDeviceSizeInBytes_Args_STRUCT_SIZE =
+    PJRT_STRUCT_SIZE(PJRT_Buffer_OnDeviceSizeInBytes_Args,
+                     on_device_size_in_bytes);
+
+// Gets the number of bytes of the buffer storage on the device
+typedef PJRT_Error* PJRT_Buffer_OnDeviceSizeInBytes(
+    PJRT_Buffer_OnDeviceSizeInBytes_Args* args);
+
+typedef struct {
+  size_t struct_size;
+  void* priv;
+  PJRT_Buffer* buffer;
 } PJRT_Buffer_Delete_Args;
 const size_t PJRT_Buffer_Delete_Args_STRUCT_SIZE =
     PJRT_STRUCT_SIZE(PJRT_Buffer_Delete_Args, buffer);
@@ -370,6 +400,7 @@ typedef struct {
   _PJRT_API_STRUCT_FIELD(PJRT_Device_Id);
   _PJRT_API_STRUCT_FIELD(PJRT_Device_ProcessIndex);
   _PJRT_API_STRUCT_FIELD(PJRT_Device_IsAddressable);
+  _PJRT_API_STRUCT_FIELD(PJRT_Device_Kind);
 
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Destroy);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Name);
@@ -377,6 +408,7 @@ typedef struct {
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Delete);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_IsDeleted);
 
+  _PJRT_API_STRUCT_FIELD(PJRT_Buffer_OnDeviceSizeInBytes);
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_Delete);
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_IsDeleted);
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_IsOnCpu);

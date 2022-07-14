@@ -60,30 +60,6 @@ ParseResult parseShapeTypeDimensionsList(
   return success();
 }
 
-ParseResult parseI64ElementsAttr(OpAsmParser &parser,
-                                 DenseIntElementsAttr &attr) {
-  SmallVector<int64_t> values;
-  auto parseI64Element = [&]() {
-    return parser.parseInteger(values.emplace_back());
-  };
-  if (failed(parser.parseCommaSeparatedList(OpAsmParser::Delimiter::Square,
-                                            parseI64Element))) {
-    return failure();
-  }
-  OpBuilder b(parser.getContext());
-  attr = b.getI64TensorAttr(values);
-  return success();
-}
-
-void printI64ElementsAttr(OpAsmPrinter &printer, Operation *,
-                          DenseIntElementsAttr attr) {
-  printer << "[";
-  llvm::interleave(
-      attr.getValues<int64_t>(), printer, [&](int64_t val) { printer << val; },
-      ", ");
-  printer << "]";
-}
-
 }  // namespace
 }  // namespace mlir
 
@@ -176,7 +152,7 @@ void LoopOp::build(OpBuilder &builder, OperationState &result,
                                 static_cast<int32_t>(outputs.size())}));
   result.addAttribute(getIteratorTypesAttrName(), iteratorTypes);
 
-  if (distributionTypes.hasValue())
+  if (distributionTypes.has_value())
     result.addAttribute(getDistributionTypesAttrName(),
                         distributionTypes.getValue());
 
@@ -240,7 +216,7 @@ void LoopOp::print(OpAsmPrinter &p) {
       }))
     p << " iterators" << iterator_types();
 
-  if (distribution_types().hasValue())
+  if (distribution_types().has_value())
     p << " distribution" << distribution_types().getValue();
 
   p << ' ';
@@ -1588,8 +1564,7 @@ LogicalResult CollapseTileOp::inferReturnTypes(
   // Derive result shape.
   CollapseTileOp::Adaptor adaptor(operands, attributes, regions);
   SmallVector<int64_t> shape = llvm::to_vector(llvm::map_range(
-      adaptor.remaining_dims(),
-      [&](const auto &d) { return argShape[d.getLimitedValue()]; }));
+      adaptor.remaining_dims(), [&](const auto &d) { return argShape[d]; }));
 
   auto resultTy = TileType::get(ctx, shape);
   inferredReturnTypes.push_back(resultTy);
@@ -1955,12 +1930,12 @@ Value DynamicBroadcastInDimOp::fuse(Location loc, Value set,
 
   // Materialize offsets and sizes for operand tile.
   auto collapsedTile =
-      builder.create<CollapseTileOp>(loc, tile, broadcast_dimensions());
+      builder.create<CollapseTileOp>(loc, tile, broadcast_dimensionsAttr());
   SmallVector<Value> argTileOffsets;
   SmallVector<Value> argTileSizes;
   for (const auto &it : llvm::enumerate(broadcast_dimensions())) {
     Value argIdx = getIndexConstant(it.index());
-    Value resultIdx = getIndexConstant(it.value().getLimitedValue());
+    Value resultIdx = getIndexConstant(it.value());
 
     // If corresponding operand and result dimensions are different, the
     // dimension is expanding.
@@ -1999,7 +1974,7 @@ Value DynamicBroadcastInDimOp::fuse(Location loc, Value set,
   auto tiledResultTy =
       RankedTensorType::get(tileTy.getShape(), resultTy.getElementType());
   return builder.create<DynamicBroadcastInDimOp>(
-      loc, tiledResultTy, tiledOperand, tiledInit, broadcast_dimensions(),
+      loc, tiledResultTy, tiledOperand, tiledInit, broadcast_dimensionsAttr(),
       known_expanding_dimensionsAttr(), known_nonexpanding_dimensionsAttr());
 }
 
