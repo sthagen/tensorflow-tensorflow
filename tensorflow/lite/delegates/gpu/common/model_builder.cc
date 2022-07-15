@@ -463,11 +463,27 @@ class ConcatenationOperationParser : public TFLiteOperationParser {
       }
     }
 
+    for (int i = 0; i < inputs.size(); ++i) {
+      for (int j = 0; j < i; ++j) {
+        if (inputs[i] == inputs[j]) {
+          Node* node_copy = graph->NewNode();
+          node_copy->operation.type = ToString(OperationType::COPY);
+          RETURN_IF_ERROR(graph->AddConsumer(node_copy->id, inputs[j]->id));
+          Value* copy_value = graph->NewValue();
+          copy_value->tensor.type = inputs[j]->tensor.type;
+          copy_value->tensor.shape = inputs[j]->tensor.shape;
+          RETURN_IF_ERROR(graph->SetProducer(node_copy->id, copy_value->id));
+          inputs[i] = copy_value;
+          break;
+        }
+      }
+    }
+
     Node* node = graph->NewNode();
     node->operation.type = ToString(OperationType::CONCAT);
     RETURN_IF_ERROR(reader->AddOutputs(node));
-    for (const Value* input : inputs) {
-      RETURN_IF_ERROR(graph->AddConsumer(node->id, input->id));
+    for (int i = 0; i < inputs.size(); ++i) {
+      RETURN_IF_ERROR(graph->AddConsumer(node->id, inputs[i]->id));
     }
 
     std::vector<BHWC> input_shapes;
@@ -968,8 +984,11 @@ class ElementwiseOperationParser : public TFLiteOperationParser {
           output_tensor_info.consumers.size() != 1) {
         return absl::UnavailableError("Not supported logical op case");
       }
-      if (output_tensor_info.consumers[0].second->builtin_code ==
-          kTfLiteBuiltinCast) {
+      const auto& next_node = output_tensor_info.consumers[0];
+      TfLiteType dst_type =
+          context->tensors[next_node.first->outputs->data[0]].type;
+      if (next_node.second->builtin_code == kTfLiteBuiltinCast &&
+          (dst_type == kTfLiteFloat16 || dst_type == kTfLiteFloat32)) {
         return absl::OkStatus();
       } else {
         return absl::UnimplementedError("Not supported logical op case.");
