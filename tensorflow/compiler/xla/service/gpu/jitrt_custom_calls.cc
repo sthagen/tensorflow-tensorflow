@@ -257,16 +257,15 @@ static Shape ToShape(const jitrt::StridedMemrefView& memref) {
 }
 
 static StatusOr<GemmConfig> GetGemmConfig(
-    const DebugOptions* debug_options, const jitrt::StridedMemrefView& lhs,
-    const jitrt::StridedMemrefView& rhs, const jitrt::StridedMemrefView& out,
-    int64_t algorithm, double alpha_real, double alpha_imag, double beta,
-    ArrayRef<int64_t> lhs_batch, ArrayRef<int64_t> lhs_contract,
-    ArrayRef<int64_t> rhs_batch, ArrayRef<int64_t> rhs_contract) {
+    const jitrt::StridedMemrefView& lhs, const jitrt::StridedMemrefView& rhs,
+    const jitrt::StridedMemrefView& out, int64_t algorithm, double alpha_real,
+    double alpha_imag, double beta, ArrayRef<int64_t> lhs_batch,
+    ArrayRef<int64_t> lhs_contract, ArrayRef<int64_t> rhs_batch,
+    ArrayRef<int64_t> rhs_contract) {
   return GemmConfig::For(ToShape(lhs), lhs_batch, lhs_contract, ToShape(rhs),
                          rhs_batch, rhs_contract, ToShape(out), alpha_real,
                          alpha_imag, beta, algorithm,
-                         se::blas::kDefaultComputePrecision,
-                         debug_options->xla_gpu_enable_cublaslt());
+                         se::blas::kDefaultComputePrecision);
 }
 
 // -------------------------------------------------------------------------- //
@@ -451,33 +450,14 @@ LogicalResult Gemm::operator()(
   // Find the gemm config for this instance of operation based on uid.
   const GemmConfig* config = configs->Get(uid);
   if (config == nullptr) {
-    auto cfg = GetGemmConfig(debug_options, lhs, rhs, out, algorithm,
-                             alpha_real, alpha_imag, beta, lhs_batch,
-                             lhs_contract, rhs_batch, rhs_contract);
+    auto cfg =
+        GetGemmConfig(lhs, rhs, out, algorithm, alpha_real, alpha_imag, beta,
+                      lhs_batch, lhs_contract, rhs_batch, rhs_contract);
     if (!cfg.ok()) return failure();
     config = configs->Set(uid, std::move(*cfg));
   }
 
-  Status executed = [&] {
-    if (config->use_cublaslt) {
-      TF_ASSIGN_OR_RETURN(MatmulPlanParams matmul_plan_params,
-                          GetBlasLtMatmulPlanParams(*config));
-
-      // TODO(cjfj): Cache the plan.
-      se::cuda::BlasLt::MatmulPlan matmul_plan;
-      TF_RETURN_IF_ERROR(matmul_plan.init(matmul_plan_params.params));
-
-      if (matmul_plan_params.must_swap_operands) {
-        std::swap(lhs_data, rhs_data);
-      }
-
-      se::OwningScratchAllocator<> scratch_allocator(
-          run_options->device_ordinal(), run_options->allocator());
-
-      return RunBlasLtMatmul(matmul_plan, {alpha_real, alpha_imag}, lhs_data,
-                             rhs_data, beta, output_data, stream,
-                             scratch_allocator);
-    }
+  Status executed = [&]() -> Status {
     return RunGemm(*config, lhs_data, rhs_data, output_data, stream);
   }();
 

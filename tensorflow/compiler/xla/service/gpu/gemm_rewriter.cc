@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/gpu/gemm_rewriter.h"
 
+#include <memory>
 #include <utility>
 
 #include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
@@ -24,6 +25,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_creation_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_evaluator.h"
+#include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/pattern_matcher.h"
@@ -41,6 +43,11 @@ namespace m = match;
 
 // Give this instruction a more useful name than "custom-call.42".
 Status SetName(HloModule *module, HloInstruction *gemm) {
+  if (IsCublasLtMatmul(*gemm)) {
+    module->SetAndUniquifyInstrName(gemm, "cublas-lt-matmul");
+    return OkStatus();
+  }
+
   GemmBackendConfig config;
   TF_ASSIGN_OR_RETURN(config, gemm->backend_config<GemmBackendConfig>());
   const DotDimensionNumbers &dot_dims = config.dot_dimension_numbers();
@@ -125,9 +132,14 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       CHECK(!lhs->IsRank2Transpose());
       CHECK(!rhs->IsRank2Transpose());
       const Shape &output_shape = instr->shape();
+
+      const char *const target =
+          instr->GetModule()->config().debug_options().xla_gpu_enable_cublaslt()
+              ? kCublasLtMatmulCallTarget
+              : kGemmCallTarget;
+
       std::unique_ptr<HloInstruction> gemm_call =
-          HloInstruction::CreateCustomCall(output_shape, {lhs, rhs},
-                                           kGemmCallTarget);
+          HloInstruction::CreateCustomCall(output_shape, {lhs, rhs}, target);
       GemmBackendConfig gemm_config;
       gemm_config.set_alpha_real(1.0);
       gemm_config.set_alpha_imag(0.0);
@@ -203,10 +215,11 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       instr = new_add;
     }
 
-    if (Match(instr,
-              m::AddAnyOrder(
-                  m::Op(&existing_gemm).WithCustomCallTarget(kGemmCallTarget),
-                  m::Op(&bias)))) {
+    if (Match(instr, m::AddAnyOrder(
+                         m::Op(&existing_gemm)
+                             .WithCustomCallTarget(
+                                 {kGemmCallTarget, kCublasLtMatmulCallTarget}),
+                         m::Op(&bias)))) {
       return FuseBiasedGemm(instr, bias, existing_gemm);
     }
 
@@ -229,35 +242,39 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
   }
 
   Status FuseBiasedGemm(HloInstruction *instr, HloInstruction *bias,
-                        HloInstruction *existing_gemm) {
+                        HloInstruction *gemm) {
     // Do not fuse bias into S32 GEMM, as for this datatype cuBLAS only
     // supports fixed values for alpha/beta.
-    if (existing_gemm->shape().element_type() == S32) {
+    if (gemm->shape().element_type() == S32) {
       return OkStatus();
     }
-    auto config =
-        existing_gemm->backend_config<GemmBackendConfig>().ValueOrDie();
-    if (config.beta() != 0 || bias->user_count() != 1 ||
-        existing_gemm->user_count() != 1 ||
-        bias->shape() != existing_gemm->shape()) {
+
+    // BLAS GeMM overwrites bias matrix, so fusion is only possible if the GeMM
+    // is the only user. cublasLt matmul can operate out-of-place.
+    bool can_fuse_bias = (bias->user_count() == 1) || IsCublasLtMatmul(*gemm);
+
+    auto config = gemm->backend_config<GemmBackendConfig>().ValueOrDie();
+    if (config.beta() != 0 || !can_fuse_bias || gemm->user_count() != 1 ||
+        bias->shape() != gemm->shape()) {
       return OkStatus();
     }
 
     config.set_beta(1.0);
-    CHECK_EQ(existing_gemm->operand_count(), 2);
-    std::unique_ptr<HloInstruction> gemm_call =
-        existing_gemm->CloneWithNewOperands(
-            instr->shape(), {
-                                existing_gemm->mutable_operand(0),
-                                existing_gemm->mutable_operand(1),
-                                MaybeConstantFoldBias(bias),
-                            });
-    TF_RETURN_IF_ERROR(gemm_call->set_backend_config(config));
-    // Force bias input to alias with output, as GEMM operates in-place.
-    xla::Cast<HloCustomCallInstruction>(gemm_call.get())
-        ->set_output_to_operand_aliasing({{{}, {2, {}}}});
-    TF_RETURN_IF_ERROR(SetName(instr->GetModule(), gemm_call.get()));
-    TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(instr, std::move(gemm_call)));
+    CHECK_EQ(gemm->operand_count(), 2);
+    std::unique_ptr<HloInstruction> fused_op = gemm->CloneWithNewOperands(
+        instr->shape(), {
+                            gemm->mutable_operand(0),
+                            gemm->mutable_operand(1),
+                            MaybeConstantFoldBias(bias),
+                        });
+    TF_RETURN_IF_ERROR(fused_op->set_backend_config(config));
+    if (IsCublasGemm(*fused_op)) {
+      // Force bias input to alias with output, as GEMM operates in-place.
+      xla::Cast<HloCustomCallInstruction>(fused_op.get())
+          ->set_output_to_operand_aliasing({{{}, {2, {}}}});
+    }
+    TF_RETURN_IF_ERROR(SetName(instr->GetModule(), fused_op.get()));
+    TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(instr, std::move(fused_op)));
     return OkStatus();
   }
 };
@@ -270,9 +287,12 @@ StatusOr<bool> RunOnComputation(HloComputation *computation) {
 
 }  // anonymous namespace
 
-StatusOr<bool> GemmRewriter::Run(HloModule *module) {
+StatusOr<bool> GemmRewriter::Run(
+    HloModule *module,
+    const absl::flat_hash_set<absl::string_view> &execution_threads) {
   bool changed = false;
-  for (HloComputation *computation : module->MakeNonfusionComputations()) {
+  for (HloComputation *computation :
+       module->MakeNonfusionComputations(execution_threads)) {
     TF_ASSIGN_OR_RETURN(bool result, RunOnComputation(computation));
     changed |= result;
   }
