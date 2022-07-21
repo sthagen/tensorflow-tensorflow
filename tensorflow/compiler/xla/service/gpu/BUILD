@@ -685,6 +685,7 @@ cc_library(
         "@tf_runtime//:support",
         "@tf_runtime//backends/jitrt",
         "@tf_runtime//backends/jitrt:custom_call",
+        "@tf_runtime//backends/jitrt:custom_call_to_llvm",
     ] + if_gpu_is_configured([
         ":cholesky_thunk",
         ":triangular_solve_thunk",
@@ -1027,6 +1028,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:pattern_matcher",
         "//tensorflow/core:lib",
         "//tensorflow/stream_executor/lib",
+        "@com_google_absl//absl/algorithm:container",
     ],
 )
 
@@ -1763,6 +1765,7 @@ cc_library(
         "//tensorflow/compiler/mlir/xla:mhlo_to_lhlo_with_xla",
         "//tensorflow/compiler/mlir/xla:type_to_shape",
         "//tensorflow/compiler/xla/service:bitcast_dtypes_expander",
+        "//tensorflow/compiler/xla/service:scatter_simplifier",
         "//tensorflow/compiler/xla/service:simplify_fp_conversions",
         "//tensorflow/compiler/xla:protobuf_util",
         "//tensorflow/compiler/xla:status_macros",

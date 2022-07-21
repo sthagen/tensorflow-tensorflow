@@ -1648,13 +1648,13 @@ cc_library(
         ":hlo_proto_cc",
         ":memory_space_assignment_repacking",
         ":tuple_points_to_analysis",
+        "//tensorflow/compiler/xla:comparison_util",
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:util",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -6126,6 +6126,21 @@ cc_library(
     ],
 )
 
+filegroup(
+    name = "custom_call_status_hdrs",
+    srcs = [
+        "custom_call_status.h",
+        "custom_call_status_internal.h",
+    ],
+    visibility = [":friends"],
+)
+
+filegroup(
+    name = "custom_call_status_srcs",
+    srcs = ["custom_call_status.cc"],
+    visibility = [":friends"],
+)
+
 # Internal version that exposes internal details and private interfaces. For
 # use by other XLA code only.
 cc_library(
@@ -6588,6 +6603,35 @@ tf_cc_test(
         ":scatter_simplifier",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+    ],
+)
+
+cc_library(
+    name = "select_and_scatter_expander",
+    srcs = ["select_and_scatter_expander.cc"],
+    hdrs = ["select_and_scatter_expander.h"],
+    deps = [
+        ":call_inliner",
+        ":hlo",
+        ":op_expander_pass",
+        "//tensorflow/compiler/xla:literal_util",
+    ],
+)
+
+tf_cc_test(
+    name = "select_and_scatter_expander_test",
+    srcs = ["select_and_scatter_expander_test.cc"],
+    deps = [
+        ":hlo",
+        ":hlo_matchers",
+        ":select_and_scatter_expander",
+        "//tensorflow/compiler/xla:literal",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:test",
+        "//tensorflow/compiler/xla:types",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "//tensorflow/core:test",
     ],
 )
 

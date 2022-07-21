@@ -90,7 +90,10 @@ PJRT_Error* PJRT_Executable_AddressableDevices(
     PJRT_Executable_AddressableDevices_Args* args);
 PJRT_Error* PJRT_Executable_Delete(PJRT_Executable_Delete_Args* args);
 PJRT_Error* PJRT_Executable_IsDeleted(PJRT_Executable_IsDeleted_Args* args);
+PJRT_Error* PJRT_Executable_Execute(PJRT_Executable_Execute_Args* args);
 
+PJRT_Error* PJRT_Buffer_OnDeviceTrimmedShape(
+    PJRT_Buffer_OnDeviceTrimmedShape_Args* args);
 PJRT_Error* PJRT_Buffer_OnDeviceSizeInBytes(
     PJRT_Buffer_OnDeviceSizeInBytes_Args* args);
 PJRT_Error* PJRT_Buffer_Delete(PJRT_Buffer_Delete_Args* args);
