@@ -83,6 +83,8 @@ using tfrt::jitrt::Executable;
 
 namespace se = ::stream_executor;
 namespace jitrt = ::tfrt::jitrt;
+namespace lmhlo_gpu = ::mlir::lmhlo_gpu;
+namespace mhlo = ::mlir::mhlo;
 namespace runtime = ::tfrt::jitrt::runtime;
 
 // Disable all CustomCall checks in optimized build.
@@ -98,11 +100,28 @@ static constexpr CustomCall::RuntimeChecks RuntimeChecks() {
 
 void PopulateLmhloToXlaAttrEncoding(
     jitrt::CustomCallAttrEncodingSet& encoding) {
-  encoding.Add<jitrt::EnumAttrEncoding<mlir::lmhlo_gpu::ActivationAttr,
-                                       mlir::lmhlo_gpu::Activation,
-                                       se::dnn::ActivationMode>>(
-      [](mlir::lmhlo_gpu::Activation value) -> se::dnn::ActivationMode {
+  encoding.Add<
+      jitrt::EnumAttrEncoding<lmhlo_gpu::ActivationAttr, lmhlo_gpu::Activation,
+                              se::dnn::ActivationMode>>(
+      [](lmhlo_gpu::Activation value) -> se::dnn::ActivationMode {
         return ConvertConvActivationMode(value).value();
+      });
+
+  encoding.Add<
+      jitrt::EnumAttrEncoding<mhlo::FftTypeAttr, mhlo::FftType, se::fft::Type>>(
+      [](mhlo::FftType value) -> se::fft::Type {
+        switch (value) {
+          case mhlo::FftType::FFT:
+            return se::fft::Type::kC2CForward;
+          case mhlo::FftType::IFFT:
+            return se::fft::Type::kC2CInverse;
+          case mhlo::FftType::RFFT:
+            return se::fft::Type::kR2C;
+          case mhlo::FftType::IRFFT:
+            return se::fft::Type::kC2R;
+          default:
+            return se::fft::Type::kInvalid;
+        }
       });
 }
 
@@ -1088,7 +1107,7 @@ struct Fft {
                            jitrt::StridedMemrefView input,
                            jitrt::StridedMemrefView output,
                            ArrayRef<int64_t> fft_length,
-                           int32_t fft_type) const;
+                           se::fft::Type fft_type) const;
   static Fft Handler() { return Fft(); }
 };
 }  // namespace
@@ -1097,42 +1116,37 @@ LogicalResult Fft::operator()(const ServiceExecutableRunOptions* run_options,
                               jitrt::StridedMemrefView input,
                               jitrt::StridedMemrefView output,
                               ArrayRef<int64_t> fft_length,
-                              int32_t fft_type) const {
+                              se::fft::Type fft_type) const {
   // TODO(ezhulenev): Cache FFT plans in the GpuExecutable.
   FftPlanCache fft_plan_cache;
 
   se::Stream* stream = run_options->stream();
   se::StreamExecutor* executor = stream->parent();
 
-  // TODO(ezhulenev): Compiler pass should pass fft type to the custom call.
-  bool double_precision =
-      input.dtype == tfrt::DType::F64 || input.dtype == tfrt::DType::Complex128;
-
-  // TODO(b/234085769): Lmhlo to JitRt lowering pass should pass Xla Fft type to
-  // the custom call.
-  se::fft::Type fft = [&] {
-    // See mlir::mhlo::FftType enum.
+  if (input.dtype == tfrt::DType::F64 ||
+      input.dtype == tfrt::DType::Complex128) {
+    // Adjust FFT type to reflect double precision.
     switch (fft_type) {
-      case 0:  // FFT
-        return double_precision ? se::fft::Type::kZ2ZForward
-                                : se::fft::Type::kC2CForward;
-      case 1:  // IFFT
-        return double_precision ? se::fft::Type::kZ2ZInverse
-                                : se::fft::Type::kC2CInverse;
-      case 2:  // RFFT
-        return double_precision ? se::fft::Type::kD2Z : se::fft::Type::kR2C;
-      case 3:  // IRFFT
-        return double_precision ? se::fft::Type::kZ2D : se::fft::Type::kC2R;
+      case se::fft::Type::kC2CForward:
+        fft_type = se::fft::Type::kZ2ZForward;
+        break;
+      case se::fft::Type::kC2CInverse:
+        fft_type = se::fft::Type::kZ2ZInverse;
+        break;
+      case se::fft::Type::kR2C:
+        fft_type = se::fft::Type::kD2Z;
+        break;
+      case se::fft::Type::kC2R:
+        fft_type = se::fft::Type::kZ2D;
+        break;
       default:
-        return se::fft::Type::kInvalid;
+        return failure();
     }
-  }();
-
-  if (fft == se::fft::Type::kInvalid) return failure();
+  }
 
   auto st =
       RunFft(GetDeviceAddress(input), ToShape(input), GetDeviceAddress(output),
-             ToShape(output), fft, fft_length, executor->device_ordinal(),
+             ToShape(output), fft_type, fft_length, executor->device_ordinal(),
              &fft_plan_cache, stream, run_options->allocator());
   if (!st.ok()) return failure();
 
@@ -1145,7 +1159,7 @@ static bool Fft(runtime::KernelContext* ctx, void** args, void** attrs) {
                              .Arg<jitrt::StridedMemrefView>()  // input
                              .Arg<jitrt::StridedMemrefView>()  // output
                              .Attr<ArrayRef<int64_t>>("fft_length")
-                             .Attr<int32_t>("fft_type")
+                             .Attr<se::fft::Type>("fft_type")
                              .To<RuntimeChecks()>(Fft::Handler())
                              .release();
 
@@ -1161,7 +1175,7 @@ struct Cholesky {
                            const DebugOptions* debug_options,
                            jitrt::MemrefView operand, jitrt::MemrefView a,
                            jitrt::MemrefView workspace, jitrt::MemrefView info,
-                           int64_t batch_size, int64_t n, int64_t uplo) const;
+                           int64_t batch_size, bool is_lower, int64_t n) const;
   static Cholesky Handler() { return Cholesky(); }
 };
 }  // namespace
@@ -1170,7 +1184,7 @@ LogicalResult Cholesky::operator()(
     const ServiceExecutableRunOptions* run_options,
     const DebugOptions* debug_options, jitrt::MemrefView operand,
     jitrt::MemrefView a, jitrt::MemrefView workspace, jitrt::MemrefView info,
-    int64_t batch_size, int64_t n, int64_t uplo) const {
+    int64_t batch_size, bool is_lower, int64_t n) const {
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   se::DeviceMemoryBase operand_buffer = GetDeviceAddress(operand);
   se::DeviceMemoryBase a_buffer = GetDeviceAddress(a);
@@ -1184,9 +1198,11 @@ LogicalResult Cholesky::operator()(
   if (a.data != operand.data)
     stream->ThenMemcpy(&a_buffer, operand_buffer, operand_buffer.size());
 
-  CholeskyParams params{
-      n,        batch_size,       static_cast<se::blas::UpperLower>(uplo),
-      a_buffer, workspace_buffer, info_buffer};
+  using UpperLower = se::blas::UpperLower;
+  UpperLower uplo = is_lower ? UpperLower::kLower : UpperLower::kUpper;
+
+  CholeskyParams params{n,        batch_size,       uplo,
+                        a_buffer, workspace_buffer, info_buffer};
   auto executed = RunCholesky(xla::gpu::PtxOptsFromDebugOptions(*debug_options),
                               ToPrimitiveType(operand.dtype), &params, stream);
   if (!executed.ok()) return failure();
@@ -1206,8 +1222,8 @@ static bool Cholesky(runtime::KernelContext* ctx, void** args, void** attrs) {
                              .Arg<jitrt::MemrefView>()  // workspace
                              .Arg<jitrt::MemrefView>()  // info
                              .Attr<int64_t>("batch_size")
+                             .Attr<bool>("is_lower")
                              .Attr<int64_t>("n")
-                             .Attr<int64_t>("uplo")  // se::blas::UpperLower
                              .To<RuntimeChecks()>(Cholesky::Handler())
                              .release();
 

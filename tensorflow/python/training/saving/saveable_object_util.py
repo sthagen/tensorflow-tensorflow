@@ -16,6 +16,7 @@
 import functools
 import six
 
+from tensorflow.python.checkpoint import saveable_compat
 from tensorflow.python.eager import context
 from tensorflow.python.eager import def_function
 
@@ -533,6 +534,7 @@ class TrackableSaveable(saveable_object.SaveableObject):
     tensor_dict = obj._serialize_to_tensors()  # pylint: disable=protected-access
     specs = []
     self._local_names = []
+    self._prefix = saveable_compat.get_saveable_name(self._trackable) or ""
     for tensor_name, tensor in tensor_dict.items():
       self._local_names.append(tensor_name)
       spec_name = name + trackable_utils.escape_local_name(tensor_name)
@@ -558,7 +560,7 @@ class TrackableSaveable(saveable_object.SaveableObject):
     return restore_from_tensors()
 
   def get_proto_names_and_checkpoint_keys(self):
-    return [(local_name, spec.name)
+    return [(self._prefix + local_name, spec.name)
             for local_name, spec in zip(self._local_names, self.specs)]
 
 
@@ -634,8 +636,9 @@ class SaveableCompatibilityConverter(trackable.Trackable):
         `_gather_saveables_for_checkpoint`.
     """
     self._obj = obj
-    # The following are cached the first time any of the public methods are run.
     self._cached_saveables = None
+
+    _ = self._saveables  # Generate cached saveables when converter is created.
 
   @property
   def _saveables(self):
@@ -644,6 +647,7 @@ class SaveableCompatibilityConverter(trackable.Trackable):
       return self._cached_saveables
 
     self._cached_saveables = []
+    saveable_names = []
     for name, saveable_factory in (
         saveable_objects_from_trackable(self._obj).items()):
       if callable(saveable_factory):
@@ -656,7 +660,31 @@ class SaveableCompatibilityConverter(trackable.Trackable):
       else:
         saveables = tuple(saveable_objects_for_op(op=maybe_saveable, name=name))
       self._cached_saveables.extend(saveables)
+      saveable_names.extend([name] * len(saveables))
+
+    if not saveable_compat.force_checkpoint_conversion_enabled():
+      # Run an extra step to validate that the converter can be used without
+      # changing the checkpoint metadata.
+      self._maybe_apply_legacy_decorator(saveable_names)
+
     return self._cached_saveables
+
+  def _maybe_apply_legacy_decorator(self, saveable_names):
+    # Check the spec names. If there are multiple specs with different names
+    # under the same saveable, then the this indicates that a decorator must be
+    # used to ensure checkpoint equality under the new checkpoint
+    # implementation. See the docstring `legacy_saveable_name` for details.
+    for saveable in self._cached_saveables:
+      spec_names = set(spec for spec in saveable.specs)
+
+      if len(spec_names) == 1:
+        continue  # Decorator not needed.
+
+      if len(set(saveable_names)) > 1:
+        # An edge case not handled by the legacy decorator has been encountered.
+        raise saveable_compat.CheckpointConversionError
+
+      saveable_compat.legacy_saveable_name(saveable_names[0])(self)
 
   def _serialize_to_tensors(self):
     """Returns a dict of tensors to serialize."""
