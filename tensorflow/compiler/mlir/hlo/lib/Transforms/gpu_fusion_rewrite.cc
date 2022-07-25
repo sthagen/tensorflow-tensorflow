@@ -18,6 +18,7 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "mlir-hlo/Dialect/lhlo/IR/lhlo_ops.h"
@@ -193,12 +194,29 @@ LogicalResult FusionRewritePattern::matchAndRewrite(
   SetVector<Value> captures;
   getUsedValuesDefinedAbove(fusionOp->getRegions(), captures);
 
+  // Converts statically shaped types to their 1D equivalent. This only works
+  // for element wise fusions and will have to become a more sophisticated
+  // pass when e.g. broadcasts are involved.
+  TypeConverter converter;
+  converter.addConversion([](Type type) { return type; });
+  converter.addConversion([](ShapedType type) {
+    if (!type.hasStaticShape()) return type;
+    return type.clone(type.getNumElements());
+  });
+  converter.addConversion([&](MemRefType type) {
+    if (!type.hasStaticShape() || !type.getLayout().isIdentity()) return type;
+    return MemRefType::get(type.getNumElements(), type.getElementType(),
+                           MemRefLayoutAttrInterface(), type.getMemorySpace());
+  });
+
   // Create a new module with a function, clone fusion region into it.
   Location loc = fusionOp.getLoc();
   auto moduleOp = rewriter.create<ModuleOp>(loc);
   rewriter.setInsertionPointToEnd(moduleOp.getBody());
-  auto funcType =
-      rewriter.getFunctionType(TypeRange(captures.getArrayRef()), llvm::None);
+  auto argTypes = llvm::to_vector(llvm::map_range(captures, [&](Value value) {
+    return converter.convertType(value.getType());
+  }));
+  auto funcType = rewriter.getFunctionType(argTypes, llvm::None);
   auto funcOp = rewriter.create<func::FuncOp>(loc, "fusion", funcType);
   rewriter.setInsertionPointToEnd(funcOp.addEntryBlock());
   BlockAndValueMapping mapping;
@@ -209,6 +227,10 @@ LogicalResult FusionRewritePattern::matchAndRewrite(
   rewriter.cloneRegionBefore(fusionOp.getRegion(), funcOp.getRegion(),
                              funcOp.end(), mapping);
   rewriter.mergeBlocks(&funcOp.back(), &funcOp.front());
+  funcOp->walk([&](Operation* op) {
+    for (auto result : op->getResults())
+      result.setType(converter.convertType(result.getType()));
+  });
 
   // Create and run the HLO to GPU pass pipeline.
   auto resultType = (*storeOps.begin()).tensor().getType().cast<TensorType>();
@@ -286,11 +308,15 @@ void FusionRewritePattern::annotateLaunchFunc(func::FuncOp funcOp,
 }
 
 // Returns whether 'type' is can be lowered by the FusionRewritePattern.
-static bool isRewritableType(TensorType type) {
+static bool isRewritableType(Type type) {
+  auto shapedType = type.cast<ShapedType>();
   // Complex types are not yet supported.
-  if (type.getElementType().isa<ComplexType>()) return false;
+  if (shapedType.getElementType().isa<ComplexType>()) return false;
   // Zero ranked shapes are not yet supported.
-  if (type.getRank() == 0) return false;
+  if (shapedType.getRank() == 0) return false;
+  // MemRef types need to have identity layout.
+  if (auto memrefType = shapedType.dyn_cast<MemRefType>())
+    return memrefType.getLayout().isIdentity();
   return true;
 }
 
@@ -300,11 +326,13 @@ ConversionTarget FusionRewritePattern::getRewritableTarget(MLIRContext* ctx) {
   target.addLegalOp<lmhlo::TerminatorOp>();
   target.addDynamicallyLegalOp<bufferization::ToTensorOp>(
       [&](bufferization::ToTensorOp op) {
-        return isRewritableType(op.getType());
+        return isRewritableType(op.getMemref().getType()) &&
+               isRewritableType(op.getType());
       });
   target.addDynamicallyLegalOp<memref::TensorStoreOp>(
       [&](memref::TensorStoreOp op) {
-        return isRewritableType(op.getTensor().getType().cast<TensorType>());
+        return isRewritableType(op.getTensor().getType()) &&
+               isRewritableType(op.getMemref().getType());
       });
   // For now, use an explicit allow-list of hlo ops inside the fusion. If any
   // other op is present, the fusion will not be rewritten.
