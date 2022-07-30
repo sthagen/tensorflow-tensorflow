@@ -676,19 +676,15 @@ xla_test(
     ],
 )
 
-xla_test(
-    name = "bef_executable_test",
-    srcs = ["bef_executable_test.cc"],
-    backends = ["gpu"],
+tf_cc_test(
+    name = "select_and_scatter_test",
+    srcs = ["select_and_scatter_test.cc"],
+    tags = tf_cuda_tests_tags(),
     deps = [
-        "//tensorflow/compiler/xla:array2d",
-        "//tensorflow/compiler/xla:reference_util",
-        "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla/client:xla_builder",
-        "//tensorflow/compiler/xla/client/lib:matrix",
-        "//tensorflow/compiler/xla/tests:client_library_test_base",
-        "//tensorflow/compiler/xla/tests:test_macros_header",
-        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        ":gpu_codegen_test",
+        "//tensorflow/compiler/xla:error_spec",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/core:test_main",
     ],
 )
 

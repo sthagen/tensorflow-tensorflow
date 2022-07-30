@@ -79,19 +79,17 @@ static tfrt::AsyncValueRef<CpuEvent> GetOrCreateReadyEvent(
 TfrtCpuDevice::TfrtCpuDevice(int id, bool asynchronous)
     : id_(id),
       max_inflight_computations_semaphore_(/*capacity=*/asynchronous ? 32 : 1) {
+  debug_string_ = absl::StrCat("TFRT_CPU_", id);
+  to_string_ = absl::StrCat("CpuDevice(id=", id, ")");
 }
 
 absl::string_view TfrtCpuDevice::device_kind() const {
   return kCpuPlatformName;
 }
 
-std::string TfrtCpuDevice::DebugString() const {
-  return absl::StrCat("TFRT_CPU_", id());
-}
+absl::string_view TfrtCpuDevice::DebugString() const { return debug_string_; }
 
-std::string TfrtCpuDevice::ToString() const {
-  return absl::StrCat("CpuDevice(id=", id(), ")");
-}
+absl::string_view TfrtCpuDevice::ToString() const { return to_string_; }
 
 Status TfrtCpuDevice::TransferToInfeed(const LiteralSlice& literal) {
   return TransferLiteralToInfeedOnCpu(local_hardware_id(), literal);
@@ -1622,7 +1620,17 @@ StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
     input_deps.push_back(std::move(last_collective_launch_event));
   }
 
-  if (input_deps.empty() && cheap_computation_) {
+  bool execute_inline = cheap_computation_;
+
+  // Overwrite `execute_inline` if it is specified in the ExecuteOptions.
+  if (options.execution_mode == ExecuteOptions::ExecutionMode::kAsynchronous) {
+    execute_inline = false;
+  } else if (options.execution_mode ==
+             ExecuteOptions::ExecutionMode::kSynchronous) {
+    execute_inline = true;
+  }
+
+  if (input_deps.empty() && execute_inline) {
     // Synchronously call generated function.
     execute_event = GetOrCreateReadyEvent(host_context);
 

@@ -42,14 +42,13 @@ std::string GetOneInputCode(const GpuInfo& gpu_info,
       break;
     case OperationType::COS:
       if (use_native_opencl_functions) {
-        result = "$0 = native_cos($1);\n";
+        result = "$0 = convert_half4(native_cos(convert_float4($1)));\n";
       } else {
         result = "$0 = cos($1);\n";
       }
       break;
     case OperationType::COPY:
-      // No op as inout_value will be copied to dest automatically.
-      result = "\n";
+      result = "$0 = $1;\n";
       break;
     case OperationType::ELU:
       if (gpu_info.IsApiOpenCl()) {
@@ -68,7 +67,7 @@ $0.w = $1.w < INIT_FLT(0.0f) ? exp($1.w) - INIT_FLT(1.0f) : $1.w;)";
       break;
     case OperationType::EXP:
       if (use_native_opencl_functions) {
-        result = "$0 = native_exp($1);\n";
+        result = "$0 = convert_half4(native_exp(convert_float4($1)));\n";
       } else {
         result = "$0 = exp($1);\n";
       }
@@ -78,13 +77,13 @@ $0.w = $1.w < INIT_FLT(0.0f) ? exp($1.w) - INIT_FLT(1.0f) : $1.w;)";
       break;
     case OperationType::HARD_SWISH:
       result =
-          "$0 *= clamp($1 * INIT_FLT(0.16666667f) + INIT_FLT(0.5f), "
+          "$0 = $1 * clamp($1 * INIT_FLT(0.16666667f) + INIT_FLT(0.5f), "
           "INIT_FLT4(0.0f), "
           "INIT_FLT4(1.0f));\n";
       break;
     case OperationType::LOG:
       if (use_native_opencl_functions) {
-        result = "$0 = native_log($1);\n";
+        result = "$0 = convert_half4(native_log(convert_float4($1)));\n";
       } else {
         result = "$0 = log($1);\n";
       }
@@ -94,7 +93,7 @@ $0.w = $1.w < INIT_FLT(0.0f) ? exp($1.w) - INIT_FLT(1.0f) : $1.w;)";
       break;
     case OperationType::RSQRT:
       if (use_native_opencl_functions) {
-        result = "$0 = native_rsqrt($1);\n";
+        result = "$0 = convert_half4(native_rsqrt(convert_float4($1)));\n";
       } else {
         result = "$0 = rsqrt($1);\n";
       }
@@ -110,14 +109,14 @@ $0.w = $1.w < INIT_FLT(0.0f) ? exp($1.w) - INIT_FLT(1.0f) : $1.w;)";
       break;
     case OperationType::SIN:
       if (use_native_opencl_functions) {
-        result = "$0 = native_sin($1);\n";
+        result = "$0 = convert_half4(native_sin(convert_float4($1)));\n";
       } else {
         result = "$0 = sin($1);\n";
       }
       break;
     case OperationType::SQRT:
       if (use_native_opencl_functions) {
-        result = "$0 = native_sqrt($1);\n";
+        result = "$0 = convert_half4(native_sqrt(convert_float4($1)));\n";
       } else {
         result = "$0 = sqrt($1);\n";
       }
@@ -127,7 +126,9 @@ $0.w = $1.w < INIT_FLT(0.0f) ? exp($1.w) - INIT_FLT(1.0f) : $1.w;)";
       break;
     case OperationType::TANH:
       if (use_native_opencl_functions) {
-        result = "  FLT4 exp_val = native_exp(INIT_FLT4(2.0f) * $1);\n";
+        result =
+            "  FLT4 exp_val = convert_half4(native_exp(2.0f * "
+            "convert_float4($1)));\n";
         result +=
             "$0 = ((exp_val - INIT_FLT4(1.0f)) / (exp_val + "
             "INIT_FLT4(1.0f)));\n";
@@ -180,40 +181,40 @@ std::string GetTwoInputCode(const OperationType& op_type,
       break;
     // Comparison operators
     case OperationType::LESS:
-      result = "$0.x = $1.x < $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y < $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z < $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w < $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x < $2.x;\n";
+      result += "$0.y = $1.y < $2.y;\n";
+      result += "$0.z = $1.z < $2.z;\n";
+      result += "$0.w = $1.w < $2.w;\n";
       break;
     case OperationType::LESS_EQUAL:
-      result = "$0.x = $1.x <= $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y <= $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z <= $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w <= $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x <= $2.x;\n";
+      result += "$0.y = $1.y <= $2.y;\n";
+      result += "$0.z = $1.z <= $2.z;\n";
+      result += "$0.w = $1.w <= $2.w;\n";
       break;
     case OperationType::GREATER:
-      result = "$0.x = $1.x > $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y > $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z > $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w > $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x > $2.x;\n";
+      result += "$0.y = $1.y > $2.y;\n";
+      result += "$0.z = $1.z > $2.z;\n";
+      result += "$0.w = $1.w > $2.w;\n";
       break;
     case OperationType::GREATER_EQUAL:
-      result = "$0.x = $1.x >= $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y >= $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z >= $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w >= $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x >= $2.x;\n";
+      result += "$0.y = $1.y >= $2.y;\n";
+      result += "$0.z = $1.z >= $2.z;\n";
+      result += "$0.w = $1.w >= $2.w;\n";
       break;
     case OperationType::EQUAL:
-      result = "$0.x = $1.x == $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y == $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z == $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w == $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x == $2.x;\n";
+      result += "$0.y = $1.y == $2.y;\n";
+      result += "$0.z = $1.z == $2.z;\n";
+      result += "$0.w = $1.w == $2.w;\n";
       break;
     case OperationType::NOT_EQUAL:
-      result = "$0.x = $1.x != $2.x ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.y = $1.y != $2.y ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.z = $1.z != $2.z ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
-      result += "$0.w = $1.w != $2.w ? INIT_FLT(1.0f) : INIT_FLT(0.0f);\n";
+      result = "$0.x = $1.x != $2.x;\n";
+      result += "$0.y = $1.y != $2.y;\n";
+      result += "$0.z = $1.z != $2.z;\n";
+      result += "$0.w = $1.w != $2.w;\n";
       break;
     default:
       return "Unknown operation type;\n";

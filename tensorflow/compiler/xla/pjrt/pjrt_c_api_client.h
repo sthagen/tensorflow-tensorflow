@@ -47,11 +47,9 @@ class PjRtCApiDevice : public PjRtDevice {
 
   absl::string_view device_kind() const override;
 
-  std::string DebugString() const override { return wrapped_->DebugString(); }
+  absl::string_view DebugString() const override;
 
-  std::string ToString() const override {
-    return absl::StrCat("PjRtCApiDevice(wrapped=", wrapped_->ToString(), ")");
-  }
+  absl::string_view ToString() const override { return wrapped_->ToString(); }
 
   Status TransferToInfeed(const LiteralSlice& literal) override {
     return wrapped_->TransferToInfeed(literal);
@@ -140,9 +138,7 @@ class PjRtCApiClient : public PjRtClient {
   }
 
   StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Compile(
-      mlir::ModuleOp module, CompileOptions options) override {
-    return WrapExecutable(wrapped_->Compile(module, options));
-  }
+      mlir::ModuleOp module, CompileOptions options) override;
 
   StatusOr<std::optional<std::string>> ExecutableFingerprint(
       const PjRtLoadedExecutable& executable) const override;
@@ -368,6 +364,7 @@ class PjRtCApiExecutable : public PjRtLoadedExecutable {
  public:
   PjRtCApiExecutable(PjRtCApiClient* client,
                      std::unique_ptr<PjRtLoadedExecutable> wrapped);
+  PjRtCApiExecutable(PjRtCApiClient* client, PJRT_Executable* executable);
 
   ~PjRtCApiExecutable() override;
 
