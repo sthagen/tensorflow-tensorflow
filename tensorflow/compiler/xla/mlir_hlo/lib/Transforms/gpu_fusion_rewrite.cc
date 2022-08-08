@@ -30,7 +30,6 @@ limitations under the License.
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BlockAndValueMapping.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
@@ -250,14 +249,8 @@ LogicalResult FusionRewritePattern::matchAndRewrite(
   for (auto gpuModuleOp : moduleOp.getBodyRegion().getOps<gpu::GPUModuleOp>()) {
     StringAttr symbol =
         symbolTable.insert(rewriter.clone(*gpuModuleOp.getOperation()));
-    if (symbol == gpuModuleOp.getNameAttr()) {
-      continue;
-    }
-    // gpu.module name changed, update symbol uses in gpu.launch_func.
-    funcOp->walk([&](gpu::LaunchFuncOp launch) {
-      launch.kernelAttr(
-          SymbolRefAttr::get(symbol, launch.kernel().getNestedReferences()));
-    });
+    if (failed(symbolTable.replaceAllSymbolUses(gpuModuleOp, symbol, funcOp)))
+      return rewriter.notifyMatchFailure(fusionOp, "failed to replace symbol");
   }
   // Add 'gpu.container_module' attribute to parent module.
   fusionOp->getParentOfType<ModuleOp>()->setAttr(
@@ -285,6 +278,8 @@ LogicalResult FusionRewritePattern::matchAndRewrite(
 }
 
 bool FusionRewritePattern::isRewritable(lmhlo::FusionOp fusionOp) const {
+  if (fusionOp.getFusionResults().size() > 1)
+    return false;  // Do not rewrite fusions with multiple outputs.
   auto callback = [this](Operation* op) {
     if (rewritableTarget.isLegal(op)) return WalkResult::advance();
     return WalkResult::interrupt();
@@ -324,6 +319,9 @@ static bool isRewritableType(Type type) {
   // MemRef types need to have identity layout.
   if (auto memrefType = shapedType.dyn_cast<MemRefType>())
     return memrefType.getLayout().isIdentity();
+  // Unsigned integers are not yet supported.
+  if (auto intType = shapedType.getElementType().dyn_cast<IntegerType>())
+    return !intType.isUnsigned();
   return true;
 }
 
@@ -343,8 +341,12 @@ ConversionTarget FusionRewritePattern::getRewritableTarget(MLIRContext* ctx) {
       });
   // For now, use an explicit allow-list of hlo ops inside the fusion. If any
   // other op is present, the fusion will not be rewritten.
-  target.addLegalOp<mhlo::LogOp>();
-  target.addLegalOp<mhlo::AbsOp>();
+  target.addLegalOp<
+      mhlo::AddOp, mhlo::AbsOp, mhlo::CbrtOp, mhlo::CeilOp, mhlo::CosineOp,
+      mhlo::DivOp, mhlo::ExpOp, mhlo::Expm1Op, mhlo::FloorOp, mhlo::LogOp,
+      mhlo::Log1pOp, mhlo::LogisticOp, mhlo::MulOp, mhlo::NegOp, mhlo::RoundOp,
+      /*unsupported: mhlo::RoundNearestEvenOp,*/ mhlo::RsqrtOp, mhlo::SignOp,
+      mhlo::SineOp, mhlo::SqrtOp, mhlo::SubtractOp, mhlo::TanhOp>();
   return target;
 }
 
