@@ -1202,89 +1202,106 @@ LogicalResult DotGeneralOp::reifyReturnTypeShapes(
 // FftOp
 //===----------------------------------------------------------------------===//
 
-// TODO(atondwal): add shape ineference for FFT that generates a return type
-
 // We intend to verify the following properties
 // P1. 1 <= rank <= 3
-// P2. operand shape dimensions agree with fft_length for the given fft_type
-// P3. Element types agree with fft_type
-LogicalResult FftOp::verify() {
+// P2. Element types agree with fft_type
+// P3. Operand shape dimensions agree with fft_length for the given fft_type
+LogicalResult FftOp::inferReturnTypeComponents(
+    MLIRContext*, Optional<Location> location, ValueShapeRange operands,
+    DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+  FftOp::Adaptor adaptor(operands, attributes, regions);
+  auto fftLength = adaptor.fft_length().getValues<int64_t>();
+  int64_t fftRank = fftLength.size();
+
   // P1.
-  int64_t fftRank = fft_length().size();
   if (fftRank > 3 || fftRank < 1) {
-    return emitOpError() << "rank must be between 1 and 3, but got " << fftRank
-                         << ".";
+    return emitOptionalError(location, "rank must be between 1 and 3, but got ",
+                             fftRank, ".");
   }
 
-  // P2.
-  auto operandType = operand().getType().dyn_cast<RankedTensorType>();
-  if (!operandType) return success();
-  auto operandShape = operandType.getShape();
-  if (static_cast<int64_t>(operandShape.size()) < fftRank) {
-    return emitOpError() << "operand rank must be greater than fft rank of "
-                         << fftRank << " for operand of type " << operandType
-                         << ".";
-  }
-
-  if (fft_type() == FftType::RFFT) {
-    auto shapeBack = operandShape.take_back(fftRank);
-    for (auto it : llvm::zip(shapeBack, fft_length().getValues<int64_t>())) {
-      if (std::get<0>(it) != std::get<1>(it)) {
-        return emitError()
-               << "RFFT requires innermost dimensions match fft_length. Got: "
-               << operandShape << " but wanted " << fft_length() << ".";
-      }
-    }
-  }
-  if (fft_type() == FftType::IRFFT) {
-    auto shapeBack = operandShape.take_back(fftRank).drop_back();
-    for (auto it : llvm::zip(shapeBack, fft_length().getValues<int64_t>())) {
-      if (std::get<0>(it) != std::get<1>(it)) {
-        return emitError() << "IRFFT requires non-final dimensions "
-                              "match fft_length. Got: "
-                           << operandShape << " but wanted " << fft_length()
-                           << ", and " << std::get<0>(it)
-                           << " != " << std::get<1>(it) << ".";
-      }
-    }
-    if (operandShape[operandShape.size() - 1] !=
-        fft_length().getValues<int64_t>()[fftRank - 1] / 2 + 1)
-      return emitError() << "IRFFT requires innermost dimension match "
-                            "fft_length[-1]/2+1. Got: "
-                         << operandShape << " but fft_length is "
-                         << fft_length() << ".";
-  }
-
-  // P3. Element type agreement
+  // P2. Element type agreement
   // FFT : C -> C
-  // IFF : C -> C
+  // IFFT : C -> C
   // RFFT : R -> C
   // IRFFT : C -> R
-  if (fft_type() == FftType::RFFT) {
-    if (operandType.getElementType().isa<ComplexType>()) {
-      return emitError() << "RFFT takes a real tensor as input, but is given "
-                         << operandType << ".";
+  auto fftType = adaptor.fft_type();
+  auto operandType = adaptor.operand().getType().cast<TensorType>();
+  Type operandElementType = operandType.getElementType();
+  // Check the input element type and infer return element type
+  if (fftType == FftType::RFFT) {
+    if (!operandElementType.isF32() && !operandElementType.isF64()) {
+      return emitOptionalError(
+          location, "RFFT requires f32 or f64 input type, but is given ",
+          operandElementType, ".");
     }
-  } else if (!operandType.getElementType().isa<ComplexType>()) {
-    return emitError() << stringifyFftType(fft_type())
-                       << " takes a complex tensor as input, but is given "
-                       << operandType << ".";
+  } else {
+    if (!operandElementType.isa<ComplexType>()) {
+      return emitOptionalError(
+          location, stringifyFftType(fftType),
+          " takes a complex tensor as input, but is given ", operandType, ".");
+    }
+  }
+  // Generate the output element type
+  Type resultElementType = operandElementType;
+  if (fftType == FftType::RFFT) {  // RFFT : R -> C
+    resultElementType = ComplexType::get(resultElementType);
+  } else if (fftType == FftType::IRFFT) {  // IRFFT : C -> R
+    resultElementType = operandElementType.cast<ComplexType>().getElementType();
   }
 
-  auto resultType = getResult().getType().dyn_cast<RankedTensorType>();
-  if (!resultType) return success();
-  if (fft_type() == FftType::IRFFT) {
-    if (resultType.getElementType().isa<ComplexType>()) {
-      return emitError()
-             << "IRFFT produces a real tensor as output, but is given "
-             << resultType << ".";
-    }
-  } else if (!resultType.getElementType().isa<ComplexType>()) {
-    return emitError() << stringifyFftType(fft_type())
-                       << " produces a complex tensor as output, but is given "
-                       << resultType << ".";
+  // P3. Check input shape and infer return shape
+  operandType = operandType.dyn_cast<RankedTensorType>();
+  if (!operandType) {
+    inferredReturnShapes.emplace_back(resultElementType);
+    return success();
+  }
+  auto operandShape = operandType.getShape();
+  if (static_cast<int64_t>(operandShape.size()) < fftRank) {
+    return emitOptionalError(
+        location, "operand rank must not be less than fft rank of ", fftRank,
+        " for operand of type ", operandType, ".");
   }
 
+  SmallVector<int64_t> resultShape = to_vector(operandShape);
+
+  if (fftType == FftType::RFFT) {
+    auto shapeBack = operandShape.take_back(fftRank);
+    for (auto [operandDim, fftDim] : llvm::zip(shapeBack, fftLength)) {
+      if (operandDim != fftDim) {
+        return emitOptionalError(
+            location,
+            "RFFT requires innermost dimensions match fft_length. Got: ",
+            operandShape, " but wanted ", fftLength, ".");
+      }
+    }
+    if (fftLength[fftRank - 1] != 0) {
+      resultShape[resultShape.size() - 1] = fftLength[fftRank - 1] / 2 + 1;
+    }
+  }
+  if (fftType == FftType::IRFFT) {
+    auto shapeBack = operandShape.take_back(fftRank).drop_back();
+    for (auto [operandDim, fftDim] : llvm::zip(shapeBack, fftLength)) {
+      if (operandDim != fftDim) {
+        return emitOptionalError(location,
+                                 "IRFFT requires non-final dimensions "
+                                 "match fft_length. Got: ",
+                                 operandShape, " but wanted ", fftLength,
+                                 ", and ", operandDim, " != ", fftDim, ".");
+      }
+    }
+    if ((operandShape[operandShape.size() - 1] != 0 ||
+         fftLength[fftRank - 1] != 0) &&
+        operandShape[operandShape.size() - 1] != fftLength[fftRank - 1] / 2 + 1)
+      return emitOptionalError(location,
+                               "IRFFT requires innermost dimension match "
+                               "fft_length[-1]/2+1. Got: ",
+                               operandShape, " but fft_length is ", fftLength,
+                               ".");
+    resultShape[resultShape.size() - 1] = fftLength[fftRank - 1];
+  }
+
+  inferredReturnShapes.emplace_back(resultShape, resultElementType);
   return success();
 }
 
@@ -2350,6 +2367,7 @@ struct ConvolutionIsDot : public OpRewritePattern<mhlo::ConvolutionOp> {
     auto rhs = op.rhs();
     auto lhsTy = lhs.getType().cast<RankedTensorType>();
     auto rhsTy = rhs.getType().cast<RankedTensorType>();
+    auto resultTy = op.getType().cast<RankedTensorType>();
 
     if (lhsTy.getRank() != 2) return failure();
     if (rhsTy.getRank() != 2) return failure();
@@ -2361,6 +2379,8 @@ struct ConvolutionIsDot : public OpRewritePattern<mhlo::ConvolutionOp> {
     assert(!op.padding() || op.padding()->empty());
     assert(dNums.getKernelSpatialDimensions().empty());
 
+    auto lhsBatchDim = dNums.getInputBatchDimension();
+    auto rhsBatchDim = dNums.getKernelOutputFeatureDimension();
     auto lhsContractDim = dNums.getInputFeatureDimension();
     auto rhsContractDim = dNums.getKernelInputFeatureDimension();
     auto outBatchDim = dNums.getOutputBatchDimension();
@@ -2386,7 +2406,52 @@ struct ConvolutionIsDot : public OpRewritePattern<mhlo::ConvolutionOp> {
       return success();
     }
 
-    return failure();
+    int64_t featureGroupCount = op.feature_group_count();
+    int64_t lhsBatchSize = lhsTy.getDimSize(lhsBatchDim);
+    int64_t lhsContractSize = lhsTy.getDimSize(lhsContractDim);
+    int64_t rhsBatchSize = rhsTy.getDimSize(rhsBatchDim);
+    int64_t rhsContractSize = rhsTy.getDimSize(rhsContractDim);
+
+    llvm::SmallVector<int64_t> lhsShape;
+    llvm::SmallVector<int64_t> rhsShape;
+    lhsShape.resize(3, lhsBatchSize);
+    rhsShape.resize(3, rhsContractSize);
+    lhsShape[lhsContractDim] = featureGroupCount;
+    lhsShape[lhsContractDim + 1] = lhsContractSize / featureGroupCount;
+    rhsShape[rhsContractDim] = featureGroupCount;
+    rhsShape[rhsContractDim + 1] = rhsBatchSize / featureGroupCount;
+
+    lhsTy = RankedTensorType::get(lhsShape, lhsTy.getElementType());
+    rhsTy = RankedTensorType::get(rhsShape, rhsTy.getElementType());
+
+    lhs = rewriter.create<mhlo::ReshapeOp>(op.getLoc(), lhsTy, lhs);
+    rhs = rewriter.create<mhlo::ReshapeOp>(op.getLoc(), rhsTy, rhs);
+
+    auto dotTy = RankedTensorType::get(
+        {featureGroupCount, lhsBatchSize, rhsBatchSize / featureGroupCount},
+        resultTy.getElementType());
+
+    auto dotNums = DotDimensionNumbersAttr::get(
+        op.getContext(), {lhsContractDim}, {rhsContractDim},
+        {lhsContractDim + 1}, {rhsContractDim == 0 ? 2 : 0});
+    auto dotOp = rewriter.create<mhlo::DotGeneralOp>(
+        op.getLoc(), dotTy, lhs, rhs, dotNums,
+        op.precision_config().getValueOr(nullptr));
+
+    llvm::SmallVector<int64_t> perms;
+    perms.resize(3, dNums.getOutputBatchDimension() == 0 ? 0 : 2);
+    perms[0] = dNums.getOutputFeatureDimension();
+    perms[2] = dNums.getOutputFeatureDimension() + 1;
+
+    auto transposeTy = RankedTensorType::get(
+        {dotTy.getDimSize(perms[0]), dotTy.getDimSize(perms[1]),
+         dotTy.getDimSize(perms[2])},
+        dotTy.getElementType());
+    auto transposeOp = rewriter.create<mhlo::TransposeOp>(
+        op.getLoc(), transposeTy, dotOp, rewriter.getI64TensorAttr(perms));
+
+    rewriter.replaceOpWithNewOp<mhlo::ReshapeOp>(op, resultTy, transposeOp);
+    return success();
   }
 };
 
