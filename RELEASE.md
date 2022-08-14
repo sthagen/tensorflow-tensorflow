@@ -15,14 +15,20 @@
 
 # Major Features and Improvements
 
-*   <INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
-*   <IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
+*   `tf.lite`:
+
+    *   New operations supported:
+          * tf.unsortedsegmentmin op is supported.
+          * tf.atan2 op is supported.
+    *   Updates to existing operations:
+          * tfl.mul now supports complex32 inputs.
 
 # Bug Fixes and Other Changes
 
-* <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
-* <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
-* <NOTES SHOULD BE GROUPED PER AREA>
+*   `tf.image`
+    *   Added an optional parameter `return_index_map` to `tf.image.ssim` which
+        causes the returned value to be the local SSIM map instead of the global
+        mean.
 
 # Thanks to our Contributors
 

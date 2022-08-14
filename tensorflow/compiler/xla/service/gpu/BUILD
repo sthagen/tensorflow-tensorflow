@@ -602,7 +602,7 @@ config_setting(
 #         "@tf_runtime//:dtype",
 #         "@tf_runtime//:support",
 #         "@tf_runtime//backends/jitrt",
-#         "@tf_runtime//backends/jitrt:custom_call",
+#         "//tensorflow/compiler/xla/runtime:custom_call",
 #         "@tf_runtime//backends/jitrt:custom_call_to_llvm",
 #     ] + if_gpu_is_configured([
 #         ":cholesky_thunk",
@@ -675,6 +675,7 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
         "//tensorflow/compiler/xla/mlir_hlo:lhlo_gpu",
         "//tensorflow/compiler/xla/service:hlo_execution_profile",
         "//tensorflow/compiler/xla:array2d",
@@ -728,8 +729,8 @@ cc_library(
         ":precompiled_kernels",
         ":triangular_solve_thunk",
     ]) + if_cuda_is_configured([
-        "//tensorflow/stream_executor/cuda:cublas_plugin",
         "//tensorflow/stream_executor/cuda:cuda_stream",
+        "//tensorflow/core/platform/default/build_config:cublas_plugin",
         "//tensorflow/core/platform/default/build_config:cudnn_plugin",
         "//tensorflow/core/platform/default/build_config:cufft_plugin",
         "//tensorflow/core/platform/default/build_config:stream_executor_cuda",  # build_cleaner: keep
@@ -741,8 +742,9 @@ cc_library(
         ":is_xlir_enabled": [
             ":jitrt_custom_calls",
             # copybara:uncomment "@tf_runtime//backends/jitrt",
-            # copybara:uncomment "@tf_runtime//backends/jitrt:diagnostics",
+            "//tensorflow/compiler/xla/runtime:diagnostics",
             # copybara:uncomment "@tf_runtime//backends/jitrt:jitrt_compiler",
+            # copybara:uncomment "@tf_runtime//:init_tfrt_dialects",
         ],
         "//conditions:default": [],
     }),
@@ -928,9 +930,10 @@ cc_library(
         "//tensorflow/compiler/xla/service:buffer_assignment",
         "//tensorflow/compiler/xla:status",
         "//tensorflow/core:tflite_portable_logging",
-        "//tensorflow/stream_executor/cuda:cublas_plugin",
+        "//tensorflow/core/platform/default/build_config:cublas_plugin",
         "//tensorflow/stream_executor:device_memory",
         "//tensorflow/stream_executor:stream_header",
+        "//tensorflow/stream_executor/cuda:cublas_lt_header",
     ]),
 )
 
@@ -956,7 +959,8 @@ cc_library(
         "//tensorflow/core/protobuf:autotuning_proto_cc",
         "//tensorflow/core/util/proto:proto_utils",
         "//tensorflow/stream_executor:blas",
-        "//tensorflow/stream_executor/cuda:cublas_plugin",
+        "//tensorflow/core/platform/default/build_config:cublas_plugin",
+        "//tensorflow/stream_executor/cuda:cublas_lt_header",
         "//tensorflow/stream_executor:device_memory",
         "//tensorflow/stream_executor:device_memory_allocator",
         "//tensorflow/stream_executor/gpu:redzone_allocator",
@@ -985,7 +989,8 @@ cc_library(
         "//tensorflow/core/platform:statusor",
         "//tensorflow/stream_executor:stream_header",
     ] + if_cuda_is_configured([
-        "//tensorflow/stream_executor/cuda:cublas_plugin",
+        "//tensorflow/stream_executor/cuda:cublas_lt_header",
+        "//tensorflow/core/platform/default/build_config:cublas_plugin",
         "//tensorflow/stream_executor:host_or_device_scalar",
         "//tensorflow/stream_executor:scratch_allocator",
     ]),
@@ -1059,9 +1064,9 @@ cc_library(
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/stream_executor:lazy_op_runner",
         "//tensorflow/core/platform:stream_executor_no_cuda",
         "//tensorflow/stream_executor:dnn",
-        "//tensorflow/stream_executor:lazy_op_runner",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -1727,7 +1732,10 @@ cc_library(
         ":runtime_intrinsics",
     ] + select({
         ":is_xlir_enabled": [
+            ":jitrt_custom_calls",
             "//tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu:pass_utils",
+            "@tf_runtime//backends/jitrt",
+            "@tf_runtime//backends/jitrt:jitrt_compiler",
         ],
         "//conditions:default": [],
     }),
@@ -1849,12 +1857,10 @@ tf_cc_test(
         "XLA_FLAGS": "--xla_gpu_jitrt_executable",
     },
     tags = [
-        "broken",  # b/239679478: Switching AOT support from BEF to JitRt.
         "gpu",
         "no_oss",
         "no_rocm",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
-        "notap",  # b/239679478: Switching AOT support from BEF to JitRt.
         "requires-gpu-nvidia",
     ],
     deps = [
@@ -2595,6 +2601,7 @@ test_suite(
         "//tensorflow/compiler/xla/python:xla_client_test_gpu",
         "//tensorflow/compiler/xla/service/gpu:cudnn_fused_conv_rewriter_test",
         "//tensorflow/compiler/xla/service/gpu:custom_call_test",
+        "//tensorflow/compiler/xla/service/gpu:gpu_aot_compilation_test",
         "//tensorflow/compiler/xla/service/gpu/tests:add_preds.hlo.test",
         "//tensorflow/compiler/xla/service/gpu/tests:all_reduce.hlo.test",
         "//tensorflow/compiler/xla/service/gpu/tests:concat.hlo.test",

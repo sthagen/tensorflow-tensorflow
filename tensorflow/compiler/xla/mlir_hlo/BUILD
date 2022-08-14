@@ -29,6 +29,7 @@ td_library(
     compatible_with = get_compatible_with_cloud(),
     includes = ["include"],
     deps = [
+        "@llvm-project//mlir:BuiltinDialectTdFiles",
         "@llvm-project//mlir:ControlFlowInterfacesTdFiles",
         "@llvm-project//mlir:CopyOpInterfaceTdFiles",
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
@@ -480,6 +481,7 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:ComplexDialect",
         "@llvm-project//mlir:ControlFlowInterfaces",
         "@llvm-project//mlir:Dialect",
         "@llvm-project//mlir:FuncDialect",
@@ -1479,6 +1481,7 @@ cc_library(
         ":map_chlo_to_hlo_op",
         ":mlir_hlo",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ComplexDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:SCFDialect",
@@ -1501,6 +1504,26 @@ gentbl_cc_library(
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "lib/Dialect/mhlo/transforms/chlo_legalize_to_hlo_patterns.td",
     deps = [":hlo_ops_td_files"],
+)
+
+cc_library(
+    name = "chlo_legalize_to_hlo_pass",
+    srcs = ["lib/Dialect/mhlo/transforms/chlo_legalize_to_hlo_pass.cc"],
+    hdrs = ["include/mlir-hlo/Dialect/mhlo/transforms/passes.h"],
+    deps = [
+        ":chlo_legalize_to_hlo",
+        ":mhlo_pass_details",
+        ":mlir_hlo",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:ShapeDialect",
+        "@llvm-project//mlir:TensorDialect",
+        "@llvm-project//mlir:Transforms",
+    ],
 )
 
 cc_library(
@@ -1556,7 +1579,6 @@ cc_library(
         "include/mlir-hlo/Dialect/mhlo/transforms/rewriters.h",
         "lib/Analysis/test_shape_component_analysis.cc",
         "lib/Analysis/test_userange_analysis.cc",
-        "lib/Dialect/mhlo/transforms/chlo_legalize_to_hlo_pass.cc",
         "lib/Dialect/mhlo/transforms/materialize_broadcasts_pass.cc",
         "lib/Dialect/mhlo/transforms/optimize_mhlo_pass.cc",
         "lib/Dialect/mhlo/transforms/restrict_max_rank.cc",
@@ -1613,6 +1635,7 @@ cc_library(
         ":bufferize_pass",
         ":bufferize_tiled_loop",
         ":chlo_legalize_to_hlo",
+        ":chlo_legalize_to_hlo_pass",
         ":collapse_elementwise_map",
         ":collapse_parallel_loops_to_1d_pass",
         ":constraint_fusion_pass",

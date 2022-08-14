@@ -6,16 +6,13 @@
 
 # TODO(rdzhabarov): XLA should have its own tensorflow independent rule.
 load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
-load("//tensorflow:tensorflow.bzl", "tf_cuda_library")
+load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_cuda_library")
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow/core/platform:build_config.bzl", "tf_proto_library")
 
 package(
     default_visibility = [
-        "//tensorflow/compiler/xla:__subpackages__",
-        "//tensorflow/core/protobuf:__subpackages__",
-        "//tensorflow/core/util:__subpackages__",
-        "//tensorflow/stream_executor:__subpackages__",
+        "//tensorflow:__subpackages__",
     ],
     licenses = ["notice"],
 )
@@ -62,7 +59,6 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/lib",
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/core/platform:logging",
-        "//tensorflow/stream_executor/cuda:cuda_dnn_headers",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -378,9 +374,11 @@ tf_cuda_library(
         "//tensorflow/compiler/xla/stream_executor/platform",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core/platform:logging",
-        "//tensorflow/stream_executor/cuda:cuda_dnn_headers",
-        # TODO(rdzhabarov): dnn dependency only needed until stream_executor/cuda is not mirgated to xla/compiler.
+        # TODO(rdzhabarov): dependencies below only needed until stream_executor/cuda is migrated to xla/compiler.
         "//tensorflow/stream_executor:dnn",
+        "//tensorflow/stream_executor:plugin_registry",
+        "//tensorflow/stream_executor:temporary_device_memory",
+        "//tensorflow/stream_executor/lib",
     ],
 )
 
@@ -677,6 +675,7 @@ cc_library(
         ":stream_executor_headers",
         ":stream_executor_pimpl",
         ":timer",
+        "//tensorflow/compiler/xla/stream_executor:dnn_proto_cc_impl",
     ],
 )
 
@@ -697,7 +696,54 @@ cc_library(
     ],
 )
 
-alias(
-    name = "stream",
-    actual = ":stream_executor",
+cc_library(
+    name = "scratch_allocator",
+    srcs = ["scratch_allocator.cc"],
+    hdrs = ["scratch_allocator.h"],
+    deps = [
+        ":device_memory",
+        ":stream_executor_headers",
+        "//tensorflow/compiler/xla/stream_executor/lib",
+        "//tensorflow/compiler/xla/stream_executor/platform",
+        "@com_google_absl//absl/container:inlined_vector",
+    ],
 )
+
+tf_cc_test(
+    name = "stream_test",
+    size = "small",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":stream_executor",
+        "//tensorflow/compiler/xla/stream_executor/host:host_platform",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+    ],
+)
+
+cc_library(
+    name = "tf_allocator_adapter",
+    srcs = ["tf_allocator_adapter.cc"],
+    hdrs = ["tf_allocator_adapter.h"],
+    deps = [
+        ":device_memory",
+        ":device_memory_allocator",
+        ":platform",
+        ":stream_executor_headers",
+        "//tensorflow/compiler/xla/stream_executor/lib",
+        "//tensorflow/core/framework:allocator",
+        "//tensorflow/core/platform:errors",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "lazy_op_runner",
+    hdrs = ["lazy_op_runner.h"],
+    deps = [
+        ":dnn",
+        ":stream_executor_headers",
+    ],
+)
+
+exports_files(["lazy_op_runner.h"])
