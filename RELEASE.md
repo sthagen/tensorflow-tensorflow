@@ -2,7 +2,8 @@
 
 <INSERT SMALL BLURB ABOUT RELEASE FOCUS AREA AND POTENTIAL TOOLCHAIN CHANGES>
 
-# Breaking Changes
+* `tensorflow::StatusOr::ConsumeValueOrDie`, deprecated in TF 2.10 has been
+  removed.
 
 * <DOCUMENT BREAKING CHANGES HERE>
 * <THIS SECTION SHOULD CONTAIN API, ABI AND BEHAVIORAL BREAKING CHANGES>
@@ -60,6 +61,7 @@ This release contains contributions from many people at Google, as well as:
     *   Updates to existing operations:
           * tfl.scatter_nd now supports I1 for update arg.
     *   Upgrade Flatbuffers v2.0.5 from v1.12.0
+    *   Better supporting `tf_type.variant` type in flatbuffer import/export.
 
 *   `tf.keras`:
 

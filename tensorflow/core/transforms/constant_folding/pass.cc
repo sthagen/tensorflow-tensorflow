@@ -719,7 +719,10 @@ class MaterializeShapeOp : public FolderPatternBase<MaterializeShapeOp> {
     if (!input_shape.getShape().empty() && input_shape.getShape()[0] == 0)
       return failure();
 
-    ElementsAttr const_attr = ConvertShapeToAttr(input_shape);
+    Type output_dtype =
+        op->getResult(0).getType().cast<ShapedType>().getElementType();
+    ElementsAttr const_attr = CreateElementsAttrOfTypeValues(
+        output_dtype, {input_shape.getRank()}, input_shape.getShape());
 
     // Add the control edge to `input` to ensure that the constant value will
     // only be run in the cases where Shape would have been run in the original
@@ -1028,7 +1031,7 @@ class MaterializeReductionIndices
     auto indices_shape = indices->getResult(0).getType().cast<ShapedType>();
     if (!indices_shape.hasRank()) return failure();
     if (!indices_shape.getElementType().isInteger(32) &&
-        indices_shape.getElementType().isInteger(64)) {
+        !indices_shape.getElementType().isInteger(64)) {
       return failure();
     }
 
@@ -1064,11 +1067,11 @@ class MaterializeReductionIndices
 
     // We know it's a full reduction. We can generate the full set of indices
     // to reduce as a constant node.
-    SmallVector<int> elements(indices_shape.getRank());
+    SmallVector<int> elements(input_shape.getRank());
     std::iota(elements.begin(), elements.end(), 0);
 
     ElementsAttr const_attr = CreateElementsAttrOfTypeValues(
-        indices_shape.getElementType(), {indices_shape.getRank()},
+        indices_shape.getElementType(), {input_shape.getRank()},
         llvm::makeArrayRef(elements));
 
     FailureOr<TFOp> const_op = CreateConstantTensorOp(

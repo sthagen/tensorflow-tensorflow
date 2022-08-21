@@ -103,6 +103,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/gpu_reduce_scatter_creator.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_sanitize_constant_names.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_scatter_expander.h"
+#include "tensorflow/compiler/xla/service/gpu/gpu_shape_verifier.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_fusion_stats.h"
 #include "tensorflow/compiler/xla/service/gpu/horizontal_input_fusion.h"
 #include "tensorflow/compiler/xla/service/gpu/horizontal_loop_fusion.h"
@@ -188,10 +189,9 @@ limitations under the License.
 
 #if XLA_ENABLE_XLIR
 #include "tensorflow/compiler/mlir/tfrt/transforms/lmhlo_to_gpu/pass_utils.h"
+#include "tensorflow/compiler/xla/mlir/transforms/runtime/compilation_pipeline.h"
+#include "tensorflow/compiler/xla/runtime/jit_executable.h"
 #include "tensorflow/compiler/xla/service/gpu/jitrt_custom_calls.h"
-#include "tfrt/jitrt/jitrt.h"  // from @tf_runtime
-#include "tfrt/jitrt/jitrt_compiler.h"  // from @tf_runtime
-namespace jitrt = ::tfrt::jitrt;
 #endif  // XLA_ENABLE_XLIR
 
 namespace xla {
@@ -318,6 +318,22 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
       pointer_size_(llvm::DataLayout(data_layout)
                         .getPointerSize(0 /* default address space */)) {}
 
+namespace {
+// Adds the HloVerifier for GPU to the given pipeline.
+void AddHloVerifier(HloPassPipeline* pipeline, HloVerifierOpts&& opts = {},
+                    bool debug_only = false) {
+  std::unique_ptr<TargetVerifierMetadata> verifier_metadata =
+      std::make_unique<GpuVerifierMetadata>(std::move(opts));
+  if (debug_only) {
+    pipeline->AddInvariantCheckerDebug<HloVerifier>(
+        std::move(verifier_metadata), "hlo verifier (debug)");
+  } else {
+    pipeline->AddInvariantChecker<HloVerifier>(std::move(verifier_metadata),
+                                               "hlo verifier");
+  }
+}
+}  // namespace
+
 // Runs optimization passes on the given HLO module.
 Status GpuCompiler::OptimizeHloModule(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
@@ -338,11 +354,11 @@ Status GpuCompiler::OptimizeHloModule(
 
   if (hlo_module->config().use_spmd_partitioning()) {
     HloPassPipeline spmd_pipeline("spmd-partitioner");
+    AddHloVerifier(&spmd_pipeline);
     const int64_t num_partitions = hlo_module->config().num_partitions();
     if (num_partitions > 1) {
       // Run some IR cleanup passes before running the SPMD partitioning
       // passes.
-      spmd_pipeline.AddInvariantChecker<HloVerifier>(HloVerifierOpts{});
       spmd_pipeline.AddPass<CallInliner>();
       spmd_pipeline.AddPass<ZeroSizedHloElimination>();
       spmd_pipeline.AddPass<ConditionalCanonicalizer>();
@@ -384,7 +400,7 @@ Status GpuCompiler::OptimizeHloModule(
 
   {
     HloPassPipeline pipeline("optimization");
-    pipeline.AddInvariantChecker<HloVerifier>(HloVerifierOpts{});
+    AddHloVerifier(&pipeline);
     pipeline.AddPass<AllToAllDecomposer>();
 
     HloPredicate upcaster_filter = [&](const HloInstruction* instr) {
@@ -488,7 +504,7 @@ Status GpuCompiler::OptimizeHloModule(
     // point.
     [&, &pipeline =
             pipeline.AddPass<HloPassFix<HloPassPipeline>>("simplification")] {
-      pipeline.AddInvariantCheckerDebug<HloVerifier>(HloVerifierOpts{});
+      AddHloVerifier(&pipeline, HloVerifierOpts{}, /*debug_only=*/true);
 
       // BatchNormExpander can create zero-sized ops, so zero-sized HLO
       // elimination has to come after that pass.
@@ -596,9 +612,11 @@ Status GpuCompiler::OptimizeHloModule(
     // We try to split variadic ops with many parameters into several such ops
     // to avoid exceeding the parameter space.
     fusion.AddPass<VariadicOpSplitter>();
-    fusion.AddInvariantCheckerDebug<HloVerifier>(
+    AddHloVerifier(
+        &fusion,
         HloVerifierOpts{}.MakeLayoutSensitive().WithInstructionCanChangeLayout(
-            LayoutAssignment::InstructionCanChangeLayout));
+            LayoutAssignment::InstructionCanChangeLayout),
+        /*debug_only=*/true);
     fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/false);
     fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/true);
     fusion.AddPass<FusionMerger>();
@@ -681,9 +699,11 @@ Status GpuCompiler::PrepareHloModuleForIrEmitting(HloModule* hlo_module) {
   // (b/27180329). Therefore, in that case, we set the output to be a copy of
   // the parameter.
   HloPassPipeline pipeline("GPU-ir-emit-prepare");
-  pipeline.AddInvariantCheckerDebug<HloVerifier>(
+  AddHloVerifier(
+      &pipeline,
       HloVerifierOpts{}.MakeLayoutSensitive().WithInstructionCanChangeLayout(
-          LayoutAssignment::InstructionCanChangeLayout));
+          LayoutAssignment::InstructionCanChangeLayout),
+      /*debug_only=*/true);
 
   // Copy insertion should be performed immediately before IR emission to avoid
   // inserting unnecessary copies (later pass adds an instruction which
@@ -720,13 +740,14 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   }
 
   HloPassPipeline pipeline("post-layout_assignment");
-  pipeline.AddInvariantCheckerDebug<HloVerifier>(
-      HloVerifierOpts{}
-          .MakeLayoutSensitive()
-          .WithInstructionCanChangeLayout(
-              LayoutAssignment::InstructionCanChangeLayout)
-          .VerifyBroadcastDimensionsOrder()
-          .VerifyReshapeIsBitcast());
+  AddHloVerifier(&pipeline,
+                 HloVerifierOpts{}
+                     .MakeLayoutSensitive()
+                     .WithInstructionCanChangeLayout(
+                         LayoutAssignment::InstructionCanChangeLayout)
+                     .VerifyBroadcastDimensionsOrder()
+                     .VerifyReshapeIsBitcast(),
+                 /*debug_only=*/true);
 
   pipeline.AddPass<ReductionDegenerateDimRemover>();
   pipeline.AddPass<ReductionLayoutNormalizer>();
@@ -861,7 +882,8 @@ StatusOr<std::unique_ptr<BufferAssignment>> GpuCompiler::AssignBuffers(
 #if XLA_ENABLE_XLIR
 static StatusOr<OwnedJitRtProgram> LowerToJitRt(
     mlir::ModuleOp mlir_module, llvm::StringRef entry_function_name,
-    llvm::ArrayRef<int64_t> buffer_sizes, HloModule* hlo_module) {
+    llvm::ArrayRef<int64_t> buffer_sizes, HloModule* hlo_module,
+    se::StreamExecutor* stream_exec) {
   // Forward collective (NCCL) attributes for use by the lowering pipeline.
   mlir::OpBuilder builder(mlir_module.getContext());
   mlir::IntegerAttr replica_count_attr =
@@ -873,10 +895,22 @@ static StatusOr<OwnedJitRtProgram> LowerToJitRt(
   func->setAttr("replica_count", replica_count_attr);
   func->setAttr("num_partitions", num_partitions_attr);
 
+  tensorflow::GpuBinaryOptions options;
+  if (stream_exec == nullptr) {
+    options = tensorflow::GpuBinaryOptions::DefaultGpuBinaryOptions();
+  } else {
+    options.platform_name = stream_exec->platform()->Name();
+    options.gpu_device_info = xla::gpu::GetGpuDeviceInfo(stream_exec);
+    options.cuda_compute_capability =
+        stream_exec->GetDeviceDescription().cuda_compute_capability();
+    options.rocm_compute_capability =
+        stream_exec->GetDeviceDescription().rocm_compute_capability();
+  }
+
   // Lower LMHLO operations to the JitRt compatible custom calls.
   TF_RETURN_IF_ERROR(tensorflow::ConvertLmhloToJitRt(
       mlir_module, {entry_function_name.data(), entry_function_name.size()},
-      buffer_sizes));
+      buffer_sizes, options));
   // Serialize module to pass it to GpuExecutable for compilation.
   std::string serialized_module;
   llvm::raw_string_ostream os(serialized_module);
@@ -1049,7 +1083,7 @@ static Status CompileModuleToLlvmIrImpl(
         [](const BufferAllocation& allocation) { return allocation.size(); });
     TF_ASSIGN_OR_RETURN(results->executable,
                         LowerToJitRt(*mlir_module, entry_function.getName(),
-                                     buffer_sizes, hlo_module));
+                                     buffer_sizes, hlo_module, stream_exec));
     return OkStatus();
   }
 #endif  // XLA_ENABLE_XLIR
@@ -1377,26 +1411,6 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   return static_cast<std::unique_ptr<Executable>>(std::move(gpu_executable));
 }
 
-GpuDeviceInfo GetGpuDeviceInfo(se::StreamExecutor* stream_exec) {
-  GpuDeviceInfo gpu_device_info;
-  gpu_device_info.threads_per_block_limit =
-      stream_exec->GetDeviceDescription().threads_per_block_limit();
-  gpu_device_info.threads_per_warp =
-      stream_exec->GetDeviceDescription().threads_per_warp();
-  gpu_device_info.shared_memory_per_block =
-      stream_exec->GetDeviceDescription().shared_memory_per_block();
-  gpu_device_info.threads_per_core_limit =
-      stream_exec->GetDeviceDescription().threads_per_core_limit();
-  gpu_device_info.core_count = stream_exec->GetDeviceDescription().core_count();
-  gpu_device_info.block_dim_limit_x =
-      stream_exec->GetDeviceDescription().block_dim_limit().x;
-  gpu_device_info.block_dim_limit_y =
-      stream_exec->GetDeviceDescription().block_dim_limit().y;
-  gpu_device_info.block_dim_limit_z =
-      stream_exec->GetDeviceDescription().block_dim_limit().z;
-  return gpu_device_info;
-}
-
 StatusOr<std::vector<std::unique_ptr<AotCompilationResult>>>
 GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
                                 const AotCompilationOptions& options) {
@@ -1431,30 +1445,31 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     const auto& program = std::get<OwnedJitRtProgram>(compiled_executable);
 
     // Options for the default JitRt compilation pipeline.
-    jitrt::CompilationPipelineOptions copts;
-    copts.num_worker_threads = 1;
+    runtime::CompilationPipelineOptions copts;
 
     // Options for constructing JitRt JitExecutable.
-    jitrt::CompilationOptions opts;
-    opts.specialization = jitrt::CompilationOptions::Specialization::kDisabled;
-    opts.register_dialects = jitrt::RegisterDefaultJitRtDialects;
+    runtime::JitExecutable::Options opts;
+    opts.specialization = runtime::JitExecutable::Specialization::kDisabled;
+    opts.compiler.register_dialects =
+        runtime::RegisterDefaultXlaRuntimeDialects;
 
     // Register JitRt Gpu runtime custom calls with the linker.
-    opts.runtime_symbol_map = jitrt::GetSymbolsBinding(JitRtGpuCustomCalls());
+    opts.compiler.symbols_binding = runtime::ToSymbolsBinding(
+        JitRtGpuCustomCalls(), PopulateXlaTypeIdNames);
 
-    opts.create_compilation_pipeline = [copts](mlir::PassManager& pm) {
-      jitrt::CreateDefaultJitRtCompilationPipeline(pm, copts);
+    opts.compiler.create_compilation_pipeline = [copts](mlir::PassManager& pm) {
+      runtime::CreateDefaultXlaRuntimeCompilationPipeline(pm, copts);
     };
 
     // Instantiate new JitExecutable from the MLIR source.
-    auto jit_executable = jitrt::JitExecutable::Instantiate(
+    auto jit_executable = runtime::JitExecutable::Instantiate(
         program->module, program->entry_point, opts);
     if (auto err = jit_executable.takeError())
       return InternalError("Failed to compile JitRt program: %s",
                            tfrt::StrCat(err));
 
     // For static shapes we can always serialize only the default executable.
-    jitrt::Executable& executable = jit_executable->DefaultExecutable().get();
+    runtime::Executable& executable = jit_executable->DefaultExecutable().get();
 
     // Check if JitRt executable saved the compilation result.
     std::unique_ptr<llvm::MemoryBuffer> obj_file = executable.obj_file();
