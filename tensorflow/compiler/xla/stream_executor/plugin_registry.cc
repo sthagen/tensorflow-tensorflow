@@ -84,7 +84,7 @@ port::Status PluginRegistry::RegisterFactoryInternal(
 
   (*factories)[plugin_id] = factory;
   plugin_names_[plugin_id] = plugin_name;
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 template <typename FACTORY_TYPE>
@@ -112,7 +112,7 @@ bool PluginRegistry::SetDefaultFactory(Platform::Id platform_id,
         MultiPlatformManager::PlatformWithId(platform_id);
     std::string platform_name = "<unregistered platform>";
     if (status.ok()) {
-      platform_name = status.ValueOrDie()->Name();
+      platform_name = status.value()->Name();
     }
 
     LOG(ERROR) << "A factory must be registered for a platform before being "

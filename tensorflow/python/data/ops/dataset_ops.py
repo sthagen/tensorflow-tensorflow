@@ -615,9 +615,10 @@ class DatasetV2(
       raise RuntimeError("`tf.data.Dataset.as_numpy_iterator()` is only "
                          "supported in eager mode.")
     for component_spec in nest.flatten(self.element_spec):
-      if not isinstance(component_spec,
-                        (tensor_spec.TensorSpec, ragged_tensor.RaggedTensorSpec,
-                         structure.NoneTensorSpec)):
+      if not isinstance(
+          component_spec,
+          (tensor_spec.TensorSpec, ragged_tensor.RaggedTensorSpec,
+           sparse_tensor_lib.SparseTensorSpec, structure.NoneTensorSpec)):
         raise TypeError(
             f"`tf.data.Dataset.as_numpy_iterator()` is not supported for "
             f"datasets that produce values of type {component_spec.value_type}")
@@ -811,7 +812,10 @@ class DatasetV2(
     Returns:
       Dataset: A `Dataset`.
     """
-    return TensorSliceDataset(tensors, name=name)
+    # Loaded lazily due to a circular dependency (dataset_ops ->
+    # from_tensor_slices_op -> dataset_ops).
+    from tensorflow.python.data.ops import from_tensor_slices_op  # pylint: disable=g-import-not-at-top
+    return from_tensor_slices_op.from_tensor_slices(tensors, name)
 
   class _GeneratorState:
     """Stores outstanding iterators created from a Python generator.
@@ -1250,7 +1254,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return ZipDataset(datasets, name=name)
 
@@ -1280,9 +1284,49 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return ConcatenateDataset(self, dataset, name=name)
+
+  @staticmethod
+  def counter(start=0, step=1, dtype=dtypes.int64, name=None):
+    """Creates a `Dataset` that counts from `start` in steps of size `step`.
+
+    Unlike `tf.data.Dataset.range`, which stops at some ending number,
+    `tf.data.Dataset.counter` produces elements indefinitely.
+
+    >>> dataset = tf.data.experimental.Counter().take(5)
+    >>> list(dataset.as_numpy_iterator())
+    [0, 1, 2, 3, 4]
+    >>> dataset.element_spec
+    TensorSpec(shape=(), dtype=tf.int64, name=None)
+    >>> dataset = tf.data.experimental.Counter(dtype=tf.int32)
+    >>> dataset.element_spec
+    TensorSpec(shape=(), dtype=tf.int32, name=None)
+    >>> dataset = tf.data.experimental.Counter(start=2).take(5)
+    >>> list(dataset.as_numpy_iterator())
+    [2, 3, 4, 5, 6]
+    >>> dataset = tf.data.experimental.Counter(start=2, step=5).take(5)
+    >>> list(dataset.as_numpy_iterator())
+    [2, 7, 12, 17, 22]
+    >>> dataset = tf.data.experimental.Counter(start=10, step=-1).take(5)
+    >>> list(dataset.as_numpy_iterator())
+    [10, 9, 8, 7, 6]
+
+    Args:
+      start: (Optional.) The starting value for the counter. Defaults to 0.
+      step: (Optional.) The step size for the counter. Defaults to 1.
+      dtype: (Optional.) The data type for counter elements. Defaults to
+        `tf.int64`.
+      name: (Optional.) A name for the tf.data operation.
+
+    Returns:
+      A `Dataset` of scalar `dtype` elements.
+    """
+    # Loaded lazily due to a circular dependency (dataset_ops -> counter_op
+    # -> dataset_ops).
+    from tensorflow.python.data.ops import counter_op  # pylint: disable=g-import-not-at-top
+    return counter_op.counter(start, step, dtype, name=name)
 
   def prefetch(self, buffer_size, name=None):
     """Creates a `Dataset` that prefetches elements from this dataset.
@@ -1310,7 +1354,7 @@ class DatasetV2(
       name: Optional. A name for the tf.data transformation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     if DEBUG_MODE:
       return self
@@ -1377,7 +1421,12 @@ class DatasetV2(
       with ops.control_dependencies([assert_not_empty]):
         matching_files = array_ops.identity(matching_files)
 
-      dataset = TensorSliceDataset(matching_files, is_files=True, name=name)
+      # TODO(b/240947712): Remove lazy import after this method is factored out.
+      # Loaded lazily due to a circular dependency (dataset_ops ->
+      # from_tensor_slices_op -> dataset_ops).
+      from tensorflow.python.data.ops import from_tensor_slices_op  # pylint: disable=g-import-not-at-top
+      dataset = from_tensor_slices_op.TensorSliceDataset(
+          matching_files, is_files=True, name=name)
       if issubclass(Dataset, DatasetV1):
         dataset = DatasetV1Adapter(dataset)
       if shuffle:
@@ -1407,7 +1456,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return RepeatDataset(self, count, name=name)
 
@@ -1439,7 +1488,7 @@ class DatasetV2(
       name: Optional. A name for the tf.data operations used by `enumerate`.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
 
     max_value = np.iinfo(dtypes.int64.as_numpy_dtype).max
@@ -1517,7 +1566,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return ShuffleDataset(
         self, buffer_size, seed, reshuffle_each_iteration, name=name)
@@ -1571,7 +1620,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return CacheDataset(self, filename, name=name)
 
@@ -1591,7 +1640,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return TakeDataset(self, count, name=name)
 
@@ -1611,7 +1660,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return SkipDataset(self, count, name=name)
 
@@ -1672,7 +1721,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       InvalidArgumentError: if `num_shards` or `index` are illegal values.
@@ -1882,7 +1931,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     if num_parallel_calls is None or DEBUG_MODE:
       if deterministic is not None and not DEBUG_MODE:
@@ -2009,7 +2058,7 @@ class DatasetV2(
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       ValueError: If a component has an unknown rank, and the `padded_shapes`
@@ -2184,7 +2233,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     if num_parallel_calls is None or DEBUG_MODE:
       if deterministic is not None and not DEBUG_MODE:
@@ -2231,9 +2280,35 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     return FlatMapDataset(self, map_func, name=name)
+
+  def ignore_errors(self, log_warning=False, name=None):
+    """Drops elements that cause errors.
+
+    >>> dataset = tf.data.Dataset.from_tensor_slices([1., 2., 0., 4.])
+    >>> dataset = dataset.map(lambda x: tf.debugging.check_numerics(1. / x, ""))
+    >>> list(dataset.as_numpy_iterator())
+    Traceback (most recent call last):
+    ...
+    InvalidArgumentError: ... Tensor had Inf values
+    >>> dataset = dataset.ignore_errors()
+    >>> list(dataset.as_numpy_iterator())
+    [1.0, 0.5, 0.25]
+
+    Args:
+      log_warning: (Optional.) A bool indicating whether or not ignored errors
+        should be logged to stderr. Defaults to `False`.
+      name: (Optional.) A string indicating a name for the `tf.data` operation.
+
+    Returns:
+      A new `Dataset` with the transformation applied as described above.
+    """
+    # Loaded lazily due to a circular dependency (dataset_ops ->
+    # ignore_errors_op -> dataset_ops).
+    from tensorflow.python.data.ops import ignore_errors_op  # pylint: disable=g-import-not-at-top
+    return ignore_errors_op.ignore_errors(self, log_warning, name)
 
   def interleave(self,
                  map_func,
@@ -2341,7 +2416,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     if block_length is None:
       block_length = 1
@@ -2384,10 +2459,12 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: The `Dataset` containing the elements of this dataset for which
-          `predicate` is `True`.
+      A new `Dataset` with the transformation applied as described above.
     """
-    return FilterDataset(self, predicate, name=name)
+    # Loaded lazily due to a circular dependency (dataset_ops -> filter_op ->
+    # dataset_ops).
+    from tensorflow.python.data.ops import filter_op  # pylint: disable=g-import-not-at-top
+    return filter_op.filter(self, predicate, name)
 
   def apply(self, transformation_func):
     """Applies a transformation function to this dataset.
@@ -2408,8 +2485,7 @@ name=None))
         returns a `Dataset`.
 
     Returns:
-      Dataset: The `Dataset` returned by applying `transformation_func` to this
-          dataset.
+      A new `Dataset` with the transformation applied as described above.
     """
     dataset = transformation_func(self)
     if not isinstance(dataset, DatasetV2):
@@ -2439,7 +2515,7 @@ name=None))
     Since windows are datasets, they can be iterated over:
 
     >>> for window in dataset:
-    ...   print([item.numpy() for item in window])
+    ...   print(list(window.as_numpy_iterator()))
     [0, 1, 2]
     [3, 4, 5]
     [6]
@@ -2535,8 +2611,7 @@ name=None))
 
     For example, to turn each window into a dense tensor:
 
-    >>> size = 3
-    >>> dataset = tf.data.Dataset.range(7).window(size, shift=1,
+    >>> dataset = tf.data.Dataset.range(7).window(3, shift=1,
     ...                                           drop_remainder=True)
     >>> batched = dataset.flat_map(lambda x:x.batch(3))
     >>> for batch in batched:
@@ -2562,8 +2637,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset` of (nests of) windows. Each window is a finite
-        datasets of flat elements.
+      A new `Dataset` with the transformation applied as described above.
     """
     if shift is None:
       shift = size
@@ -2836,7 +2910,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
     normalized_dataset = normalize_to_dense(self)
     return _UnbatchDataset(normalized_dataset, name=name)
@@ -2862,7 +2936,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      Dataset: A `Dataset` with the given options.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       ValueError: when an option is set more than once to a non-default value
@@ -2944,7 +3018,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       ValueError: if neither or both of {`window_size`, `window_size_func`} are
@@ -3035,7 +3109,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       ValueError: if `len(bucket_batch_sizes) != len(bucket_boundaries) + 1`.
@@ -3214,7 +3288,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
 
     project_func = None
@@ -3267,7 +3341,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
 
     return _ScanDataset(
@@ -3288,7 +3362,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
 
     return _TakeWhileDataset(self, predicate, name=name)
@@ -3311,7 +3385,7 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`.
+      A new `Dataset` with the transformation applied as described above.
     """
 
     return _UniqueDataset(self, name=name)
@@ -3322,32 +3396,29 @@ name=None))
                          initial_dist=None,
                          seed=None,
                          name=None):
-    """A transformation that resamples a dataset to a target distribution.
+    """Resamples elements to reach a target distribution.
 
-    Lets consider the following example where a dataset with an initial data
-    distribution of `init_dist` needs to be resampled into a dataset with
-    `target_dist` distribution.
+    Note: This implementation can reject **or repeat** elements in order to
+    reach the `target_dist`. So, in some cases, the output `Dataset` may be
+    larger than the input `Dataset`.
 
     >>> initial_dist = [0.6, 0.4]
-    >>> num_classes = len(initial_dist)
-    >>> num_samples = 1000
-    >>> data_np = np.random.choice(num_classes, num_samples, p=initial_dist)
-    >>> dataset = tf.data.Dataset.from_tensor_slices(data_np)
+    >>> n = 1000
+    >>> elems = np.random.choice(len(initial_dist), size=n, p=initial_dist)
+    >>> dataset = tf.data.Dataset.from_tensor_slices(elems)
+    >>> zero, one = np.bincount(list(dataset.as_numpy_iterator())) / n
 
-    The value of `x` will be close to `{0: 50000, 1: 50000}` as per the
-    `initial_dist` distribution.
+    Following from `initial_dist`, `zero` is ~0.6 and `one` is ~0.4.
 
     >>> target_dist = [0.5, 0.5]
-    >>> resampled_dataset = dataset.rejection_resample(
+    >>> dataset = dataset.rejection_resample(
     ...    class_func=lambda x: x,
     ...    target_dist=target_dist,
     ...    initial_dist=initial_dist)
-    >>> resampled_dataset = resampled_dataset.map(
-    ...     lambda class_func_result, data: data)
+    >>> dataset = dataset.map(lambda class_func_result, data: data)
+    >>> zero, one = np.bincount(list(dataset.as_numpy_iterator())) / n
 
-
-    The value distribution of classes in the resampled_distribution will be now
-    be close to the target distribution.
+    Following from `target_dist`, `zero` is ~0.5 and `one` is ~0.5.
 
     Args:
       class_func: A function mapping an element of the input dataset to a scalar
@@ -3360,8 +3431,10 @@ name=None))
       name: (Optional.) A name for the tf.data operation.
 
     Returns:
-      A `Dataset`
+      A new `Dataset` with the transformation applied as described above.
     """
+
+    # TODO(b/245793127): Consider switching back to the 'v1' implementation.
 
     target_dist_t = ops.convert_to_tensor(target_dist, name="target_dist")
     target_dist_t = math_ops.cast(target_dist_t, dtypes.float32)
@@ -3593,8 +3666,7 @@ name=None))
         Defaults to `True`.
 
     Returns:
-      A dataset that interleaves elements from `datasets` according to the
-      values of `choice_dataset`.
+      A new `Dataset` with the transformation applied as described above.
 
     Raises:
       TypeError: If `datasets` or `choice_dataset` has the wrong type.
@@ -4110,7 +4182,10 @@ class DatasetV1(DatasetV2):
       Dataset: The `Dataset` containing the elements of this dataset for which
           `predicate` is `True`.
     """
-    return FilterDataset(self, predicate, use_legacy_function=True)
+    # Loaded lazily due to a circular dependency (dataset_ops -> filter_op ->
+    # dataset_ops).
+    from tensorflow.python.data.ops import filter_op  # pylint: disable=g-import-not-at-top
+    return filter_op.FilterDataset(self, predicate, use_legacy_function=True)
 
   @functools.wraps(DatasetV2.apply)
   def apply(self, transformation_func):
@@ -4702,39 +4777,6 @@ class TensorDataset(DatasetSource):
         output_shapes=structure.get_flat_tensor_shapes(self._structure),
         metadata=self._metadata.SerializeToString())
     super(TensorDataset, self).__init__(variant_tensor)
-
-  @property
-  def element_spec(self):
-    return self._structure
-
-
-class TensorSliceDataset(DatasetSource):
-  """A `Dataset` of slices from a dataset element."""
-
-  def __init__(self, element, is_files=False, name=None):
-    """See `Dataset.from_tensor_slices()` for details."""
-    element = structure.normalize_element(element)
-    batched_spec = structure.type_spec_from_value(element)
-    self._tensors = structure.to_batched_tensor_list(batched_spec, element)
-    if not self._tensors:
-      raise ValueError("Invalid `element`. `element` should not be empty.")
-    self._structure = nest.map_structure(
-        lambda component_spec: component_spec._unbatch(), batched_spec)  # pylint: disable=protected-access
-    self._name = name
-
-    batch_dim = tensor_shape.Dimension(
-        tensor_shape.dimension_value(self._tensors[0].get_shape()[0]))
-    for t in self._tensors[1:]:
-      batch_dim.assert_is_compatible_with(
-          tensor_shape.Dimension(
-              tensor_shape.dimension_value(t.get_shape()[0])))
-
-    variant_tensor = gen_dataset_ops.tensor_slice_dataset(
-        self._tensors,
-        output_shapes=structure.get_flat_tensor_shapes(self._structure),
-        is_files=is_files,
-        metadata=self._metadata.SerializeToString())
-    super(TensorSliceDataset, self).__init__(variant_tensor)
 
   @property
   def element_spec(self):
@@ -5625,42 +5667,6 @@ class ParallelInterleaveDataset(UnaryDataset):
 
   def _transformation_name(self):
     return "Dataset.interleave()"
-
-
-class FilterDataset(UnaryUnchangedStructureDataset):
-  """A `Dataset` that filters its input according to a predicate function."""
-
-  def __init__(self,
-               input_dataset,
-               predicate,
-               use_legacy_function=False,
-               name=None):
-    """See `Dataset.filter()` for details."""
-    self._input_dataset = input_dataset
-    wrapped_func = structured_function.StructuredFunctionWrapper(
-        predicate,
-        self._transformation_name(),
-        dataset=input_dataset,
-        use_legacy_function=use_legacy_function)
-    if not wrapped_func.output_structure.is_compatible_with(
-        tensor_spec.TensorSpec([], dtypes.bool)):
-      raise ValueError(f"Invalid `predicate`. `predicate` must return a "
-                       f"`tf.bool` scalar tensor, but its return type is "
-                       f"{wrapped_func.output_structure}.")
-    self._predicate = wrapped_func
-    self._name = name
-    variant_tensor = gen_dataset_ops.filter_dataset(
-        input_dataset._variant_tensor,  # pylint: disable=protected-access
-        other_arguments=self._predicate.function.captured_inputs,
-        predicate=self._predicate.function,
-        **self._common_args)
-    super(FilterDataset, self).__init__(input_dataset, variant_tensor)
-
-  def _functions(self):
-    return [self._predicate]
-
-  def _transformation_name(self):
-    return "Dataset.filter()"
 
 
 class PrefetchDataset(UnaryUnchangedStructureDataset):

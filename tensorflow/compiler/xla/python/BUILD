@@ -16,7 +16,7 @@ load("//tensorflow:tensorflow.bzl", "pybind_extension")
 load("//tensorflow:tensorflow.bzl", "pytype_library")
 
 package(
-    default_visibility = ["//tensorflow:internal"],
+    default_visibility = [":friends"],
     licenses = ["notice"],
 )
 
@@ -172,6 +172,7 @@ cc_library(
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
         "//tensorflow/core:lib",
         "//tensorflow/python:bfloat16_lib",
+        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
         "@pybind11",
@@ -229,6 +230,7 @@ cc_library(
         ":exceptions",
         ":python_ref_manager",
         "//tensorflow/core:lib",
+        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
@@ -249,8 +251,8 @@ cc_library(
     deps = [
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:util",
-        "//tensorflow/core/platform:protobuf",
         "//tensorflow/core/profiler:protos_all_cc",
+        "//tensorflow/tsl/platform:protobuf",
         "@com_google_absl//absl/container:flat_hash_map",
         "@pybind11",
     ],
@@ -260,6 +262,7 @@ cc_library(
     name = "py_client",
     srcs = [
         "callback.cc",
+        "py_array.cc",
         "py_buffer.cc",
         "py_client.cc",
         "py_executable.cc",
@@ -270,6 +273,7 @@ cc_library(
     ]),
     hdrs = [
         "callback.h",
+        "py_array.h",
         "py_buffer.h",
         "py_client.h",
         "py_executable.h",
@@ -290,6 +294,7 @@ cc_library(
         ":pprof_profile_builder",
         ":python_ref_manager",
         ":python_utils",
+        ":status_casters",
         ":traceback",
         ":transfer_guard_lib",
         ":types",
@@ -302,6 +307,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/types:variant",
         "@pybind11",
+        "@pybind11_abseil//pybind11_abseil:absl_casters",
         "//tensorflow/compiler/xla/pjrt:host_callback",
         "//tensorflow/compiler/xla:comparison_util",
         "//tensorflow/compiler/xla:statusor",
@@ -316,9 +322,10 @@ cc_library(
         "//tensorflow/compiler/xla/service:custom_call_status",
         "//tensorflow/compiler/xla/service:custom_call_target_registry",
         "//tensorflow/core/platform:fingerprint",
-        "//tensorflow/core/platform:statusor",
+        "//tensorflow/tsl/platform:statusor",
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/python/lib/core:numpy_lib",
+        "//tensorflow/tsl/platform:fingerprint",
     ] + if_cuda([
         "@local_config_cuda//cuda:cuda_headers",
     ]),
@@ -376,8 +383,8 @@ cc_library(
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/pjrt:lru_cache",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
-        "//tensorflow/core/platform:status",
         "//tensorflow/core/profiler/lib:traceme",
+        "//tensorflow/tsl/platform:status",
         "//third_party/python_runtime:headers",  # build_cleaner: keep
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
@@ -457,8 +464,8 @@ cc_library(
         ":types",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/pjrt:pjrt_client",
-        "//tensorflow/core/platform:logging",
         "//tensorflow/core/profiler/lib:traceme",
+        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -525,9 +532,10 @@ cc_library(
         "-fno-strict-aliasing",
     ],
     features = ["-use_header_modules"],
+    visibility = [":friends"],
     deps = [
         ":exceptions",
-        "//tensorflow/core/platform:logging",
+        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
@@ -555,6 +563,7 @@ cc_library(
         "//tensorflow/compiler/xla:status",
         "//tensorflow/compiler/xla/client:xla_computation",
         "//tensorflow/compiler/xla/mlir_hlo",
+        "//tensorflow/compiler/xla/mlir_hlo/stablehlo:chlo_ops",
         "//tensorflow/compiler/xla/pjrt:mlir_to_hlo",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
@@ -675,6 +684,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:name_uniquer",
         "//tensorflow/compiler/xla/service:platform_util",
         "//tensorflow/core:lib",
+        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
@@ -767,6 +777,8 @@ pybind_extension(
                "//tensorflow/compiler/xla/pjrt/distributed:client",
                "//tensorflow/compiler/xla/pjrt/distributed:service",
                "//tensorflow/core:lib",
+               "//tensorflow/tsl/platform:logging",
+               "//tensorflow/compiler/xla/pjrt:pjrt_c_api_client",
                # Do NOT remove this dependency. The XLA Python extension must not
                # depend on any part of TensorFlow at runtime, **including**
                # libtensorflow_framework.so. The XLA module is deployed self-contained

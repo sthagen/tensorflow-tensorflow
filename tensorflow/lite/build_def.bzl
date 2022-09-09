@@ -128,7 +128,8 @@ def tflite_symbol_opts():
         clean_dep("//tensorflow:debug"): [],
         clean_dep("//tensorflow/lite:tflite_keep_symbols"): [],
         "//conditions:default": [
-            "-s",  # Omit symbol table, for all non debug builds
+            # Omit symbol table, for all non debug builds
+            "-Wl,-s",
         ],
     })
 
@@ -610,7 +611,6 @@ def tflite_custom_c_library(
         srcs = ["//tensorflow/lite/c:c_api_srcs"],
         hdrs = [
             "//tensorflow/lite/c:c_api.h",
-            "//tensorflow/lite/c:c_api_internal.h",
             "//tensorflow/lite/c:c_api_experimental.h",
             "//tensorflow/lite/c:c_api_opaque.h",
         ],

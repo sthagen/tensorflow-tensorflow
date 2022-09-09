@@ -17,9 +17,9 @@ limitations under the License.
 
 #include <atomic>
 
+#include "absl/synchronization/mutex.h"
 #include "tensorflow/compiler/xla/stream_executor/multi_platform_manager.h"
 #include "tensorflow/core/platform/env.h"
-#include "tensorflow/core/platform/mutex.h"
 
 namespace tensorflow {
 namespace tpu {
@@ -33,8 +33,7 @@ TpuPlatformInterface* GetRegisteredPlatformStatic(bool initialize_platform,
       stream_executor::MultiPlatformManager::PlatformWithName(
           "TPU", initialize_platform);
   if (status_or_tpu_platform.ok()) {
-    return static_cast<TpuPlatformInterface*>(
-        status_or_tpu_platform.ValueOrDie());
+    return static_cast<TpuPlatformInterface*>(status_or_tpu_platform.value());
   }
   if (status_or_tpu_platform.status().code() != error::NOT_FOUND) {
     LOG(WARNING) << "Error when getting the TPU platform: "
@@ -62,7 +61,7 @@ TpuPlatformInterface* GetRegisteredPlatformStatic(bool initialize_platform,
   // If we find at least one thing, we return the first thing we see.
   if (status_or_other_tpu_platforms.ok() &&
       !status_or_other_tpu_platforms->empty()) {
-    auto other_tpu_platforms = status_or_other_tpu_platforms.ValueOrDie();
+    auto other_tpu_platforms = status_or_other_tpu_platforms.value();
     LOG(WARNING) << other_tpu_platforms.size()
                  << " TPU platforms registered, selecting "
                  << other_tpu_platforms[0]->Name();
@@ -85,12 +84,12 @@ TpuPlatformInterface* GetRegisteredPlatformStatic(bool initialize_platform,
 /* static */
 TpuPlatformInterface* TpuPlatformInterface::GetRegisteredPlatform(
     bool initialize_platform, int num_tries) {
-  static auto* mu = new mutex;
+  static auto* mu = new absl::Mutex;
   static bool requested_initialize_platform = initialize_platform;
   static TpuPlatformInterface* tpu_registered_platform =
       GetRegisteredPlatformStatic(initialize_platform, num_tries);
 
-  mutex_lock lock(*mu);
+  absl::MutexLock lock(mu);
   if (!requested_initialize_platform && initialize_platform) {
     // If the first time this function is called, we did not request
     // initializing the platform, but the next caller wants the platform

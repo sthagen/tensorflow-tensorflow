@@ -18,6 +18,7 @@ limitations under the License.
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
@@ -29,13 +30,12 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/pattern_matcher_gmock.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/verified_hlo_module.h"
-#include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/window_util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
-#include "tensorflow/core/platform/status_matchers.h"
-#include "tensorflow/core/platform/statusor.h"
-#include "tensorflow/core/platform/test.h"
+#include "tensorflow/tsl/platform/status_matchers.h"
+#include "tensorflow/tsl/platform/statusor.h"
+#include "tensorflow/tsl/platform/test.h"
 
 namespace xla {
 namespace {
@@ -2146,16 +2146,6 @@ ENTRY BitcastConvertUsage {
 
 )"
 },
-{
-"OuterDimensionPartitions",
-R"(HloModule OuterDimensionPartitions, entry_computation_layout={(f32[100]{0})->f32[100]{0}}
-
-ENTRY Test {
-  ROOT foo = f32[100]{0} parameter(0), outer_dimension_partitions={0,10,20}
-}
-
-)"
-},
 });
   // clang-format on
 }
@@ -2265,7 +2255,21 @@ R"(HloModule test, entry_computation_layout={(f32[10,10]{1,0:D(D,C)})->f32[10,10
 ENTRY test {
   ROOT root = f32[10,10]{1,0:D(D,C)} parameter(0)
 })",
-}
+},
+
+{
+"SparseShapeWithPhysicalShape",
+R"(HloModule test
+
+ENTRY test {
+  ROOT root = f32[10,10]{1,0:D(D,C)P((s32[10]{0:T(100)}, s32[10]{0:T(100)}, f32[10]{0:T(100)}))} parameter(0)
+})",
+R"(HloModule test, entry_computation_layout={(f32[10,10]{1,0:D(D,C)P((s32[10]{0:T(100)}, s32[10]{0:T(100)}, f32[10]{0:T(100)}))})->f32[10,10]{1,0:D(D,C)P((s32[10]{0:T(100)}, s32[10]{0:T(100)}, f32[10]{0:T(100)}))}}
+
+ENTRY test {
+  ROOT root = f32[10,10]{1,0:D(D,C)P((s32[10]{0:T(100)}, s32[10]{0:T(100)}, f32[10]{0:T(100)}))} parameter(0)
+})",
+},
 });
   // clang-format on
 }
@@ -2424,17 +2428,17 @@ ENTRY %blabla (a: f32[1,291,291]) -> f32[1,291,291] {
 )";
   auto result = ParseAndReturnVerifiedModule(original);
   EXPECT_EQ(OkStatus(), result.status());
-  EXPECT_EQ("Cholesky", result.ValueOrDie()
+  EXPECT_EQ("Cholesky", result.value()
                             ->entry_computation()
                             ->root_instruction()
                             ->metadata()
                             .op_name());
-  EXPECT_EQ("Cholesky", result.ValueOrDie()
+  EXPECT_EQ("Cholesky", result.value()
                             ->entry_computation()
                             ->root_instruction()
                             ->metadata()
                             .op_type());
-  EXPECT_EQ(WINDOW, *result.ValueOrDie()
+  EXPECT_EQ(WINDOW, *result.value()
                          ->entry_computation()
                          ->root_instruction()
                          ->metadata()
@@ -2502,7 +2506,7 @@ ENTRY %configuration_test() -> s32[] {
 })";
   auto result = ParseAndReturnVerifiedModule(original);
   TF_ASSERT_OK(result.status());
-  EXPECT_EQ("foo bar", result.ValueOrDie()
+  EXPECT_EQ("foo bar", result.value()
                            ->entry_computation()
                            ->root_instruction()
                            ->raw_backend_config_string());
@@ -2685,7 +2689,7 @@ ENTRY %ShortConstant.v4 () -> f32[67,89] {
 )";
   auto result = ParseAndReturnVerifiedModule(original);
   TF_EXPECT_OK(result.status());
-  EXPECT_EQ(result.ValueOrDie()->ToString(HloPrintOptions()), original);
+  EXPECT_EQ(result.value()->ToString(HloPrintOptions()), original);
 }
 
 TEST_F(HloParserTest, NegativeNan) {
@@ -2699,7 +2703,7 @@ ENTRY %NegativeNan () -> bf16[2] {
 )";
   auto result = ParseAndReturnUnverifiedModule(original);
   EXPECT_EQ(OkStatus(), result.status());
-  EXPECT_EQ(result.ValueOrDie()->ToString(HloPrintOptions()), original);
+  EXPECT_EQ(result.value()->ToString(HloPrintOptions()), original);
 }
 
 TEST_F(HloParserTest, NanPayload) {
@@ -2713,7 +2717,7 @@ ENTRY %NanPayload () -> bf16[2] {
 )";
   auto result = ParseAndReturnUnverifiedModule(original);
   EXPECT_EQ(OkStatus(), result.status());
-  EXPECT_EQ(result.ValueOrDie()->ToString(HloPrintOptions()), original);
+  EXPECT_EQ(result.value()->ToString(HloPrintOptions()), original);
 }
 
 TEST_F(HloParserTest, AttributesAnyOrder) {
@@ -2884,7 +2888,7 @@ ENTRY %Reduce (input: f32[8,16,256]) -> f32[8,16] {
 
   auto module = ParseAndReturnVerifiedModule(original);
   TF_ASSERT_OK(module.status());
-  auto program_layout = module.ValueOrDie()->entry_computation_layout();
+  auto program_layout = module.value()->entry_computation_layout();
   ASSERT_EQ(program_layout.parameter_count(), 1);
   auto param_layout = program_layout.parameter_layout(0).layout();
   auto result_layout = program_layout.result_layout().layout();
@@ -2907,7 +2911,7 @@ c2 {
 })";
   auto module = ParseAndReturnVerifiedModule(original);
   TF_ASSERT_OK(module.status());
-  EXPECT_EQ(module.ValueOrDie()->entry_computation()->name(), "c2");
+  EXPECT_EQ(module.value()->entry_computation()->name(), "c2");
 }
 
 TEST_F(HloParserTest, NoRoot) {
@@ -2918,9 +2922,8 @@ ENTRY consts {
 })";
   auto module = ParseAndReturnVerifiedModule(original);
   TF_ASSERT_OK(module.status());
-  EXPECT_EQ(
-      module.ValueOrDie()->entry_computation()->root_instruction()->name(),
-      "last");
+  EXPECT_EQ(module.value()->entry_computation()->root_instruction()->name(),
+            "last");
 }
 
 TEST_F(HloParserTest, Comments) {
@@ -4053,7 +4056,7 @@ ENTRY TestComputation {
 )";
   auto result = ParseAndReturnVerifiedModule(hlo_string);
   TF_EXPECT_OK(result.status());
-  EXPECT_TRUE(result.ValueOrDie()->config().alias_passthrough_params());
+  EXPECT_TRUE(result.value()->config().alias_passthrough_params());
 }
 
 TEST_F(HloParserTest, NestedBroadcastWithoutDimensionsAttribute) {
@@ -4075,7 +4078,7 @@ ENTRY test {
   ROOT root = f32[10,10]{1,0:D(X,C)} parameter(0)
 })";
   EXPECT_THAT(ParseAndReturnUnverifiedModule(original).status(),
-              tensorflow::testing::StatusIs(
+              tsl::testing::StatusIs(
                   tensorflow::error::INVALID_ARGUMENT,
                   HasSubstr("expected a DimLevelType abbreviation")));
 }
@@ -4088,7 +4091,7 @@ ENTRY test {
 })";
   EXPECT_THAT(
       ParseAndReturnUnverifiedModule(original).status(),
-      tensorflow::testing::StatusIs(
+      tsl::testing::StatusIs(
           tensorflow::error::INVALID_ARGUMENT,
           HasSubstr("Dimensions size is 2, but dim level types size is 1")));
 }
@@ -4100,9 +4103,23 @@ ENTRY test {
   ROOT root = f32[10,10]{1,0:D(D,C)T(128,8)} parameter(0)
 })";
   EXPECT_THAT(ParseAndReturnUnverifiedModule(original).status(),
-              tensorflow::testing::StatusIs(
+              tsl::testing::StatusIs(
                   tensorflow::error::INVALID_ARGUMENT,
                   HasSubstr("Layout has tiles, but is for a sparse array")));
+}
+
+TEST_F(HloParserTest, RejectDensePhysicalShape) {
+  const std::string original = R"(HloModule test
+
+ENTRY test {
+  ROOT root = f32[10,10]{1,0:T(128,8)P(f32[10,10])} parameter(0)
+})";
+  EXPECT_THAT(
+      ParseAndReturnUnverifiedModule(original).status(),
+      tsl::testing::StatusIs(
+          tensorflow::error::INVALID_ARGUMENT,
+          HasSubstr(
+              "Layout has physical shape, but is not for a sparse array")));
 }
 
 }  // namespace

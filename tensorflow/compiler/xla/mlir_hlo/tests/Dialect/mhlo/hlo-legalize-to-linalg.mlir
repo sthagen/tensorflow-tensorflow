@@ -584,6 +584,16 @@ func.func @is_finte(%input: tensor<2x2xf32>) -> tensor<2x2xi1> {
 
 // -----
 
+// CHECK-LABEL: func @round_nearest_even
+func.func @round_nearest_even(%val: tensor<2x2xf32>) -> tensor<2x2xf32> {
+  // CHECK: %[[ROUND:.+]] = math.roundeven %arg1
+  // CHECK: linalg.yield %[[ROUND]]
+  %0 = "mhlo.round_nearest_even"(%val) : (tensor<2x2xf32>) -> (tensor<2x2xf32>)
+  func.return %0 : tensor<2x2xf32>
+}
+
+// -----
+
 // CHECK-LABEL: func @round
 func.func @round(%val: tensor<2x2xf32>) -> tensor<2x2xf32> {
   // CHECK: %[[ROUND:.+]] = math.round %arg1
@@ -2403,6 +2413,19 @@ func.func @reduce_add(%arg0: tensor<5x4xi32>, %arg1: tensor<i32>) -> tensor<5xi3
 // CHECK-NEXT: ^bb0(%[[LHS_IN:.*]]: i32, %[[RHS_IN:.*]]: i32):
 // CHECK-NEXT:   %[[RESULT:.*]] = arith.addi %[[RHS_IN]], %[[LHS_IN]] : i32
 // CHECK-NEXT:   linalg.yield %[[RESULT]] : i32
+
+// -----
+
+// CHECK-LABEL: @reduce_add_unranked
+func.func @reduce_add_unranked(%arg0: tensor<*xi32>, %arg1: tensor<i32>) -> tensor<*xi32> {
+  %0 = "mhlo.reduce"(%arg0, %arg1) ({
+  ^bb0(%arg3: tensor<i32>, %arg4 : tensor<i32>):
+    %1 = mhlo.add %arg3, %arg4 : tensor<i32>
+    "mhlo.return"(%1) : (tensor<i32>) -> ()
+  }) {dimensions = dense<1> : tensor<1xi64>, someattr} : (tensor<*xi32>, tensor<i32>) -> tensor<*xi32>
+  func.return %0 : tensor<*xi32>
+}
+// CHECK: mhlo.reduce
 
 // -----
 
@@ -4938,4 +4961,25 @@ func.func @feature_group_count_convolution(%arg0: tensor<2x14x12x2xf64>, %arg1: 
     {batch_group_count = 1 : i64, feature_group_count = 2 : i64, precision_config = [#mhlo<precision HIGHEST>, #mhlo<precision HIGHEST>]}
     : (tensor<2x14x12x2xf64>, tensor<7x7x1x2xf64>) -> tensor<2x6x8x2xf64>
   return %0 : tensor<2x6x8x2xf64>
+}
+
+// -----
+// The following test is identical to the previous one, except that the
+// `mhlo.convolution` op lacks the (optional) `window_stride` and
+// `window_reverse` attributes. The goal of this test is to make sure that the
+// compiler does not segfault, so we simply check for the existence of the
+// function in the output IR.
+
+// CHECK-LABEL: @convolution_without_reversing_and_stride
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x14x12x2xf64>
+// CHECK-SAME: %[[ARG1:.*]]: tensor<7x7x1x2xf64>)
+// CHECK-SAME -> tensor<2x12x16x2xf64>
+
+func.func @convolution_without_reversing_and_stride(%arg0: tensor<2x14x12x2xf64>, %arg1: tensor<7x7x1x2xf64>) -> tensor<2x12x16x2xf64> {
+  %0 = mhlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 1, 0, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {pad = [[1, 0], [0, 1]], lhs_dilate = [2, 2], rhs_dilate = [2, 2]}
+    {batch_group_count = 1 : i64, feature_group_count = 2 : i64, precision_config = [#mhlo<precision HIGHEST>, #mhlo<precision HIGHEST>]}
+    : (tensor<2x14x12x2xf64>, tensor<7x7x1x2xf64>) -> tensor<2x12x16x2xf64>
+  return %0 : tensor<2x12x16x2xf64>
 }

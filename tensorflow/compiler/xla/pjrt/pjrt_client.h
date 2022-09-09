@@ -31,7 +31,6 @@ limitations under the License.
 #include "absl/synchronization/notification.h"
 #include "absl/types/span.h"
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "tensorflow/compiler/xla/client/executable_build_options.h"
 #include "tensorflow/compiler/xla/client/xla_computation.h"
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/pjrt/pjrt_executable.h"
@@ -42,8 +41,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/platform/fingerprint.h"
+#include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/fingerprint.h"
 
 // API notes:
 // PjRt stands for "Pretty much Just another RunTime".
@@ -65,15 +64,15 @@ inline const char* TpuName() {
   return kTpuName;
 }
 inline PjRtPlatformId CpuId() {
-  static const PjRtPlatformId kCpuId = tensorflow::Fingerprint64(CpuName());
+  static const PjRtPlatformId kCpuId = tsl::Fingerprint64(CpuName());
   return kCpuId;
 }
 inline PjRtPlatformId GpuId() {
-  static const PjRtPlatformId kGpuId = tensorflow::Fingerprint64(GpuName());
+  static const PjRtPlatformId kGpuId = tsl::Fingerprint64(GpuName());
   return kGpuId;
 }
 inline PjRtPlatformId TpuId() {
-  static const PjRtPlatformId kTpuId = tensorflow::Fingerprint64(TpuName());
+  static const PjRtPlatformId kTpuId = tsl::Fingerprint64(TpuName());
   return kTpuId;
 }
 
@@ -193,58 +192,6 @@ struct PjRtCrossHostRecvState {
 };
 using PjRtCrossHostRecvNotifier =
     std::function<void(StatusOr<PjRtCrossHostRecvState>)>;
-
-// Provides configuration for implementations that support compile and execute
-// spanning multiple slices. A slice is a set of devices connected by dedicated
-// high speed interconnect. Connectivity between slices is typically over data
-// center networks. Concrete implementations of MultiSliceConfig contain
-// environment specific information to enable communication between devices on
-// different slices. Passed as options during compile and execute.
-// Implementations that do not support this are allowed to pass nullptr.
-class MultiSliceConfig {
- public:
-  virtual ~MultiSliceConfig();
-
-  // Returns the total number of slices.
-  virtual int32_t NumSlices() const = 0;
-
-  // Returns the SliceID at this host - an integer in [0, NumSlices)
-  virtual int32_t SliceId() const = 0;
-
-  // Returns the number of devices on each slice indexed by SliceId.
-  virtual absl::flat_hash_map<int32_t, int32_t> NumDevicesPerSlice() const = 0;
-};
-
-struct CompileOptions {
-  // The layouts of the arguments that the computation should expect.
-  std::optional<std::vector<Shape>> argument_layouts;
-
-  // If true, the supplied computation expects its arguments to be wrapped in a
-  // tuple and passed as a single parameter.
-  bool parameter_is_tupled_arguments = false;
-
-  // XLA's compilation time options.
-  ExecutableBuildOptions executable_build_options;
-
-  // If true, the executable can be run on any device. May only be true if
-  // !executable_build_options.has_device_assignment(), so only applies to
-  // single-device executables. Beware: on GPUs, sometimes an executable
-  // compiled for one device doesn't run on another.
-  bool compile_portable_executable = false;
-
-  // XLA compilation profile version.
-  int64_t profile_version = 0;
-
-  // Set multi_slice_config to trigger compilation for DCN connected multi
-  // slice operation.
-  const MultiSliceConfig* multi_slice_config = nullptr;
-
-  // Serialize the CompileOptions into a CompileOptionsProto.
-  StatusOr<CompileOptionsProto> ToProto() const;
-};
-
-StatusOr<CompileOptions> CompileOptionsFromProto(
-    const CompileOptionsProto& input);
 
 // A sized chunk of host data. The host data can be either in host layout or in
 // device layout, and it can be one part of the entire buffer. The PjRt
@@ -471,6 +418,7 @@ class PjRtClient {
   // (e.g. the CUDA version on GPU or libtpu version on Cloud TPU).
   virtual absl::string_view platform_version() const = 0;
 
+  // TODO(b/244756954): Rethink this function altogether
   // Returns an enum that identifies the type of runtime being used under this
   // client.
   virtual PjRtRuntimeType runtime_type() const = 0;

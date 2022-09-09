@@ -40,7 +40,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/tsl/platform/errors.h"
 
 namespace xla {
 
@@ -1777,7 +1777,7 @@ Status ShapeVerifier::CheckShape(const HloInstruction* instruction,
                                         instruction->ToString());
     return s;
   }
-  return CheckShape(instruction, inferred_shape_status.ValueOrDie());
+  return CheckShape(instruction, inferred_shape_status.value());
 }
 
 Status ShapeVerifier::CheckUnaryShape(const HloInstruction* instruction) {
@@ -2587,7 +2587,7 @@ StatusOr<bool> HloVerifier::Run(
     return false;
   }();
   if (status_or_changed.ok()) {
-    return status_or_changed.ValueOrDie();
+    return status_or_changed.value();
   }
   return Status(status_or_changed.status().code(),
                 absl::StrCat("during context [", context_, "]: ",

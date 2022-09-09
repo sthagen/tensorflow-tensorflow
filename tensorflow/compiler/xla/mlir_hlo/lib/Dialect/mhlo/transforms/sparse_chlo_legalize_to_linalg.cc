@@ -22,8 +22,6 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
-#include "mlir-hlo/Dialect/mhlo/IR/chlo_ops.h"
-#include "mlir-hlo/Dialect/mhlo/transforms/PassDetail.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/legalize_to_linalg_utils.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/rewriters.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/type_conversion.h"
@@ -42,13 +40,18 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "stablehlo/dialect/ChloOps.h"
 
 namespace mlir {
 namespace mhlo {
+
+#define GEN_PASS_DEF_CHLOLEGALIZETOLINALGPASS
+#include "mlir-hlo/Dialect/mhlo/transforms/mhlo_passes.h.inc"
+
 namespace {
 
 struct ChloLegalizeToLinalgPass
-    : public mhlo::ChloLegalizeToLinalgPassBase<ChloLegalizeToLinalgPass> {
+    : public impl::ChloLegalizeToLinalgPassBase<ChloLegalizeToLinalgPass> {
   void getDependentDialects(DialectRegistry& registry) const override {
     registry
         .insert<bufferization::BufferizationDialect, linalg::LinalgDialect,

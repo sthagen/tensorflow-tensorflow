@@ -27,15 +27,11 @@ namespace tensorflow {
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createConvertGpuBinaryToJitRtPass();
 
-std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
-createConvertLmhloGpuToJitRtPass();
-
 void registerLmhloToJitRtPasses();
 
 // Passes to lower from the lmhlo to the JitRt compatible program.
 void populateLmhloToJitRtPasses(
-    mlir::OpPassManager &pm,
-    GpuBinaryOptions options = GpuBinaryOptions::DefaultGpuBinaryOptions());
+    mlir::OpPassManager& pm, xla::gpu::ThunkSequence* thunk_sequence = nullptr);
 
 }  // namespace tensorflow
 

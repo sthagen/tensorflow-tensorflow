@@ -541,7 +541,7 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
                                .Reshard(HloSharding::Replicate())
                          : *partitioned_rhs;
       dot = create_sharded_dot(new_lhs.hlo(), new_rhs.hlo(), b, conv_window)
-                .ValueOrDie();
+                .value();
       computation_time_in_ms = visitor->GetComputationTimeInMilliSec(dot);
 
       collective = lhs_needs_ag ? new_lhs.hlo() : new_rhs.hlo();
@@ -581,7 +581,7 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
       new_rhs = new_rhs.PadWithZero();
 
       dot = create_sharded_dot(new_lhs.hlo(), new_rhs.hlo(), b, conv_window)
-                .ValueOrDie();
+                .value();
       computation_time_in_ms = visitor->GetComputationTimeInMilliSec(dot);
 
       std::vector<int64_t> lhs_contracting_dims;
@@ -3037,6 +3037,13 @@ bool PrioritizeContractingDimensionsPartitioning(
         lhs_contracting_partitions > 1)) {
     return false;
   }
+
+  // Return false if lhs/rhs sharding would have to be transposed.
+  if (RequiresTransposeSharding(lhs.hlo()->sharding(), rhs.hlo()->sharding(),
+                                dims_mapping.contracting_dims)) {
+    return false;
+  }
+
   // Estimate the iterations in the case we perform the partitioning on the
   // contracting dimensions instead.
   std::vector<int64_t> lhs_dims;
@@ -3179,7 +3186,7 @@ bool PrioritizeContractingDimensionsPartitioning(
       create_sharded_dot(lhs_matching_iterations ? lhs.hlo() : other_hlo,
                          lhs_matching_iterations ? other_hlo : rhs.hlo(), b,
                          conv_window)
-          .ValueOrDie();
+          .value();
   const double computation_time_in_ms =
       visitor->GetComputationTimeInMilliSec(dot);
   *other_hlo->mutable_shape() = other_original_shape;
@@ -3299,8 +3306,7 @@ bool LhsIsBestMatchForNonContractingPartitioning(
       *compute_rhs->mutable_shape() =
           GetPerGroupBaseShape(rhs_grouped, rhs.base_shape());
       HloInstruction* dot =
-          create_sharded_dot(compute_lhs, compute_rhs, b, conv_window)
-              .ValueOrDie();
+          create_sharded_dot(compute_lhs, compute_rhs, b, conv_window).value();
       const double computation_time_in_ms =
           visitor->GetComputationTimeInMilliSec(dot);
       *compute_lhs->mutable_shape() = lhs_original_shape;

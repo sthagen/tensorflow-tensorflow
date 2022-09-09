@@ -61,13 +61,6 @@ auto* mlir_graph_optimization_pass_fallback_count = monitoring::Counter<1>::New(
 constexpr char kSuccess[] = "kSuccess";
 constexpr char kFailure[] = "kFailure";
 
-// Graph <-> MLIR transformations outcomes (for logging)
-constexpr char kGraphImportFallbackFail[] = "kGraphImportFallbackFail";
-constexpr char kGraphImportFail[] = "kGraphImportFail";
-constexpr char kGraphImportSuccess[] = "kGraphImportSuccess";
-constexpr char kRoundTripSuccess[] = "kRoundTripSuccess";
-constexpr char kRoundTripFailure[] = "kRoundTripFailure";
-
 static inline absl::string_view StringRefToView(llvm::StringRef ref) {
   return {ref.data(), ref.size()};
 }
@@ -230,21 +223,14 @@ Status MlirFunctionOptimizationPass::Run(
     // If at least one pass is enabled, return failure to the caller
     // immediately.
     if (overall_state == MlirOptimizationPassState::Enabled) {
-      metrics::UpdateTfMlirGraphOptimizationPassStateCounter("",
-                                                             kGraphImportFail);
       return module_ref_status.status();
     }
-
     // Do not fail, just keep the original TF graph unchanged in fallback mode.
-    metrics::UpdateTfMlirGraphOptimizationPassStateCounter(
-        "", kGraphImportFallbackFail);
     return OkStatus();
   }
-  metrics::UpdateTfMlirGraphOptimizationPassStateCounter("",
-                                                         kGraphImportSuccess);
 
   mlir::OwningOpRef<mlir::ModuleOp> module_ref =
-      std::move(module_ref_status.ValueOrDie());
+      std::move(module_ref_status.value());
   AddDevicesToOp(*module_ref, &device_set);
 
   // Capture stats on graph properties analyzed before running the MLIR
@@ -324,13 +310,10 @@ Status MlirFunctionOptimizationPass::Run(
   Status status = ConvertMlirToGraph(*module_ref, export_config, graph,
                                      flib_def, &control_ret_nodes);
   if (!status.ok()) {
-    metrics::UpdateTfMlirGraphOptimizationPassStateCounter("",
-                                                           kRoundTripFailure);
     errors::AppendToMessage(&status,
                             "Error converting MLIR module back to graph");
     return status;
   }
-  metrics::UpdateTfMlirGraphOptimizationPassStateCounter("", kRoundTripSuccess);
 
   timings.ReportAndStop();
 
@@ -387,7 +370,7 @@ Status MlirV1CompatGraphOptimizationPass::Run(
   }
 
   mlir::OwningOpRef<mlir::ModuleOp> module_ref =
-      std::move(module_ref_status.ValueOrDie());
+      std::move(module_ref_status.value());
   AddDevicesToOp(*module_ref, options.device_set);
 
   llvm::StringRef name = pass->name();

@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_DEVICE_MEMORY_ALLOCATOR_H_
 #define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_DEVICE_MEMORY_ALLOCATOR_H_
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -25,9 +26,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/device_memory.h"
 #include "tensorflow/compiler/xla/stream_executor/lib/statusor.h"
 #include "tensorflow/compiler/xla/stream_executor/platform.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/platform/status.h"
-#include "tensorflow/core/platform/types.h"
+#include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/status.h"
+#include "tensorflow/tsl/platform/types.h"
 
 namespace stream_executor {
 
@@ -151,7 +152,7 @@ class ScopedDeviceMemory {
 };
 
 // Type alias for compatibility with the previous managed memory implementation.
-using OwningDeviceMemory = ScopedDeviceMemory<uint8>;
+using OwningDeviceMemory = ScopedDeviceMemory<uint8_t>;
 
 // Memory allocator interface for the device.
 //
@@ -279,7 +280,7 @@ port::Status ScopedDeviceMemory<ElemT>::Free() {
     TF_RETURN_IF_ERROR(allocator_->Deallocate(device_ordinal_, wrapped_));
   }
   wrapped_ = DeviceMemory<ElemT>{};
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 }  // namespace stream_executor

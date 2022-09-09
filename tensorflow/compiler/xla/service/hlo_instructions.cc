@@ -45,7 +45,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_sharding_metadata.h"
 #include "tensorflow/compiler/xla/window_util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/tsl/platform/protobuf.h"
 
 namespace xla {
 namespace {
@@ -467,7 +467,7 @@ namespace {
 // Currently implements a small subset of cases; feel free to add more as
 // needed.
 std::vector<std::string> AttributeProtoToStringVector(
-    const tensorflow::protobuf::Message& message) {
+    const tsl::protobuf::Message& message) {
   const tensorflow::protobuf::Reflection* reflection = message.GetReflection();
   std::vector<const tensorflow::protobuf::FieldDescriptor*> fields;
   reflection->ListFields(message, &fields);
@@ -1558,12 +1558,12 @@ HloCallableInstruction::HloCallableInstruction(
 HloCallableInstruction::HloCallableInstruction(
     HloOpcode opcode, const Shape& shape,
     absl::Span<HloInstruction* const> operands,
-    HloComputation* called_computation)
+    HloComputation* called_computation, absl::string_view prefix)
     : HloInstruction(opcode, shape) {
   for (auto operand : operands) {
     AppendOperand(operand);
   }
-  SetAndSanitizeName(HloOpcodeString(opcode));
+  SetAndSanitizeName(std::string(prefix) + HloOpcodeString(opcode));
   AppendComputation(called_computation);
 }
 
@@ -1624,6 +1624,12 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
   VLOG(3) << "CloneAndAppendInstructionIntoCalledComputation:\n"
           << instruction_to_append->ToString();
   HloInstruction* clone = nullptr;
+  bool do_not_clone =
+      instruction_to_append->opcode() == HloOpcode::kTuple &&
+      std::find_if(instruction_to_append->users().begin(),
+                   instruction_to_append->users().end(), [](HloInstruction* u) {
+                     return u->opcode() != HloOpcode::kGetTupleElement;
+                   }) == instruction_to_append->users().end();
   if (called_computations().empty()) {
     // New fusion instruction. It should not be a multioutput instruction.
     CHECK(!add_output);
@@ -1642,7 +1648,7 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
     bool in_operand_list =
         absl::c_linear_search(operands(), instruction_to_append);
     CHECK(add_output || in_operand_list);
-    if (instruction_to_append->opcode() == HloOpcode::kTuple) {
+    if (do_not_clone) {
       // We assume all uses of a kTuple operation are GTE ops. In this case, we
       // don't need to clone 'instruction_to_append'.
       CHECK(!in_operand_list);
@@ -1748,11 +1754,11 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
       TF_CHECK_OK(ReplaceAllUsesWithDifferentShape(new_instr));
     }
     int64_t index = tuple_elements.size();
-    if (instruction_to_append->opcode() == HloOpcode::kTuple) {
+    if (do_not_clone) {
       CHECK_EQ(clone, instruction_to_append);
-      index -= clone->operand_count();
+      index -= instruction_to_append->operand_count();
       std::vector<HloInstruction*> to_be_removed;
-      const auto& users = clone->users();
+      const auto& users = instruction_to_append->users();
       to_be_removed.reserve(users.size());
       for (auto old_gte : users) {
         CHECK_EQ(old_gte->opcode(), HloOpcode::kGetTupleElement);
@@ -1824,9 +1830,9 @@ HloFusionInstruction::HloFusionInstruction(const Shape& shape,
 HloFusionInstruction::HloFusionInstruction(
     const Shape& shape, FusionKind fusion_kind,
     absl::Span<HloInstruction* const> operands,
-    HloComputation* fusion_computation)
+    HloComputation* fusion_computation, absl::string_view prefix)
     : HloCallableInstruction(HloOpcode::kFusion, shape, operands,
-                             fusion_computation),
+                             fusion_computation, prefix),
       fusion_kind_(fusion_kind) {
   fusion_computation->SetFusionInstruction(this);
 }
@@ -1977,7 +1983,7 @@ void HloFusionInstruction::MergeFusionInstruction(
     TF_CHECK_OK(instruction->parent()->RemoveInstruction(instruction));
   }
   CHECK_EQ(0, cloned_fusion->user_count());
-  TF_CHECK_OK(parent()->parent()->RemoveEmbeddedComputation(
+  TF_CHECK_OK(GetModule()->RemoveEmbeddedComputation(
       cloned_fusion->fused_instructions_computation()));
 }
 

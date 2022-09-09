@@ -20,6 +20,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/stream_executor_pimpl.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -332,6 +333,24 @@ port::Status StreamExecutor::GetFusedConvolveRunners(
       conv_input_scale, side_input_scale, leakyrelu_alpha, stream,
       input_descriptor, filter_descriptor, bias_descriptor, output_descriptor,
       convolution_descriptor, use_fallback, activation_mode, out_exec_plans);
+}
+
+port::Status StreamExecutor::GetFusedMatmulRunners(
+    bool use_cudnn_frontend, dnn::DataType input_type, dnn::DataType bias_type,
+    dnn::DataType output_type, Stream* stream, bool trans_a, bool trans_b,
+    uint64_t m, uint64_t n, uint64_t k, int64_t lda, int64_t ldb, int64_t ldc,
+    dnn::ActivationMode activation_mode, bool use_fallback,
+    std::vector<std::unique_ptr<const dnn::FusedMatmulRunner>>*
+        out_exec_plans) {
+  dnn::DnnSupport* dnn_support = AsDnn();
+  if (!dnn_support) {
+    return port::UnimplementedError("DNN library is not found.");
+  }
+
+  return dnn_support->GetFusedMatmulRunners(
+      use_cudnn_frontend, input_type, bias_type, output_type, stream, trans_a,
+      trans_b, m, n, k, lda, ldb, ldc, activation_mode, use_fallback,
+      out_exec_plans);
 }
 
 bool StreamExecutor::GetMIOpenConvolveAlgorithms(
@@ -726,7 +745,7 @@ port::Status StreamExecutor::MemZero(Stream* stream, DeviceMemoryBase* location,
 
 port::Status StreamExecutor::Memset32(Stream* stream,
                                       DeviceMemoryBase* location,
-                                      uint32 pattern, uint64_t size) {
+                                      uint32_t pattern, uint64_t size) {
   CHECK_EQ(0, size % 4)
       << "need 32-bit multiple size to fill with 32-bit pattern";
   return implementation_->Memset32(stream, location, pattern, size);
@@ -913,7 +932,8 @@ port::StatusOr<OwningDeviceMemory> StreamExecutorMemoryAllocator::Allocate(
     int64_t memory_space) {
   TF_ASSIGN_OR_RETURN(StreamExecutor * executor,
                       GetStreamExecutor(device_ordinal));
-  DeviceMemoryBase result = executor->AllocateArray<uint8>(size, memory_space);
+  DeviceMemoryBase result =
+      executor->AllocateArray<uint8_t>(size, memory_space);
   if (size > 0 && result == nullptr) {
     return tensorflow::errors::ResourceExhausted(absl::StrFormat(
         "Failed to allocate request for %s (%uB) on device ordinal %d",
@@ -936,7 +956,7 @@ port::Status StreamExecutorMemoryAllocator::Deallocate(int device_ordinal,
                                   mem.opaque(), device_ordinal);
     executor->Deallocate(&mem);
   }
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::StatusOr<StreamExecutor*>

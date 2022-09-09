@@ -13,27 +13,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/platform/cuda_libdevice_path.h"
+#include "tensorflow/tsl/platform/cuda_libdevice_path.h"
 
 #include <stdlib.h>
+
+#include <string>
 #include <vector>
+
+#include "tensorflow/core/platform/platform.h"
 
 #if !defined(PLATFORM_GOOGLE)
 #include "third_party/gpus/cuda/cuda_config.h"
 #endif
 #include "tensorflow/core/platform/logging.h"
 
-namespace tensorflow {
+namespace tsl {
 
-std::vector<string> CandidateCudaRoots() {
+std::vector<std::string> CandidateCudaRoots() {
 #if !defined(PLATFORM_GOOGLE)
   VLOG(3) << "CUDA root = " << TF_CUDA_TOOLKIT_PATH;
-  return {TF_CUDA_TOOLKIT_PATH, string("/usr/local/cuda")};
+  return {TF_CUDA_TOOLKIT_PATH, std::string("/usr/local/cuda")};
 #else
-  return {string("/usr/local/cuda")};
+  return {std::string("/usr/local/cuda")};
 #endif
 }
 
 bool PreferPtxasFromPath() { return true; }
 
-}  // namespace tensorflow
+}  // namespace tsl

@@ -28,7 +28,6 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "mlir-hlo/Dialect/mhlo/transforms/PassDetail.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/legalize_to_linalg_utils.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/map_mhlo_to_scalar_op.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/rewriters.h"
@@ -66,6 +65,10 @@ limitations under the License.
 
 namespace mlir {
 namespace mhlo {
+
+#define GEN_PASS_DEF_HLOLEGALIZETOLINALGPASS
+#include "mlir-hlo/Dialect/mhlo/transforms/mhlo_passes.h.inc"
+
 namespace {
 
 Value getResultValue(Operation* op) { return op->getResult(0); }
@@ -1441,7 +1444,10 @@ class DotOpConversion : public OpConversionPattern<mhlo::DotOp> {
         typeConverter->convertType(op.getType()).cast<ShapedType>();
     SmallVector<Value, 2> dynShape = getDotOpInitTensorDynSizes(
         rewriter, loc, adaptor.lhs(), adaptor.rhs(), op_type);
-    auto initTensor = getInitTensor(rewriter, loc, outputType, dynShape);
+    auto initTensor =
+        sparse_tensor::getSparseTensorEncoding(outputType) == nullptr
+            ? getInitTensor(rewriter, loc, outputType, dynShape)
+            : getInitSparseTensor(rewriter, loc, outputType, dynShape);
     Value zeroTensor = fillTensorWithZeros(rewriter, loc, initTensor);
     rewriter.replaceOpWithNewOp<LinalgOp>(
         op, TypeRange{outputType}, ValueRange{adaptor.lhs(), adaptor.rhs()},
@@ -1608,7 +1614,7 @@ class ReduceConversion : public OpConversionPattern<mhlo::ReduceOp> {
     int numOperands = static_cast<int>(adaptor.operands().size());
 
     if (llvm::any_of(adaptor.operands(), [](Value v) {
-          return !v.getType().cast<ShapedType>().getRank();
+          return !v.getType().isa<RankedTensorType>();
         })) {
       return rewriter.notifyMatchFailure(op, "expects known-rank args");
     }
@@ -1620,18 +1626,14 @@ class ReduceConversion : public OpConversionPattern<mhlo::ReduceOp> {
     if (failed(typeConverter->convertTypes(op.getResultTypes(), resultTypes)))
       return failure();
 
-    SmallVector<Value> operands, outputs;
+    SmallVector<Value> outputs;
     SmallVector<AffineMap, 3> indexingMaps;
-    for (auto values :
+    for (auto [operand, initValue, resultType] :
          llvm::zip(adaptor.operands(), adaptor.init_values(), resultTypes)) {
       // Check if init_value is constant. If so, inline the value into the
       // region.
-      Value operand = std::get<0>(values);
-      Value initValue = std::get<1>(values);
-      Type resultType = std::get<2>(values);
       initValue = rewriter.createOrFold<tensor::ExtractOp>(loc, initValue);
 
-      operands.push_back(operand);
       SmallVector<Value, 8> dynShape = getReduceOpInitTensorDynSizes(
           rewriter, loc, operand, resultType, reductionDims);
       auto initTensor = getInitTensor(rewriter, loc, resultType, dynShape);
@@ -1659,7 +1661,7 @@ class ReduceConversion : public OpConversionPattern<mhlo::ReduceOp> {
                                        rewriter.getContext()));
 
     auto linalgOp = rewriter.create<linalg::GenericOp>(
-        loc, /*resultTensorTypes=*/resultTypes, operands,
+        loc, /*resultTensorTypes=*/resultTypes, adaptor.operands(),
         /*outputBuffers=*/ValueRange{outputs}, indexingMaps,
         getParallelAndReductionIterators(srcRank, reductionDims.size()),
         /*bodyBuild=*/nullptr, pruneAttributeList(op));
@@ -1673,20 +1675,24 @@ class ReduceConversion : public OpConversionPattern<mhlo::ReduceOp> {
     rewriter.inlineRegionBefore(op.body(), region, region.end());
     TypeConverter::SignatureConversion signatureConverter(numOperands * 2);
 
-    // Reduce requires that the seed be used as a LHS operand inside the
-    // region, and the seed is encoded in linalg in the intial out value, so
+    // The mhlo ReduceOp requires that the seed be used as a LHS operand inside
+    // the region, and the seed is encoded in linalg in the intial out value, so
     // modify the signature of the block and the value mappings, so the output
-    // args will correlate with the LHS and the inputs correlate with the RHS.
-    for (const auto& [idx, val] : llvm::enumerate(op.init_values())) {
+    // args will correlate with the original LHS and the inputs correlate with
+    // the original RHS.
+    for (const auto& [idx, val] : llvm::enumerate(op.operands())) {
       signatureConverter.addInputs(
-          idx + numOperands,
+          /*origigInputNo=*/idx + numOperands,
+          // type for the new operand number 'idx'.
           typeConverter->convertType(
               val.getType().cast<ShapedType>().getElementType()));
     }
-    for (const auto& [idx, val] : llvm::enumerate(op.operands())) {
+    for (const auto& [idx, val] : llvm::enumerate(op.init_values())) {
       signatureConverter.addInputs(
-          idx, typeConverter->convertType(
-                   val.getType().cast<ShapedType>().getElementType()));
+          /*origInputNo=*/idx,
+          // type for the new operand number 'idx' + 'numOperands'.
+          typeConverter->convertType(
+              val.getType().cast<ShapedType>().getElementType()));
     }
 
     rewriter.applySignatureConversion(&region, signatureConverter,
@@ -2025,7 +2031,7 @@ struct ConvolutionOpGeneralConversion
 
     // Decompose the reversal dims into its own step
     auto reversals = op.window_reversal();
-    if (reversals.value()) {
+    if (reversals.has_value()) {
       llvm::SmallVector<int64_t> reversedDims;
       for (auto& idxAndBool :
            llvm::enumerate(reversals.value().getValues<bool>()))
@@ -2055,8 +2061,8 @@ struct ConvolutionOpGeneralConversion
     std::iota(resultIndexMapping.begin(), resultIndexMapping.end(), 0);
     auto updateDimMappingFromOffset =
         [](llvm::SmallVectorImpl<int64_t>& mapping, int64_t offset) {
-          for (auto i = offset; i < mapping.size(); ++i) {
-            mapping[i] += 1;
+          for (auto& mappingElt : llvm::drop_begin(mapping, offset)) {
+            mappingElt += 1;
           }
         };
 
@@ -2073,7 +2079,7 @@ struct ConvolutionOpGeneralConversion
                                  llvm::SmallVectorImpl<int64_t>& newShape,
                                  int64_t reshapedDim, int64_t factor) {
       newShape.reserve(oldShape.size() + 1);
-      for (int i = 0; i < oldShape.size(); ++i) {
+      for (auto i : llvm::seq<int64_t>(0, oldShape.size())) {
         if (i == reshapedDim) {
           newShape.push_back(factor);
           newShape.push_back(oldShape[reshapedDim] / factor);
@@ -2200,7 +2206,7 @@ struct ConvolutionOpGeneralConversion
       auto dim1 = mlir::getAffineDimExpr(nextDim++, ctx);
 
       auto stride = dim0;
-      if (op.window_strides().value())
+      if (op.window_strides().has_value())
         stride = stride * op.window_strides().value().getValues<int64_t>()[i];
       AffineExpr srcExpr = stride + dim1;
 
@@ -2276,7 +2282,7 @@ struct DepthwiseConvolutionOpConversion
     int64_t inputFeatureDim = dimensionNumbers.getInputFeatureDimension();
     int64_t inputFeatureCount =
         op.lhs().getType().cast<ShapedType>().getDimSize(inputFeatureDim);
-    if (op.feature_group_count() != inputFeatureCount) {
+    if (static_cast<int64_t>(op.feature_group_count()) != inputFeatureCount) {
       return rewriter.notifyMatchFailure(op, "not depth-wise convolution");
     }
 
@@ -2337,7 +2343,7 @@ struct DepthwiseConvolutionOpConversion
         dimensionNumbers.getKernelOutputFeatureDimension();
     if (filterDims[kernelInputFeatureDimension] *
             filterDims[kernelOutputFeatureDimension] !=
-        op.feature_group_count()) {
+        static_cast<int64_t>(op.feature_group_count())) {
       // For cases where channel multiplier != 1
 
       // Reshaping filter shape
@@ -2553,7 +2559,7 @@ struct ReduceWindowOpOnTensorsGenericConversion
         llvm::any_of(baseDilations, [](int64_t v) { return v != 1; })) {
       llvm::SmallVector<int64_t> staticLows(rank, 0);
       llvm::SmallVector<int64_t> staticHighs(rank, 0);
-      for (int i = 0; i < padding.size(); i += 2) {
+      for (int64_t i = 0; i < static_cast<int64_t>(padding.size()); i += 2) {
         staticLows[i / 2] = padding[i];
         staticHighs[i / 2] = padding[i + 1];
       }
@@ -3235,7 +3241,7 @@ class DotGeneralOpConversion : public OpConversionPattern<mhlo::DotGeneralOp> {
 };
 
 struct HloLegalizeToLinalgPass
-    : public mhlo::HloLegalizeToLinalgPassBase<HloLegalizeToLinalgPass> {
+    : public impl::HloLegalizeToLinalgPassBase<HloLegalizeToLinalgPass> {
   void getDependentDialects(DialectRegistry& registry) const override {
     registry.insert<bufferization::BufferizationDialect, linalg::LinalgDialect,
                     scf::SCFDialect, complex::ComplexDialect, math::MathDialect,
@@ -3309,6 +3315,7 @@ void populateHloToLinalgConversionPattern(MLIRContext* context,
       PointwiseToLinalgConverter<mhlo::PowOp>,
       PointwiseToLinalgConverter<mhlo::RealOp>,
       PointwiseToLinalgConverter<mhlo::RemOp>,
+      PointwiseToLinalgConverter<mhlo::RoundNearestEvenOp>,
       PointwiseToLinalgConverter<mhlo::RoundOp>,
       PointwiseToLinalgConverter<mhlo::RsqrtOp>,
       PointwiseToLinalgConverter<mhlo::SelectOp>,

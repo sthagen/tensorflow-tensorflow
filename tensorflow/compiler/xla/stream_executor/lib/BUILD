@@ -1,6 +1,6 @@
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow:tensorflow.bzl", "if_windows")
-load("//tensorflow/stream_executor:build_defs.bzl", "stream_executor_friends")
+load("//tensorflow/compiler/xla/stream_executor:build_defs.bzl", "stream_executor_friends")
 load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
 
 package(
@@ -32,10 +32,10 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/platform:env",
-        "//tensorflow/core/platform:stacktrace",
-        "//tensorflow/core/platform:status",
-        "//tensorflow/core/platform:statusor",
+        "//tensorflow/tsl/platform:stacktrace",
         "//tensorflow/compiler/xla/stream_executor/platform",
+        "//tensorflow/tsl/platform:status",
+        "//tensorflow/tsl/platform:statusor",
     ] + if_static([
         "//tensorflow/core/platform:env_impl",
     ]),

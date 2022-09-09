@@ -33,12 +33,12 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/utils/string_container_utils.h"
 #include "tensorflow/compiler/xla/array4d.h"
 #include "tensorflow/compiler/xla/service/computation_placer.h"
+#include "tensorflow/compiler/xla/stream_executor/lib/statusor.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/protobuf/tpu/topology.pb.h"
 #include "tensorflow/core/util/device_name_utils.h"
-#include "tensorflow/stream_executor/lib/statusor.h"
 
 namespace tensorflow {
 
@@ -537,7 +537,7 @@ mlir::LogicalResult GetHostDeviceOutsideComputation(
     return cluster.emitError()
            << "error in fetching TPU compilation/execution devices: "
            << status_or_tpu_device_assignment.status().error_message();
-  auto& tpu_device_assignment = status_or_tpu_device_assignment.ValueOrDie();
+  auto& tpu_device_assignment = status_or_tpu_device_assignment.value();
 
   *host_device = tpu_device_assignment.tpu_devices[0][0].host;
   return mlir::success();

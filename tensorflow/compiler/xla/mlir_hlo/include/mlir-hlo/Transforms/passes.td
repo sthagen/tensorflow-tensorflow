@@ -69,6 +69,12 @@ def CollapseParallelLoopsTo1DPass : Pass<"collapse-parallel-loops-to-1d"> {
   let constructor = "createCollapseParallelLoopsTo1DPass()";
 }
 
+def DetensorizeScfOpsPass : Pass<"detensorize-scf-ops", "func::FuncOp"> {
+  let summary = "Detensorize arguments of SCF ops where possible.";
+  let constructor = "createDetensorizeScfOpsPass()";
+  let dependentDialects = ["scf::SCFDialect", "tensor::TensorDialect"];
+}
+
 def TileLoopsPass : Pass<"tile-loops", "func::FuncOp"> {
   let summary = "Tiles parallel loops.";
   let description = [{ The pass converts an `scf.parallel` loop into a nested,
@@ -153,5 +159,23 @@ def GenericHostToLLVMPass : Pass<"generic-host-to-llvm", "ModuleOp"> {
   let constructor = "hlo::createGenericHostToLLVMPass()";
   let options = [];
 }
+
+def UnbufferizePass : Pass<"unbufferize", "mlir::func::FuncOp"> {
+  let summary = "Unbufferize partially bufferized functions.";
+  let description = [{
+    Removes bufferization.to_tensor and memref.tensor_store ops that are the 
+    result of XLA bufferizing during HLO to MHLO transformation.
+  }];
+  let constructor = "hlo::createUnbufferizePass()";
+}
+
+def AllocToArgPass : Pass<"alloc-to-arg", "mlir::func::FuncOp"> {
+  let summary = "Hoist memref allocations to function arguments.";
+  let description = [{
+    Replaces memref.alloc uses with a new argument of the parent function.
+  }];
+  let constructor = "hlo::createAllocToArgPass()";
+}
+
 
 #endif // TENSORFLOW_COMPILER_MLIR_HLO_TRANSFORMS_PASSES

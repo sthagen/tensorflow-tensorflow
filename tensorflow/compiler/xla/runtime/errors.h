@@ -13,16 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_RUNTIME_ERRORS_H_
-#define XLA_RUNTIME_ERRORS_H_
+#ifndef TENSORFLOW_COMPILER_XLA_RUNTIME_ERRORS_H_
+#define TENSORFLOW_COMPILER_XLA_RUNTIME_ERRORS_H_
 
 #include <string>
 
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace xla {
 namespace runtime {
+
+template <typename... Args>
+absl::Status InvalidArgument(const absl::FormatSpec<Args...>& format,
+                             const Args&... args) {
+  return absl::InvalidArgumentError(absl::StrFormat(format, args...));
+}
 
 // TODO(ezhulenev): Replace all uses of llvm errors inside the runtime with ABSL
 // types: Error -> Status, Expected -> StatusOr.
@@ -38,8 +46,6 @@ void ToStreamHelper(StreamT& os, T&& v, Args&&... args) {
   ToStreamHelper(os, std::forward<Args>(args)...);
 }
 
-}  // namespace internal
-
 template <typename... Args>
 std::string StrCat(Args&&... args) {
   std::string str;
@@ -49,13 +55,15 @@ std::string StrCat(Args&&... args) {
   return str;
 }
 
+}  // namespace internal
+
 template <typename... Args>
 llvm::Error MakeStringError(Args&&... args) {
   return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                 StrCat(std::forward<Args>(args)...));
+                                 internal::StrCat(std::forward<Args>(args)...));
 }
 
 }  // namespace runtime
 }  // namespace xla
 
-#endif  // XLA_RUNTIME_ERRORS_H_
+#endif  // TENSORFLOW_COMPILER_XLA_RUNTIME_ERRORS_H_

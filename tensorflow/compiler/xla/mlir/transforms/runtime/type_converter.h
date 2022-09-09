@@ -13,14 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_MLIR_RUNTIME_TYPE_CONVERTER_H_
-#define XLA_MLIR_RUNTIME_TYPE_CONVERTER_H_
+#ifndef TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_RUNTIME_TYPE_CONVERTER_H_
+#define TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_RUNTIME_TYPE_CONVERTER_H_
 
 #include <functional>
 #include <memory>
 
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/Error.h"
+#include "absl/status/statusor.h"
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/runtime/types.h"
 
@@ -60,16 +59,16 @@ class TypeConverter {
         });
   }
 
-  // Converts MLIR element type to the DType.
-  static llvm::Expected<tfrt::DType> ConvertElementType(mlir::Type type);
+  // Converts MLIR element type to the PrimitiveType.
+  static absl::StatusOr<PrimitiveType> ConvertElementType(mlir::Type type);
 
   // Converts MLIR type to the runtime type. Returns error if conversion was not
   // successful and the type has no corresponding run time type.
-  llvm::Expected<std::unique_ptr<Type>> Convert(mlir::Type type) const;
+  absl::StatusOr<std::unique_ptr<Type>> Convert(mlir::Type type) const;
 
   // Converts MLIR function type to the runtime function type. Returns error if
   // function has unsupported operands or results types.
-  llvm::Expected<FunctionType> Convert(mlir::FunctionType type) const;
+  absl::StatusOr<FunctionType> Convert(mlir::FunctionType type) const;
 
  private:
   llvm::SmallVector<ConversionFn> conversions_;
@@ -78,4 +77,4 @@ class TypeConverter {
 }  // namespace runtime
 }  // namespace xla
 
-#endif  // XLA_MLIR_RUNTIME_TYPE_CONVERTER_H_
+#endif  // TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_RUNTIME_TYPE_CONVERTER_H_

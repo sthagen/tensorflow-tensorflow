@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/stream_executor/cuda/cuda_gpu_executor.h"
 
+#include <cstdint>
 #include <utility>
 
 #if defined(__APPLE__)
@@ -213,7 +214,7 @@ port::Status GpuExecutor::LoadModuleFromCuBin(const char* cubin,
             << " is already loaded as module " << *module;
   }
   gpu_binary_to_module_[cubin] = {*module, module_refcount};
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status GpuExecutor::LoadModuleFromPtx(const char* ptx, CUmodule* module) {
@@ -231,7 +232,7 @@ port::Status GpuExecutor::LoadModuleFromPtx(const char* ptx, CUmodule* module) {
             << " is already loaded as module " << module;
   }
   gpu_binary_to_module_[ptx] = {*module, module_refcount};
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status GpuExecutor::LoadModuleFromHsaco(const char* hsaco,
@@ -289,7 +290,7 @@ port::Status GpuExecutor::GetKernel(const MultiKernelLoaderSpec& spec,
   TF_RETURN_IF_ERROR(GetKernelMetadata(cuda_kernel, &kernel_metadata));
   kernel->set_metadata(kernel_metadata);
   kernel->set_name(*kernelname);
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 bool GpuExecutor::UnloadGpuBinary(const void* gpu_binary) {
@@ -337,7 +338,7 @@ port::Status GpuExecutor::LoadModule(const MultiModuleLoaderSpec& spec,
         &cu_module));
     *module_handle = ModuleHandle(const_cast<void*>(
         static_cast<const void*>(spec.cuda_cubin_in_memory().data())));
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   } else if (spec.has_cuda_ptx_in_memory()) {
     if (cc_major_ == 0 && cc_minor_ == 0) {
       return port::InternalError("Compute capability not set");
@@ -352,7 +353,7 @@ port::Status GpuExecutor::LoadModule(const MultiModuleLoaderSpec& spec,
         LoadModuleFromPtx(spec.cuda_ptx_in_memory(), &cu_module));
     *module_handle = ModuleHandle(
         const_cast<void*>(static_cast<const void*>(spec.cuda_ptx_in_memory())));
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   }
   return port::InternalError("No method of loading CUDA module provided");
 }
@@ -365,7 +366,7 @@ bool GpuExecutor::UnloadModule(ModuleHandle module_handle) {
 
 namespace {
 absl::uint128 Fingerprint128(const absl::string_view s) {
-  auto fp = tensorflow::Fingerprint128(s);
+  auto fp = tsl::Fingerprint128(s);
   return absl::MakeUint128(fp.high64, fp.low64);
 }
 }  // namespace
@@ -435,7 +436,7 @@ port::Status GpuExecutor::GetKernelMetadata(GpuKernel* cuda_kernel,
       GpuDriver::FuncGetAttribute(CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
                                   *cuda_kernel->gpu_function_ptr(), &value));
   kernel_metadata->set_shared_memory_bytes(value);
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status GpuExecutor::Launch(Stream* stream, const ThreadDim& thread_dims,
@@ -604,10 +605,10 @@ port::Status GpuExecutor::SynchronousMemSet(DeviceMemoryBase* location,
                                             int value, uint64_t size) {
   if (reinterpret_cast<uintptr_t>(location->opaque()) % 4 == 0 &&
       size % 4 == 0) {
-    // cudaMemset reinterprets "value" as a uint8.
-    uint8 byte_value = static_cast<uint8>(value);
-    uint32 pattern = (byte_value << 24) | (byte_value << 16) |
-                     (byte_value << 8) | byte_value;
+    // cudaMemset reinterprets "value" as a uint8_t.
+    uint8_t byte_value = static_cast<uint8_t>(value);
+    uint32_t pattern = (byte_value << 24) | (byte_value << 16) |
+                       (byte_value << 8) | byte_value;
     return GpuDriver::SynchronousMemsetUint32(
         context_, AsCudaDevicePtr(location), pattern, size / 4);
   }
@@ -646,7 +647,7 @@ port::Status GpuExecutor::MemZero(Stream* stream, DeviceMemoryBase* location,
 }
 
 port::Status GpuExecutor::Memset(Stream* stream, DeviceMemoryBase* location,
-                                 uint8 pattern, uint64_t size) {
+                                 uint8_t pattern, uint64_t size) {
   VLOG(2) << "enqueueing memset8 operation onto stream " << stream
           << " at location " << location << " with size " << size
           << " and pattern " << std::hex << pattern;
@@ -656,7 +657,7 @@ port::Status GpuExecutor::Memset(Stream* stream, DeviceMemoryBase* location,
 }
 
 port::Status GpuExecutor::Memset32(Stream* stream, DeviceMemoryBase* location,
-                                   uint32 pattern, uint64_t size) {
+                                   uint32_t pattern, uint64_t size) {
   VLOG(2) << "enqueueing memset32 operation onto stream " << stream
           << " at location " << location << " with size " << size
           << " and pattern " << std::hex << pattern;
@@ -726,7 +727,7 @@ port::Status GpuExecutor::RecordEvent(Stream* stream, Event* event) {
 port::Status GpuExecutor::WaitForEvent(Stream* stream, Event* event) {
   if (GpuDriver::WaitStreamOnEvent(context_, AsGpuStream(stream)->gpu_stream(),
                                    AsGpuEvent(event)->gpu_event())) {
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   } else {
     return port::Status(
         port::error::INTERNAL,
@@ -802,7 +803,7 @@ blas::BlasSupport* GpuExecutor::CreateBlas() {
     return nullptr;
   }
 
-  return status.ValueOrDie()(this);
+  return status.value()(this);
 }
 
 dnn::DnnSupport* GpuExecutor::CreateDnn() {
@@ -816,7 +817,7 @@ dnn::DnnSupport* GpuExecutor::CreateDnn() {
     return nullptr;
   }
 
-  return status.ValueOrDie()(this);
+  return status.value()(this);
 }
 
 fft::FftSupport* GpuExecutor::CreateFft() {
@@ -830,7 +831,7 @@ fft::FftSupport* GpuExecutor::CreateFft() {
     return nullptr;
   }
 
-  return status.ValueOrDie()(this);
+  return status.value()(this);
 }
 
 rng::RngSupport* GpuExecutor::CreateRng() {
@@ -844,7 +845,7 @@ rng::RngSupport* GpuExecutor::CreateRng() {
     return nullptr;
   }
 
-  return status.ValueOrDie()(this);
+  return status.value()(this);
 }
 
 // TODO(rspringer): Remove in b/18544742.
@@ -1039,23 +1040,23 @@ GpuExecutor::CreateDeviceDescription(int device_ordinal) {
     builder.set_threads_per_block_limit(
         GpuDriver::GetDeviceAttribute(CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
                                       device)
-            .ValueOrDie());
+            .value());
 
     ThreadDim thread_dim_limit;
     thread_dim_limit.x = GpuDriver::GetDeviceAttribute(
                              CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X, device)
-                             .ValueOrDie();
+                             .value();
     thread_dim_limit.y = GpuDriver::GetDeviceAttribute(
                              CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, device)
-                             .ValueOrDie();
+                             .value();
     thread_dim_limit.z = GpuDriver::GetDeviceAttribute(
                              CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z, device)
-                             .ValueOrDie();
+                             .value();
     builder.set_thread_dim_limit(thread_dim_limit);
 
     int clock_rate =
         GpuDriver::GetDeviceAttribute(CU_DEVICE_ATTRIBUTE_CLOCK_RATE, device)
-            .ValueOrDie();
+            .value();
     builder.set_clock_rate_ghz(static_cast<float>(clock_rate) / 1e6);
   }
 
@@ -1078,9 +1079,8 @@ GpuExecutor::CreateDeviceDescription(int device_ordinal) {
   if (mem_clock_khz.ok() && mem_bus_width_bits.ok()) {
     // Times 2 because HBM is DDR memory; it gets two data bits per each data
     // lane.
-    builder.set_memory_bandwidth(2 * int64_t{mem_clock_khz.ValueOrDie()} *
-                                 1000 *
-                                 int64_t{mem_bus_width_bits.ValueOrDie()} / 8);
+    builder.set_memory_bandwidth(2 * int64_t{mem_clock_khz.value()} * 1000 *
+                                 int64_t{mem_bus_width_bits.value()} / 8);
   }
 
   {
@@ -1105,21 +1105,19 @@ GpuExecutor::CreateDeviceDescription(int device_ordinal) {
   builder.set_device_vendor("NVIDIA Corporation");
   builder.set_cuda_compute_capability(cc_major, cc_minor);
   builder.set_shared_memory_per_core(
-      GpuDriver::GetMaxSharedMemoryPerCore(device).ValueOrDie());
+      GpuDriver::GetMaxSharedMemoryPerCore(device).value());
   builder.set_shared_memory_per_block(
-      GpuDriver::GetMaxSharedMemoryPerBlock(device).ValueOrDie());
-  builder.set_core_count(
-      GpuDriver::GetMultiprocessorCount(device).ValueOrDie());
+      GpuDriver::GetMaxSharedMemoryPerBlock(device).value());
+  builder.set_core_count(GpuDriver::GetMultiprocessorCount(device).value());
   builder.set_threads_per_core_limit(
-      GpuDriver::GetMaxThreadsPerMultiprocessor(device).ValueOrDie());
+      GpuDriver::GetMaxThreadsPerMultiprocessor(device).value());
   builder.set_registers_per_block_limit(
-      GpuDriver::GetMaxRegistersPerBlock(device).ValueOrDie());
-  builder.set_threads_per_warp(
-      GpuDriver::GetThreadsPerWarp(device).ValueOrDie());
+      GpuDriver::GetMaxRegistersPerBlock(device).value());
+  builder.set_threads_per_warp(GpuDriver::GetThreadsPerWarp(device).value());
   builder.set_registers_per_core_limit(
       GpuDriver::GetDeviceAttribute(
           CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR, device)
-          .ValueOrDie());
+          .value());
 
   return builder.Build();
 }

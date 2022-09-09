@@ -13,19 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_RUNTIME_TYPES_H_
-#define XLA_RUNTIME_TYPES_H_
+#ifndef TENSORFLOW_COMPILER_XLA_RUNTIME_TYPES_H_
+#define TENSORFLOW_COMPILER_XLA_RUNTIME_TYPES_H_
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Errc.h"
-#include "llvm/Support/ErrorOr.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "llvm/Support/ExtensibleRTTI.h"
-#include "tfrt/dtype/dtype.h"  // from @tf_runtime
+#include "llvm/Support/raw_ostream.h"
+#include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
 namespace runtime {
@@ -72,23 +73,23 @@ class Type : public llvm::RTTIExtends<Type, llvm::RTTIRoot> {
   };
 
   // Returns an Abi if the type can be used as an argument.
-  virtual llvm::ErrorOr<ArgumentAbi> AsArgument() const {
-    return llvm::errc::not_supported;
+  virtual absl::StatusOr<ArgumentAbi> AsArgument() const {
+    return absl::UnimplementedError("argument ABI is not implemented");
   }
 
   // Returns an Abi if the type can be returned as a result.
-  virtual llvm::ErrorOr<ResultAbi> AsResult() const {
-    return llvm::errc::not_supported;
+  virtual absl::StatusOr<ResultAbi> AsResult() const {
+    return absl::UnimplementedError("result ABI is not implemented");
   }
 
-  virtual llvm::raw_ostream& print(llvm::raw_ostream& os) const = 0;
+  virtual std::string ToString() const = 0;
 
  protected:
   Type() = default;
 };
 
 inline llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const Type& type) {
-  return type.print(os);
+  return os << type.ToString();
 }
 
 //===----------------------------------------------------------------------===//
@@ -99,9 +100,9 @@ class AsyncTokenType : public llvm::RTTIExtends<AsyncTokenType, Type> {
  public:
   static constexpr char ID = 0;  // NOLINT
 
-  llvm::ErrorOr<ResultAbi> AsResult() const final;
+  absl::StatusOr<ResultAbi> AsResult() const final;
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 };
 
 //===----------------------------------------------------------------------===//
@@ -117,9 +118,9 @@ class AsyncValueType : public llvm::RTTIExtends<AsyncValueType, Type> {
 
   const Type& value_type() const { return *value_type_; }
 
-  llvm::ErrorOr<ResultAbi> AsResult() const final;
+  absl::StatusOr<ResultAbi> AsResult() const final;
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 
  private:
   std::unique_ptr<Type> value_type_;
@@ -136,18 +137,18 @@ class RankedTensorType : public llvm::RTTIExtends<RankedTensorType, Type> {
 
   static constexpr bool IsDynamic(int64_t dim) { return dim == kDynamicSize; }
 
-  RankedTensorType(llvm::ArrayRef<int64_t> sizes, tfrt::DType element_type)
+  RankedTensorType(absl::Span<const int64_t> sizes, PrimitiveType element_type)
       : sizes_(sizes.begin(), sizes.end()), element_type_(element_type) {}
 
-  llvm::ArrayRef<int64_t> sizes() const { return sizes_; }
+  absl::Span<const int64_t> sizes() const { return sizes_; }
   unsigned rank() const { return sizes_.size(); }
-  tfrt::DType element_type() const { return element_type_; }
+  PrimitiveType element_type() const { return element_type_; }
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 
  private:
-  llvm::SmallVector<int64_t> sizes_;
-  tfrt::DType element_type_;
+  std::vector<int64_t> sizes_;
+  PrimitiveType element_type_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -158,15 +159,15 @@ class UnrankedTensorType : public llvm::RTTIExtends<UnrankedTensorType, Type> {
  public:
   static constexpr char ID = 0;  // NOLINT
 
-  explicit UnrankedTensorType(tfrt::DType element_type)
+  explicit UnrankedTensorType(PrimitiveType element_type)
       : element_type_(element_type) {}
 
-  tfrt::DType element_type() const { return element_type_; }
+  PrimitiveType element_type() const { return element_type_; }
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 
  private:
-  tfrt::DType element_type_;
+  PrimitiveType element_type_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -180,21 +181,21 @@ class MemrefType : public llvm::RTTIExtends<MemrefType, Type> {
 
   static constexpr bool IsDynamic(int64_t dim) { return dim == kDynamicSize; }
 
-  MemrefType(llvm::ArrayRef<int64_t> sizes, tfrt::DType element_type)
+  MemrefType(absl::Span<const int64_t> sizes, PrimitiveType element_type)
       : sizes_(sizes.begin(), sizes.end()), element_type_(element_type) {}
 
-  llvm::ArrayRef<int64_t> sizes() const { return sizes_; }
+  absl::Span<const int64_t> sizes() const { return sizes_; }
   unsigned rank() const { return sizes_.size(); }
-  tfrt::DType element_type() const { return element_type_; }
+  PrimitiveType element_type() const { return element_type_; }
 
-  llvm::ErrorOr<ArgumentAbi> AsArgument() const final;
-  llvm::ErrorOr<ResultAbi> AsResult() const final;
+  absl::StatusOr<ArgumentAbi> AsArgument() const final;
+  absl::StatusOr<ResultAbi> AsResult() const final;
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 
  private:
-  llvm::SmallVector<int64_t> sizes_;
-  tfrt::DType element_type_;
+  std::vector<int64_t> sizes_;
+  PrimitiveType element_type_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -205,29 +206,42 @@ class UnrankedMemrefType : public llvm::RTTIExtends<UnrankedMemrefType, Type> {
  public:
   static constexpr char ID = 0;  // NOLINT
 
-  explicit UnrankedMemrefType(tfrt::DType element_type)
+  explicit UnrankedMemrefType(PrimitiveType element_type)
       : element_type_(element_type) {}
 
-  tfrt::DType element_type() const { return element_type_; }
+  PrimitiveType element_type() const { return element_type_; }
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
 
  private:
-  tfrt::DType element_type_;
+  PrimitiveType element_type_;
 };
 
 //===----------------------------------------------------------------------===//
-// Corresponds to the RT dialect's KernelContextType.
+// Corresponds to the RT dialect's ExecutionContextType.
 //===----------------------------------------------------------------------===//
 
-class KernelContextOperandType
-    : public llvm::RTTIExtends<KernelContextOperandType, Type> {
+class ExecutionContextOperandType
+    : public llvm::RTTIExtends<ExecutionContextOperandType, Type> {
  public:
   static constexpr char ID = 0;  // NOLINT
 
-  llvm::ErrorOr<ArgumentAbi> AsArgument() const final;
+  absl::StatusOr<ArgumentAbi> AsArgument() const final;
 
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  std::string ToString() const final;
+};
+
+//===----------------------------------------------------------------------===//
+// Corresponds to the RT dialect's OpaqueType.
+//===----------------------------------------------------------------------===//
+
+class OpaqueOperandType : public llvm::RTTIExtends<OpaqueOperandType, Type> {
+ public:
+  static constexpr char ID = 0;  // NOLINT
+
+  absl::StatusOr<ArgumentAbi> AsArgument() const final;
+
+  std::string ToString() const final;
 };
 
 //===----------------------------------------------------------------------===//
@@ -242,16 +256,16 @@ class FunctionType {
   unsigned num_operands() const { return operands_.size(); }
   unsigned num_results() const { return results_.size(); }
 
-  FunctionType(llvm::SmallVector<std::unique_ptr<Type>> operands,
-               llvm::SmallVector<std::unique_ptr<Type>> results)
+  FunctionType(std::vector<std::unique_ptr<Type>> operands,
+               std::vector<std::unique_ptr<Type>> results)
       : operands_(std::move(operands)), results_(std::move(results)) {}
 
  private:
-  llvm::SmallVector<std::unique_ptr<Type>> operands_;
-  llvm::SmallVector<std::unique_ptr<Type>> results_;
+  std::vector<std::unique_ptr<Type>> operands_;
+  std::vector<std::unique_ptr<Type>> results_;
 };
 
 }  // namespace runtime
 }  // namespace xla
 
-#endif  // XLA_RUNTIME_TYPES_H_
+#endif  // TENSORFLOW_COMPILER_XLA_RUNTIME_TYPES_H_

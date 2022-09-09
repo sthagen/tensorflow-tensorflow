@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_TPU_NONCOPYABLE_BUFFER_H_
 #define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_TPU_NONCOPYABLE_BUFFER_H_
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -24,8 +25,8 @@ limitations under the License.
 #include "absl/functional/function_ref.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/mem.h"
+#include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/mem.h"
 
 namespace tensorflow {
 namespace tpu {
@@ -53,7 +54,7 @@ class NoncopyableBuffer {
       : data_(allocator(size)), buf_(data_.get()), size_(size) {}
 
   // Allocates an owning buffer and initializes it with the specified data. Size
-  // is specified in number of uint32's.
+  // is specified in number of uint32_t's.
   NoncopyableBuffer(size_t size_in_u32s, std::optional<uint32_t> value,
                     BufferAllocator allocator = DefaultAllocator)
       : NoncopyableBuffer(size_in_u32s * sizeof(uint32_t), allocator) {
@@ -135,8 +136,8 @@ class NoncopyableBuffer {
 
   static OwnedDataPtr AlignedAlloc(size_t size, size_t alignment) {
     return OwnedDataPtr(
-        static_cast<uint8_t*>(port::AlignedMalloc(size, alignment)),
-        port::AlignedFree);
+        static_cast<uint8_t*>(tsl::port::AlignedMalloc(size, alignment)),
+        tsl::port::AlignedFree);
   }
 
  private:

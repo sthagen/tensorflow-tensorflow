@@ -55,15 +55,16 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/tuple_simplifier.h"
 #include "tensorflow/compiler/xla/status_macros.h"
+#include "tensorflow/compiler/xla/stream_executor/cuda/cuda_diagnostics.h"
+#include "tensorflow/compiler/xla/stream_executor/cuda/cuda_platform_id.h"
+#include "tensorflow/compiler/xla/stream_executor/gpu/asm_compiler.h"
+#include "tensorflow/compiler/xla/stream_executor/gpu/gpu_driver.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/io/path.h"
-#include "tensorflow/core/platform/statusor.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
-#include "tensorflow/stream_executor/cuda/cuda_diagnostics.h"
-#include "tensorflow/stream_executor/gpu/asm_compiler.h"
-#include "tensorflow/stream_executor/gpu/gpu_driver.h"
+#include "tensorflow/tsl/platform/statusor.h"
 
 namespace xla {
 namespace gpu {
@@ -178,7 +179,7 @@ std::optional<bool> CanShareBufferHint(const HloInstruction* user,
       // The matrix bias operand can be overwritten in-place.
       if (user->custom_call_target() == kCublasLtMatmulCallTarget) {
         GemmBackendConfig config =
-            std::move(user->backend_config<GemmBackendConfig>()).ValueOrDie();
+            std::move(user->backend_config<GemmBackendConfig>()).value();
         return (config.beta() != 0.) && user->operand(2) == operand;
       }
       // The operand of cholesky can be shared with the first output.
@@ -202,7 +203,7 @@ bool MaybeLoadPtxFromFile(const HloModuleConfig module_config,
        module_config.debug_options().xla_gpu_ptx_file()) {
     // To ease comparing many PTX versions, accept different suffixes then
     // the original filename.
-    auto filename = tensorflow::io::Basename(full_filename);
+    auto filename = tsl::io::Basename(full_filename);
     if (absl::StartsWith(filename, prefix)) {
       matched_filename = full_filename;
       VLOG(1) << "RunBackend() - Will load PTX from file: " << full_filename;
@@ -243,8 +244,7 @@ std::unique_ptr<llvm::Module> MaybeLoadLLVMFromFile(const HloModule* module,
       xla_gpu_llvm_ir_file, [prefix](const std::string& full_filename) {
         // To ease comparing many LLVM versions, accept different suffixes then
         // the original filename.
-        return absl::StartsWith(tensorflow::io::Basename(full_filename),
-                                prefix);
+        return absl::StartsWith(tsl::io::Basename(full_filename), prefix);
       });
   if (!xla_gpu_llvm_ir_file.empty() &&
       matched_filename == std::end(xla_gpu_llvm_ir_file)) {
@@ -287,7 +287,7 @@ void WarnIfBadDriverJITVersion() {
       LOG(WARNING) << "Couldn't read CUDA driver version.";
       return;
     }
-    se::cuda::DriverVersion version = version_or_status.ValueOrDie();
+    se::cuda::DriverVersion version = version_or_status.value();
 
     // The following versions of the driver JIT miscompile some address
     // calculations with large offsets (e.g. "load ptr + large_constant"),
@@ -424,7 +424,7 @@ std::vector<uint8_t> NVPTXCompiler::CompileGpuAsmOrGetCachedResult(
           // error out we have no way of telling how far through the process we
           // got).
           RecordPtxToCubinDuration(end_usecs - start_usecs);
-          cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
+          cache_value->cubin_data = std::move(maybe_cubin).value();
           VLOG(1) << "Compiled PTX size:" << ptx.size()
                   << " CUBIN size: " << cache_value->cubin_data.size();
         } else {

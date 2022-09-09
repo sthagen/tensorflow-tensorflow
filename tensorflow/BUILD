@@ -940,10 +940,12 @@ package_group(
         "//learning/brain/mlir/...",
         "//learning/brain/tfrt/...",
         "//learning/lib/ami/simple_ml/...",
+        "//learning/pathways/...",
         "//smartass/brain/configure/...",
         "//tensorflow/...",
         "//tensorflow_decision_forests/...",
         "//tensorflow_federated/...",
+        "//third_party/cloud_tpu/convergence_tools/sdc_monitoring/...",
         "//third_party/cloud_tpu/inference_converter/...",
         "//third_party/py/cloud_ml_autoflow/...",
         "//third_party/py/envlogger/...",
@@ -1038,38 +1040,6 @@ cc_library(
 # global symbol table in order to support op registration. This means that
 # projects building with Bazel and importing TensorFlow as a dependency will not
 # depend on libtensorflow_framework.so unless they opt in.
-#
-# DEBUGGING DUPLICATE INITIALIZATION
-# ----------------------------------
-#
-# Having a dynamic library introduces a diamond dependency problem:
-# if a target X is depended on by both libtensorflow_framework.so and the
-# users of libtensorflow_framework.so, the definitions will get duplicated.
-# This causes global initializers which need to be run exactly once (e.g.
-# protobuf registration) to crash, as the initialization is run once from the
-# statically linked in global, and one by the global which comes in from
-# libtensorflow_framework.so.
-# Even worse, global objects which need to be singletons for semantical
-# correctness (e.g. registers) might get duplicated.
-#
-# In order to avoid these HARD TO DEBUG CRASHES, it is sufficient to follow
-# these rules:
-#  - All globals with non-trivial static constructors or for which a
-#    single identity is required (e.g. registers) need to live in `*_impl`
-#    targets.
-#
-#  - An `*_impl` target has to be (transitively) included into
-#    `libtensorflow_framework.so`.
-#
-#  - A target T1 can depend on `*_impl` target T2 only if:
-#
-#    -> It's a tf_cc_shared_object, and there is no other tf_cc_shared_object
-#       transitively depending on T2.
-#    -> It's an `*_impl` target by itself
-#    -> The dependency is guarded by `if_static`. This is discouraged,
-#       as it diverges dependency topology between static and dynamic TF.
-#
-# TODO(cheshire): Write tests to check for rule violations.
 tf_cc_shared_library(
     name = "tensorflow_framework",
     additional_linker_inputs = [
@@ -1112,7 +1082,7 @@ tf_cc_shared_library(
         "//tensorflow/core/grappler/optimizers:custom_graph_optimizer_registry_impl",
         "//tensorflow/core:lib_internal_impl",
         "//tensorflow/core/profiler:profiler_impl",
-        "//tensorflow/core/util:determinism",
+        "//tensorflow/core/util:determinism",  # Must be linked and exported to libtensorflow_framework.so.
         "//tensorflow/lite/kernels/shim:tf_kernel_shim",
         "//tensorflow/compiler/xla/stream_executor:stream_executor_impl",
     ] + tf_additional_binary_deps(),
@@ -1215,12 +1185,16 @@ tf_cc_shared_library(
         ],
     }),
     per_os_targets = True,
+    roots = [
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:client_session",
+        "//tensorflow/cc:const_op",
+        "//tensorflow/cc:scope",
+    ],
     soversion = VERSION,
     static_deps = PACKAGE_STATIC_DEPS,
     visibility = ["//visibility:public"],
-    # copybara:comment_begin(OSS Windows only: DEF file for exported symbols)
     win_def_file = ":tensorflow_filtered_def_file",
-    # copybara:comment_end
     deps = [
         "//tensorflow/c:c_api",
         "//tensorflow/c:env",
@@ -1231,9 +1205,6 @@ tf_cc_shared_library(
         "//tensorflow/c/eager:c_api",
         "//tensorflow/c/experimental/filesystem:filesystem_interface",
         "//tensorflow/c/experimental/stream_executor:stream_executor",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:client_session",
-        "//tensorflow/cc:scope",
         "//tensorflow/cc/saved_model:fingerprinting_impl",
         "//tensorflow/cc/saved_model:loader_lite_impl",
         "//tensorflow/cc/saved_model:metrics_impl",
@@ -1353,6 +1324,7 @@ genrule(
         "//tensorflow/c/eager:headers",
         "//tensorflow/cc:headers",
         "//tensorflow/core:headers",
+        "//tensorflow/stream_executor:stream_executor_install_hdrs",
     ],
     outs = ["include"],
     cmd = """

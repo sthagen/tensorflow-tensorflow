@@ -2,7 +2,7 @@
 #   Host-platform specific StreamExecutor support code.
 
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
-load("//tensorflow/stream_executor:build_defs.bzl", "stream_executor_friends")
+load("//tensorflow/compiler/xla/stream_executor:build_defs.bzl", "stream_executor_friends")
 load("//tensorflow:tensorflow.bzl", "tf_cc_test")
 
 package(
@@ -103,8 +103,8 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor:stream_executor_pimpl",
         "//tensorflow/compiler/xla/stream_executor:timer",
         "//tensorflow/compiler/xla/stream_executor/lib",
-        "//tensorflow/core/platform:platform_port",
         "//tensorflow/core/platform:profile_utils_cpu_utils",
+        "//tensorflow/tsl/platform:platform_port",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
     ],

@@ -45,6 +45,7 @@ limitations under the License.
 #endif
 
 #include <complex>
+#include <cstdint>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -69,7 +70,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/plugin_registry.h"
 #include "tensorflow/compiler/xla/stream_executor/scratch_allocator.h"
 #include "tensorflow/compiler/xla/stream_executor/stream_executor.h"
-#include "tensorflow/core/platform/tensor_float_32_utils.h"
+#include "tensorflow/tsl/platform/tensor_float_32_utils.h"
 
 namespace stream_executor {
 namespace cuda {
@@ -351,22 +352,22 @@ struct CUDADataType<int> {
 };
 
 template <>
-struct CUDADataType<int8> {
+struct CUDADataType<int8_t> {
   static constexpr cudaDataType_t type = CUDA_R_8I;
 };
 
 template <>
-struct CUDADataType<std::complex<int8>> {
+struct CUDADataType<std::complex<int8_t>> {
   static constexpr cudaDataType_t type = CUDA_C_8I;
 };
 
 template <>
-struct CUDADataType<uint8> {
+struct CUDADataType<uint8_t> {
   static constexpr cudaDataType_t type = CUDA_R_8U;
 };
 
 template <>
-struct CUDADataType<std::complex<uint8>> {
+struct CUDADataType<std::complex<uint8_t>> {
   static constexpr cudaDataType_t type = CUDA_C_8U;
 };
 
@@ -388,7 +389,7 @@ port::Status CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
   ScopedCublasMathMode math_mode{blas_};
 #if CUBLAS_VER_MAJOR >= 11
   if (math_type == CUBLAS_TF32_TENSOR_OP_MATH &&
-      tensorflow::tensor_float_32_execution_enabled()) {
+      tsl::tensor_float_32_execution_enabled()) {
 #else
   if (math_type == CUBLAS_TENSOR_OP_MATH) {
 #endif
@@ -406,7 +407,7 @@ port::Status CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
   }
   cublasStatus_t ret = cublas_func(blas_, args...);
   if (ret == CUBLAS_STATUS_SUCCESS) {
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   }
   return port::InternalError(ToString(ret));
 }
@@ -625,7 +626,7 @@ port::Status CUDABlas::DoBlasGemm(Stream *stream, blas::Transpose transa,
             CudaComputeCapability::AMPERE)) {
       // TODO(reedwm): Remove or make this VLOG(1) once TensorFloat-32 is more
       // well tested.
-      if (tensorflow::tensor_float_32_execution_enabled()) {
+      if (tsl::tensor_float_32_execution_enabled()) {
         LOG_FIRST_N(INFO, 1) << "TensorFloat-32 will be used for the matrix "
                                 "multiplication. This will only be logged "
                                 "once.";
@@ -919,7 +920,7 @@ static bool UsesTensorOps(blas::AlgorithmType algo) {
 
 static port::StatusOr<cublasMath_t> GetMathTypeForGemmEx(
     Stream *stream, blas::AlgorithmType algorithm, blas::DataType type_a,
-    blas::DataType type_b) {
+    blas::DataType type_b, blas::ComputePrecision precision) {
   if (type_a != type_b) {
     return port::InternalError("Types of inputs mismatch");
   }
@@ -950,7 +951,7 @@ static port::StatusOr<cublasMath_t> GetMathTypeForGemmEx(
             "Algorithm ", algorithm,
             " uses tensor ops, but tensor ops are not available in sm",
             cc.major, "X devices for float input types."));
-      } else if (!tensorflow::tensor_float_32_execution_enabled()) {
+      } else if (!tsl::tensor_float_32_execution_enabled()) {
         return port::InternalError(absl::StrCat(
             "Algorithm ", algorithm,
             " uses tensor ops, but tensor ops are disabled for fp32 inputs"));
@@ -966,6 +967,9 @@ static port::StatusOr<cublasMath_t> GetMathTypeForGemmEx(
           absl::StrCat("Algorithm ", algorithm,
                        " uses tensor ops which are not supported for input"));
     }
+  }
+  if (precision > blas::kDefaultComputePrecision) {
+    math_type = CUBLAS_DEFAULT_MATH;
   }
 
   // Return false if we might be hitting a cuBLAS bug that produces the wrong
@@ -1009,7 +1013,7 @@ static port::Status PopulateProfileFromTimer(
     output_profile_result->set_elapsed_time_in_ms(
         timer->GetElapsedMilliseconds());
   }
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status CUDABlas::DoBlasGemmWithAlgorithm(
@@ -1018,9 +1022,11 @@ port::Status CUDABlas::DoBlasGemmWithAlgorithm(
     blas::DataType type_a, int lda, const DeviceMemoryBase &b,
     blas::DataType type_b, int ldb, const void *beta, DeviceMemoryBase *c,
     blas::DataType type_c, int ldc, blas::ComputationType computation_type,
-    blas::AlgorithmType algorithm, blas::ProfileResult *output_profile_result) {
-  TF_ASSIGN_OR_RETURN(cublasMath_t math_type,
-                      GetMathTypeForGemmEx(stream, algorithm, type_a, type_b));
+    blas::AlgorithmType algorithm, blas::ComputePrecision precision,
+    blas::ProfileResult *output_profile_result) {
+  TF_ASSIGN_OR_RETURN(
+      cublasMath_t math_type,
+      GetMathTypeForGemmEx(stream, algorithm, type_a, type_b, precision));
 
   TF_ASSIGN_OR_RETURN(auto timer, StartGpuTimerForProfile(
                                       stream, parent_, output_profile_result));
@@ -1038,7 +1044,7 @@ port::Status CUDABlas::DoBlasGemmWithAlgorithm(
       static_cast<cublasGemmAlgo_t>(algorithm)));
   TF_RETURN_IF_ERROR(PopulateProfileFromTimer(timer.get(), algorithm,
                                               output_profile_result, stream));
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status CUDABlas::DoBlasGemmStridedBatchedWithAlgorithm(
@@ -1048,9 +1054,11 @@ port::Status CUDABlas::DoBlasGemmStridedBatchedWithAlgorithm(
     blas::DataType type_b, int ldb, int64_t stride_b, const void *beta,
     DeviceMemoryBase *c, blas::DataType type_c, int ldc, int64_t stride_c,
     int batch_count, blas::ComputationType computation_type,
-    blas::AlgorithmType algorithm, blas::ProfileResult *output_profile_result) {
-  TF_ASSIGN_OR_RETURN(cublasMath_t math_type,
-                      GetMathTypeForGemmEx(stream, algorithm, type_a, type_b));
+    blas::AlgorithmType algorithm, blas::ComputePrecision precision,
+    blas::ProfileResult *output_profile_result) {
+  TF_ASSIGN_OR_RETURN(
+      cublasMath_t math_type,
+      GetMathTypeForGemmEx(stream, algorithm, type_a, type_b, precision));
   TF_ASSIGN_OR_RETURN(auto timer, StartGpuTimerForProfile(
                                       stream, parent_, output_profile_result));
 
@@ -1091,7 +1099,7 @@ port::Status CUDABlas::DoBlasGemmStridedBatchedWithAlgorithm(
       static_cast<cublasGemmAlgo_t>(algorithm)));
   TF_RETURN_IF_ERROR(PopulateProfileFromTimer(timer.get(), algorithm,
                                               output_profile_result, stream));
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 bool CUDABlas::GetBlasGemmAlgorithms(
@@ -1221,11 +1229,11 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
   // Decide how to allocate device-side copy of pointers to matrices based on
   // whether a scratch allocator was passed.
   if (scratch_allocator != nullptr) {
-    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8> a_bytes,
+    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8_t> a_bytes,
                         scratch_allocator->AllocateBytes(size));
-    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8> b_bytes,
+    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8_t> b_bytes,
                         scratch_allocator->AllocateBytes(size));
-    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8> c_bytes,
+    TF_ASSIGN_OR_RETURN(DeviceMemory<uint8_t> c_bytes,
                         scratch_allocator->AllocateBytes(size));
     a = DeviceMemory<CUDA_T *>(a_bytes);
     b = DeviceMemory<CUDA_T *>(b_bytes);
@@ -1268,7 +1276,7 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
       // DoBlassInternalImpl will switch math_type back to CUBLAS_DEFAULT_MATH
       // if TensorFloat-32 is disabled.
       math_type = CUBLAS_TF32_TENSOR_OP_MATH;
-      algo = tensorflow::tensor_float_32_execution_enabled()
+      algo = tsl::tensor_float_32_execution_enabled()
                  ? CUBLAS_GEMM_DFALT_TENSOR_OP
                  : CUBLAS_GEMM_DFALT;
 #endif
@@ -1302,7 +1310,7 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
         const_cast<const CUDA_T **>(GpuMemory(b)), ldb, GpuComplex(&cb_beta),
         const_cast<CUDA_T **>(GpuMemory(c)), ldc, batch_count);
     if (ok) {
-      return ::tensorflow::OkStatus();
+      return ::tsl::OkStatus();
     }
     return port::Status(port::error::INTERNAL,
                         "failed BLAS call, see log for details");
@@ -1317,7 +1325,7 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
           a_matrix, lda, b_matrix, ldb, &beta, c_matrix, ldc,
           blas::kDefaultComputePrecision));
     }
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   }
 }
 
@@ -1409,7 +1417,8 @@ port::Status CUDABlas::DoBlasGemmStridedBatched(
     uint64_t n, uint64 k, blas::DataType dtype, const void *alpha,
     const DeviceMemoryBase &a, int lda, int64_t stride_a,
     const DeviceMemoryBase &b, int ldb, int64_t stride_b, const void *beta,
-    DeviceMemoryBase *c, int ldc, int64_t stride_c, int batch_count) {
+    DeviceMemoryBase *c, int ldc, int64_t stride_c, int batch_count,
+    blas::ComputePrecision precision) {
   cublasMath_t math_type = CUBLAS_DEFAULT_MATH;
 #if CUDA_VERSION < 11000
   if (dtype == dnn::kHalf) {
@@ -1418,6 +1427,9 @@ port::Status CUDABlas::DoBlasGemmStridedBatched(
 #else
   if (dtype == dnn::kFloat) {
     math_type = CUBLAS_TF32_TENSOR_OP_MATH;
+  }
+  if (precision > blas::kDefaultComputePrecision) {
+    math_type = CUBLAS_DEFAULT_MATH;
   }
 #endif
 
@@ -1489,7 +1501,7 @@ port::Status CUDABlas::DoBlasGemmStridedBatched(
             b_matrix, SE_CUDA_DATA_HALF, ldb, static_cast<const float *>(beta),
             c_matrix, SE_CUDA_DATA_HALF, ldc));
       }
-      return ::tensorflow::OkStatus();
+      return ::tsl::OkStatus();
     }
     case dnn::kFloat: {
       return DoBlasInternalImpl(
@@ -1664,7 +1676,7 @@ port::Status CUDABlas::GetVersion(std::string *version) {
     return port::InternalError(ToString(status));
   }
   *version = std::to_string(v);
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 void initialize_cublas() {

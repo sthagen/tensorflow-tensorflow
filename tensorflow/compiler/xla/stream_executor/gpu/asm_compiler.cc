@@ -15,10 +15,13 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/stream_executor/gpu/asm_compiler.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/base/const_init.h"
+#include "absl/base/optimization.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
@@ -28,12 +31,12 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "tensorflow/compiler/xla/stream_executor/gpu/gpu_driver.h"
 #include "tensorflow/compiler/xla/stream_executor/lib/statusor.h"
-#include "tensorflow/core/platform/cuda_libdevice_path.h"
 #include "tensorflow/core/platform/env.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/platform/path.h"
-#include "tensorflow/core/platform/regexp.h"
 #include "tensorflow/core/platform/subprocess.h"
+#include "tensorflow/tsl/platform/cuda_libdevice_path.h"
+#include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/path.h"
+#include "tensorflow/tsl/platform/regexp.h"
 
 namespace stream_executor {
 
@@ -86,15 +89,14 @@ static void WarnIfBadPtxasVersion(const std::string& ptxas_path) {
 
   int64_t vmaj, vmin, vdot;
   std::string vmaj_str, vmin_str, vdot_str;
-  if (!RE2::PartialMatch(ptxas_version.ValueOrDie(),
-                         R"(\bV(\d+)\.(\d+)\.(\d+)\b)", &vmaj_str, &vmin_str,
-                         &vdot_str) ||
+  if (!RE2::PartialMatch(ptxas_version.value(), R"(\bV(\d+)\.(\d+)\.(\d+)\b)",
+                         &vmaj_str, &vmin_str, &vdot_str) ||
       !absl::SimpleAtoi(vmaj_str, &vmaj) ||
       !absl::SimpleAtoi(vmin_str, &vmin) ||
       !absl::SimpleAtoi(vdot_str, &vdot)) {
     LOG(WARNING) << "Couldn't parse ptxas version in output of " << ptxas_path
                  << " --version:\n"
-                 << ptxas_version.ValueOrDie();
+                 << ptxas_version.value();
     return;
   }
 
@@ -120,10 +122,10 @@ static void WarnIfBadPtxasVersion(const std::string& ptxas_path) {
   }
 }
 
-port::StatusOr<absl::Span<const uint8>> CompileGpuAsmOrGetCached(
+port::StatusOr<absl::Span<const uint8_t>> CompileGpuAsmOrGetCached(
     int device_ordinal, const char* ptx, GpuAsmOpts compilation_options) {
   using PtxCacheKey = std::tuple<int, std::string, GpuAsmOpts::PtxOptionsTuple>;
-  using PtxCompilerResult = port::StatusOr<std::vector<uint8>>;
+  using PtxCompilerResult = port::StatusOr<std::vector<uint8_t>>;
   static absl::Mutex ptx_cache_mutex(absl::kConstInit);
   static auto& ptx_cache ABSL_GUARDED_BY(ptx_cache_mutex) =
       *new absl::flat_hash_map<PtxCacheKey, PtxCompilerResult>();
@@ -144,17 +146,17 @@ port::StatusOr<absl::Span<const uint8>> CompileGpuAsmOrGetCached(
   // Use separate status check and ValueOrDie invocation on ptx_cache
   // entry to avoid value moving introduced by TF_ASSIGN_OR_RETURN.
 
-  if (TF_PREDICT_FALSE(!it->second.ok())) {
+  if (ABSL_PREDICT_FALSE(!it->second.ok())) {
     return it->second.status();
   }
 
-  const std::vector<uint8>& compiled = it->second.ValueOrDie();
+  const std::vector<uint8_t>& compiled = it->second.value();
   return absl::MakeSpan(compiled);
 }
 
-port::StatusOr<std::vector<uint8>> CompileGpuAsm(int device_ordinal,
-                                                 const char* ptx_contents,
-                                                 GpuAsmOpts options) {
+port::StatusOr<std::vector<uint8_t>> CompileGpuAsm(int device_ordinal,
+                                                   const char* ptx_contents,
+                                                   GpuAsmOpts options) {
   gpu::GpuDeviceHandle handle;
   TF_RETURN_IF_ERROR(gpu::GpuDriver::GetDevice(device_ordinal, &handle));
   int cc_major;
@@ -186,7 +188,7 @@ static std::string FindCudaExecutable(const std::string binary_name,
   }
 
   // Try searching in the default PATH first if applicable.
-  if (tensorflow::PreferPtxasFromPath() &&
+  if (tsl::PreferPtxasFromPath() &&
       GetPtxasVersionString(binary_filename).ok()) {
     VLOG(2) << "Using " << binary_filename;
     seen_binary_paths->emplace(std::move(cache_key), binary_filename);
@@ -197,8 +199,8 @@ static std::string FindCudaExecutable(const std::string binary_name,
   auto env = tensorflow::Env::Default();
   std::string binary_path;
   for (const std::string& cuda_root :
-       tensorflow::CandidateCudaRoots(preferred_cuda_dir)) {
-    binary_path = tensorflow::io::JoinPath(cuda_root, "bin", binary_filename);
+       tsl::CandidateCudaRoots(preferred_cuda_dir)) {
+    binary_path = tsl::io::JoinPath(cuda_root, "bin", binary_filename);
     VLOG(2) << "Looking for " << binary_filename << " at " << binary_path;
     if (env->FileExists(binary_path).ok() &&
         GetPtxasVersionString(binary_path).ok()) {
@@ -245,9 +247,9 @@ static void AppendArgsFromOptions(GpuAsmOpts options,
               options.extra_flags.end());
 }
 
-port::StatusOr<std::vector<uint8>> CompileGpuAsm(int cc_major, int cc_minor,
-                                                 const char* ptx_contents,
-                                                 GpuAsmOpts options) {
+port::StatusOr<std::vector<uint8_t>> CompileGpuAsm(int cc_major, int cc_minor,
+                                                   const char* ptx_contents,
+                                                   GpuAsmOpts options) {
   std::string ptxas_path =
       FindCudaExecutable("ptxas", options.preferred_cuda_dir);
 
@@ -332,11 +334,11 @@ port::StatusOr<std::vector<uint8>> CompileGpuAsm(int cc_major, int cc_minor,
   std::string cubin;
   TF_RETURN_IF_ERROR(tensorflow::ReadFileToString(tensorflow::Env::Default(),
                                                   cubin_path, &cubin));
-  std::vector<uint8> cubin_vector(cubin.begin(), cubin.end());
+  std::vector<uint8_t> cubin_vector(cubin.begin(), cubin.end());
   return cubin_vector;
 }
 
-port::StatusOr<std::vector<uint8>> BundleGpuAsm(
+port::StatusOr<std::vector<uint8_t>> BundleGpuAsm(
     std::vector<CubinOrPTXImage> images, GpuAsmOpts options) {
   std::string fatbinary_path =
       FindCudaExecutable("fatbinary", options.preferred_cuda_dir);
@@ -415,14 +417,14 @@ port::StatusOr<std::vector<uint8>> BundleGpuAsm(
   std::string result_blob;
   TF_RETURN_IF_ERROR(tensorflow::ReadFileToString(tensorflow::Env::Default(),
                                                   result_path, &result_blob));
-  return std::vector<uint8>(result_blob.begin(), result_blob.end());
+  return std::vector<uint8_t>(result_blob.begin(), result_blob.end());
 }
 
 static std::string findRocmExecutable(const std::string& binary_relative_path,
                                       const std::string& rocm_root_dir) {
   auto env = tensorflow::Env::Default();
   std::string binary_path =
-      tensorflow::io::JoinPath(rocm_root_dir, binary_relative_path);
+      tsl::io::JoinPath(rocm_root_dir, binary_relative_path);
   VLOG(2) << "Looking for " << binary_relative_path << " at " << rocm_root_dir;
   if (!env->FileExists(binary_path).ok()) {
     binary_path = absl::StrCat("<", binary_path, " - NOT FOUND>");
@@ -430,7 +432,7 @@ static std::string findRocmExecutable(const std::string& binary_relative_path,
   return binary_path;
 }
 
-port::StatusOr<std::vector<uint8>> BundleGpuAsm(
+port::StatusOr<std::vector<uint8_t>> BundleGpuAsm(
     std::vector<HsacoImage> images, const std::string rocm_root_dir) {
   std::string clang_offload_bundler_path =
       findRocmExecutable("llvm/bin/clang-offload-bundler", rocm_root_dir);
@@ -510,7 +512,7 @@ port::StatusOr<std::vector<uint8>> BundleGpuAsm(
   std::string result_blob;
   TF_RETURN_IF_ERROR(tensorflow::ReadFileToString(tensorflow::Env::Default(),
                                                   result_path, &result_blob));
-  return std::vector<uint8>(result_blob.begin(), result_blob.end());
+  return std::vector<uint8_t>(result_blob.begin(), result_blob.end());
 }
 
 }  // namespace stream_executor

@@ -15,10 +15,15 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 
+#include <cmath>
+#include <complex>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -27,7 +32,6 @@ limitations under the License.
 #include "absl/base/casts.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/strings/ascii.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -54,7 +58,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
-#include "tensorflow/core/platform/protobuf.h"
 
 namespace xla {
 
@@ -421,7 +424,7 @@ class HloParserImpl : public HloParser {
   bool CopyAttributeToProtoMessage(
       absl::flat_hash_set<std::string> non_proto_attrs,
       const absl::flat_hash_map<std::string, AttrConfig>& attrs,
-      tensorflow::protobuf::Message* message);
+      tsl::protobuf::Message* message);
 
   // Parses an attribute string into a protocol buffer `message`.
   // Since proto3 has no notion of mandatory fields, `required_attrs` gives the
@@ -430,7 +433,7 @@ class HloParserImpl : public HloParser {
   // but added to the HloInstruction.
   bool ParseAttributesAsProtoMessage(
       const absl::flat_hash_map<std::string, AttrConfig>& non_proto_attrs,
-      tensorflow::protobuf::Message* message);
+      tsl::protobuf::Message* message);
 
   // Parses a name and finds the corresponding hlo computation.
   bool ParseComputationName(HloComputation** value);
@@ -488,6 +491,7 @@ class HloParserImpl : public HloParser {
                                absl::string_view attr_description);
   bool ParseDimLevelTypes(std::vector<DimLevelType>* dim_level_types);
   bool ParseTiles(std::vector<Tile>* tiles);
+  bool ParsePhysicalShape(Shape* physical_shape);
   bool ParseOpcode(HloOpcode* opcode,
                    std::optional<HloOpcode>* async_wrapped_opcode);
   bool ParseFftType(FftType* result);
@@ -884,7 +888,7 @@ bool HloParserImpl::ParseCustomCallSchedule(CustomCallSchedule* result) {
         StrFormat("expects custom-call schedule but sees: %s, error: %s", val,
                   status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -901,7 +905,7 @@ bool HloParserImpl::ParseCustomCallApiVersion(CustomCallApiVersion* result) {
         StrFormat("expects custom-call API version but sees: %s, error: %s",
                   val, status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -1167,10 +1171,6 @@ bool HloParserImpl::ParseInstructionRhs(HloComputation::Builder* builder,
   optional<std::string> backend_config;
   attrs["backend_config"] = {/*required=*/false, AttrTy::kString,
                              &backend_config};
-  optional<std::vector<int64_t>> outer_dimension_partitions;
-  attrs["outer_dimension_partitions"] = {/*required=*/false,
-                                         AttrTy::kBracedInt64List,
-                                         &outer_dimension_partitions};
 
   std::optional<Shape> maybe_shape;
   if (parse_shape) {
@@ -1203,8 +1203,7 @@ bool HloParserImpl::ParseInstructionRhs(HloComputation::Builder* builder,
 
   // Add shared attributes like metadata to the instruction, if they were seen.
   if (sharding) {
-    instruction->set_sharding(
-        HloSharding::FromProto(sharding.value()).ValueOrDie());
+    instruction->set_sharding(HloSharding::FromProto(sharding.value()).value());
   }
   if (parameter_replication) {
     int leaf_count = ShapeUtil::GetLeafCount(instruction->shape());
@@ -1233,9 +1232,6 @@ bool HloParserImpl::ParseInstructionRhs(HloComputation::Builder* builder,
   if (backend_config) {
     instruction->set_raw_backend_config_string(std::move(*backend_config));
   }
-  if (outer_dimension_partitions) {
-    instruction->set_outer_dimension_partitions(*outer_dimension_partitions);
-  }
   if (frontend_attributes) {
     instruction->set_frontend_attributes(*frontend_attributes);
   }
@@ -1263,7 +1259,7 @@ HloInstruction* HloParserImpl::CreateInstruction(  // NOLINT
               "failed to infer shape for opcode: %s, error: %s",
               HloOpcodeString(opcode), inferred.status().error_message()));
         }
-        shape = std::move(inferred).ValueOrDie();
+        shape = std::move(inferred).value();
         return true;
       };
 
@@ -3236,9 +3232,9 @@ bool HloParserImpl::ParseDomain(DomainData* domain) {
   }
   if (*kind == ShardingMetadata::KindName()) {
     auto entry_sharding_ptr = std::make_unique<HloSharding>(
-        HloSharding::FromProto(*entry_sharding).ValueOrDie());
+        HloSharding::FromProto(*entry_sharding).value());
     auto exit_sharding_ptr = std::make_unique<HloSharding>(
-        HloSharding::FromProto(*exit_sharding).ValueOrDie());
+        HloSharding::FromProto(*exit_sharding).value());
     domain->entry_metadata =
         std::make_unique<ShardingMetadata>(std::move(entry_sharding_ptr));
     domain->exit_metadata =
@@ -3310,8 +3306,7 @@ bool HloParserImpl::SetValueInLiteral(LocTy loc, double value, int64_t index,
     case F16:
       return SetValueInLiteralHelper<Eigen::half>(loc, value, index, literal);
     case BF16:
-      return SetValueInLiteralHelper<tensorflow::bfloat16>(loc, value, index,
-                                                           literal);
+      return SetValueInLiteralHelper<tsl::bfloat16>(loc, value, index, literal);
     case F32:
       return SetValueInLiteralHelper<float>(loc, value, index, literal);
     case F64:
@@ -4415,8 +4410,8 @@ bool HloParserImpl::ParseAttributeHelper(
 bool HloParserImpl::CopyAttributeToProtoMessage(
     absl::flat_hash_set<std::string> non_proto_attrs,
     const absl::flat_hash_map<std::string, AttrConfig>& attrs,
-    tensorflow::protobuf::Message* message) {
-  const tensorflow::protobuf::Descriptor* descriptor = message->GetDescriptor();
+    tsl::protobuf::Message* message) {
+  const tsl::protobuf::Descriptor* descriptor = message->GetDescriptor();
   const tensorflow::protobuf::Reflection* reflection = message->GetReflection();
 
   for (const auto& p : attrs) {
@@ -4476,8 +4471,8 @@ bool HloParserImpl::CopyAttributeToProtoMessage(
 // attributes ::= (',' attribute)*
 bool HloParserImpl::ParseAttributesAsProtoMessage(
     const absl::flat_hash_map<std::string, AttrConfig>& non_proto_attrs,
-    tensorflow::protobuf::Message* message) {
-  const tensorflow::protobuf::Descriptor* descriptor = message->GetDescriptor();
+    tsl::protobuf::Message* message) {
+  const tsl::protobuf::Descriptor* descriptor = message->GetDescriptor();
   absl::flat_hash_map<std::string, AttrConfig> attrs;
 
   // Storage for attributes.
@@ -5073,6 +5068,24 @@ bool HloParserImpl::ParseTiles(std::vector<Tile>* tiles) {
   return true;
 }
 
+// physical_shape
+//   ::= /*empty*/
+//   ::= 'P' '(' shape ')'
+bool HloParserImpl::ParsePhysicalShape(Shape* physical_shape) {
+  if (!ParseToken(TokKind::kLparen,
+                  StrCat("expects physical shape to start with ",
+                         TokKindToString(TokKind::kLparen)))) {
+    return false;
+  }
+  ParseShape(physical_shape);
+  if (!ParseToken(TokKind::kRparen,
+                  StrCat("expects physical shape to end with ",
+                         TokKindToString(TokKind::kRparen)))) {
+    return false;
+  }
+  return true;
+}
+
 // int_attribute
 //   ::= /*empty*/
 //   ::= attr_token '(' attr_value ')'
@@ -5100,7 +5113,10 @@ bool HloParserImpl::ParseLayoutIntAttribute(
 
 // layout
 //   ::= '{' int64_list
-//       (':' dim_level_types tiles element_size_in_bits memory_space)?
+//       (':' dim_level_types
+//            tiles element_size_in_bits
+//            memory_space
+//            physical_shape)?
 //       '}'
 // element_size_in_bits
 //   ::= /*empty*/
@@ -5114,6 +5130,7 @@ bool HloParserImpl::ParseLayout(Layout* layout) {
   std::vector<Tile> tiles;
   int64_t element_size_in_bits = 0;
   int64_t memory_space = 0;
+  std::optional<Shape> physical_shape;
 
   auto parse_and_add_item = [&]() {
     int64_t i;
@@ -5161,6 +5178,12 @@ bool HloParserImpl::ParseLayout(Layout* layout) {
         lexer_.Lex();
         ParseLayoutIntAttribute(&memory_space, "memory space");
       }
+
+      if (lexer_.GetKind() == TokKind::kIdent && lexer_.GetStrVal() == "P") {
+        lexer_.Lex();
+        physical_shape.emplace();
+        ParsePhysicalShape(&*physical_shape);
+      }
     }
   }
   if (!ParseToken(TokKind::kRbrace,
@@ -5174,7 +5197,8 @@ bool HloParserImpl::ParseLayout(Layout* layout) {
     vec_tiles[i] = Tile(tiles[i]);
   }
   *layout = LayoutUtil::MakeLayout(minor_to_major, dim_level_types, vec_tiles,
-                                   element_size_in_bits, memory_space);
+                                   element_size_in_bits, memory_space,
+                                   std::move(physical_shape));
   return true;
 }
 
@@ -5255,6 +5279,13 @@ bool HloParserImpl::ParseShape(Shape* result) {
       return Error(lexer_.GetLoc(),
                    StrFormat("Layout has tiles, but is for a sparse array: %s",
                              layout.ToString()));
+    }
+    if (!LayoutUtil::IsSparse(layout) && layout.has_physical_shape()) {
+      return Error(
+          lexer_.GetLoc(),
+          StrFormat(
+              "Layout has physical shape, but is not for a sparse array: %s",
+              layout.ToString()));
     }
     *result->mutable_layout() = layout;
   }
@@ -5505,13 +5536,13 @@ bool HloParserImpl::ParseOpcode(
             StrFormat("expects async wrapped opcode but sees: %s, error: %s",
                       val, status_or_result.status().error_message()));
       }
-      *async_wrapped_opcode = status_or_result.ValueOrDie();
+      *async_wrapped_opcode = status_or_result.value();
     } else {
       return TokenError(StrFormat("expects opcode but sees: %s, error: %s", val,
                                   status_or_result.status().error_message()));
     }
   } else {
-    *opcode = status_or_result.ValueOrDie();
+    *opcode = status_or_result.value();
   }
   lexer_.Lex();
   return true;
@@ -5554,7 +5585,7 @@ bool HloParserImpl::ParseComparisonDirection(ComparisonDirection* result) {
     return TokenError(
         StrFormat("expects comparison direction but sees: %s", val));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -5569,7 +5600,7 @@ bool HloParserImpl::ParseComparisonType(Comparison::Type* result) {
   if (!status_or_result.ok()) {
     return TokenError(StrFormat("expects comparison type but sees: %s", val));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -5586,7 +5617,7 @@ bool HloParserImpl::ParseFusionKind(HloInstruction::FusionKind* result) {
                                 val,
                                 status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -5603,7 +5634,7 @@ bool HloParserImpl::ParseRandomDistribution(RandomDistribution* result) {
         StrFormat("expects random distribution but sees: %s, error: %s", val,
                   status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -5620,7 +5651,7 @@ bool HloParserImpl::ParseRandomAlgorithm(RandomAlgorithm* result) {
         StrFormat("expects random algorithm but sees: %s, error: %s", val,
                   status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }
@@ -5637,7 +5668,7 @@ bool HloParserImpl::ParsePrecision(PrecisionConfig::Precision* result) {
                                 val,
                                 status_or_result.status().error_message()));
   }
-  *result = status_or_result.ValueOrDie();
+  *result = status_or_result.value();
   lexer_.Lex();
   return true;
 }

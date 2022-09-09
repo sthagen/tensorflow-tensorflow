@@ -69,13 +69,14 @@ add_mlir_library(MhloPasses
   Core
 
   LINK_LIBS PUBLIC
-  ChloDialect
+  ChloOps
   MhloDialect
   MhloTypeConversion
   MLIRIR
   MLIRMhloUtils
   MLIRPass
   MLIRTransformUtils
+  StablehloBroadcastUtils
 )
 
 add_mlir_library(MhloToThloConversion
@@ -83,6 +84,7 @@ add_mlir_library(MhloToThloConversion
 
   DEPENDS
   MLIRGmlStFusionInterfaceIncGen
+  MLIRMhloPassIncGen
   THLODialect
 
   LINK_COMPONENTS
@@ -90,6 +92,8 @@ add_mlir_library(MhloToThloConversion
 
   LINK_LIBS PUBLIC
   MhloDialect
+  MhloTypeConversion
+  THLODialect
   MLIRIR
   MLIRMhloUtils
   MLIRPass
@@ -232,7 +236,7 @@ add_mlir_library(ChloPasses
   Core
 
   LINK_LIBS PUBLIC
-  ChloDialect
+  ChloOps
   HloToLinalgUtils
   MLIRComplexDialect
   MLIRIR

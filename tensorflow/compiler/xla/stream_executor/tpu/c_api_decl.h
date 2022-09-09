@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_STREAM_EXECUTOR_TPU_C_API_DECL_H_
-#define TENSORFLOW_STREAM_EXECUTOR_TPU_C_API_DECL_H_
+#ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_TPU_C_API_DECL_H_
+#define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_TPU_C_API_DECL_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -66,7 +66,7 @@ typedef struct SE_PlatformId {
 } SE_PlatformId;
 typedef struct SE_StreamExecutorConfig SE_StreamExecutorConfig;
 typedef struct SE_DeviceOptions SE_DeviceOptions;
-typedef TF_Status* (*SE_StatusCallbackFn)(void*);
+typedef TF_Status* (*SE_StatusCallback)(void*);
 
 typedef struct SE_DeviceMemoryBase {
   void* opaque;
@@ -345,4 +345,4 @@ typedef struct SE_TpuTopology_Core SE_TpuTopology_Core;
 typedef struct SE_TpuTopology_Core SE_TpuTopology_Host;
 }
 
-#endif  // TENSORFLOW_STREAM_EXECUTOR_TPU_C_API_DECL_H_
+#endif  // TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_TPU_C_API_DECL_H_

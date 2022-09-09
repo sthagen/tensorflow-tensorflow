@@ -22,6 +22,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_GPU_GPU_EXECUTOR_H_
 #define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_GPU_GPU_EXECUTOR_H_
 
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <type_traits>
@@ -38,7 +39,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/platform/port.h"
 #include "tensorflow/compiler/xla/stream_executor/stream_executor_internal.h"
 #include "tensorflow/compiler/xla/stream_executor/stream_executor_pimpl.h"
-#include "tensorflow/core/platform/fingerprint.h"
+#include "tensorflow/tsl/platform/fingerprint.h"
 
 namespace stream_executor {
 
@@ -189,10 +190,10 @@ class GpuExecutor : public internal::StreamExecutorInterface {
 
   port::Status MemZero(Stream* stream, DeviceMemoryBase* location,
                        uint64_t size) override;
-  port::Status Memset(Stream* stream, DeviceMemoryBase* location, uint8 pattern,
-                      uint64_t size) override;
+  port::Status Memset(Stream* stream, DeviceMemoryBase* location,
+                      uint8_t pattern, uint64_t size) override;
   port::Status Memset32(Stream* stream, DeviceMemoryBase* location,
-                        uint32 pattern, uint64_t size) override;
+                        uint32_t pattern, uint64_t size) override;
 
   bool Memcpy(Stream* stream, void* host_dst, const DeviceMemoryBase& gpu_src,
               uint64_t size) override;

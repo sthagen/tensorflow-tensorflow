@@ -471,6 +471,62 @@ def ExecutorConvertControlToDataOutputsPass : Pass<"tf-executor-convert-control-
   let constructor = "tf_executor::CreateTFExecutorConvertControlToDataOutputsPass()";
 }
 
+def ExecutorCheckControlDependenciesPass : Pass<"tf-executor-check-control-dependencies", "ModuleOp"> {
+  let summary = "Checks control dependencies";
+
+  let description = [{
+    This pass analyzes control dependencies between islands and warns about
+    dependencies that are not explainable by side effects of the involved ops.
+    More precisely, for every minimal unexplainable control dependency path
+    we emit op warnings for all involved ops. The pass does not report
+    intermediate dummy ops for grouping control dependencies (Identity, NoOp),
+    unless they are part of an unexplainable path between other ops.
+    This pass is useful to understand control dependency conservatism for a
+    given MLIR module.
+
+    For example, the following function
+    ```mlir
+    func.func @path_with_intermediate_ops(
+      %arg0: tensor<!tf_type.resource<tensor<f32>>>,
+      %arg1: tensor<!tf_type.resource<tensor<f32>>>,
+      %arg2: tensor<f32>) -> () {
+      tf_executor.graph {
+        %island1 = tf_executor.island wraps "tf.AssignVariableOp"(%arg0, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+        %island2 = tf_executor.island(%island1) wraps "tf.NoOp"() : () -> ()
+        %island3 = tf_executor.island(%island2) wraps "tf.NoOp"() : () -> ()
+        %island4 = tf_executor.island(%island3) wraps "tf.AssignVariableOp"(%arg1, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+        tf_executor.fetch
+      }
+      func.return
+    }
+    ```
+    produces the following warnings
+    ```mlir
+      6:45: warning: unexpected control dependency path: path 0, node 0 (source)
+      %island1 = tf_executor.island wraps "tf.AssignVariableOp"(%arg0, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+                                          ^
+      6:45: note: see current operation: %control = tf_executor.island wraps "tf.AssignVariableOp"(%arg0, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+      7:55: warning: unexpected control dependency path: path 0, node 1 (intermediate)
+      %island2 = tf_executor.island(%island1) wraps "tf.NoOp"() : () -> ()
+                                                    ^
+      7:55: note: see current operation: %control_0 = tf_executor.island(%control) wraps "tf.NoOp"() : () -> ()
+      8:55: warning: unexpected control dependency path: path 0, node 2 (intermediate)
+      %island3 = tf_executor.island(%island2) wraps "tf.NoOp"() : () -> ()
+                                                    ^
+      8:55: note: see current operation: %control_1 = tf_executor.island(%control_0) wraps "tf.NoOp"() : () -> ()
+      9:55: warning: unexpected control dependency path: path 0, node 3 (target)
+      %island4 = tf_executor.island(%island3) wraps "tf.AssignVariableOp"(%arg1, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+                                                    ^
+      9:55: note: see current operation: %control_2 = tf_executor.island(%control_1) wraps "tf.AssignVariableOp"(%arg1, %arg2) : (tensor<!tf_type.resource<tensor<f32>>>, tensor<f32>) -> ()
+    ```
+    because the first and last `AssignVariableOp`s access different resources
+    and therefore should be independent. Note that the `NoOp`s are considered
+    as intermediate ops for control dependency grouping.
+  }];
+
+  let constructor = "tf_executor::CreateTFExecutorCheckControlDependenciesPass()";
+}
+
 def ExecutorGraphPruningPass : Pass<"tf-executor-graph-pruning", "mlir::func::FuncOp"> {
   let summary = "Prunes unreachable ops in a tf_executor.graph";
 
@@ -2027,6 +2083,50 @@ def FunctionalControlFlowToCFGPass : Pass<"tf-functional-control-flow-to-cfg", "
 def BreakUpIslandsPass : Pass<"tf-executor-break-up-islands", "mlir::func::FuncOp"> {
   let summary = "Transform from TF control dialect to TF executor dialect.";
   let constructor = "CreateBreakUpIslandsPass()";
+  let dependentDialects = ["mlir::tf_executor::TensorFlowExecutorDialect"];
+}
+
+def SplitIntoIslandPerOpPass : Pass<"tf-executor-split-into-island-per-op", "mlir::func::FuncOp"> {
+  let summary = "Transform from TF control dialect to TF executor dialect.";
+  let description = [{
+    Splits an island with multiple ops into multiple islands (one per op). Does
+    not create any control dependencies between new islands, and does not
+    propagate control dependencies that potentially existed between the old
+    islands into the new islands. Maintains existing data dependencies between
+    ops wrapped by the new islands.
+
+    Example: original program:
+
+    ```mlir
+        func.func @dangling_print(%arg0: tensor<*xi32>, %arg1: tensor<i32>) -> (tensor<*xi32>, tensor<*xi32>) {
+          %graph:2 = tf_executor.graph {
+            %island1:3 = tf_executor.island {
+              %add1 = "tf.Add"(%arg0, %arg1) : (tensor<*xi32>, tensor<i32>) -> tensor<*xi32>
+              %add2 = "tf.Add"(%add1, %arg1) : (tensor<*xi32>, tensor<i32>) -> tensor<*xi32>
+              %res = "tf.Print"(%add2) { message = "add result" } : (tensor<*xi32>) -> (tensor<*xi32>)
+              tf_executor.yield %add1, %add2 : tensor<*xi32>, tensor<*xi32>
+            }
+            tf_executor.fetch %island1#0, %island1#1 : tensor<*xi32>, tensor<*xi32>
+          }
+          func.return %graph#0, %graph#1 : tensor<*xi32>, tensor<*xi32>
+        }
+    ```
+
+    will be converted by this pass into:
+
+    ```mlir
+        func.func @dangling_print(%arg0: tensor<*xi32>, %arg1: tensor<i32>) -> (tensor<*xi32>, tensor<*xi32>) {
+          %0:2 = tf_executor.graph {
+            %outputs, %control = tf_executor.island wraps "tf.Add"(%arg0, %arg1) : (tensor<*xi32>, tensor<i32>) -> tensor<*xi32>
+            %outputs_0, %control_1 = tf_executor.island wraps "tf.Add"(%outputs, %arg1) : (tensor<*xi32>, tensor<i32>) -> tensor<*xi32>
+            %outputs_2, %control_3 = tf_executor.island wraps "tf.Print"(%outputs_0) {message = "add result"} : (tensor<*xi32>) -> tensor<*xi32>
+            tf_executor.fetch %outputs, %outputs_0 : tensor<*xi32>, tensor<*xi32>
+          }
+          return %0#0, %0#1 : tensor<*xi32>, tensor<*xi32>
+        }
+    ```
+  }];
+  let constructor = "mlir::CreateSplitIntoIslandPerOpPass()";
   let dependentDialects = ["mlir::tf_executor::TensorFlowExecutorDialect"];
 }
 

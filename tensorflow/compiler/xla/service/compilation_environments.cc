@@ -28,8 +28,8 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/protobuf.h"
 
 namespace xla {
 namespace {
@@ -50,7 +50,7 @@ class GlobalCompEnvStats {
       absl::MutexLock l(&mu_);
       ++stats_[std::string(env_type)].default_env_created;
     }
-    LOG(INFO) << "New GlobalCompEnvStats value: " << ToString();
+    VLOG(1) << "New GlobalCompEnvStats value: " << ToString();
   }
 
   void DefaultEnvCreatedByCompilationEnvironments(std::string_view env_type)
@@ -60,7 +60,7 @@ class GlobalCompEnvStats {
       ++stats_[std::string(env_type)]
             .default_env_created_by_compilation_environments;
     }
-    LOG(INFO) << "New GlobalCompEnvStats value: " << ToString();
+    VLOG(1) << "New GlobalCompEnvStats value: " << ToString();
   }
 
   void EnvAdded(std::string_view env_type) ABSL_LOCKS_EXCLUDED(mu_) {
@@ -68,7 +68,7 @@ class GlobalCompEnvStats {
       absl::MutexLock l(&mu_);
       ++stats_[std::string(env_type)].env_added;
     }
-    LOG(INFO) << "New GlobalCompEnvStats value: " << ToString();
+    VLOG(1) << "New GlobalCompEnvStats value: " << ToString();
   }
 
   std::string ToString() const ABSL_LOCKS_EXCLUDED(mu_) {
@@ -136,7 +136,7 @@ CompilationEnvironments& CompilationEnvironments::operator=(
 }
 
 void CompilationEnvironments::AddEnv(
-    std::unique_ptr<tensorflow::protobuf::Message> env) {
+    std::unique_ptr<tsl::protobuf::Message> env) {
   auto descriptor = env->GetDescriptor();
   if (environments_.contains(descriptor)) {
     LOG(WARNING) << "Replacing CompilationEnvironment of type "

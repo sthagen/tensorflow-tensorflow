@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMPILER_SERVICE_XLA_COMPILATION_ENVIRONMENTS_H_
-#define TENSORFLOW_COMPILER_SERVICE_XLA_COMPILATION_ENVIRONMENTS_H_
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_COMPILATION_ENVIRONMENTS_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_COMPILATION_ENVIRONMENTS_H_
 
 #include <cstdint>
 #include <memory>
@@ -23,8 +23,8 @@ limitations under the License.
 #include <utility>
 
 #include "absl/container/flat_hash_map.h"
-#include "tensorflow/core/platform/casts.h"
-#include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/tsl/platform/casts.h"
+#include "tensorflow/tsl/platform/protobuf.h"
 
 namespace xla {
 
@@ -63,7 +63,7 @@ class CompilationEnvironments {
   // Adds env to the list of CompilationEnvironments. If an environment with
   // std::type_index equal to env.GetTypeid() has already been added, env
   // will replace it.
-  void AddEnv(std::unique_ptr<tensorflow::protobuf::Message> env);
+  void AddEnv(std::unique_ptr<tsl::protobuf::Message> env);
 
   // Returns the CompilationEnvironment corresponding to T. If such an
   // environment has not been added, CreateDefaultEnv<T>() will be called to
@@ -95,18 +95,18 @@ class CompilationEnvironments {
   // are added to CompilationEnvironments.
   static void EnvAdded(std::string_view env_type);
 
-  absl::flat_hash_map<const tensorflow::protobuf::Descriptor*,
-                      std::unique_ptr<tensorflow::protobuf::Message>>
+  absl::flat_hash_map<const tsl::protobuf::Descriptor*,
+                      std::unique_ptr<tsl::protobuf::Message>>
       environments_;
 };
 
 // ----- Template implementation below -----
 
 // Make sure no one tries to specialize CreateDefaultEnv() for raw
-// tensorflow::protobuf::Message. Specialization should always be for a specific
+// tsl::protobuf::Message. Specialization should always be for a specific
 // type of proto message.
 template <>
-std::unique_ptr<tensorflow::protobuf::Message>
+std::unique_ptr<tsl::protobuf::Message>
 CompilationEnvironments::CreateDefaultEnv() = delete;
 
 template <typename T>
@@ -123,4 +123,4 @@ const T& CompilationEnvironments::GetEnv() {
 
 }  // namespace xla
 
-#endif  // TENSORFLOW_COMPILER_SERVICE_XLA_COMPILATION_ENVIRONMENTS_H_
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_COMPILATION_ENVIRONMENTS_H_

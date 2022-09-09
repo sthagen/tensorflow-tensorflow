@@ -95,7 +95,7 @@ port::Status Platform::Initialize(
     return port::Status(port::error::UNIMPLEMENTED,
                         "this platform does not support custom initialization");
   }
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::Status Platform::ForceExecutorShutdown() {
@@ -109,8 +109,8 @@ std::unique_ptr<Platform::PeerAccessMap> Platform::GetPeerAccessMap() {
   int device_count = VisibleDeviceCount();
   for (int i = 0; i < device_count; ++i) {
     for (int j = 0; j < device_count; ++j) {
-      StreamExecutor *from = ExecutorForDevice(i).ValueOrDie();
-      StreamExecutor *to = ExecutorForDevice(j).ValueOrDie();
+      StreamExecutor *from = ExecutorForDevice(i).value();
+      StreamExecutor *to = ExecutorForDevice(j).value();
       (*map)[{i, j}] = from->CanEnablePeerAccessTo(to);
     }
   }
@@ -123,8 +123,8 @@ port::Status Platform::EnablePeerAccess() {
   for (const auto &access : *peer_access_map) {
     auto devices = access.first;
     if (access.second) {
-      StreamExecutor *from = ExecutorForDevice(devices.first).ValueOrDie();
-      StreamExecutor *to = ExecutorForDevice(devices.second).ValueOrDie();
+      StreamExecutor *from = ExecutorForDevice(devices.first).value();
+      StreamExecutor *to = ExecutorForDevice(devices.second).value();
       auto status = from->EnablePeerAccessTo(to);
       if (!status.ok()) {
         return status;
@@ -134,7 +134,7 @@ port::Status Platform::EnablePeerAccess() {
                 << devices.first << " to device ordinal " << devices.second;
     }
   }
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 }  // namespace stream_executor

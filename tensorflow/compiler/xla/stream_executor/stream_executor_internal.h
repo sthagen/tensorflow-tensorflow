@@ -21,6 +21,7 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_STREAM_EXECUTOR_INTERNAL_H_
 #define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_STREAM_EXECUTOR_INTERNAL_H_
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -233,7 +234,7 @@ class StreamExecutorInterface {
     return port::InternalError("Not implemented");
   }
   virtual port::Status Memset32(Stream* stream, DeviceMemoryBase* location,
-                                uint32 pattern, uint64_t size) = 0;
+                                uint32_t pattern, uint64_t size) = 0;
   virtual bool Memcpy(Stream* stream, void* host_dst,
                       const DeviceMemoryBase& gpu_src, uint64_t size) = 0;
   virtual bool Memcpy(Stream* stream, DeviceMemoryBase* gpu_dst,
@@ -385,9 +386,7 @@ class StreamExecutorInterface {
   // Clears the compilation cache from volatile memory. Returns OK if no
   // compilation cache exists or if clearing the compilation cache is
   // unsupported. Caches in non-volatile storage are unaffected.
-  virtual port::Status FlushCompilationCache() {
-    return ::tensorflow::OkStatus();
-  }
+  virtual port::Status FlushCompilationCache() { return ::tsl::OkStatus(); }
 
   // Returns a stream allocated by this executor, or nullptr if not found.
   // Performs linear search over alive GPU streams.
