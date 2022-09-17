@@ -35,7 +35,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
-#include "tensorflow/compiler/xla/mlir/transforms/gpu/custom_calls.h"
+#include "tensorflow/compiler/xla/mlir/utils/runtime/custom_calls.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo/IR/lhlo_ops.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops.h"
 #include "tensorflow/compiler/xla/service/gpu/nccl_all_gather_thunk.h"
@@ -61,6 +61,9 @@ using mlir::lmhlo::InfeedOp;
 using mlir::lmhlo::OutfeedOp;
 using mlir::lmhlo::TerminatorOp;
 using mlir::lmhlo::WhileOp;
+
+using xla::runtime::AppendCustomCallAttrs;
+using xla::runtime::CustomCallDeclarations;
 
 class ConvertLmhloToGpuRuntimePass
     : public ConvertLmhloToGpuRuntimePassBase<ConvertLmhloToGpuRuntimePass> {
@@ -94,7 +97,7 @@ class IoFeedOpLowering : public OpRewritePattern<IoFeedOp> {
   static StringRef Target(OutfeedOp) { return "xla.gpu.outfeed"; }
 
  public:
-  IoFeedOpLowering(MLIRContext* ctx, CustomCalls& custom_calls)
+  IoFeedOpLowering(MLIRContext* ctx, CustomCallDeclarations& custom_calls)
       : OpRewritePattern<IoFeedOp>(ctx), custom_calls_(custom_calls) {}
 
   LogicalResult matchAndRewrite(IoFeedOp op,
@@ -115,7 +118,7 @@ class IoFeedOpLowering : public OpRewritePattern<IoFeedOp> {
   }
 
  private:
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 class InfeedOpLowering : public IoFeedOpLowering<InfeedOp> {
@@ -135,7 +138,7 @@ class CustomCallOpLowering : public OpRewritePattern<CustomCallOp> {
   static constexpr const char kCustomCallTarget[] = "xla.gpu.custom_call";
 
  public:
-  CustomCallOpLowering(MLIRContext* ctx, CustomCalls& custom_calls)
+  CustomCallOpLowering(MLIRContext* ctx, CustomCallDeclarations& custom_calls)
       : OpRewritePattern(ctx), custom_calls_(custom_calls) {}
 
   LogicalResult matchAndRewrite(CustomCallOp op,
@@ -152,9 +155,16 @@ class CustomCallOpLowering : public OpRewritePattern<CustomCallOp> {
       int64_t num_args = mapping.getNumArgs();
       int64_t num_results = mapping.getNumResults();
 
+      // Always create an `alloca` in the parent function entry block.
+      // See: https://llvm.org/docs/Frontend/PerformanceTips.html#use-of-allocas
+      Value hole = [&]() -> Value {
+        OpBuilder::InsertionGuard guard(b);
+        b.setInsertionPointToStart(
+            &op->getParentOfType<func::FuncOp>().front());
+        return b.create<memref::AllocaOp>(MemRefType::get({0}, b.getI8Type()));
+      }();
+
       // We represent holes as empty i8 memrefs.
-      Value hole =
-          b.create<memref::AllocaOp>(MemRefType::get({0}, b.getI8Type()));
       operands = llvm::SmallVector<Value>(num_args + num_results, hole);
 
       // Update operands to mapped custom call arguments.
@@ -186,7 +196,7 @@ class CustomCallOpLowering : public OpRewritePattern<CustomCallOp> {
   }
 
  private:
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -196,7 +206,7 @@ class FftOpLowering : public OpRewritePattern<FftOp> {
   static constexpr const char kCustomCallTarget[] = "xla.gpu.fft";
 
  public:
-  FftOpLowering(MLIRContext* ctx, CustomCalls& custom_calls)
+  FftOpLowering(MLIRContext* ctx, CustomCallDeclarations& custom_calls)
       : OpRewritePattern(ctx), custom_calls_(custom_calls) {}
 
   LogicalResult matchAndRewrite(FftOp op,
@@ -217,7 +227,7 @@ class FftOpLowering : public OpRewritePattern<FftOp> {
   }
 
  private:
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -233,10 +243,14 @@ class CaseOpLowering : public OpRewritePattern<CaseOp> {
     // Copy index buffer to the host ...
     auto index_type = op.getIndex().getType().dyn_cast<MemRefType>();
 
-    // TODO(ezhulenev): We need to make sure that `alloca` is placed in the
-    // parent function entry block.
-    // https://llvm.org/docs/Frontend/PerformanceTips.html#use-of-allocas
-    Value index_on_host = b.create<memref::AllocaOp>(index_type);
+    // Always create an `alloca` in the parent function entry block.
+    // See: https://llvm.org/docs/Frontend/PerformanceTips.html#use-of-allocas
+    Value index_on_host = [&]() -> Value {
+      OpBuilder::InsertionGuard guard(b);
+      b.setInsertionPointToStart(&op->getParentOfType<func::FuncOp>().front());
+      return b.create<memref::AllocaOp>(index_type);
+    }();
+
     b.create<MemcpyOp>(TypeRange(), ValueRange({index_on_host, op.getIndex()}));
 
     // Get the index value from the buffer.
@@ -267,9 +281,18 @@ class CaseOpLowering : public OpRewritePattern<CaseOp> {
       index = b.create<arith::SelectOp>(out_of_range, cN, index);
     }
 
-    // Split block right at the case operation.
-    Block* cont = rewriter.splitBlock(op->getBlock(), op->getIterator());
-    Block* orig = cont->getPrevNode();
+    // Wrap the CFG constructed from the `lmhlo.case` operation in an
+    // `scf.execute_region` operation, so that we do not introduce the CFG
+    // into regions that expect a single block (e.g. inside the loop body).
+    auto execute = b.create<scf::ExecuteRegionOp>(TypeRange());
+
+    // Add an entry block to the execute region operation.
+    Block& entry = execute.getRegion().emplaceBlock();
+
+    // Create a block with `scf.yield` terminator.
+    Block& yield = execute.getRegion().emplaceBlock();
+    b.setInsertionPointToStart(&yield);
+    b.create<scf::YieldOp>();
 
     // Prepare case destinations for the `scf.switch` operation.
     llvm::SmallVector<llvm::APInt> case_values;
@@ -278,16 +301,16 @@ class CaseOpLowering : public OpRewritePattern<CaseOp> {
 
     // Create blocks from each of the case regions.
     for (Region& region : op->getRegions()) {
-      // Move `lmhlo.case` block before the continuation.
+      // Move `lmhlo.case` block into the execute region.
       Block& block = region.front();
-      block.moveBefore(cont);
+      block.moveBefore(&yield);
 
       // Erase original `lmhlo.terminator`.
       rewriter.eraseOp(block.getTerminator());
 
-      // Branch into the continuation block.
+      // Branch into the yield block.
       b.setInsertionPointToEnd(&block);
-      b.create<cf::BranchOp>(cont);
+      b.create<cf::BranchOp>(&yield);
 
       // Add a `cf.switch` case.
       int32_t idx = case_blocks.size();
@@ -296,10 +319,10 @@ class CaseOpLowering : public OpRewritePattern<CaseOp> {
       case_operands.push_back({});
     }
 
-    // Replace `lmhlo.case` with a `cf.switch` operation on the host.
-    b.setInsertionPointToEnd(orig);
-    b.create<cf::SwitchOp>(index, cont, ValueRange(), case_values, case_blocks,
-                           case_operands);
+    // Create a `cf.switch` operation in the execute region entry block.
+    b.setInsertionPointToEnd(&entry);
+    b.create<cf::SwitchOp>(index, &yield, ValueRange(), case_values,
+                           case_blocks, case_operands);
 
     // Erase the original case operation.
     rewriter.eraseOp(op);
@@ -325,18 +348,29 @@ class WhileOpLowering : public OpRewritePattern<WhileOp> {
     assert(op.getNumOperands() == 1 && "expected single cond operand");
     Value pred = op.getOperand(0);
 
-    // Clone condition and body blocks into the new loop operation.
+    // Inline condition and body regions into the new loop operation.
     BlockAndValueMapping mapping;
-    op.getCond().cloneInto(&loop.getBefore(), mapping);
-    op.getBody().cloneInto(&loop.getAfter(), mapping);
+    rewriter.inlineRegionBefore(op.getCond(), loop.getBefore(),
+                                loop.getBefore().begin());
+    rewriter.inlineRegionBefore(op.getBody(), loop.getAfter(),
+                                loop.getAfter().begin());
 
     {  // Replace loop condition terminator.
       auto* terminator = loop.getBefore().back().getTerminator();
       b.setInsertionPointAfter(terminator);
 
-      // Copy predicate buffer to the host ...
       auto i1 = b.getI1Type();
-      Value pred_on_host = b.create<memref::AllocaOp>(MemRefType::get({}, i1));
+
+      // Always create an `alloca` in the parent function entry block.
+      // See: https://llvm.org/docs/Frontend/PerformanceTips.html#use-of-allocas
+      Value pred_on_host = [&]() -> Value {
+        OpBuilder::InsertionGuard guard(b);
+        b.setInsertionPointToStart(
+            &op->getParentOfType<func::FuncOp>().front());
+        return b.create<memref::AllocaOp>(MemRefType::get({}, i1));
+      }();
+
+      // Copy predicate buffer to the host ...
       b.create<gpu::MemcpyOp>(TypeRange(), ValueRange({pred_on_host, pred}));
 
       // .. and check if we need to continue loop iteration.
@@ -569,7 +603,7 @@ class CollectiveOpLowering : public OpRewritePattern<CollectiveOp> {
 
  public:
   CollectiveOpLowering(MLIRContext* ctx, CollectiveUidGenerator& uid,
-                       CustomCalls& custom_calls)
+                       CustomCallDeclarations& custom_calls)
       : OpRewritePattern<CollectiveOp>(ctx),
         uid_(uid),
         custom_calls_(custom_calls) {}
@@ -690,7 +724,7 @@ class CollectiveOpLowering : public OpRewritePattern<CollectiveOp> {
 
  private:
   CollectiveUidGenerator& uid_;
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 #define DEFINE_COLLECTIVE_OP_LOWERING(OP)                \
@@ -713,7 +747,7 @@ class AllReduceDoneOpLowering : public OpRewritePattern<AllReduceDoneOp> {
 
  public:
   AllReduceDoneOpLowering(MLIRContext* ctx, CollectiveUidGenerator& uid,
-                          CustomCalls& custom_calls)
+                          CustomCallDeclarations& custom_calls)
       : OpRewritePattern(ctx), uid_(uid), custom_calls_(custom_calls) {}
 
   LogicalResult matchAndRewrite(AllReduceDoneOp op,
@@ -745,7 +779,7 @@ class AllReduceDoneOpLowering : public OpRewritePattern<AllReduceDoneOp> {
 
  private:
   CollectiveUidGenerator& uid_;
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 template <typename CollectiveIdOp>
@@ -754,7 +788,7 @@ class CollectiveIdOpLowering : public OpRewritePattern<CollectiveIdOp> {
   static StringRef Target(PartitionIdOp) { return "xla.gpu.partition_id"; }
 
  public:
-  CollectiveIdOpLowering(MLIRContext* ctx, CustomCalls& custom_calls)
+  CollectiveIdOpLowering(MLIRContext* ctx, CustomCallDeclarations& custom_calls)
       : OpRewritePattern<CollectiveIdOp>(ctx), custom_calls_(custom_calls) {}
 
   LogicalResult matchAndRewrite(CollectiveIdOp op,
@@ -770,7 +804,7 @@ class CollectiveIdOpLowering : public OpRewritePattern<CollectiveIdOp> {
   }
 
  private:
-  CustomCalls& custom_calls_;
+  CustomCallDeclarations& custom_calls_;
 };
 
 class ReplicaIdOpLowering : public CollectiveIdOpLowering<ReplicaIdOp> {
@@ -791,7 +825,7 @@ void ConvertLmhloToGpuRuntimePass::runOnOperation() {
 
   // Keep track of the custom calls created from the lowered operations.
   SymbolTable sym_table(module);
-  CustomCalls custom_calls(std::move(sym_table));
+  CustomCallDeclarations custom_calls(std::move(sym_table));
 
   // Convert lmhlo operations to XLA gpu runtime custom calls.
   RewritePatternSet patterns(ctx);

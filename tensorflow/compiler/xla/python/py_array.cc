@@ -57,10 +57,10 @@ CreatePjRtBuffersFromSingleShardedPyArrays(
 }  // namespace
 
 PyArray::PyArray(py::object aval, py::object sharding,
-                 absl::Span<const PyArray* const> py_arrays, bool committed,
+                 const std::vector<const PyArray*>& py_arrays, bool committed,
                  bool skip_checks, py::object fast_path_args)
     : PyArray(aval, pybind11::cast<bool>(aval.attr("weak_type")),
-              DtypeToPrimitiveType(aval.attr("dtype")).ValueOrDie(),
+              aval.attr("dtype"),
               pybind11::cast<std::vector<int64_t>>(aval.attr("shape")),
               std::move(sharding), py_arrays.at(0)->py_client(),
               Traceback::Get(),
@@ -71,13 +71,13 @@ PyArray::PyArray(py::object aval, py::object sharding,
                  absl::Span<const PyBuffer::object> py_buffers, bool committed,
                  bool skip_checks, py::object fast_path_args)
     : PyArray(aval, pybind11::cast<bool>(aval.attr("weak_type")),
-              DtypeToPrimitiveType(aval.attr("dtype")).ValueOrDie(),
+              aval.attr("dtype"),
               pybind11::cast<std::vector<int64_t>>(aval.attr("shape")),
               std::move(sharding), py_buffers.at(0).buf()->client(),
               Traceback::Get(), CreatePjRtBuffersFromPyBuffers(py_buffers),
               committed, skip_checks, std::move(fast_path_args)) {}
 
-PyArray::PyArray(py::object aval, bool weak_type, PrimitiveType dtype,
+PyArray::PyArray(py::object aval, bool weak_type, py::dtype dtype,
                  std::vector<int64_t> shape, py::object sharding,
                  std::shared_ptr<PyClient> py_client,
                  std::shared_ptr<Traceback> traceback,
@@ -85,7 +85,7 @@ PyArray::PyArray(py::object aval, bool weak_type, PrimitiveType dtype,
                  bool committed, bool skip_checks, py::object fast_path_args)
     : aval_(std::move(aval)),
       weak_type_(weak_type),
-      dtype_(dtype),
+      dtype_(std::move(dtype)),
       shape_(std::move(shape)),
       sharding_(std::move(sharding)),
       fast_path_args_(std::move(fast_path_args)),
@@ -160,7 +160,7 @@ void PyArray::RegisterTypes(py::module& m) {
            py::arg("aval"), py::arg("sharding"), py::arg("arrays"),
            py::arg("committed"), py::arg("_skip_checks") = false,
            py::arg("_fast_path_args") = py::none())
-      .def(py::init<py::object, py::object, absl::Span<const PyArray* const>,
+      .def(py::init<py::object, py::object, const std::vector<const PyArray*>&,
                     bool, bool, py::object>(),
            py::arg("aval"), py::arg("sharding"), py::arg("arrays"),
            py::arg("committed"), py::arg("_skip_checks") = false,

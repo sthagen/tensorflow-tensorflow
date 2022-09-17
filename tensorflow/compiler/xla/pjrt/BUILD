@@ -129,7 +129,7 @@ tf_cc_test(
         "//tensorflow/compiler/xla/client:xla_builder",
         "//tensorflow/compiler/xla/tests:literal_test_util",
         "//tensorflow/core:test_main",
-        "//tensorflow/core/platform:random",
+        "//tensorflow/tsl/platform:random",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -456,6 +456,22 @@ cc_library(
     ]),
 )
 
+cc_library(
+    name = "pjrt_plugin_device_client",
+    deps = [
+        ":pjrt_plugin_device_client_headers",
+        "//tensorflow/compiler/plugin",
+    ],
+)
+
+cc_library(
+    name = "pjrt_plugin_device_client_headers",
+    hdrs = ["pjrt_plugin_device_client.h"],
+    deps = [
+        "//tensorflow/compiler/xla:statusor",
+    ],
+)
+
 # We actually wish we could write if_cuda(if_nccl(...)) in :gpu_device,
 # but Bazel does not allow nested selects. We can work around the problem using
 # an intermediate library that has the conditional NCCL pieces that is only
@@ -490,13 +506,13 @@ cc_library(
         "//tensorflow/compiler/xla/mlir_hlo",
         "//tensorflow/compiler/xla/mlir_hlo:chlo_legalize_to_hlo_pass",
         "//tensorflow/compiler/xla/mlir_hlo:sink_constants_to_control_flow",
-        "//tensorflow/compiler/xla/mlir_hlo/stablehlo:chlo_ops",
         "@com_google_absl//absl/strings",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Transforms",
+        "@stablehlo//:chlo_ops",
     ],
 )
 
@@ -548,6 +564,7 @@ cc_library(
     deps = [
         ":mlir_to_hlo",
         ":pjrt_client",
+        ":pjrt_executable",
         ":pjrt_future",
         ":semaphore",
         ":tracked_tfrt_cpu_device_buffer",
@@ -567,6 +584,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:executable",
         "//tensorflow/compiler/xla/service:hlo_cost_analysis",
         "//tensorflow/compiler/xla/service:hlo_module_util",
+        "//tensorflow/compiler/xla/service:hlo_proto_cc",
         "//tensorflow/compiler/xla/service/cpu:cpu_compiler",
         "//tensorflow/compiler/xla/service/cpu:cpu_executable",
         "//tensorflow/compiler/xla/service/cpu:cpu_xfeed",
@@ -656,8 +674,8 @@ tf_cc_test(
         "//tensorflow/compiler/xla:test",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/core:test_main",
-        "//tensorflow/core/platform:env",
         "//tensorflow/core/protobuf:error_codes_proto_impl_cc",
+        "//tensorflow/tsl/platform:env",
         "//tensorflow/tsl/platform:test_benchmark",
         "//third_party/eigen3",
         "@com_google_absl//absl/container:inlined_vector",

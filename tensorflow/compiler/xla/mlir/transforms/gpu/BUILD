@@ -7,18 +7,6 @@ package(
     licenses = ["notice"],
 )
 
-cc_library(
-    name = "custom_calls",
-    srcs = ["custom_calls.cc"],
-    hdrs = ["custom_calls.h"],
-    compatible_with = get_compatible_with_cloud(),
-    deps = [
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:FuncDialect",
-        "@llvm-project//mlir:IR",
-    ],
-)
-
 gentbl_cc_library(
     name = "passes_inc_gen",
     compatible_with = get_compatible_with_cloud(),
@@ -41,20 +29,27 @@ cc_library(
     srcs = [
         "gpu_to_gpu_runtime.cc",
         "lmhlo_gpu_to_gpu_runtime.cc",
+        "lmhlo_to_gpu_launch.cc",
         "lmhlo_to_gpu_runtime.cc",
         "memref_get_global_to_arg.cc",
+        "passes.cc",
     ],
     hdrs = ["passes.h"],
     # Override cc_library()'s internal default value of ["//buildenv/target:gce"].`
     # TODO(ezhulenev): Do not depend on NCCL thunks in compiler passes.
     compatible_with = [],
     deps = [
-        ":custom_calls",
         ":passes_inc_gen",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
+        "//tensorflow/compiler/xla/mlir/utils/runtime:custom_calls",
         "//tensorflow/compiler/xla/mlir_hlo:lhlo",
         "//tensorflow/compiler/xla/mlir_hlo:lhlo_gpu",
+        "//tensorflow/compiler/xla/service/gpu:gpu_executable",
+        "//tensorflow/compiler/xla/service/gpu:launch_dimensions",
         "//tensorflow/compiler/xla/service/gpu:nccl_collective_thunks",
         "//tensorflow/compiler/xla/stream_executor:blas",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
