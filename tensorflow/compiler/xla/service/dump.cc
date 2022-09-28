@@ -24,19 +24,20 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "mlir/IR/OperationSupport.h"  // from @llvm-project
 #include "mlir/Support/FileUtilities.h"  // from @llvm-project
 #include "mlir/Transforms/LocationSnapshot.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/service/hlo_graph_dumper.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_proto_util.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/io/zlib_compression_options.h"
 #include "tensorflow/core/lib/io/zlib_outputbuffer.h"
-#include "tensorflow/core/lib/strings/proto_serialization.h"
+#include "tensorflow/tsl/lib/strings/proto_serialization.h"
 #include "tensorflow/tsl/platform/env.h"
 #include "tensorflow/tsl/platform/path.h"
 #include "tensorflow/tsl/platform/regexp.h"
+#include "tensorflow/tsl/platform/status.h"
 
 namespace xla {
 
@@ -412,7 +413,7 @@ static std::vector<std::string> DumpHloModuleImpl(
     HloProto module_proto =
         buffer_assn ? MakeHloProto(module, *buffer_assn) : MakeHloProto(module);
     std::string pb;
-    if (!tensorflow::SerializeToStringDeterministic(module_proto, &pb)) {
+    if (!tsl::SerializeToStringDeterministic(module_proto, &pb)) {
       pb = "Failed to serialize HLO module proto.";
     }
     file_paths.push_back(DumpToFileInDirImpl(
@@ -616,7 +617,12 @@ void DumpToFileInDirOrStdout(const HloModule& module, string_view file_prefix,
     return;
   }
 
-  op->print(outputFile->os(), mlir::OpPrintingFlags().useLocalScope());
+  mlir::OpPrintingFlags print_flags = mlir::OpPrintingFlags().useLocalScope();
+  // Enable debug info so that it is easier to see the corresponding HLO node.
+  if (file_prefix == "lmhlo") {
+    print_flags.enableDebugInfo(/*prettyForm=*/true);
+  }
+  op->print(outputFile->os(), print_flags);
   outputFile->keep();
 }
 
@@ -767,7 +773,7 @@ void DumpHloSnapshotIfEnabled(const HloModule& module,
     return;
   }
   std::string pb;
-  if (!tensorflow::SerializeToStringDeterministic(snapshot, &pb)) {
+  if (!tsl::SerializeToStringDeterministic(snapshot, &pb)) {
     LOG(ERROR) << "Failed to serialize HLO snapshot proto " << filename;
   }
   DumpToFileInDirImpl(filename, pb, opts);
@@ -799,7 +805,7 @@ void DumpHloSnapshotIfEnabled(const HloSnapshot& snapshot,
     return;
   }
   std::string pb;
-  if (!tensorflow::SerializeToStringDeterministic(snapshot, &pb)) {
+  if (!tsl::SerializeToStringDeterministic(snapshot, &pb)) {
     LOG(ERROR) << "Failed to serialize HLO snapshot proto " << filename;
   }
   DumpToFileInDirImpl(filename, pb, canonical_opts);

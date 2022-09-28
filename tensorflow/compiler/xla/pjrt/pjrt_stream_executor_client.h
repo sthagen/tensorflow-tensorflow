@@ -51,9 +51,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/stream.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/framework/allocator.h"
-#include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/tsl/framework/allocator.h"
 #include "tensorflow/tsl/platform/casts.h"
+#include "tensorflow/tsl/platform/status.h"
 
 namespace xla {
 
@@ -149,7 +149,7 @@ class PjRtStreamExecutorClient : public PjRtClient {
       std::string platform_name, LocalClient* client,
       std::vector<std::unique_ptr<PjRtStreamExecutorDevice>> devices,
       int process_index, std::unique_ptr<se::DeviceMemoryAllocator> allocator,
-      std::unique_ptr<tensorflow::Allocator> host_memory_allocator,
+      std::unique_ptr<tsl::Allocator> host_memory_allocator,
       bool should_stage_host_to_device_transfers,
       std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options);
   ~PjRtStreamExecutorClient() override = default;
@@ -270,7 +270,7 @@ class PjRtStreamExecutorClient : public PjRtClient {
   }
   LocalClient* client() const { return client_; }
   se::DeviceMemoryAllocator* allocator() const { return allocator_; }
-  tensorflow::Allocator* host_memory_allocator() const {
+  tsl::Allocator* host_memory_allocator() const {
     return host_memory_allocator_.get();
   }
   bool should_stage_host_to_device_transfers() const {
@@ -335,7 +335,7 @@ class PjRtStreamExecutorClient : public PjRtClient {
   LocalClient* client_;
 
   // Allocator to be used for staging memory transfers to devices.
-  std::unique_ptr<tensorflow::Allocator> host_memory_allocator_;
+  std::unique_ptr<tsl::Allocator> host_memory_allocator_;
 
   // Device memory allocator. If owned, the allocator must outlive the devices,
   // because it is the device destructor that waits for any outstanding work to
@@ -541,7 +541,7 @@ class PjRtStreamExecutorBuffer : public PjRtBuffer {
     const Type type_;
 
     // There is an invariant that if ok() then
-    // buffer_.ValueOrDie() != nullptr.
+    // buffer_.value() != nullptr.
     State state_;
     Status status_;
     std::shared_ptr<TrackedDeviceBuffer> buffer_;
@@ -795,8 +795,6 @@ class PjRtStreamExecutorExecutable : public PjRtLoadedExecutable {
   absl::Span<const std::shared_ptr<LocalExecutable>> executables() const {
     return executables_;
   }
-
-  std::vector<std::unique_ptr<AotCompilationResult>> aot_executables_;
 
  protected:
   bool parameter_is_tupled_arguments() const {

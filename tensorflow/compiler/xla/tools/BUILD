@@ -38,6 +38,7 @@ tf_cc_binary(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/strings",
     ],
@@ -126,6 +127,7 @@ tf_cc_binary(
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/core:lib",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
     ],
 )
 
@@ -207,6 +209,7 @@ tf_cc_binary(
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:lib",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
     ],
 )
 
@@ -218,7 +221,7 @@ tf_cc_test(
         "//tensorflow/compiler/xla/service:hlo_matchers",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
-        "//tensorflow/core:test",
+        "//tensorflow/tsl/platform:test",
     ],
 )
 
@@ -292,7 +295,8 @@ tf_cc_test(
         ":hlo_module_loader",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
-        "//tensorflow/core:test",
+        "//tensorflow/tsl/lib/core:status_test_util",
+        "//tensorflow/tsl/platform:test",
     ],
 )
 
@@ -415,7 +419,8 @@ tf_cc_test(
         "//tensorflow/compiler/xla/service:hlo_verifier",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
-        "//tensorflow/core:test",
+        "//tensorflow/tsl/lib/core:status_test_util",
+        "//tensorflow/tsl/platform:test",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -427,4 +432,14 @@ cc_library(
     srcs = ["driver.cc"],
     tags = ["nofixdeps"],
     deps = [],
+)
+
+tf_cc_binary(
+    name = "compute_cost",
+    srcs = ["compute_cost.cc"],
+    deps = [
+        ":hlo_module_loader",
+        "//tensorflow/compiler/xla/service:hlo_cost_analysis",
+        "//tensorflow/tsl/platform:platform_port",
+    ],
 )

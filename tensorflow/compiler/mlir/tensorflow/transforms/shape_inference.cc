@@ -227,7 +227,7 @@ bool NeedsCastBack(OpOperand& use, Dialect* tf_dialect) {
 TensorType CreateTensorType(llvm::Optional<llvm::ArrayRef<int64_t>> shape,
                             Type element_type) {
   if (shape.has_value())
-    return RankedTensorType::get(shape.getValue(), element_type);
+    return tensorflow::GetTypeFromTFTensorShape(shape.getValue(), element_type);
   return UnrankedTensorType::get(element_type);
 }
 
@@ -255,7 +255,8 @@ RankedTensorType DropFirstDimension(Type type) {
   if (!ranked_type) return {};
   llvm::ArrayRef<int64_t> dims_except_first =
       ranked_type.getShape().drop_front();
-  return RankedTensorType::get(dims_except_first, ranked_type.getElementType());
+  return tensorflow::GetTypeFromTFTensorShape(dims_except_first,
+                                              ranked_type.getElementType());
 }
 
 Operation* InsertCast(OpBuilder& b, Location loc, Type dst_type, Value input) {
@@ -405,7 +406,8 @@ Type GetType(Attribute shape_attr, Attribute type_attr) {
   auto shape = shape_attr.cast<tf_type::ShapeAttr>();
   auto type = type_attr.cast<TypeAttr>();
   if (shape.hasRank())
-    return RankedTensorType::get(shape.getShape(), type.getValue());
+    return tensorflow::GetTypeFromTFTensorShape(shape.getShape(),
+                                                type.getValue());
   else
     return UnrankedTensorType::get(type.getValue());
 }
@@ -547,14 +549,14 @@ Attribute ComputeOutputComponent(const ValuePort& value_port,
   if (auto graph = dyn_cast<tf_executor::GraphOp>(op)) {
     if (port.size() == 1)
       return ComputeOutputComponent(
-          ValuePort(graph.GetFetch().fetches()[port[0]]), values);
+          ValuePort(graph.GetFetch().getFetches()[port[0]]), values);
     return nullptr;
   }
 
   if (auto island = dyn_cast<tf_executor::IslandOp>(op)) {
     if (port.size() == 1)
       return ComputeOutputComponent(
-          ValuePort(island.GetYield().fetches()[port[0]]), values);
+          ValuePort(island.GetYield().getFetches()[port[0]]), values);
     return nullptr;
   }
 
@@ -922,7 +924,7 @@ bool ShapeInference::InferShapeForCast(Operation* op) {
       }))
     return false;
 
-  auto new_type = RankedTensorType::get(
+  auto new_type = tensorflow::GetTypeFromTFTensorShape(
       ranked_op_type.getShape(),
       result.getType().cast<ShapedType>().getElementType());
 
@@ -1255,7 +1257,7 @@ bool ShapeInference::InferShapeForTensorListInitOps(Operation* op) {
                                        << element_type);
   if (!element_type || !element_type.hasStaticShape()) return false;
   auto variant_type = VariantType::get(element_type, op->getContext());
-  auto tensor_type = RankedTensorType::get({}, variant_type);
+  auto tensor_type = tensorflow::GetTypeFromTFTensorShape({}, variant_type);
   bool changed = RefineResultType(op, handle, tensor_type);
   if (changed) DCOMMENT_OP(op, "Modified after shape inference:");
   return changed;
@@ -1415,7 +1417,7 @@ llvm::Optional<RankedTensorType> InferWindowOutputShape(
     }
   }
 
-  return RankedTensorType::get(output_dimensions, element_type);
+  return tensorflow::GetTypeFromTFTensorShape(output_dimensions, element_type);
 }
 
 bool ShapeInference::InferShapeForXlaReduceWindowOp(XlaReduceWindowOp op) {
@@ -1567,7 +1569,7 @@ llvm::Optional<RankedTensorType> InferXlaConvOutputShape(
   }
 
   ShapedType base_shape =
-      RankedTensorType::get(input_spatial_dims, element_type);
+      tensorflow::GetTypeFromTFTensorShape(input_spatial_dims, element_type);
 
   auto window =
       InferWindowFromDimensions(window_spatial_dims, window_strides, paddings,
@@ -1584,7 +1586,7 @@ llvm::Optional<RankedTensorType> InferXlaConvOutputShape(
              << dnums.output_spatial_dimensions(i) << " is "
              << output_dims[dnums.output_spatial_dimensions(i)]);
   }
-  return RankedTensorType::get(output_dims, element_type);
+  return tensorflow::GetTypeFromTFTensorShape(output_dims, element_type);
 }
 
 // TODO(hanxiongwang): The logic in this function need move to Op Verify method
@@ -1932,16 +1934,18 @@ bool ShapeInference::RefineShapeForPassThroughOps(Operation* op) {
 
 bool ShapeInference::InferShapeForNonTFDialectOperation(Operation* op) {
   if (auto graph_op = dyn_cast<tf_executor::GraphOp>(op)) {
-    return RefineTypeForPassThroughOperands(
-        graph_op.GetFetch(), graph_op.GetFetch().fetches(), op->getResults());
+    return RefineTypeForPassThroughOperands(graph_op.GetFetch(),
+                                            graph_op.GetFetch().getFetches(),
+                                            op->getResults());
   }
   if (auto island_op = dyn_cast<tf_executor::IslandOp>(op)) {
-    return RefineTypeForPassThroughOperands(
-        island_op.GetYield(), island_op.GetYield().fetches(), op->getResults());
+    return RefineTypeForPassThroughOperands(island_op.GetYield(),
+                                            island_op.GetYield().getFetches(),
+                                            op->getResults());
   }
   if (auto iter_sink = dyn_cast<tf_executor::NextIterationSinkOp>(op)) {
     auto iter_source = cast<tf_executor::NextIterationSourceOp>(
-        iter_sink.token().getDefiningOp());
+        iter_sink.getToken().getDefiningOp());
     return RefineTypeForPassThroughOperands(
         op, iter_sink.getOperands().drop_front().take_front(),
         iter_source.getResults());
@@ -2339,7 +2343,8 @@ RankedTensorType GetCompatibleRankedTensorType(RankedTensorType lhs,
       dims.push_back(ShapedType::kDynamicSize);
     }
   }
-  return RankedTensorType::get(dims, GetElementTypeFromOperand(lhs, rhs));
+  return tensorflow::GetTypeFromTFTensorShape(
+      dims, GetElementTypeFromOperand(lhs, rhs));
 }
 
 // Finds compatible types to propagate into functions/regions of a shape
@@ -2433,7 +2438,8 @@ FailureOr<bool> ShapeInference::PropagateShapeIntoAttachedFunctions(
           mlir::SymbolTable::lookupSymbolIn(module, func_sym));
       mlir::SmallVector<mlir::Type, 2> types;
       for (auto type : func.getFunctionType().getInputs()) {
-        types.push_back(RankedTensorType::get({}, getElementTypeOrSelf(type)));
+        types.push_back(tensorflow::GetTypeFromTFTensorShape(
+            {}, getElementTypeOrSelf(type)));
       }
       return PropagateShapeToFunctions(module, types, {func}, max_iterations);
     };
@@ -2720,7 +2726,8 @@ FailureOr<bool> InferShapeForFunction(func::FuncOp func,
       element_type = unranked_input_ty.getElementType();
     }
 
-    auto new_arg_type = RankedTensorType::get(shape, element_type);
+    auto new_arg_type =
+        tensorflow::GetTypeFromTFTensorShape(shape, element_type);
     if (new_arg_type != func_type.getInput(i)) {
       // If the new type is more detailed, trigger shape inference.
       func.getArgument(i).setType(new_arg_type);

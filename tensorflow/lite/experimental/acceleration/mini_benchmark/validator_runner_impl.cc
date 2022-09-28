@@ -25,9 +25,11 @@ limitations under the License.
 
 #include "flatbuffers/flatbuffer_builder.h"  // from @flatbuffers
 #include "tensorflow/lite/experimental/acceleration/configuration/configuration_generated.h"
+#include "tensorflow/lite/experimental/acceleration/mini_benchmark/benchmark_result_evaluator.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/fb_storage.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/file_lock.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/model_loader.h"
+#include "tensorflow/lite/experimental/acceleration/mini_benchmark/model_modifier/custom_validation_embedder.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/runner.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/status_codes.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/validator.h"
@@ -35,10 +37,35 @@ limitations under the License.
 
 namespace tflite {
 namespace acceleration {
-
+namespace {
 using ::flatbuffers::FlatBufferBuilder;
 
+std::unique_ptr<FlatBufferBuilder> CopyModel(
+    const flatbuffers::FlatBufferBuilder* input) {
+  if (!input) {
+    return nullptr;
+  }
+  ModelT model_obj;
+  GetModel(input->GetBufferPointer())->UnPackTo(&model_obj);
+  auto copy = std::make_unique<FlatBufferBuilder>();
+  copy->Finish(CreateModel(*copy, &model_obj));
+
+  return copy;
+}
+
+}  // namespace
+
 MinibenchmarkStatus ValidatorRunnerImpl::Init() {
+  if (storage_path_.empty() || data_directory_path_.empty() ||
+      benchmark_evaluator_ == nullptr) {
+    return kMinibenchmarkPreconditionNotMet;
+  }
+  MinibenchmarkStatus status = storage_.Read();
+  if (status != kMinibenchmarkSuccess) {
+    TF_LITE_REPORT_ERROR(error_reporter_, "Storage::Read failed");
+    return status;
+  }
+
   std::unique_ptr<ModelLoader> model_loader =
       CreateModelLoaderFromPath(fd_or_model_path_);
   if (!model_loader) {
@@ -47,11 +74,23 @@ MinibenchmarkStatus ValidatorRunnerImpl::Init() {
   }
 
   // Check that the model can be loaded from disk.
-  MinibenchmarkStatus status = model_loader->Init();
+  status = model_loader->Init();
   if (status != kMinibenchmarkSuccess) {
     TF_LITE_REPORT_ERROR(error_reporter_, "Could not load model: %d",
                          static_cast<int>(status));
     return status;
+  }
+
+  if (custom_validation_embedder_) {
+    model_with_custom_input_ = std::make_unique<FlatBufferBuilder>();
+    status = custom_validation_embedder_->BuildModel(
+        *model_loader->GetModel()->GetModel(), *model_with_custom_input_);
+    if (status != kMinibenchmarkSuccess) {
+      TF_LITE_REPORT_ERROR(error_reporter_,
+                           "Failed to embed golden input to model: %d",
+                           static_cast<int>(status));
+      return status;
+    }
   }
 
   status = nnapi_helper_.Load();
@@ -95,8 +134,10 @@ void ValidatorRunnerImpl::TriggerValidationAsync(
                                validation_entrypoint =
                                    validation_entrypoint_helper_
                                        .LoadEntrypoint(),
-                               nnapi_sl_path =
-                                   nnapi_helper_.nnapi_sl_path()]() {
+                               nnapi_sl_path = nnapi_helper_.nnapi_sl_path(),
+                               model_with_custom_input =
+                                   CopyModel(model_with_custom_input_.get()),
+                               timeout_ms = timeout_ms_]() {
     FileLock lock(storage_path + ".parent_lock");
     if (!lock.TryLock()) {
       return;
@@ -109,7 +150,7 @@ void ValidatorRunnerImpl::TriggerValidationAsync(
       TFLITE_LOG_PROD(TFLITE_LOG_INFO, "Run validation with entry point '%s'",
                       validation_entrypoint_name);
       ProcessRunner runner(data_directory_path, validation_entrypoint_name,
-                           validation_entrypoint);
+                           validation_entrypoint, timeout_ms);
       int exitcode = 0;
       int signal = 0;
       MinibenchmarkStatus status = runner.Init();
@@ -122,8 +163,12 @@ void ValidatorRunnerImpl::TriggerValidationAsync(
                 BenchmarkEventType_START, /* result */ 0, /* error */ 0,
                 Validator::BootTimeMicros(), Validator::WallTimeMicros()));
         if (status == kMinibenchmarkSuccess) {
-          std::vector<std::string> args{model_path, storage_path,
-                                        data_directory_path};
+          std::vector<std::string> args;
+          if (!model_with_custom_input) {
+            args.push_back(model_path);
+          }
+          args.push_back(storage_path);
+          args.push_back(data_directory_path);
           if (!nnapi_sl_path.empty() &&
               tflite_settings_obj.delegate == tflite::Delegate_NNAPI) {
             TFLITE_LOG_PROD(
@@ -133,7 +178,8 @@ void ValidatorRunnerImpl::TriggerValidationAsync(
             args.push_back(nnapi_sl_path);
           }
           std::string output;
-          status = runner.Run(nullptr, args, &output, &exitcode, &signal);
+          status = runner.Run(model_with_custom_input.get(), args, &output,
+                              &exitcode, &signal);
         }
       }
       if (status != kMinibenchmarkSuccess) {
@@ -151,6 +197,31 @@ void ValidatorRunnerImpl::TriggerValidationAsync(
     }
   });
   detached_thread.detach();
+}
+
+std::vector<const BenchmarkEvent*> ValidatorRunnerImpl::GetSuccessfulResults() {
+  std::vector<const BenchmarkEvent*> results;
+  storage_.Read();
+  for (int i = 0; i < storage_.Count(); i++) {
+    const BenchmarkEvent* event = storage_.Get(i);
+    if (benchmark_evaluator_->IsValidationSuccessEvent(*event)) {
+      results.push_back(event);
+    }
+  }
+  return results;
+}
+
+int ValidatorRunnerImpl::GetNumCompletedResults() {
+  storage_.Read();
+  int num_results = 0;
+  for (int i = 0; i < storage_.Count(); i++) {
+    const BenchmarkEvent* event = storage_.Get(i);
+    if (event->event_type() == BenchmarkEventType_ERROR ||
+        (event->event_type() == BenchmarkEventType_END && event->result())) {
+      num_results++;
+    }
+  }
+  return num_results;
 }
 
 MinibenchmarkStatus

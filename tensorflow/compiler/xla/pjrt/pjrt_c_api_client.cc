@@ -22,7 +22,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
+#include "mlir/Bytecode/BytecodeWriter.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/pjrt/c/pjrt_c_api.h"
 // TODO(skyewm): remove when everything goes through C API
 #include "tensorflow/compiler/xla/pjrt/c/pjrt_c_api_helpers.h"
@@ -303,10 +303,14 @@ StatusOr<std::unique_ptr<PjRtLoadedExecutable>> PjRtCApiClient::Compile(
 
 StatusOr<std::unique_ptr<PjRtLoadedExecutable>> PjRtCApiClient::Compile(
     mlir::ModuleOp module, CompileOptions options) {
-  std::string module_str = tensorflow::SerializeMlirModule(module);
+  std::string module_bytecode;
+  {
+    llvm::raw_string_ostream os(module_bytecode);
+    mlir::writeBytecodeToFile(module, os);
+  }
   std::string format(pjrt::kMlirFormat);
   return InitializeArgsAndCompile(this, c_api_, c_client_.get(), options,
-                                  module_str, format);
+                                  module_bytecode, format);
 }
 
 StatusOr<std::string> PjRtCApiClient::SerializeExecutable(
@@ -331,11 +335,28 @@ PjRtCApiClient::DeserializeExecutable(absl::string_view serialized,
 
 StatusOr<std::uintptr_t> PjRtCApiClient::UnsafeBufferPointer(
     PjRtBuffer* buffer) {
-  if (kPjRtCApiBypass) {
-    VLOG(1) << "PJRT C API BYPASS: UnsafeBufferPointer";
-    return wrapped_->UnsafeBufferPointer(PjRtCApiBuffer::GetWrapped(buffer));
+  // Validate that the buffer's client matches the function call's client, since
+  // that could be a common error.
+  // Not doing input nullptr validation since such cases should be rare, and
+  // crashes should bubble up the call stack to higher layers. See b/248334153
+  // for the considerations that went into this.
+  if (buffer->client() != this) {
+    return InvalidArgument(
+        "buffer passed to PjRtCApiClient::UnsafeBufferPointer() is from a "
+        "different client than that of the function call. Buffer's client "
+        "platform: '%s', function call's client platform: '%s'.",
+        buffer->client()->platform_name(), this->platform_name());
   }
-  return Unimplemented("PJRT C API does not support UnsafeBufferPointer");
+
+  PJRT_Buffer_UnsafePointer_Args args;
+  args.struct_size = PJRT_Buffer_UnsafePointer_Args_STRUCT_SIZE;
+  args.priv = nullptr;
+  args.buffer =
+      tensorflow::down_cast<const PjRtCApiBuffer*>(buffer)->c_buffer();
+
+  RETURN_STATUS_IF_ERROR(c_api_->PJRT_Buffer_UnsafePointer(&args), c_api_);
+
+  return args.buffer_pointer;
 }
 
 StatusOr<std::unique_ptr<PjRtLoadedExecutable>> PjRtCApiClient::WrapExecutable(
@@ -633,7 +654,7 @@ static xla::PjRtFuture<Status> ConvertCEventToCppFuture(PJRT_Event* c_future,
           promise.Set(s);
           ::pjrt::MakeErrorDeleter(c_api)(error);
         } else {
-          promise.Set(Status::OK());
+          promise.Set(tsl::OkStatus());
         }
         ::pjrt::MakeEventDeleter(c_api)(c_future);
       });
@@ -838,6 +859,19 @@ bool PjRtCApiExecutable::IsDeleted() {
   return args.is_deleted;
 }
 
+int64_t PjRtCApiExecutable::SizeOfGeneratedCodeInBytes() const {
+  PJRT_Executable_SizeOfGeneratedCodeInBytes_Args args;
+  args.struct_size =
+      PJRT_Executable_SizeOfGeneratedCodeInBytes_Args_STRUCT_SIZE;
+  args.priv = nullptr;
+  args.executable = executable_.get();
+
+  const PJRT_Api* c_api = pjrt_c_api();
+  pjrt::LogFatalIfPjrtError(
+      c_api->PJRT_Executable_SizeOfGeneratedCodeInBytes(&args), c_api);
+  return args.size_in_bytes;
+}
+
 // ---------------------------------- Buffers ----------------------------------
 
 PjRtCApiBuffer::PjRtCApiBuffer(PjRtCApiClient* client, PJRT_Buffer* buffer)
@@ -1021,16 +1055,20 @@ StatusOr<std::unique_ptr<PjRtBuffer>> PjRtCApiBuffer::CopyToDevice(
     return std::unique_ptr<PjRtBuffer>(
         std::make_unique<PjRtCApiBuffer>(client_, args.dst_buffer));
   } else {
-    if (kPjRtCApiBypass) {
-      VLOG(1) << "PJRT C API BYPASS: CopyToDevice";
-      // TODO(b/239735405) Copying across different clients where `dst_device`
-      // is not a PjRtCApiDevice raises an error.
-      return wrapped_->CopyToDevice(dst_device);
-    }
-    return Unimplemented(
-        "PjRtCApiBuffer::CopyToDevice does not support cross-platform device "
-        "transfers, got destination device: %s",
-        dst_device->ToString());
+    // Copy across PjRtClients by copying through host
+    TF_ASSIGN_OR_RETURN(std::shared_ptr<Literal> literal, ToLiteralSync());
+    absl::InlinedVector<int64_t, 4> byte_strides(
+        literal->shape().dimensions_size());
+    TF_RETURN_IF_ERROR(
+        ShapeUtil::ByteStrides(literal->shape(), absl::MakeSpan(byte_strides)));
+    // Avoid use-after-free on `literal` due to unsequenced move and use.
+    Literal* literal_pointer = literal.get();
+    return dst_device->client()->BufferFromHostBuffer(
+        literal_pointer->untyped_data(),
+        literal_pointer->shape().element_type(),
+        literal_pointer->shape().dimensions(), byte_strides,
+        PjRtClient::HostBufferSemantics::kZeroCopy,
+        [literal{std::move(literal)}]() { /* frees literal */ }, dst_device);
   }
 }
 

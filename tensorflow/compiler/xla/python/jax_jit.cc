@@ -34,6 +34,7 @@ limitations under the License.
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>  // NOLINT
 #include <utility>
 
 #include "absl/container/flat_hash_map.h"
@@ -74,51 +75,65 @@ namespace py = pybind11;
 
 namespace {
 
-// Protected by the GIL.
-JitState& global_state = *new JitState();
-
-// TODO(phawkins): Google style guide forbids thread-local values with
-// non-trivial destructors.
-ABSL_CONST_INIT thread_local JitState thread_local_state;  // NOLINT
-
-}  // namespace
-
 // `thread_local_state.extra_jit_context` is set from Python. It's done when
 // loading the Python jax modules on the main-thread. For other threads, we
 // need to initialize the field the first time we access `thread_local_state`.
 py::object& initialize_local_state = *new py::object();
 
-JitState& GetGlobalState() { return global_state; }
-JitState& GetLocalState() {
+}  // namespace
+
+JitState& GlobalJitState() {
+  // Protected by the GIL.
+  static JitState& global_state = *new JitState();
+  return global_state;
+}
+
+JitState& ThreadLocalJitState() {
+  // TODO(phawkins): Google style guide forbids thread-local values with
+  // non-trivial destructors.
+  ABSL_CONST_INIT thread_local JitState thread_local_state;  // NOLINT
+  DCHECK(PyGILState_Check());
   if (thread_local_state.extra_jit_context == std::nullopt) {
     CHECK(initialize_local_state.ptr() != nullptr);
+    // Avoids reentrant calls to the initialization function.
+    thread_local_state.extra_jit_context = py::none();
     initialize_local_state();
   }
   return thread_local_state;
 }
 
 bool GetDisableJit() {
+  auto& global_state = GlobalJitState();
+  auto& thread_local_state = ThreadLocalJitState();
   CHECK(global_state.disable_jit.has_value());
   return thread_local_state.disable_jit.value_or(*global_state.disable_jit);
 }
 
 bool GetEnableX64() {
+  auto& global_state = GlobalJitState();
+  auto& thread_local_state = ThreadLocalJitState();
   CHECK(global_state.enable_x64.has_value());
   return thread_local_state.enable_x64.value_or(*global_state.enable_x64);
 }
 
 bool GetEnableJaxArray() {
+  auto& global_state = GlobalJitState();
+  auto& thread_local_state = ThreadLocalJitState();
   CHECK(global_state.jax_array.has_value());
   return thread_local_state.jax_array.value_or(*global_state.jax_array);
 }
 
 std::optional<py::object> GetDefaultDevice() {
+  auto& global_state = GlobalJitState();
+  auto& thread_local_state = ThreadLocalJitState();
   return thread_local_state.default_device.has_value()
              ? thread_local_state.default_device
              : global_state.default_device;
 }
 
 std::optional<pybind11::function> GetPostHook() {
+  auto& global_state = GlobalJitState();
+  auto& thread_local_state = ThreadLocalJitState();
   return thread_local_state.post_hook.has_value() ? thread_local_state.post_hook
                                                   : global_state.post_hook;
 }
@@ -146,6 +161,7 @@ std::string CallSignature::DebugString() const {
   return absl::StrFormat(
       "static args (positional + keyword): %s\nstatic arg keyword names: %s\n"
       "dynamic arg signatures (positional + keyword): %s\n"
+      "dynamic arg shardings: %s\n"
       "dynamic arg keyword names: %s\ndynamic arg treedefs: %s\n"
       "device: %s\n"
       "jax_enable_x64: %d\n"
@@ -155,6 +171,7 @@ std::string CallSignature::DebugString() const {
       absl::StrJoin(static_args, ",", py_object_formatter),
       absl::StrJoin(static_arg_names, ",", py_object_formatter),
       absl::StrJoin(dynamic_arg_signatures, ", ", signature_formatter),
+      absl::StrJoin(dynamic_arg_shardings, ", ", py_object_formatter),
       absl::StrJoin(dynamic_arg_names, ",", py_object_formatter),
       absl::StrJoin(dynamic_arg_treedefs, "| ", treedef_formatter),  // new line
       device != nullptr ? device->DebugString() : "nullptr", jax_enable_x64,
@@ -163,12 +180,14 @@ std::string CallSignature::DebugString() const {
 }
 
 bool CallSignature::operator==(const CallSignature& other) const {
+  // TODO(chky): Consider implementing hashing and equality for sharding in cpp
+  // instead of hashing and checking sharding's pointer values.
   return std::tie(dynamic_arg_treedefs, dynamic_arg_names,
-                  dynamic_arg_signatures, device, jax_enable_x64, jax_array,
-                  static_arg_names) ==
+                  dynamic_arg_signatures, dynamic_arg_shardings, device,
+                  jax_enable_x64, jax_array, static_arg_names) ==
              std::tie(other.dynamic_arg_treedefs, other.dynamic_arg_names,
-                      other.dynamic_arg_signatures, other.device,
-                      other.jax_enable_x64, other.jax_array,
+                      other.dynamic_arg_signatures, other.dynamic_arg_shardings,
+                      other.device, other.jax_enable_x64, other.jax_array,
                       other.static_arg_names) &&
          // `==` on py:objects is the Python `is`. We need equal.
          std::equal(
@@ -299,6 +318,7 @@ struct CacheEntry {
   // If an error occurred during the compilation, `fall_back_to_python` is set
   // to `true`, and other threads will fail with the same error.
   absl::Notification compilation_complete;
+  std::thread::id thread_id = std::this_thread::get_id();
 
   std::shared_ptr<xla::PyExecutable> executable;
   xla::PyTreeDef out_pytree_def;
@@ -622,17 +642,17 @@ static xla::StatusOr<xla::PjRtDevice*> GetJitArgumentStickyDevice(
   }();
 
   if (arg.get_type() == xla::PyArray::type()) {
-    auto* py_array = arg.cast<xla::PyArray*>();
+    auto py_array = py::reinterpret_borrow<xla::PyArray>(arg);
 
-    if (py_array->num_shards() != 1) {
+    if (py_array.num_shards() != 1) {
       return xla::InvalidArgument(
           "Only single-sharded Array is expected in C++ JIT.");
     }
 
-    if (!py_array->committed()) {
+    if (!py_array.committed()) {
       return nullptr;
     }
-    return py_array->GetBuffer(0)->device();
+    return py_array.GetBuffer(0)->device();
   }
 
   // We specically only deal with DeviceArray (not ShardedDeviceArray).
@@ -669,7 +689,7 @@ static xla::StatusOr<xla::PjRtDevice*> GetJitArgumentStickyDevice(
 
 // Compute signature for arguments.
 //
-// Returns `Status::OK()` on success. Returning an error should lead to
+// Returns `OkStatus()` on success. Returning an error should lead to
 // calling the Python fallback.
 xla::Status ComputeSignature(bool jax_enable_x64,
                              xla::PjRtDevice* default_device, bool is_committed,
@@ -721,7 +741,7 @@ xla::Status ComputeSignature(bool jax_enable_x64,
 }
 
 // Copy buffers to device, skipping pruned arguments.
-// Returns `Status::OK()` on success. Returning an error should lead to
+// Returns `OkStatus()` on success. Returning an error should lead to
 // calling the Python fallback.
 xla::Status CopyBuffersToDevice(
     bool jax_enable_x64, const std::optional<std::vector<bool>>& kept_args,
@@ -865,7 +885,8 @@ xla::StatusOr<py::object> CompiledFunction::Call(
   // may never free temporary buffers for copies of arguments.
   xla::GlobalPyRefManager()->MaybeCollectGarbage();
 
-  auto& tls = thread_local_state;
+  auto& global_state = GlobalJitState();
+  auto& tls = ThreadLocalJitState();
   if (GetDisableJit()) {
     return fun_(*py::reinterpret_borrow<py::args>(args),
                 **kwargs.value_or(py::kwargs()));
@@ -980,6 +1001,12 @@ xla::StatusOr<py::object> CompiledFunction::Call(
       // because any donated buffers will now be invalid.
       return py::object(out_tuple[0]);
     } else {
+      if (cache_entry->thread_id == std::this_thread::get_id()) {
+        auto error_string = absl::StrCat("Recursively calling jit: ",
+                                         arguments.signature.DebugString());
+        PyErr_SetString(PyExc_RecursionError, error_string.c_str());
+        throw pybind11::error_already_set();
+      }
       // Release the GIL while we wait, making sure the compile thread can
       // lock it.
       py::gil_scoped_release release;
@@ -1030,7 +1057,7 @@ xla::StatusOr<py::object> CompiledFunction::Call(
           cache_entry->out_shardings.at(i), cache_entry->executable->client(),
           traceback, std::move(pjrt_buffers),
           /*committed=*/cache_entry->committed.at(i), /*skip_checks=*/true);
-      flat_device_arrays.push_back(py::cast(std::move(array)));
+      flat_device_arrays.push_back(std::move(array));
     }
   } else {
     for (int i = 0; i < output_buffers[0].size(); ++i) {
@@ -1410,10 +1437,10 @@ void BuildJaxjitSubmodule(py::module& m) {
   jit_state_.def_readwrite("post_hook", &JitState::post_hook);
 
   jitlib.def(
-      "global_state", [&]() { return &global_state; },
+      "global_state", [&]() { return &GlobalJitState(); },
       py::return_value_policy::reference);
   jitlib.def(
-      "thread_local_state", [&]() { return &thread_local_state; },
+      "thread_local_state", [&]() { return &ThreadLocalJitState(); },
       py::return_value_policy::reference);
 
   jitlib.def("jit_is_disabled", &GetDisableJit);

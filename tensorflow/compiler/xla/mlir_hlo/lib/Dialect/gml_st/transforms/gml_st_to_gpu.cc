@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <array>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <utility>
@@ -23,6 +24,10 @@ limitations under the License.
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
@@ -68,14 +73,28 @@ struct ParallelOpToGpuPattern : public OpRewritePattern<ParallelOp> {
                                 PatternRewriter& rewriter) const override;
 };
 
+struct GenericOpToWarpReductionPattern : OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(linalg::GenericOp genericOp,
+                                PatternRewriter& rewriter) const override;
+};
+
 /// Implements the GmlStToGpuPass declared in
 /// include/mlir-hlo/Dialect/gml_st/transforms/passes.td.
 struct GmlStToGpuPass : public ::impl::GmlStToGpuPassBase<GmlStToGpuPass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
-    patterns.add<ParallelOpToGpuPattern>(patterns.getContext());
+    patterns.add<ParallelOpToGpuPattern, GenericOpToWarpReductionPattern>(
+        &getContext());
     ConversionTarget target(getContext());
     target.addIllegalDialect<GmlStDialect>();
+    target.addDynamicallyLegalOp<linalg::GenericOp>([](linalg::GenericOp op) {
+      return llvm::none_of(op.iterator_types().getAsValueRange<StringAttr>(),
+                           [](StringRef type) {
+                             return type == getReductionIteratorTypeName();
+                           });
+    });
     // We're producing new ops (clones of original ops in gml_st.parallel
     // loops), so we have to mark them explicitly legal, otherwise the
     // conversion fails even if doing partial conversion.
@@ -130,16 +149,59 @@ static LogicalResult verifyLoopBoundsMatch(Value currentBound,
                  operands[2] == parallel.getStep().front());
 }
 
+/// Emits code that infers and returns an iteration-independent version of
+/// `upperBound` in cases when the tiling size does not evenly divide the
+/// problem size.
+///
+/// In these cases, `upperBound` depends on other values within the `launch`
+/// region, so it cannot be used to infer the launch bounds of `launch`. This
+/// function returns an approximation of `upperBound` that does not depend on
+/// such values, and emmits code that masks off extra threads (identified by
+/// `inductionVar`) that result from using the approximated value.
+static Value handleImperfectTile(Location loc, LaunchOp launch,
+                                 Value upperBound, Value inductionVar,
+                                 PatternRewriter& rewriter) {
+  // We are assuming that imperfect tiling is expressed through an affine.min
+  // op with an affine map of the form (<something>)[<something>] ->
+  // (<something>, tileSize), where <something>s possibly depend on values
+  // defined within the regions of nested gml_st.parallel. Since local values
+  // are not available outside of the loops, which is needed for launch bounds
+  // computation, we only use tileSize to compte the launch bounds. We then mask
+  // off the threads that would be computing out-of-bound values.
+  // TODO(b/244314345): Replace this pattern matching with a proper way to
+  // handle imperfect tiling once we figure this out.
+  auto affineMin = upperBound.getDefiningOp<AffineMinOp>();
+  if (!affineMin || affineMin.getMap().getNumResults() != 2) return upperBound;
+  auto tileSize =
+      affineMin.getMap().getResult(1).dyn_cast<AffineConstantExpr>();
+  if (!tileSize) return upperBound;
+
+  // Insert a guard in the region to mask off threads that would operate outside
+  // the tile bounds.
+  auto predicate = rewriter.create<arith::CmpIOp>(
+      loc, arith::CmpIPredicate::slt, inductionVar, upperBound);
+  auto scfIf =
+      rewriter.create<scf::IfOp>(loc, predicate, /*withElseRegion=*/false);
+  rewriter.setInsertionPointToStart(&scfIf.getThenRegion().front());
+
+  // Create a constant corresponding to the tile size, and return it as the
+  // iteration-independent upper bound.
+  PatternRewriter::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(launch);
+  return rewriter.create<arith::ConstantIndexOp>(loc, tileSize.getValue());
+}
+
 /// Matches the `launchIdx`-th iteration space of `launch` to the iteration
 /// space of `parallel`. Returns an SSA value that is a part of the `launch`'s
 /// region, and represents the value of `parallel`'s induction variable.
-static Value matchLaunchSpaceToLoop(ParallelOp parallel, LaunchOp launch,
-                                    unsigned launchIdx,
+static Value matchLaunchSpaceToLoop(ParallelOp parallel,
+                                    const BlockAndValueMapping& bvm,
+                                    unsigned launchIdx, LaunchOp launch,
                                     PatternRewriter& rewriter) {
   Location loc = parallel.getLoc();
-  Value upperBound = parallel.getUpperBound().front();
-  Value lowerBound = parallel.getLowerBound().front();
-  Value step = parallel.getStep().front();
+  Value upperBound = bvm.lookupOrDefault(parallel.getUpperBound().front());
+  Value lowerBound = bvm.lookupOrDefault(parallel.getLowerBound().front());
+  Value step = bvm.lookupOrDefault(parallel.getStep().front());
 
   // Compute the value that gml_st.parallel's induction variable would have in
   // each iteration, and make it available to operations within the gpu.launch
@@ -153,15 +215,18 @@ static Value matchLaunchSpaceToLoop(ParallelOp parallel, LaunchOp launch,
       ValueRange{launch.body().getArgument(launchIdx), lowerBound, step});
 
   // Infer the launch bound from the loop bounds and the step.
+  Value iterIndependentUpperBound =
+      handleImperfectTile(loc, launch, upperBound, inductionVar, rewriter);
   AffineMap launchBoundMap = AffineMap::get(
       /*dimCount=*/1, /*symbolCount=*/2,
       (rewriter.getAffineDimExpr(0) - rewriter.getAffineSymbolExpr(0))
           .ceilDiv(rewriter.getAffineSymbolExpr(1)));
   PatternRewriter::InsertionGuard guard(rewriter);
   rewriter.setInsertionPoint(launch);
-  launch.setOperand(launchIdx, rewriter.create<AffineApplyOp>(
-                                   loc, launchBoundMap,
-                                   ValueRange{upperBound, lowerBound, step}));
+  launch.setOperand(
+      launchIdx, rewriter.create<AffineApplyOp>(
+                     loc, launchBoundMap,
+                     ValueRange{iterIndependentUpperBound, lowerBound, step}));
   return inductionVar;
 }
 
@@ -216,8 +281,8 @@ LogicalResult ParallelOpToGpuPattern::matchAndRewrite(
       // We are encountering a loop at this level of nesting for the first time.
       assert(currentBound == defaultSize &&
              "launch bound should use the default size");
-      nestingLevelToInductionVarMap.push_back(
-          matchLaunchSpaceToLoop(parallel, launch, inductionVarIdx, rewriter));
+      nestingLevelToInductionVarMap.push_back(matchLaunchSpaceToLoop(
+          parallel, bvm, inductionVarIdx, launch, rewriter));
     }
 
     bvm.map(parallel.getInductionVars().front(),
@@ -248,5 +313,75 @@ LogicalResult ParallelOpToGpuPattern::matchAndRewrite(
   }
 
   rewriter.eraseOp(root);
+  return success();
+}
+
+LogicalResult GenericOpToWarpReductionPattern::matchAndRewrite(
+    linalg::GenericOp genericOp, PatternRewriter& rewriter) const {
+  // Match only if it's a linalg.generic vector<32xf32> -> memref<1xf32> with
+  // iterator_types = ["parallel", "reduction"].
+  auto itTypes = llvm::to_vector(
+      genericOp.getIteratorTypes().getAsValueRange<StringAttr>());
+  if (itTypes.size() != 2 || itTypes[0] != getParallelIteratorTypeName() ||
+      itTypes[1] != getReductionIteratorTypeName()) {
+    return rewriter.notifyMatchFailure(genericOp,
+                                       "Expected ['parallel', 'reduction']");
+  }
+  if (genericOp.getNumInputs() != 1 || genericOp.getNumOutputs() != 1) {
+    return rewriter.notifyMatchFailure(genericOp,
+                                       "Expected single input and output");
+  }
+  auto input = genericOp.getInputs().front();
+  auto output = genericOp.getOutputs().front();
+  auto inType = input.getType().dyn_cast<VectorType>();
+  auto outType = output.getType().dyn_cast<MemRefType>();
+  auto isNumElementsEqual = [](auto type, int64_t size) {
+    return type && type.hasStaticShape() && type.getNumElements() == size;
+  };
+  if (!isNumElementsEqual(inType, 32)) {
+    return rewriter.notifyMatchFailure(genericOp, "Expected 32-vector input");
+  }
+  if (!isNumElementsEqual(outType, 1)) {
+    return rewriter.notifyMatchFailure(genericOp, "Expected 1-element output");
+  }
+
+  // Split block before linalg.generic in order to clone its accumulate block.
+  Block* prologue = genericOp->getBlock();
+  Block* epilogue = rewriter.splitBlock(prologue, genericOp->getIterator());
+  rewriter.setInsertionPointToEnd(prologue);
+
+  // Preamble: extract lane id element from inpt.
+  Location loc = genericOp->getLoc();
+  Value laneId = rewriter.create<gpu::LaneIdOp>(loc);
+  Value cast = rewriter.create<vector::ShapeCastOp>(
+      loc, VectorType::get(inType.getNumElements(), inType.getElementType()),
+      input);
+  Value lhs = rewriter.create<vector::ExtractElementOp>(loc, cast, laneId);
+  auto getI32Attr = [&](int32_t value) {
+    return rewriter.getI32IntegerAttr(value);
+  };
+  Value width = rewriter.create<arith::ConstantOp>(loc, getI32Attr(32));
+
+  // Create warp shuffles of increasing offset and interleave with a clone of
+  // the accumulate block.
+  for (int i = 1; i < 32; i *= 2) {
+    Value offset = rewriter.create<arith::ConstantOp>(loc, getI32Attr(i));
+    auto shuffleOp = rewriter.create<gpu::ShuffleOp>(loc, lhs, offset, width,
+                                                     gpu::ShuffleMode::XOR);
+    // Clone accumulate block, then merge with prologue and erase terminator.
+    rewriter.cloneRegionBefore(genericOp.getRegion(), epilogue);
+    rewriter.mergeBlocks(prologue->getNextNode(), prologue,
+                         {lhs, shuffleOp.getShuffleResult()});
+    lhs = prologue->getTerminator()->getOperand(0);
+    rewriter.eraseOp(prologue->getTerminator());
+  }
+  // Store the result into output.
+  Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  rewriter.create<memref::StoreOp>(loc, lhs, output, zero);
+  rewriter.mergeBlocks(epilogue, prologue, llvm::None);
+
+  // Erase linalg.generic op.
+  rewriter.eraseOp(genericOp);
+
   return success();
 }

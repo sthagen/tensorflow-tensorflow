@@ -55,7 +55,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/lib/gtl/map_util.h"
+#include "tensorflow/tsl/lib/gtl/map_util.h"
 #include "tensorflow/tsl/platform/errors.h"
 #include "tensorflow/tsl/platform/human_readable_json.h"
 #include "tensorflow/tsl/platform/logging.h"
@@ -276,6 +276,8 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
                                proto.is_host_transfer());
       break;
     case HloOpcode::kSendDone:
+      TF_RET_CHECK(DynCast<HloSendInstruction>(operands(0)) != nullptr)
+          << "SendDone must take the context operand from Send";
       instruction = CreateSendDone(operands(0), proto.is_host_transfer());
       break;
     case HloOpcode::kRecv:
@@ -283,6 +285,8 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
                                proto.channel_id(), proto.is_host_transfer());
       break;
     case HloOpcode::kRecvDone:
+      TF_RET_CHECK(DynCast<HloRecvInstruction>(operands(0)) != nullptr)
+          << "RecvDone must take the context operand from Recv";
       instruction = CreateRecvDone(operands(0), proto.is_host_transfer());
       break;
     case HloOpcode::kReverse:
@@ -416,7 +420,7 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
           << proto.called_computation_ids_size();
       const int64_t fusion_id = proto.called_computation_ids(0);
       auto* fused_computation =
-          tensorflow::gtl::FindPtrOrNull(computation_map, fusion_id);
+          tsl::gtl::FindPtrOrNull(computation_map, fusion_id);
       TF_RET_CHECK(fused_computation != nullptr)
           << "No fusion computation with id " << fusion_id;
       instruction =
@@ -1841,21 +1845,11 @@ bool HloInstruction::HasSideEffectNoRecurse() const {
     case HloOpcode::kCollectivePermuteStart:
     case HloOpcode::kCollectivePermuteDone:
       return true;
-
-    // Collective instructions with channel_id are side effecting only if
-    // they are used in non-spmd context.
-    case HloOpcode::kAllToAll:
-    case HloOpcode::kAllGather:
     case HloOpcode::kAllReduce:
-    case HloOpcode::kReduceScatter:
-      if (Cast<HloCollectiveInstruction>(this)->constrain_layout()) {
-        return true;
-      }
-      [[fallthrough]];
-    case HloOpcode::kCollectivePermute:
-      return Cast<HloChannelInstruction>(this)->channel_id().has_value() &&
-             !GetModule()->config().use_spmd_partitioning();
-
+      return channel_id().has_value() ||
+             Cast<HloAllReduceInstruction>(this)->constrain_layout();
+    case HloOpcode::kAllToAll:
+      return Cast<HloAllToAllInstruction>(this)->constrain_layout();
     case HloOpcode::kCustomCall:
       return Cast<HloCustomCallInstruction>(this)
           ->custom_call_has_side_effect();
@@ -3902,7 +3896,7 @@ namespace {
 
 // Indicates how an instruction uses a value (such as an operand).
 //
-// Does it (a) not use it, (b) use it, or (c) use it multiple times?
+// Does it (a) use it multiple times, (b) use it, or (c) not use it?
 enum class UseKind { kReuse = 0, kUse = 1, kNoUse = 2 };
 
 // A helper class for memoized, recursive computation of HloOpcode::kFusion
@@ -4601,13 +4595,13 @@ HloInstruction* HloInstruction::fused_expression_root() const {
   return Cast<HloFusionInstruction>(this)->fused_expression_root();
 }
 
-const tensorflow::gtl::iterator_range<UnwrappingIterator<
+const tsl::gtl::iterator_range<UnwrappingIterator<
     std::list<std::unique_ptr<HloInstruction>>::const_iterator>>
 HloInstruction::fused_instructions() const {
   return Cast<HloFusionInstruction>(this)->fused_instructions();
 }
 
-const tensorflow::gtl::iterator_range<
+const tsl::gtl::iterator_range<
     UnwrappingIterator<std::list<std::unique_ptr<HloInstruction>>::iterator>>
 HloInstruction::fused_instructions() {
   return Cast<HloFusionInstruction>(this)->fused_instructions();

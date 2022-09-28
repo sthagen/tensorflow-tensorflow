@@ -30,7 +30,7 @@ def THLO_Dialect : Dialect {
   let name = "thlo";
   let cppNamespace = "::mlir::thlo";
 
-  let emitAccessorPrefix = kEmitAccessorPrefix_Raw;
+  let emitAccessorPrefix = kEmitAccessorPrefix_Prefixed;
 }
 
 class THLO_Op<string mnemonic, list<Trait> traits> :
@@ -63,7 +63,7 @@ def THLO_ConcatenateOp : THLO_DstStyleOp<"concatenate", [
     DeclareOpInterfaceMethods<TilingInterface>]> {
   let summary = "Destination-style twin for `mhlo.concatenate`";
   let arguments = (ins
-    Variadic<AnyTensor>:$operands,
+    Variadic<AnyTensor>:$inputs,
     AnyTensor:$init,
     I64Attr:$dimension
   );
@@ -71,8 +71,7 @@ def THLO_ConcatenateOp : THLO_DstStyleOp<"concatenate", [
 
   let extraClassDeclaration = extraBaseClassDeclaration # [{
     // Implement functions necessary for DestinationStyleOpInterface.
-    mlir::ValueRange inputs() { return operands(); }
-    mlir::ValueRange getInputs() { return operands(); }
+    mlir::ValueRange inputs() { return getInputs(); }
     mlir::ValueRange outputs() { return getOperands().take_back(1); }
   }];
 }
@@ -138,13 +137,14 @@ def THLO_ScatterOp : THLO_DstStyleOp<"scatter", [
     SingleBlockImplicitTerminator<"YieldOp">]> {
   let summary = "Destination-style twin for `mhlo.scatter`";
   let description = [{
-    Caveats:
-    - the variadic case is not supported.
-    - Only point updates are supported
-      - update_window_dims is []
-      - inserted_window_dims is range(operand.shape.rank)
-      - scatter_dims_to_operand_dims is range(indices.shape.rank)
-      - index_vector_dim is indices.shape.rank-1
+    tHLO ScatterOp corresponds to the canonicalized mHLO ScatterOp, i.e.
+
+    - update_window_dims is range(1, rank(update_window_dims))
+    - inserted_window_dims is []
+    - scatter_dims_to_operand_dims is range(0, rank(indices))
+    - index_vector_dim is rank(indices) - 1
+
+    At the moment, the variadic case is not supported.
   }];
   let arguments = (ins
     // Input args
@@ -164,6 +164,12 @@ def THLO_ScatterOp : THLO_DstStyleOp<"scatter", [
     }
     mlir::ValueRange getInputs() { return inputs(); }
     mlir::ValueRange outputs() { return getOperands().take_back(1); }
+
+    // Returns index vector dimension size, which is always statically-known.
+    int64_t getIndexVectorDim() { return getIndices().getType().getDimSize(1); }
+
+    // Returns the number of indices, i.e. number of scalar/tensor updates.
+    int64_t getIndicesCount() { return getIndices().getType().getDimSize(0); }
   }];
 }
 
@@ -201,6 +207,7 @@ def THLO_TransposeOp : THLO_DstStyleOp<"transpose", []> {
 }
 
 def THLO_ReductionOp : THLO_DstStyleOp<"reduction", [
+      DeclareOpInterfaceMethods<LinalgStructuredInterface, ["iterator_types"]>,
       SameVariadicOperandSize, SingleBlockImplicitTerminator<"YieldOp">
     ]> {
   let summary = "Destination-style twin for `mhlo.reduce`";
@@ -235,16 +242,22 @@ def THLO_ReductionOp : THLO_DstStyleOp<"reduction", [
 
   let extraClassDeclaration = [{
     // Implement functions necessary for DestinationStyleOpInterface.
-    mlir::ValueRange getInputs() { return inputs(); }
-    mlir::ValueRange outputs() { return inits(); }
-    unsigned getNumInputs() { return inputs().size(); };
-    unsigned getNumOutputs() { return inits().size(); };
+    mlir::ValueRange inputs() { return getInputs(); }
+    mlir::ValueRange outputs() { return getInits(); }
+    unsigned getNumInputs() { return getInputs().size(); };
+    unsigned getNumOutputs() { return getInits().size(); };
+    static std::function<void(mlir::ImplicitLocOpBuilder &, mlir::Block &,
+                              mlir::ArrayRef<mlir::NamedAttribute>)>
+    getRegionBuilder() {
+      return nullptr;
+    }
   }];
 }
 
 def THLO_MapOp : THLO_DstStyleOp<"map", [
     SameOperandsAndResultShape,
-    SingleBlockImplicitTerminator<"YieldOp">
+    SingleBlockImplicitTerminator<"YieldOp">,
+    DeclareOpInterfaceMethods<LinalgStructuredInterface, ["iterator_types"]>
 ]> {
   let summary = "Destination-style twin for elementwise operations";
   let description = [{
@@ -275,8 +288,16 @@ def THLO_MapOp : THLO_DstStyleOp<"map", [
 
   let extraClassDeclaration = extraBaseClassDeclaration # [{
     // Implement functions necessary for DestinationStyleOpInterface.
-    mlir::ValueRange getInputs() { return inputs(); }
+    mlir::ValueRange inputs() { return getInputs(); }
     mlir::ValueRange outputs() { return getOperands().take_back(1); }
+    linalg::OpOperandVector getOpOperandsMatchingBBargs() { return getInputOperands(); }
+
+    static std::function<void(mlir::ImplicitLocOpBuilder &, mlir::Block &,
+                              mlir::ArrayRef<mlir::NamedAttribute>)>
+    getRegionBuilder() {
+      return nullptr;
+    }
+
   }];
 }
 

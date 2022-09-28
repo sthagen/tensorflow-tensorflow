@@ -59,7 +59,7 @@ tf_cc_test(
         "//tensorflow/compiler/xla/service:hlo_parser",
         "//tensorflow/compiler/xla/service/cpu/tests:cpu_codegen_test",
         "//tensorflow/compiler/xla/tests:filecheck",
-        "//tensorflow/core:test",
+        "//tensorflow/tsl/platform:test",
     ],
 )
 
@@ -228,8 +228,7 @@ cc_library(
         "//tensorflow/compiler/xla/service/gpu:launch_dimensions",
         "//tensorflow/compiler/xla/service/gpu:parallel_loop_emitter",
         "//tensorflow/compiler/xla/service/gpu:target_util",
-        "//tensorflow/core:lib",
-        "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Core",

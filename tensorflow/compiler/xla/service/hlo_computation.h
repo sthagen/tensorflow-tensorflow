@@ -40,7 +40,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/lib/core/status.h"
+#include "tensorflow/tsl/platform/status.h"
 
 namespace xla {
 
@@ -288,12 +288,11 @@ class HloComputation {
     return H::combine(std::move(h), instructions.size());
   }
 
-  using InstructionSequence = tensorflow::gtl::iterator_range<
+  using InstructionSequence = tsl::gtl::iterator_range<
       UnwrappingIterator<std::list<std::unique_ptr<HloInstruction>>::iterator>>;
 
-  using ConstInstructionSequence =
-      tensorflow::gtl::iterator_range<UnwrappingIterator<
-          std::list<std::unique_ptr<HloInstruction>>::const_iterator>>;
+  using ConstInstructionSequence = tsl::gtl::iterator_range<UnwrappingIterator<
+      std::list<std::unique_ptr<HloInstruction>>::const_iterator>>;
 
   // Gets the instructions in this computation.
   //

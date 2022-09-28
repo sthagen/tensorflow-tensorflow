@@ -343,7 +343,7 @@ typedef struct {
   size_t code_size;
   // Supported formats are:
   // "hlo": code string takes serialized HloModuleProto.
-  // "mlir": code string takes MLIR module string.
+  // "mlir": code string takes MLIR module bytecode (or string).
   // String is owned by the caller and should stay alive for the duration of the
   // compile call.
   const char* format;
@@ -762,6 +762,19 @@ const size_t PJRT_Executable_NumOutputs_Args_STRUCT_SIZE =
 typedef PJRT_Error* PJRT_Executable_NumOutputs(
     PJRT_Executable_NumOutputs_Args* args);
 
+typedef struct {
+  size_t struct_size;
+  void* priv;
+  PJRT_Executable* executable;
+  int64_t size_in_bytes;  // out
+} PJRT_Executable_SizeOfGeneratedCodeInBytes_Args;
+const size_t PJRT_Executable_SizeOfGeneratedCodeInBytes_Args_STRUCT_SIZE =
+    PJRT_STRUCT_SIZE(PJRT_Executable_SizeOfGeneratedCodeInBytes_Args,
+                     size_in_bytes);  // last field in the struct
+
+typedef PJRT_Error* PJRT_Executable_SizeOfGeneratedCodeInBytes(
+    PJRT_Executable_SizeOfGeneratedCodeInBytes_Args* args);
+
 // ---------------------------------- Buffers ----------------------------------
 
 typedef struct {
@@ -922,6 +935,20 @@ const size_t PJRT_Buffer_ReadyEvent_Args_STRUCT_SIZE =
 // not transition to an error state after PJRT_Buffer_Delete() is called.
 typedef PJRT_Error* PJRT_Buffer_ReadyEvent(PJRT_Buffer_ReadyEvent_Args* args);
 
+typedef struct {
+  size_t struct_size;
+  void* priv;
+  PJRT_Buffer* buffer;
+  uintptr_t buffer_pointer;  // out
+} PJRT_Buffer_UnsafePointer_Args;
+const size_t PJRT_Buffer_UnsafePointer_Args_STRUCT_SIZE =
+    PJRT_STRUCT_SIZE(PJRT_Buffer_UnsafePointer_Args, buffer_pointer);
+
+// Returns platform-dependent address for the given buffer that is often but
+// not guaranteed to be the physical/device address.
+typedef PJRT_Error* PJRT_Buffer_UnsafePointer(
+    PJRT_Buffer_UnsafePointer_Args* args);
+
 // -------------------------------- API access ---------------------------------
 
 #define _PJRT_API_STRUCT_FIELD(fn_type) fn_type* fn_type
@@ -966,6 +993,7 @@ typedef struct {
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Name);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_AddressableDevices);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_NumOutputs);
+  _PJRT_API_STRUCT_FIELD(PJRT_Executable_SizeOfGeneratedCodeInBytes);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Delete);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_IsDeleted);
   _PJRT_API_STRUCT_FIELD(PJRT_Executable_Execute);
@@ -980,10 +1008,11 @@ typedef struct {
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_ToHostBuffer);
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_IsOnCpu);
   _PJRT_API_STRUCT_FIELD(PJRT_Buffer_ReadyEvent);
+  _PJRT_API_STRUCT_FIELD(PJRT_Buffer_UnsafePointer);
 } PJRT_Api;
 
 const size_t PJRT_Api_STRUCT_SIZE =
-    PJRT_STRUCT_SIZE(PJRT_Api, PJRT_Buffer_ReadyEvent);
+    PJRT_STRUCT_SIZE(PJRT_Api, PJRT_Buffer_UnsafePointer);
 
 #undef _PJRT_API_STRUCT_FIELD
 

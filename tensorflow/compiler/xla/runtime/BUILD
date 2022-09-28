@@ -36,8 +36,9 @@ tf_cc_test(
     deps = [
         ":arguments",
         ":types",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -48,12 +49,10 @@ cc_library(
     hdrs = ["async_runtime.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/core/platform:mutex",  # TODO(aminim): migrate eigen3/unsupported/Eigen/CXX11/ThreadPool:70 to TSL
+        "//tensorflow/tsl/platform:env",
         "//tensorflow/tsl/platform:platform_port",
-        "//third_party/eigen3",
         "@com_google_absl//absl/base:dynamic_annotations",
         "@com_google_absl//absl/status",
-        "@llvm-project//llvm:Support",
         "@tf_runtime//:hostcontext",
     ],
 )
@@ -63,7 +62,7 @@ cc_library(
     hdrs = ["async_values_cache.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/tsl/platform:platform",
+        "//tensorflow/tsl/platform",
     ] + tf_platform_deps(
         "async_values_cache",
         platform_dir = "//tensorflow/compiler/xla/runtime/",
@@ -117,8 +116,9 @@ tf_cc_test(
         "//tensorflow/compiler/xla/mlir/ir/runtime/tests:testlib",
         "//tensorflow/compiler/xla/mlir/transforms/runtime:compilation_pipeline_gpu",
         "//tensorflow/compiler/xla/mlir/transforms/runtime:custom_call_encoding",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
     ],
 )
 
@@ -151,8 +151,8 @@ tf_cc_test(
     srcs = ["diagnostics_test.cc"],
     deps = [
         ":diagnostics",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_main",
         "@com_google_absl//absl/status",
     ],
 )
@@ -194,6 +194,23 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@llvm-project//llvm:OrcJIT",
         "@llvm-project//llvm:Support",
+    ],
+)
+
+tf_cc_test(
+    name = "executable_test",
+    srcs = ["executable_test.cc"],
+    deps = [
+        ":arguments",
+        ":async_runtime",
+        ":diagnostics",
+        ":executable",
+        ":jit_executable",
+        ":results",
+        "//tensorflow/compiler/xla/mlir/transforms/runtime/tests:testlib_pipeline",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/base:dynamic_annotations",
     ],
 )
 
@@ -263,8 +280,9 @@ tf_cc_test(
     srcs = ["map_by_type_test.cc"],
     deps = [
         ":map_by_type",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
     ],
 )
 
@@ -274,7 +292,7 @@ cc_library(
     hdrs = ["memory_mapper.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/tsl/platform:platform",
+        "//tensorflow/tsl/platform",
         "@llvm-project//llvm:ExecutionEngine",
         "@llvm-project//llvm:Support",
     ] + tf_platform_deps(
@@ -290,6 +308,19 @@ cc_library(
     deps = [
         ":logical_result",
         ":types",
+    ],
+)
+
+tf_cc_test(
+    name = "results_test",
+    srcs = ["results_test.cc"],
+    deps = [
+        ":logical_result",
+        ":results",
+        ":types",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test_benchmark",
     ],
 )
 
@@ -323,8 +354,9 @@ tf_cc_test(
         ":constraints",
         ":symbolic_shape",
         ":types",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
         "@llvm-project//llvm:Support",
     ],
 )
@@ -345,6 +377,16 @@ cc_library(
 )
 
 cc_library(
+    name = "tracing",
+    hdrs = ["tracing.h"],
+    compatible_with = get_compatible_with_cloud(),
+    deps = [
+        ":custom_call",
+        ":type_id",
+    ],
+)
+
+cc_library(
     name = "type_id",
     srcs = ["type_id.cc"],
     hdrs = ["type_id.h"],
@@ -360,7 +402,8 @@ tf_cc_test(
     srcs = ["type_id_test.cc"],
     deps = [
         ":type_id",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
     ],
 )

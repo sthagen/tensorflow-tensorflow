@@ -37,6 +37,9 @@ Status MlirToXlaComputation(mlir::ModuleOp module,
   mlir::StatusScopedDiagnosticHandler diagnostic_handler(module->getContext());
   {
     mlir::PassManager pm(module->getContext());
+    pm.addPass(mlir::mhlo::createStablehloLegalizeToHloPass());
+    pm.addNestedPass<mlir::func::FuncOp>(
+        mlir::mhlo::createLegalizeSparseChloToLinalgPass());
     pm.addNestedPass<mlir::func::FuncOp>(
         mlir::mhlo::createChloLegalizeToHloPass(
             /*legalize_broadcasts=*/true, /*expand_compositions=*/true));

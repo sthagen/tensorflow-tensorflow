@@ -39,8 +39,9 @@ cc_library(
     deps = [
         ":custom_call_encoding",
         ":passes_inc_gen",
-        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt",
         "//tensorflow/compiler/xla/runtime:custom_call",
+        "//tensorflow/compiler/xla/runtime:tracing",
         "//tensorflow/compiler/xla/runtime:type_id",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
@@ -64,7 +65,7 @@ cc_library(
     hdrs = ["calling_convention.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Transforms",
@@ -77,9 +78,9 @@ tf_cc_test(
     compatible_with = get_compatible_with_cloud(),
     deps = [
         ":calling_convention",
-        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_main",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:MemRefDialect",
@@ -173,8 +174,9 @@ cc_library(
     hdrs = ["custom_call_encoding.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt",
         "//tensorflow/compiler/xla/runtime:custom_call",
+        "//tensorflow/compiler/xla/runtime:tracing",
         "//tensorflow/compiler/xla/runtime:type_id",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithmeticDialect",
@@ -220,7 +222,7 @@ cc_library(
     hdrs = ["specialization.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/compiler/xla/mlir/transforms/runtime:type_converter",
+        ":type_converter",
         "//tensorflow/compiler/xla/mlir/utils/runtime:constraints",
         "//tensorflow/compiler/xla/runtime:arguments",
         "//tensorflow/compiler/xla/runtime:constraints",
@@ -245,7 +247,7 @@ cc_library(
     hdrs = ["type_converter.h"],
     compatible_with = get_compatible_with_cloud(),
     deps = [
-        "//tensorflow/compiler/xla/mlir/ir/runtime:rt_ops",
+        "//tensorflow/compiler/xla/mlir/ir/runtime:rt",
         "//tensorflow/compiler/xla/runtime:errors",
         "//tensorflow/compiler/xla/runtime:types",
         "@com_google_absl//absl/status",
@@ -254,5 +256,18 @@ cc_library(
         "@llvm-project//mlir:AsyncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
+    ],
+)
+
+tf_cc_test(
+    name = "type_converter_test",
+    srcs = ["type_converter_test.cc"],
+    compatible_with = get_compatible_with_cloud(),
+    deps = [
+        ":type_converter",
+        "//tensorflow/compiler/xla/runtime:types",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_main",
+        "@llvm-project//mlir:IR",
     ],
 )
