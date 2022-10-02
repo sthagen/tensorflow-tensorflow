@@ -1,7 +1,7 @@
 load("//tensorflow:tensorflow.bzl", "tf_cc_test")
 load("//tensorflow:tensorflow.bzl", "get_compatible_with_cloud")
 load("//tensorflow/core/platform:build_config.bzl", "tf_platform_deps")
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
+load("//tensorflow/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     default_visibility = [
@@ -200,6 +200,7 @@ cc_library(
 tf_cc_test(
     name = "executable_test",
     srcs = ["executable_test.cc"],
+    tags = ["nomsan"],  # TODO(ezhulenev): Find msan error in LLVM coroutine passes
     deps = [
         ":arguments",
         ":async_runtime",
@@ -208,8 +209,9 @@ tf_cc_test(
         ":jit_executable",
         ":results",
         "//tensorflow/compiler/xla/mlir/transforms/runtime/tests:testlib_pipeline",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
+        "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
         "@com_google_absl//absl/base:dynamic_annotations",
     ],
 )
@@ -318,9 +320,9 @@ tf_cc_test(
         ":logical_result",
         ":results",
         ":types",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
+        "//tensorflow/tsl/platform:test",
         "//tensorflow/tsl/platform:test_benchmark",
+        "//tensorflow/tsl/platform:test_main",
     ],
 )
 

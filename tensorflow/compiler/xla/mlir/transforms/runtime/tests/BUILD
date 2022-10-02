@@ -14,7 +14,7 @@ filegroup(
     name = "test_utilities",
     testonly = True,
     data = [
-        "//tensorflow/compiler/xla/mlir/tools/runtime:xla-runtime-opt",
+        "//tensorflow/compiler/xla/mlir/tools:xla-runtime-opt",
         "@llvm-project//llvm:FileCheck",
         "@llvm-project//mlir:run_lit.sh",
     ],
@@ -28,7 +28,7 @@ cc_library(
     visibility = ["//tensorflow/compiler/xla:runtime"],
     deps = [
         "//tensorflow/compiler/xla/mlir/transforms/runtime:passes",
-        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:AsyncDialect",
         "@llvm-project//mlir:AsyncToLLVM",
         "@llvm-project//mlir:AsyncTransforms",

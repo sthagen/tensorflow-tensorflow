@@ -12,11 +12,10 @@ load(
 )
 load(
     "//tensorflow:tensorflow.bzl",
-    "if_google",
     "tf_cc_test",
-    "tf_copts",
     "tf_cuda_library",
 )
+load("//tensorflow/tsl:tsl.bzl", "if_google", "tf_copts")
 load(
     "@local_config_rocm//rocm:build_defs.bzl",
     "if_rocm_is_configured",
@@ -271,7 +270,7 @@ cc_library(
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Linker",
         "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:GPUDialect",
         "@llvm-project//mlir:LLVMDialect",
@@ -719,7 +718,7 @@ cc_library(
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_type_conversion_util",
         "//tensorflow/compiler/xla/stream_executor",
         "@llvm-project//llvm:Core",
-        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:ArithDialect",
     ],
 )
 
@@ -1716,6 +1715,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo_parser",
         "//tensorflow/compiler/xla/service:hlo_pass",
         "//tensorflow/compiler/xla/service:hlo_pass_pipeline",
+        "//tensorflow/compiler/xla/service:hlo_proto_cc",
         "//tensorflow/compiler/xla/service:hlo_proto_util",
         "//tensorflow/compiler/xla/service:hlo_subcomputation_unification",
         "//tensorflow/compiler/xla/service:hlo_verifier",
@@ -1735,6 +1735,7 @@ cc_library(
         "//tensorflow/compiler/xla/service:result_caster",
         "//tensorflow/compiler/xla/service:rng_bit_generator_expander",
         "//tensorflow/compiler/xla/service:rng_expander",
+        "//tensorflow/compiler/xla/service:runtime",
         "//tensorflow/compiler/xla/service:scatter_expander",
         "//tensorflow/compiler/xla/service:scatter_simplifier",
         "//tensorflow/compiler/xla/service:sharding_propagation",
@@ -1772,7 +1773,7 @@ cc_library(
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:TransformUtils",
         "@llvm-project//mlir:AllPassesAndDialects",
-        "@llvm-project//mlir:ArithmeticDialect",
+        "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:GPUTransforms",
         "@llvm-project//mlir:IR",
@@ -1789,6 +1790,7 @@ cc_library(
     deps = if_cuda_is_configured([
         "//tensorflow/compiler/xla/stream_executor/cuda:cuda_platform_id",
         ":nvptx_compiler_impl",
+        "//tensorflow/tsl/platform:path",
     ]),
     alwayslink = True,  # Contains compiler registration
 )
@@ -1803,6 +1805,7 @@ cc_library(
         "//tensorflow/core:lib_internal",
         "//tensorflow/tsl/platform:cuda_libdevice_path",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:path",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -2033,6 +2036,7 @@ cc_library(
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_executor_header",
         "//tensorflow/core:lib",
         "//tensorflow/tsl/platform:logging",
+        "//tensorflow/tsl/platform:notification",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/memory",
     ],

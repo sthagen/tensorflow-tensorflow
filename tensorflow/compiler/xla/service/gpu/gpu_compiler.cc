@@ -40,7 +40,7 @@ limitations under the License.
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Transforms/Utils/SplitModule.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/GPU/Transforms/Passes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
@@ -299,7 +299,7 @@ using OwnedThunkSequence = GpuExecutable::OwnedThunkSequence;
 using OwnedJitRtProgram = GpuExecutable::OwnedJitRtProgram;
 
 StatusOr<std::unique_ptr<Executable>>
-XlaRuntimeAotCompilationResult::LoadExecutable(
+GpuXlaRuntimeAotCompilationResult::LoadExecutable(
     Compiler* compiler, se::StreamExecutor* executor) const {
   TF_ASSIGN_OR_RETURN(HloModuleConfig hlo_module_config,
                       HloModule::CreateModuleConfigFromProto(
@@ -1554,7 +1554,7 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     std::string data(obj_file->getBuffer().data(),
                      obj_file->getBuffer().size());
     results.emplace_back(
-        std::make_unique<xla::gpu::XlaRuntimeAotCompilationResult>(
+        std::make_unique<xla::gpu::GpuXlaRuntimeAotCompilationResult>(
             module->ToProto(), data, program->module,
             compile_module_results.entry_func_attrs, backend_result.first,
             backend_result.second));
@@ -1582,7 +1582,7 @@ StatusOr<std::unique_ptr<AotCompilationResult>> GpuCompiler::Export(
   auto binary = gpu_executable->binary();
 
   std::unique_ptr<AotCompilationResult> result =
-      std::make_unique<xla::gpu::XlaRuntimeAotCompilationResult>(
+      std::make_unique<xla::gpu::GpuXlaRuntimeAotCompilationResult>(
           module_proto, obj_file, mlir_module, entry_func_attrs, text, binary);
   return result;
 }

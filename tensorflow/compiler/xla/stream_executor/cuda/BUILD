@@ -1,7 +1,8 @@
 # Description:
 #   CUDA-platform specific StreamExecutor support code.
 
-load("//tensorflow:tensorflow.bzl", "check_deps", "if_google", "tf_cc_test", "tf_copts", "tf_cuda_cc_test")
+load("//tensorflow:tensorflow.bzl", "check_deps", "tf_cc_test", "tf_cuda_cc_test")
+load("//tensorflow/tsl:tsl.bzl", "if_google", "tf_copts")
 load("//tensorflow:tensorflow.bzl", "filegroup")
 load(
     "//tensorflow/compiler/xla/stream_executor:build_defs.bzl",
@@ -21,7 +22,7 @@ load(
     "tf_cuda_tests_tags",
 )
 load(
-    "//tensorflow/core/platform:rules_cc.bzl",
+    "//tensorflow/tsl/platform:rules_cc.bzl",
     "cc_library",
 )
 
@@ -716,10 +717,10 @@ cc_library(
 
 cc_library(
     name = "stream_executor_cuda",
-    deps = if_google(
-        [
-            "//tensorflow/compiler/xla/stream_executor:stream_executor_bundle",
-        ] + select({
+    deps = [
+        "//tensorflow/compiler/xla/stream_executor:stream_executor_bundle",
+    ] + if_google(
+        select({
             # copybara:uncomment_begin(different config setting in OSS)
             # "//tools/cc_target_os:gce": [],
             # copybara:uncomment_end_and_comment_begin
