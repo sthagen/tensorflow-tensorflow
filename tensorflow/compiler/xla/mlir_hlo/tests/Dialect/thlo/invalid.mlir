@@ -1,5 +1,18 @@
 // RUN: mlir-hlo-opt %s -verify-diagnostics -split-input-file
 
+func.func @concatenate(%arg1: tensor<?x?xf32>,
+                       %arg2: tensor<?x?xi32>,
+                       %dst: tensor<?x?xf32>) -> tensor<?x?xf32> {
+  // expected-error @+1 {{thlo.concatenate' op expected element type of input 'i32' to match output element type 'f32'}}
+  %cat = thlo.concatenate
+      ins(%arg1: tensor<?x?xf32>, %arg2: tensor<?x?xi32>)
+      outs(%dst: tensor<?x?xf32>)
+      { dimension = 0 : i64 }
+  func.return %cat : tensor<?x?xf32>
+}
+
+// -----
+
 func.func @transpose_invalid_permutation(%input: tensor<16x32x64xf32>,
     %init: tensor<32x64x16xf32>) -> tensor<32x64x16xf32> {
   // expected-error @+1 {{'thlo.transpose' op permutation is not valid}}
@@ -280,6 +293,7 @@ func.func @map_input_mapper_arity_mismatch(
 }
 
 // -----
+
 func.func @map_input_mapper_type_mismatch(
     %lhs: tensor<64xf32>, %rhs: tensor<64xf32>, %init: tensor<64xf32>)
     -> tensor<64xf32> {
@@ -292,6 +306,22 @@ func.func @map_input_mapper_type_mismatch(
         thlo.yield %0: f64
       }
   func.return %add : tensor<64xf32>
+}
+
+// -----
+
+func.func @map_input_output_shape_mismatch(
+    %lhs: tensor<64x64xf32>, %rhs: tensor<64x64xf32>, %init: tensor<32xf32>)
+    -> tensor<32xf32> {
+    // expected-error@+1{{'thlo.map' op expected shape of input (64, 64) to match shape of output (32)}}
+  %add = thlo.map
+      ins(%lhs:tensor<64x64xf32>, %rhs:tensor<64x64xf32>)
+      outs(%init:tensor<32xf32>)
+      (%lhs_elem: f32, %rhs_elem: f32) {
+        %0 = arith.addf %lhs_elem, %rhs_elem: f32
+        thlo.yield %0: f32
+      }
+  func.return %add : tensor<32xf32>
 }
 
 // -----

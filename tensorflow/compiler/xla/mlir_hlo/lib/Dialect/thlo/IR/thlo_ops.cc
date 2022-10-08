@@ -236,7 +236,7 @@ namespace {
 Value fuseConcatenateOpThroughTile(ConcatenateOp op, OpBuilder &builder,
                                    Location loc, Value tile) {
   uint64_t concatDim = op.getDimension();
-  auto resultTy = op.getResult().getType().cast<RankedTensorType>();
+  RankedTensorType resultTy = op.getType(0).cast<RankedTensorType>();
   int64_t rank = resultTy.getRank();
   OperandRange allOperands = op.getInputs();
   Value anyOperand = allOperands.front();
@@ -334,8 +334,10 @@ Value fuseConcatenateOpThroughTile(ConcatenateOp op, OpBuilder &builder,
       builder.create<gml_st::MaterializeOp>(loc, op.getInit(), tile);
   auto subResultType =
       RankedTensorType::get(tileType.getShape(), resultTy.getElementType());
-  return builder.create<thlo::ConcatenateOp>(loc, subResultType, subOperands,
-                                             subInit, concatDim);
+  return builder
+      .create<thlo::ConcatenateOp>(loc, subResultType, subOperands, subInit,
+                                   concatDim)
+      ->getResult(0);
 }
 
 Value fuseConcatenateOpThroughPointRecursively(
@@ -405,7 +407,7 @@ Value fuseConcatenateOpThroughPointRecursively(
 
 Value fuseConcatenateOpThroughPoint(ConcatenateOp op, OpBuilder &builder,
                                     Location loc, Value subset) {
-  auto resultTy = op.getType().cast<RankedTensorType>();
+  auto resultTy = op.getType(0).cast<RankedTensorType>();
   int64_t resultRank = resultTy.getRank();
   uint64_t concatDim = op.getDimension();
 
@@ -449,6 +451,19 @@ ParseResult ConcatenateOp::parse(OpAsmParser &parser, OperationState &result) {
 void ConcatenateOp::print(OpAsmPrinter &p) { printDstStyleOp(*this, p); }
 
 LogicalResult ConcatenateOp::verify() {
+  Type outputElementType =
+      getOutputs().front().getType().cast<ShapedType>().getElementType();
+
+  for (Type inputArgType : TypeRange{getInputs()}) {
+    Type inputArgElementType = inputArgType.cast<ShapedType>().getElementType();
+    if (inputArgElementType != outputElementType) {
+      return emitOpError() << "expected element type of input "
+                           << inputArgElementType
+                           << " to match output element type "
+                           << outputElementType;
+    }
+  }
+
   return verifyDestinationStyleOp(getOperation());
 }
 
@@ -592,7 +607,7 @@ gml_st::TilingInterface DynamicBroadcastInDimOp::getTiledImplementation(
 
   // Finally, materialize tiled broadcast.
   auto tileTy = tile.getType();
-  auto resultTy = getResult().getType().cast<RankedTensorType>();
+  auto resultTy = getType(0).cast<RankedTensorType>();
   auto tiledResultTy =
       RankedTensorType::get(tileTy.getShape(), resultTy.getElementType());
   return b.create<DynamicBroadcastInDimOp>(
@@ -641,7 +656,7 @@ void ScatterOp::print(OpAsmPrinter &p) {
 LogicalResult ScatterOp::verify() {
   if (failed(verifyDestinationStyleOp(getOperation()))) return failure();
 
-  auto indicesType = getIndices().getType().cast<RankedTensorType>();
+  auto indicesType = getIndices().getType().cast<ShapedType>();
   int64_t indicesRank = indicesType.getRank();
 
   if (indicesRank != 2)
@@ -1189,6 +1204,18 @@ LogicalResult MapOp::verify() {
     }
   }
 
+  // The shape of each input must match the shape of the output.
+  auto outputShape =
+      getOutputs().front().getType().dyn_cast<ShapedType>().getShape();
+  for (Type inputArgType : TypeRange{getInputs()}) {
+    auto inputElemShape = inputArgType.cast<ShapedType>().getShape();
+    if (inputElemShape != outputShape) {
+      return emitOpError() << "expected shape of input (" << inputElemShape
+                           << ") to match shape of output (" << outputShape
+                           << ")";
+    }
+  }
+
   return verifyDestinationStyleOp(getOperation());
 }
 
@@ -1217,10 +1244,7 @@ LogicalResult YieldOp::verify() {
   auto parentOp = dyn_cast<linalg::DestinationStyleOpInterface>(
       *(getOperation()->getParentOp()));
 
-  SmallVector<Value, 2> tensorOuts;
-  llvm::copy_if(
-      parentOp.getOutputs(), std::back_inserter(tensorOuts),
-      [&](Value out) { return out.getType().isa<RankedTensorType>(); });
+  auto tensorOuts = parentOp.getOutputs();
   if (tensorOuts.size() != getValues().size())
     return emitOpError("expects number of tensor output args = ")
            << tensorOuts.size()
@@ -1232,8 +1256,7 @@ LogicalResult YieldOp::verify() {
     Type outputType, resultType;
     unsigned index = item.index();
     std::tie(outputType, resultType) = item.value();
-    Type outputElementType =
-        outputType.cast<RankedTensorType>().getElementType();
+    Type outputElementType = outputType.cast<ShapedType>().getElementType();
     if (outputElementType != resultType)
       return emitOpError("expects yield operand ")
              << index << " with type = " << resultType
