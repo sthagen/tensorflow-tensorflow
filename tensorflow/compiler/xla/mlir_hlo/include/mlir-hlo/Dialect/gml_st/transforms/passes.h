@@ -39,11 +39,17 @@ std::unique_ptr<OperationPass<func::FuncOp>> createFusionPass(
 
 /// Pass to tile and fuse all cwise ops.
 std::unique_ptr<OperationPass<func::FuncOp>> createTilingCwisePass(
-    bool distribute, ArrayRef<int64_t> tileSizes);
+    bool distribute, ArrayRef<int64_t> tileSizes,
+    StringRef distributionLabel = "");
 std::unique_ptr<OperationPass<func::FuncOp>> createTilingCwisePass();
 
 /// Pass to tile a linalg.generic reduction.
 std::unique_ptr<OperationPass<func::FuncOp>> createTilingReductionPass();
+
+/// Pass to match, tile, and fuse softmax implementations.
+std::unique_ptr<OperationPass<func::FuncOp>> createTilingSoftmaxPass(
+    bool distribute, ArrayRef<int64_t> tileSizes);
+std::unique_ptr<OperationPass<func::FuncOp>> createTilingSoftmaxPass();
 
 /// Pass to compose set operations.
 std::unique_ptr<OperationPass<func::FuncOp>> createComposeSetOpsPass();

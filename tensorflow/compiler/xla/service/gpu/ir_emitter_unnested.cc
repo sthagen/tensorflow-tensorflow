@@ -58,10 +58,7 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Export.h"  // from @llvm-project
-#include "tensorflow/compiler/mlir/xla/attribute_exporter.h"
-#include "tensorflow/compiler/mlir/xla/hlo_utils.h"
 #include "tensorflow/compiler/mlir/xla/location_metadata.h"
-#include "tensorflow/compiler/mlir/xla/mlir_hlo_to_hlo.h"
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo/IR/lhlo_ops.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops.h"
@@ -119,6 +116,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
+#include "tensorflow/compiler/xla/translate/hlo_to_mhlo/hlo_utils.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/attribute_exporter.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
 #include "tensorflow/compiler/xla/union_find.h"
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
@@ -2126,9 +2126,12 @@ Status IrEmitterUnnested::EmitWhile(mlir::Operation* op) {
       << "While condition computation must return bool";
 
   // Build ForThunk for conformant while loops, otherwise build WhileThunk.
-  // XLA runtime always lowers lmhlo.while to scf.while, not 'for'.
+  //
+  // If Xla runtime is enabled we always lower to `lmhlo.while` operation and
+  // rely on `lmhlo-to-gpu-runtime` to lower while loops with known trip counts
+  // to `scf.for` loops.
   if (while_op.getTripCount() &&
-      !IsJitRtExecutableEnabled(hlo_module_config_)) {
+      !IsXlaRuntimeExecutableEnabled(hlo_module_config_)) {
     TF_ASSIGN_OR_RETURN(auto thunk, BuildForThunk(while_op, GetThunkInfo(op),
                                                   *while_op.getTripCount()));
     AddThunkToThunkSequence(std::move(thunk));
