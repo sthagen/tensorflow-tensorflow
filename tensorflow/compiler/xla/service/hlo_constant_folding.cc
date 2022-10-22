@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/hlo_constant_folding.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,7 +32,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slow_operation_alarm.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/types.h"
-#include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/tsl/platform/errors.h"
 
 namespace xla {
 
@@ -175,8 +176,8 @@ StatusOr<bool> HloConstantFolding::Run(
             ShapeUtil::ElementsIn(instruction->shape());
 
         static const int64_t kMaximumConstantSizeElements = 45 * 1000 * 1000;
-        if (elements_in_constant > elements_in_removed_operands &&
-            elements_in_constant > kMaximumConstantSizeElements) {
+        if (std::max(elements_in_constant, elements_in_removed_operands) >
+            kMaximumConstantSizeElements) {
           continue;
         }
       }

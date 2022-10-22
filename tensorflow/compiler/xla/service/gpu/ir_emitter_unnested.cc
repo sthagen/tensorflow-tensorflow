@@ -58,7 +58,6 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Export.h"  // from @llvm-project
-#include "tensorflow/compiler/mlir/xla/location_metadata.h"
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo/IR/lhlo_ops.h"
 #include "tensorflow/compiler/xla/mlir_hlo/include/mlir-hlo/Dialect/lhlo_gpu/IR/lhlo_gpu_ops.h"
@@ -118,6 +117,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/translate/hlo_to_mhlo/hlo_utils.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/attribute_exporter.h"
+#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/location_exporter.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
 #include "tensorflow/compiler/xla/union_find.h"
 #include "tensorflow/compiler/xla/util.h"
@@ -535,54 +535,16 @@ Status IrEmitterUnnested::EmitConstant(mlir::Operation* op) {
   auto module = get_global->getParentOfType<mlir::ModuleOp>();
   auto global = mlir::cast<mlir::memref::GlobalOp>(
       module.lookupSymbol(get_global.getName()));
-
   auto literal = global.getInitialValue()->dyn_cast<mlir::DenseElementsAttr>();
   TF_RET_CHECK(literal);
-
-  const bool should_emit_initializer = literal.getType().getNumElements() <= 1;
-
   TF_ASSIGN_OR_RETURN(int element_bytes,
                       GetElementTypeBytes(literal.getType().getElementType()));
-  llvm::ArrayType* global_type = llvm::ArrayType::get(
-      b_.getInt8Ty(), literal.getType().getNumElements() * element_bytes);
-
-  GpuExecutable::ConstantInfo info;
-  llvm::Constant* initializer;
-  if (should_emit_initializer) {
-    std::vector<uint8_t> content;
-    TF_RETURN_IF_ERROR(CopyDenseElementsDataToXlaFormat(literal, &content));
-    initializer =
-        llvm::ConstantDataArray::get<uint8_t>(module_->getContext(), content);
-  } else {
-    TF_RETURN_IF_ERROR(
-        CopyDenseElementsDataToXlaFormat(literal, &info.content));
-    initializer = llvm::ConstantAggregateZero::get(global_type);
-  }
-
-  // These globals will be looked up by name by GpuExecutable so we need to
-  // give them an external linkage.  Not all of their uses are visible in
-  // the LLVM IR so we can't give then a linkage that merely preserves their
-  // names (like available_externally), we also need to ensure that they stick
-  // around even if they're "unused".
-  //
-  // We may have to be more clever here in the future if we notice that we're
-  // keeping around too many globals because of their linkage.
-  llvm::GlobalVariable* global_for_const = new llvm::GlobalVariable(
-      global_type, /*isConstant=*/should_emit_initializer,
-      llvm::GlobalValue::ExternalLinkage,
-      /*Initializer=*/initializer, global.getSymName(),
-      /*TLMode=*/llvm::GlobalValue::NotThreadLocal,
-      /*AddressSpace=*/0,
-      /*isExternallyInitialized=*/false);
-  global_for_const->setAlignment(llvm::Align(kConstantBufferAlignBytes));
-  module_->getGlobalList().push_back(global_for_const);
-
-  info.symbol_name.assign(global.getSymName().begin(),
-                          global.getSymName().end());
-
-  info.allocation_index =
-      global->getAttrOfType<mlir::IntegerAttr>("lmhlo.alloc").getInt();
-  ir_emitter_context_->constants().push_back(std::move(info));
+  std::vector<uint8_t> content;
+  TF_RETURN_IF_ERROR(CopyDenseElementsDataToXlaFormat(literal, &content));
+  ir_emitter_context_->emit_constant(
+      literal.getType().getNumElements(), element_bytes, global.getSymName(),
+      global->getAttrOfType<mlir::IntegerAttr>("lmhlo.alloc").getInt(), content,
+      &b_);
   return OkStatus();
 }
 
@@ -1778,7 +1740,7 @@ Status IrEmitterUnnested::EmitFusion(mlir::Operation* op) {
       // The emitter doesn't support all cases. If it's not supported, fallback
       // to ElementalIrEmitter.
       auto status = EmitInputFusibleNonStridedSlices(op);
-      if (status.code() == tensorflow::error::FAILED_PRECONDITION) {
+      if (status.code() == tsl::error::FAILED_PRECONDITION) {
         return EmitLoopFusion(op);
       }
       return status;
@@ -1829,23 +1791,37 @@ Status IrEmitterUnnested::EmitFusion(mlir::Operation* op) {
 }
 
 Status IrEmitterUnnested::EmitExtraOutputsForReduce(
+    const Shape& reduction_operand_shape,
     const ReductionOutputMap& result_ir_arrays, const IrArray::Index& index,
     const ReductionCodegenInfo& reduction_info,
     const ExtraOutputGensMap& extra_output_gens) {
+  if (extra_output_gens.empty()) {
+    return OkStatus();
+  }
+
   // Compute all extra output values before writing them. This avoids
   // overwriting aliased input/output buffers before all reads occurred.
   absl::flat_hash_map<const HloInstruction*, llvm::Value*>
       extra_output_ir_values;
-  for (const auto& p : extra_output_gens) {
+
+  auto get_index = [&](const HloInstruction* instr) {
+    const Shape& s = instr->shape();
+    return ShapeUtil::EqualIgnoringElementType(reduction_operand_shape, s)
+               ? index
+               : index.SourceIndexOfReshape(reduction_operand_shape, s, &b_);
+  };
+
+  for (const auto& [instr, generator] : extra_output_gens) {
     TF_ASSIGN_OR_RETURN(llvm::Value* const extra_output_ir_value,
-                        p.second(index));
-    extra_output_ir_values[p.first] = extra_output_ir_value;
+                        generator(get_index(instr)));
+    extra_output_ir_values[instr] = extra_output_ir_value;
   }
-  for (const auto& p : extra_output_ir_values) {
-    absl::Span<llvm_ir::IrArray const> result_ir = result_ir_arrays.at(p.first);
+
+  for (const auto& [instr, generator] : extra_output_ir_values) {
+    absl::Span<llvm_ir::IrArray const> result_ir = result_ir_arrays.at(instr);
     CHECK_EQ(result_ir.size(), 1);
     result_ir[0].EmitWriteArrayElement(
-        index, p.second, &b_, /*use_linear_index=*/
+        get_index(instr), generator, &b_, /*use_linear_index=*/
         reduction_info.GetNumPartialResults() == 1);
   }
   return OkStatus();
@@ -4642,8 +4618,7 @@ StatusOr<ReductionCodegenInfo> IrEmitterUnnested::ComputeReductionCodegenInfo(
     }
   }
 
-  VLOG(3) << "Each threads will produce " << num_partial_results
-          << " output(s)";
+  VLOG(3) << "Each thread will produce " << num_partial_results << " output(s)";
   reduction_tiling[kDimX] *= num_partial_results;
 
   Vector3 num_threads = {1, num_threads_y, num_threads_x};
@@ -4720,6 +4695,7 @@ Status IrEmitterUnnested::EmitIRForReduction(
     const ReductionCodegenInfo& reduction_info, const Shape& input_shape) {
   std::vector<const HloReduceInstruction*> reductions;
   ExtraOutputGensMap extra_output_gens;
+
   for (const HloInstruction* hlo : instr_index_group) {
     if (IsReductionFromOrToContiguousDimensions(*hlo)) {
       reductions.push_back(Cast<HloReduceInstruction>(hlo));
@@ -4767,8 +4743,9 @@ Status IrEmitterUnnested::EmitIRForReduction(
 
         // Emit code to generate the output for the non-reduction instructions
         // in the fusion, if any.
-        TF_CHECK_OK(EmitExtraOutputsForReduce(
-            result_ir_arrays, input_index, reduction_info, extra_output_gens));
+        TF_CHECK_OK(EmitExtraOutputsForReduce(input_shape, result_ir_arrays,
+                                              input_index, reduction_info,
+                                              extra_output_gens));
       };
 
   TF_ASSIGN_OR_RETURN(
@@ -4837,15 +4814,15 @@ std::vector<std::vector<HloInstruction*>> GroupDisjointReductions(
   // TODO(b/249976438): we currently do not treat properly
   // aliasing between inputs and outputs of the fusion, so for now put all
   // non-reduction roots into one group to avoid read-after-write conflicts.
-  HloInstruction* FirstNonReductionRoot = nullptr;
+  HloInstruction* first_non_reduction_root = nullptr;
 
   for (HloInstruction* root : roots) {
     disjoint_sets[root].Get() = root;
-    if (root->opcode() != HloOpcode::kReduce) {
-      if (!FirstNonReductionRoot) {
-        FirstNonReductionRoot = root;
+    if (!IsReductionFromOrToContiguousDimensions(*root)) {
+      if (!first_non_reduction_root) {
+        first_non_reduction_root = root;
       } else {
-        disjoint_sets[FirstNonReductionRoot].Merge(&disjoint_sets[root]);
+        disjoint_sets[first_non_reduction_root].Merge(&disjoint_sets[root]);
       }
     }
   }
@@ -4856,7 +4833,7 @@ std::vector<std::vector<HloInstruction*>> GroupDisjointReductions(
     std::vector<HloInstruction*> reached_output_ids;
     bool added_to_reduce = false;
     for (HloInstruction* output : roots) {
-      if (HloOpcode::kReduce == output->opcode() &&
+      if (IsReductionFromOrToContiguousDimensions(*output) &&
           (IsBroadcastedConstantOrScalar(*instr))) {
         if (added_to_reduce) {
           // Do not group more than one output reduce instructions through
@@ -4872,7 +4849,7 @@ std::vector<std::vector<HloInstruction*>> GroupDisjointReductions(
         VLOG(3) << "Reaching " << output->ToString() << " from "
                 << instr->ToString();
         reached_output_ids.push_back(output);
-        if (HloOpcode::kReduce == output->opcode()) {
+        if (IsReductionFromOrToContiguousDimensions(*output)) {
           added_to_reduce = true;
         }
       }
@@ -4931,7 +4908,7 @@ Status IrEmitterUnnested::EmitUnnestedReduction(
        /*z=*/1},
       {/*x=*/tiling_scheme.GetNumThreadsPerBlockPhysical(), /*y=*/1, /*z=*/1});
   VLOG(3) << "Launch dimensions of "
-          << mlir::mhlo::GetDebugNameFromLocation(fusion.getLoc())
+          << mlir::mhlo::GetDebugNameFromLocation(fusion.getLoc()) << ": "
           << launch_dimensions.ToString();
 
   std::vector<llvm_ir::IrArray> ir_arrays;

@@ -41,51 +41,6 @@ def GMLST_MaterializeOp : GMLST_Op<"materialize", [Pure]> {
   }];
 }
 
-def GMLST_OffsetOp : GMLST_Op<"offset", [Pure]> {
-  let summary = [{Returns the offset of a tile in a given dimension}];
-  let description = [{
-    Returns the composed offset of a tile in a given dimension relative to the
-    root space.
-  }];
-  let arguments = (ins AnySet:$subset, Index:$dim);
-  let results = (outs Index:$result);
-  let assemblyFormat = [{
-    $subset `[` $dim `]` attr-dict `:` qualified(type($subset))
-  }];
-  let hasVerifier = 0;
-  let hasFolder = 1;
-}
-
-def GMLST_SizeOp : GMLST_Op<"size", [Pure]> {
-  let summary = [{Returns the size of a tile in a given dimension}];
-  let description = [{
-    Returns the composed size of a tile in a given dimension relative to the
-    root space.
-  }];
-  let arguments = (ins GMLST_TileType:$tile, Index:$dim);
-  let results = (outs Index:$result);
-  let assemblyFormat = [{
-    $tile `[` $dim `]` attr-dict `:` qualified(type($tile))
-  }];
-  let hasVerifier = 0;
-  let hasFolder = 1;
-}
-
-def GMLST_StrideOp : GMLST_Op<"stride", [Pure]> {
-  let summary = [{Returns the stride of a tile in a given dimension}];
-  let description = [{
-    Returns the composed stride of a tile in a given dimension relative to the
-    root space.
-  }];
-  let arguments = (ins GMLST_TileType:$tile, Index:$dim);
-  let results = (outs Index:$result);
-  let assemblyFormat = [{
-    $tile `[` $dim `]` attr-dict `:` qualified(type($tile))
-  }];
-  let hasVerifier = 0;
-  let hasFolder = 1;
-}
-
 class GMLST_LoopLikeOp<string mnemonic, list<Trait> traits = []>
     : GMLST_Op<mnemonic, !listconcat(traits, [
       AttrSizedOperandSegments,
@@ -273,6 +228,8 @@ def GMLST_ForOp : GMLST_LoopLikeOp<"for", []> {
         getNumControlOperands() + opResult.getResultNumber());
     }
   }];
+
+  let hasCanonicalizer = 1;
 }
 
 def GMLST_SetYieldOp : GMLST_Op<"set_yield", [Pure, ReturnLike,
@@ -336,7 +293,38 @@ def GMLST_SetYieldOp : GMLST_Op<"set_yield", [Pure, ReturnLike,
       return operand.getOperandNumber() >= getNumUpdates() &&
              operand.getOperandNumber() < getNumUpdates() * 2;
     }
+
+    unsigned getNumDstOperands() { return getNumOperands() - getNumUpdates(); }
   }];
+}
+
+// TODO(b/253560795): Figure out where this operation shoud live, and how to
+// model it properly.
+def GMLST_DistributeOp : GMLST_Op<"distribute", [Pure,
+      AllElementTypesMatch<["source", "result"]>]> {
+  let summary = "Tile combining operation";
+  let description = [{
+    `gml_st.distribute` is in a sense an inverse operation to
+    `gml_st.materialize`, and a non-terminator version of `gml_st.set_yield`.
+    It takes one tile of a vector per parallel iteration, and returns a larger
+    vector composed of these tiles.
+
+    It is only needed as an intermediate step when flattening gml_st.parallel
+    operations during SIMTfication for GPU, where one `gml_st.distribute`
+    replaces each output of `gml_st.set_yield`. It only works on vectors, since
+    tensor arguments have been bufferized into memrefs by that point in the
+    pipeline. This is also the reason why it does not need a destination
+    argument.
+  }];
+  let arguments = (ins AnyVector:$source, AnySet:$set);
+  let results = (outs AnyVector:$result);
+
+  let assemblyFormat = [{
+    $source `into` `[` $set `]` attr-dict `:` type($source)
+      `into` type($result) `[` type($set) `]`
+  }];
+
+  let hasVerifier = 0;
 }
 
 #endif // GML_ST_OPS
