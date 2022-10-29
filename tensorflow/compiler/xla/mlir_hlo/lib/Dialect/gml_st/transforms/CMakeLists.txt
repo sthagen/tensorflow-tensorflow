@@ -63,7 +63,6 @@ add_mlir_library(GmlStBufferizableOpInterface
 )
 
 add_mlir_library(GmlStPasses
-  bufferize_tiled_loop.cc
   collapse_materialize_ops.cc
   fusion.cc
   gml_st_to_scf.cc
@@ -71,10 +70,11 @@ add_mlir_library(GmlStPasses
   linalg_utils.cc
   tiling.cc
   tiling_cwise.cc
-  tiling_cwise_gpu_warps.cc
-  tiling_reduction.cc
+  tiling_gpu_warp.cc
   tiling_softmax.cc
+  transform_map_for_cpu.cc
   transform_matmul_for_cpu.cc
+  transform_transpose_for_cpu.cc
   transform_scatter_for_cpu.cc
   vectorization.cc
 

@@ -101,6 +101,7 @@ add_mlir_library(MhloToThloConversion
 
   DEPENDS
   MLIRMhloPassIncGen
+  MLIRGmlStTilingInterfaceIncGen
   THLODialect
 
   LINK_COMPONENTS
@@ -373,4 +374,9 @@ target_link_libraries(AllGmlStPasses INTERFACE
   GmlStTestPasses
   MLIRFuncDialect
   MLIRPass
+)
+
+add_library(AllThloPasses INTERFACE)
+target_link_libraries(AllThloPasses INTERFACE
+  ThloPasses
 )
