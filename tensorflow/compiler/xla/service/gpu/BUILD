@@ -216,6 +216,32 @@ cc_library(
 )
 
 cc_library(
+    name = "gpu_device_info_for_tests",
+    testonly = 1,
+    srcs = ["gpu_device_info_for_tests.cc"],
+    hdrs = ["gpu_device_info_for_tests.h"],
+    compatible_with = get_compatible_with_cloud(),
+    deps = [
+        ":gpu_device_info",
+    ],
+)
+
+tf_cc_test(
+    name = "gpu_device_info_test",
+    srcs = ["gpu_device_info_test.cc"],
+    tags = tf_cuda_tests_tags(),
+    deps = [
+        ":gpu_device_info_for_tests",
+        "//tensorflow/compiler/xla/stream_executor:device_description",
+        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_driver",
+        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_gpu_executor",
+        "//tensorflow/tsl/platform:test_main",
+        "@com_google_googletest//:gtest_main",
+        "@local_config_cuda//cuda:cuda_headers",
+    ],
+)
+
+cc_library(
     name = "ir_emitter",
     srcs = [
         "ir_emitter.cc",
@@ -241,6 +267,7 @@ cc_library(
         ":gpu_conv_runner",
         ":gpu_executable",
         ":gpu_device_info",
+        ":gpu_fusible",
         ":hlo_to_ir_bindings",
         ":ir_emission_utils",
         ":launch_dimensions",
@@ -487,6 +514,7 @@ tf_cuda_library(
     tags = ["manual"],  # Only builds with if_nccl().
     deps = if_gpu_is_configured([
         ":gpu_executable_run_options",
+        ":thunk",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/synchronization",
@@ -520,7 +548,6 @@ cc_library(
     hdrs = ["jitrt_custom_calls.h"],
     copts = if_cuda_is_configured(["-DGOOGLE_CUDA=1"]),
     tags = ["manual"],
-    visibility = ["//visibility:private"],
     deps = [
         ":fft_thunk",
         ":gpu_asm_opts_util",
@@ -539,14 +566,19 @@ cc_library(
         "//tensorflow/compiler/xla/service:custom_call_status_internal",
         "//tensorflow/compiler/xla/service:custom_call_target_registry",
         "//tensorflow/compiler/xla/service:executable",
+        "//tensorflow/compiler/xla/service/gpu/runtime:cholesky",
+        "//tensorflow/compiler/xla/service/gpu/runtime:collectives",
         "//tensorflow/compiler/xla/service/gpu/runtime:conv",
         "//tensorflow/compiler/xla/service/gpu/runtime:io_feed",
+        "//tensorflow/compiler/xla/service/gpu/runtime:memcpy",
+        "//tensorflow/compiler/xla/service/gpu/runtime:memset",
+        "//tensorflow/compiler/xla/service/gpu/runtime:gemm",
         "//tensorflow/compiler/xla/service/gpu/runtime:fft",
         "//tensorflow/compiler/xla/service/gpu/runtime:kernel_launch",
         "//tensorflow/compiler/xla/service/gpu/runtime:cublas_lt_matmul",
         "//tensorflow/compiler/xla/service/gpu/runtime:support",
         "//tensorflow/compiler/xla/service/gpu/runtime:tracing",
-        "//tensorflow/compiler/xla/service/gpu:gpu_conv_runner",
+        ":gpu_conv_runner",
         "//tensorflow/tsl/platform:human_readable_json",
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_stream",
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_types_header",
@@ -554,7 +586,7 @@ cc_library(
         "@tf_runtime//:support",
         "//tensorflow/compiler/xla/runtime:custom_call",
         "//tensorflow/compiler/xla/runtime:type_id",
-        "//tensorflow/compiler/xla/mlir/transforms/runtime:custom_call_encoding",
+        "//tensorflow/compiler/xla/mlir/runtime/transforms:custom_call_encoding",
     ] + if_gpu_is_configured([
         ":cholesky_thunk",
         ":triangular_solve_thunk",
@@ -631,6 +663,7 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",
+        "//tensorflow/compiler/xla/service/gpu/runtime:gemm",
         "//tensorflow/compiler/xla:array2d",
         "//tensorflow/compiler/xla:literal",
         "//tensorflow/compiler/xla:refcounting_hash_map",
@@ -642,7 +675,7 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
-        "//tensorflow/compiler/xla/mlir/transforms/runtime:compilation_pipeline_gpu",
+        "//tensorflow/compiler/xla/mlir/runtime/transforms:compilation_pipeline_gpu",
         "//tensorflow/compiler/xla/mlir_hlo:lhlo_gpu",
         "//tensorflow/compiler/xla/runtime:diagnostics",
         "//tensorflow/compiler/xla/runtime:executable",
@@ -659,8 +692,10 @@ cc_library(
         "//tensorflow/compiler/xla/service:transfer_manager",
         "//tensorflow/compiler/xla/service:xla_debug_info_manager",
         "//tensorflow/compiler/xla/service/gpu/runtime:kernel_launch",
+        "//tensorflow/compiler/xla/service/gpu/runtime:collectives",
         "//tensorflow/compiler/xla/service/gpu/runtime:cublas_lt_matmul",
         "//tensorflow/compiler/xla/service/gpu/runtime:support",
+        "//tensorflow/compiler/xla/service/gpu/runtime:executable",
         "//tensorflow/compiler/xla/service/llvm_ir:buffer_assignment_util",
         "//tensorflow/compiler/xla/stream_executor",
         "//tensorflow/compiler/xla/stream_executor:blas",
@@ -1160,6 +1195,7 @@ cc_library(
         "//tensorflow/compiler/xla/service/llvm_ir:fused_ir_emitter",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -1186,7 +1222,10 @@ cc_library(
     srcs = ["multi_output_fusion.cc"],
     hdrs = ["multi_output_fusion.h"],
     deps = [
+        ":gpu_device_info",
         ":gpu_fusible",
+        ":gpu_hlo_cost_analysis",
+        ":gpu_performance_model",
         ":instruction_fusion",
         ":ir_emission_utils",
         "//tensorflow/compiler/xla:debug_options_flags",
@@ -1210,18 +1249,12 @@ tf_cc_test(
     srcs = ["multi_output_fusion_test.cc"],
     tags = ["no_pip"],
     deps = [
+        ":gpu_device_info_for_tests",
         ":gpu_fusible",
-        ":instruction_fusion",
         ":multi_output_fusion",
-        "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/compiler/xla:util",
-        "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_matchers",
-        "//tensorflow/compiler/xla/service:hlo_parser",
-        "//tensorflow/compiler/xla/service:hlo_pass_pipeline",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
-        "//tensorflow/tsl/platform:logging",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -1249,10 +1282,13 @@ cc_library(
 tf_cc_test(
     name = "softmax_fusion_test",
     srcs = ["softmax_fusion_test.cc"],
+    tags = tf_cuda_tests_tags(),
     deps = [
         ":softmax_fusion",
         "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:test",
         "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service:gpu_plugin",
         "//tensorflow/compiler/xla/service:pattern_matcher",
         "//tensorflow/compiler/xla/service:pattern_matcher_gmock",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
@@ -1260,6 +1296,7 @@ tf_cc_test(
         "//tensorflow/tsl/lib/core:status_test_util",
         "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/platform:test",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -1307,8 +1344,12 @@ cc_library(
     srcs = ["fusion_merger.cc"],
     hdrs = ["fusion_merger.h"],
     deps = [
+        ":gpu_device_info",
         ":gpu_fusible",
+        ":gpu_hlo_cost_analysis",
+        ":gpu_performance_model",
         ":instruction_fusion",
+        ":ir_emission_utils",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla/service:hlo",
@@ -1327,6 +1368,8 @@ tf_cc_test(
     tags = ["no_pip"],
     deps = [
         ":fusion_merger",
+        ":gpu_device_info",
+        ":gpu_device_info_for_tests",
         ":gpu_fusible",
         ":instruction_fusion",
         "//tensorflow/compiler/xla:test_helpers",
@@ -1627,6 +1670,7 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
+        ":all_reduce_promotion",
         ":conv_layout_normalization",
         ":executable_proto_cc",
         ":fusion_merger",
@@ -1674,8 +1718,8 @@ cc_library(
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
-        "//tensorflow/compiler/xla/mlir/transforms/gpu:passes",
-        "//tensorflow/compiler/xla/mlir/transforms/runtime:compilation_pipeline_gpu",
+        "//tensorflow/compiler/xla/mlir/backends/gpu/transforms:passes",
+        "//tensorflow/compiler/xla/mlir/runtime/transforms:compilation_pipeline_gpu",
         "//tensorflow/compiler/xla/mlir_hlo:transforms_gpu_passes",
         "//tensorflow/compiler/xla/runtime:jit_executable",
         "//tensorflow/compiler/xla/service:algebraic_simplifier",
@@ -2030,6 +2074,35 @@ tf_cc_test(
 )
 
 cc_library(
+    name = "all_reduce_promotion",
+    srcs = ["all_reduce_promotion.cc"],
+    hdrs = ["all_reduce_promotion.h"],
+    deps = [
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla/service:change_op_data_type",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+    ],
+)
+
+tf_cc_test(
+    name = "all_reduce_promotion_test",
+    srcs = ["all_reduce_promotion_test.cc"],
+    deps = [
+        ":all_reduce_promotion",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:pattern_matcher",
+        "//tensorflow/compiler/xla/service:pattern_matcher_gmock",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:test_utils",
+        "//tensorflow/tsl/platform:status_matchers",
+        "//tensorflow/tsl/platform:test_main",
+    ],
+)
+
+cc_library(
     name = "xfeed_queue",
     hdrs = ["xfeed_queue.h"],
     deps = [
@@ -2228,6 +2301,8 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",
+        "//tensorflow/compiler/xla/service:elemental_ir_emitter",
+        "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_cost_analysis",
     ],
 )
@@ -2237,6 +2312,28 @@ tf_cc_test(
     srcs = ["gpu_hlo_cost_analysis_test.cc"],
     deps = [
         ":gpu_hlo_cost_analysis",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+    ],
+)
+
+cc_library(
+    name = "gpu_performance_model",
+    srcs = ["gpu_performance_model.cc"],
+    hdrs = ["gpu_performance_model.h"],
+    deps = [
+        ":gpu_device_info",
+        ":gpu_hlo_cost_analysis",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+tf_cc_test(
+    name = "gpu_performance_model_test",
+    srcs = ["gpu_performance_model_test.cc"],
+    deps = [
+        ":gpu_device_info_for_tests",
+        ":gpu_performance_model",
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
     ],
