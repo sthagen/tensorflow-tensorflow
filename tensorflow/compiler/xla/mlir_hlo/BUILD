@@ -1,8 +1,9 @@
 load("//tensorflow/tsl/platform:rules_cc.bzl", "cc_library")
-load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_cloud")
+load("//tensorflow/tsl:tsl.default.bzl", "get_compatible_with_cloud")
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "gentbl_filegroup", "td_library")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -13,7 +14,7 @@ exports_files([
 ])
 
 # Python extension sources.
-exports_files(["python/MlirHloModule.cc"])
+exports_files(["bindings/python/MlirHloModule.cc"])
 
 filegroup(
     name = "hlo_ops_td_filegroup",
@@ -48,6 +49,7 @@ td_library(
 gentbl_cc_library(
     name = "mhlo_pass_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -65,6 +67,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lmhlo_pass_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -82,7 +85,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "hlo_ops_inc_gen",
     compatible_with = get_compatible_with_cloud(),
-    strip_include_prefix = "mhlo/IR/",
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-decls"],
@@ -101,6 +104,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "hlo_ops_attrs_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-attrdef-decls"],
@@ -119,6 +123,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "hlo_ops_enums_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-enum-decls"],
@@ -137,6 +142,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "hlo_ops_typedefs_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -180,6 +186,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lhlo_ops_structs_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-attrdef-decls"],
@@ -198,6 +205,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lhlo_ops_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-decls"],
@@ -216,6 +224,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lhlo_gpu_ops_enums_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-enum-decls"],
@@ -234,6 +243,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lhlo_gpu_ops_dialect_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-dialect-decls"],
@@ -252,6 +262,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "lhlo_gpu_ops_attrdefs_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-attrdef-decls"],
@@ -306,9 +317,9 @@ cc_library(
     srcs = ["mhlo/IR/hlo_ops_common.cc"],
     hdrs = ["mhlo/IR/hlo_ops_common.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
@@ -333,6 +344,7 @@ td_library(
 gentbl_cc_library(
     name = "lhlo_gpu_ops_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-decls"],
@@ -352,6 +364,7 @@ gentbl_cc_library(
 gentbl_cc_library(
     name = "canonicalize_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-rewriters"],
@@ -388,6 +401,7 @@ td_library(
 gentbl_cc_library(
     name = "lhlo_structured_interface_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-interface-decls"],
@@ -411,9 +425,9 @@ cc_library(
         "lhlo/IR/lhlo_structured_interface.h.inc",
     ],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":lhlo_structured_interface_inc_gen",
         "@llvm-project//mlir:IR",
@@ -426,9 +440,9 @@ cc_library(
     srcs = ["utils/convert_op_folder.cc"],
     hdrs = ["utils/convert_op_folder.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
@@ -456,9 +470,9 @@ cc_library(
         "utils/hlo_utils.h",
     ],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":canonicalize_inc_gen",
         ":convert_op_folder",
@@ -504,9 +518,9 @@ cc_library(
         "lhlo/utils/lhlo_utils.h",
     ],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":hlo_ops_common",
         ":lhlo_ops_inc_gen",
@@ -530,9 +544,9 @@ cc_library(
     srcs = ["lhlo_gpu/IR/lhlo_gpu_ops.cc"],
     hdrs = ["lhlo_gpu/IR/lhlo_gpu_ops.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":hlo_ops_common",
         ":lhlo",
@@ -553,9 +567,9 @@ cc_library(
     srcs = ["lhlo_gpu/IR/lhlo_gpu_ops.cc.inc"],
     hdrs = ["lhlo_gpu/IR/lhlo_gpu_ops.h.inc"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Analysis",
@@ -578,6 +592,7 @@ cc_library(
     name = "hlo_dialect_registration",
     srcs = ["mhlo/IR/init.cc"],
     hdrs = ["mhlo/IR/register.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//mlir:IR",
@@ -643,9 +658,9 @@ cc_library(
         "mhlo/utils/legalize_to_linalg_utils.h",
     ],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":chlo_legalize_to_hlo",
         ":gml_st_bufferizable_op_interface",
@@ -679,6 +694,7 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:InferTypeOpInterface",
         "@llvm-project//mlir:LinalgDialect",
+        "@llvm-project//mlir:LinalgTransforms",
         "@llvm-project//mlir:LinalgUtils",
         "@llvm-project//mlir:MathDialect",
         "@llvm-project//mlir:MemRefDialect",
@@ -686,6 +702,7 @@ cc_library(
         "@llvm-project//mlir:SCFDialect",
         "@llvm-project//mlir:ShapeDialect",
         "@llvm-project//mlir:ShapeTransforms",
+        "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:SparseTensorDialect",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TensorDialect",
@@ -701,6 +718,7 @@ cc_library(
     srcs = ["mhlo/utils/type_conversion.cc"],
     hdrs = ["mhlo/utils/type_conversion.h"],
     includes = ["include"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//mlir:FuncDialect",
@@ -715,6 +733,7 @@ cc_library(
 cc_library(
     name = "map_lmhlo_to_scalar_op",
     hdrs = ["lhlo/transforms/map_lmhlo_to_scalar_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":lhlo",
         ":map_lhlo_to_hlo_op",
@@ -733,6 +752,7 @@ cc_library(
 cc_library(
     name = "map_mhlo_to_scalar_op",
     hdrs = ["mhlo/transforms/map_mhlo_to_scalar_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//llvm:Support",
@@ -748,6 +768,7 @@ cc_library(
 cc_library(
     name = "map_chlo_to_hlo_op",
     hdrs = ["mhlo/transforms/map_chlo_to_hlo_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//mlir:IR",
@@ -758,6 +779,7 @@ cc_library(
 cc_library(
     name = "map_hlo_to_lhlo_op",
     hdrs = ["lhlo/transforms/map_hlo_to_lhlo_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":lhlo",
         ":mlir_hlo",
@@ -767,6 +789,7 @@ cc_library(
 cc_library(
     name = "map_lhlo_to_hlo_op",
     hdrs = ["lhlo/transforms/map_lhlo_to_hlo_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":lhlo",
         ":mlir_hlo",
@@ -776,6 +799,7 @@ cc_library(
 cc_library(
     name = "map_stablehlo_to_hlo_op",
     hdrs = ["mhlo/transforms/map_stablehlo_to_hlo_op.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//mlir:IR",
@@ -794,6 +818,7 @@ cc_library(
         "lhlo/transforms/lmhlo_passes.h.inc",
     ],
     hdrs = ["lhlo/transforms/passes.h"],
+    strip_include_prefix = ".",
     deps = [
         ":lhlo",
         ":lmhlo_pass_inc_gen",
@@ -826,9 +851,9 @@ cc_library(
     srcs = ["utils/codegen_utils.cc"],
     hdrs = ["utils/codegen_utils.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithDialect",
@@ -844,7 +869,6 @@ cc_library(
     name = "placement_utils",
     hdrs = ["utils/placement_utils.h"],
     includes = [
-        ".",
         "include",
     ],
     deps = ["@llvm-project//llvm:Support"],
@@ -854,6 +878,7 @@ cc_library(
     name = "lhlo_elemental_utils",
     srcs = ["lhlo/transforms/lhlo_elemental_utils.cc"],
     hdrs = ["lhlo/transforms/lhlo_elemental_utils.h"],
+    strip_include_prefix = ".",
     deps = [
         ":codegen_utils",
         ":lhlo",
@@ -874,6 +899,7 @@ cc_library(
     name = "legalize_to_linalg_utils",
     srcs = ["mhlo/utils/legalize_to_linalg_utils.cc"],
     hdrs = ["mhlo/utils/legalize_to_linalg_utils.h"],
+    strip_include_prefix = ".",
     deps = [
         ":map_mhlo_to_scalar_op",
         ":mlir_hlo",
@@ -900,6 +926,7 @@ cc_library(
     name = "mhlo_scatter_gather_utils",
     srcs = ["mhlo/utils/mhlo_scatter_gather_utils.cc"],
     hdrs = ["mhlo/utils/mhlo_scatter_gather_utils.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//mlir:DialectUtils",
@@ -949,6 +976,7 @@ cc_library(
     name = "unfuse_batch_norm",
     srcs = ["mhlo/transforms/unfuse_batch_norm/unfuse_batch_norm.cc"],
     hdrs = ["mhlo/transforms/rewriters.h"],
+    strip_include_prefix = ".",
     deps = [
         ":mlir_hlo",
         "@llvm-project//llvm:Support",
@@ -965,6 +993,7 @@ cc_library(
     name = "chlo_legalize_to_hlo",
     srcs = ["mhlo/transforms/chlo_legalize_to_hlo/chlo_legalize_to_hlo.cc"],
     hdrs = ["mhlo/transforms/rewriters.h"],
+    strip_include_prefix = ".",
     deps = [
         ":chlo_legalize_to_hlo_inc_gen",
         ":map_chlo_to_hlo_op",
@@ -985,7 +1014,7 @@ cc_library(
 gentbl_cc_library(
     name = "chlo_legalize_to_hlo_inc_gen",
     compatible_with = get_compatible_with_cloud(),
-    strip_include_prefix = "mhlo/transforms/",
+    strip_include_prefix = "mhlo/transforms",
     tbl_outs = [
         (
             ["-gen-rewriters"],
@@ -1001,6 +1030,7 @@ cc_library(
     name = "hlo_legalize_to_stablehlo",
     srcs = ["mhlo/transforms/hlo_legalize_to_stablehlo/hlo_legalize_to_stablehlo.cc"],
     hdrs = ["mhlo/transforms/rewriters.h"],
+    strip_include_prefix = ".",
     deps = [
         ":map_stablehlo_to_hlo_op",
         ":mlir_hlo",
@@ -1017,6 +1047,7 @@ cc_library(
     name = "stablehlo_legalize_to_hlo",
     srcs = ["mhlo/transforms/stablehlo_legalize_to_hlo/stablehlo_legalize_to_hlo.cc"],
     hdrs = ["mhlo/transforms/rewriters.h"],
+    strip_include_prefix = ".",
     deps = [
         ":map_stablehlo_to_hlo_op",
         ":mlir_hlo",
@@ -1046,6 +1077,7 @@ cc_library(
         "mhlo/transforms/passes.h",
         "thlo/transforms/passes.h",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":chlo_legalize_to_hlo",
         ":gml_st_passes",
@@ -1196,6 +1228,7 @@ cc_library(
         "@llvm-project//mlir:MathToLLVM",
         "@llvm-project//mlir:MemRefDialect",
         "@llvm-project//mlir:MemRefToLLVM",
+        "@llvm-project//mlir:MemRefTransforms",
         "@llvm-project//mlir:NVVMDialect",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:ROCDLDialect",
@@ -1212,6 +1245,7 @@ cc_library(
 gentbl_cc_library(
     name = "gml_st_test_passes_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -1234,14 +1268,15 @@ cc_library(
     ],
     hdrs = ["gml_st/transforms/test_passes.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st_bufferizable_op_interface",
         ":gml_st_passes",
         ":gml_st_test_passes_inc_gen",
         ":gml_st_transforms",
+        ":tiling_interface_impl",
         "@llvm-project//mlir:AffineDialect",
         "@llvm-project//mlir:BufferizationDialect",
         "@llvm-project//mlir:BufferizationTransforms",
@@ -1328,6 +1363,7 @@ cc_library(
         "gml_st/transforms/gml_st_simtfy/gml_st_simtfy.cc",
         "gml_st/transforms/gml_st_to_gpu/gml_st_to_gpu.cc",
         "gml_st/transforms/gml_st_to_scf/gml_st_to_scf.cc",
+        "gml_st/transforms/greedy_tiling_and_fusion/greedy_tiling_and_fusion.cc",
         "gml_st/transforms/passes.h.inc",
         "gml_st/transforms/peeling/peeling.cc",
         "gml_st/transforms/tiling/tiling.cc",
@@ -1336,6 +1372,7 @@ cc_library(
         "gml_st/transforms/tiling_softmax/tiling_softmax.cc",
         "gml_st/transforms/transform_map_for_cpu/transform_map_for_cpu.cc",
         "gml_st/transforms/transform_matmul_for_cpu/transform_matmul_for_cpu.cc",
+        "gml_st/transforms/transform_reduce_for_cpu/transform_reduce_for_cpu.cc",
         "gml_st/transforms/transform_scatter_for_cpu/transform_scatter_for_cpu.cc",
         "gml_st/transforms/transform_transpose_for_cpu/transform_transpose_for_cpu.cc",
         "gml_st/transforms/transforms.h",
@@ -1351,6 +1388,7 @@ cc_library(
         "gml_st/utils/linalg_utils.h",
         "gml_st/utils/vector_utils.h",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st",
         ":gml_st_passes_inc_gen",
@@ -1418,6 +1456,7 @@ cc_library(
     name = "CAPI",
     srcs = CAPI_SOURCES,
     hdrs = CAPI_HEADERS,
+    strip_include_prefix = ".",
     deps = [
         ":all_passes",
         ":mlir_hlo",
@@ -1430,9 +1469,9 @@ cc_library(
     name = "CAPIHeaders",
     hdrs = CAPI_HEADERS,
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = ["@llvm-project//mlir:CAPIIRHeaders"],
 )
 
@@ -1441,6 +1480,7 @@ cc_library(
     name = "CAPIObjects",
     srcs = CAPI_SOURCES,
     hdrs = CAPI_HEADERS,
+    strip_include_prefix = ".",
     deps = [
         ":all_passes",
         ":mlir_hlo",
@@ -1492,18 +1532,18 @@ gentbl_filegroup(
                 "-gen-python-op-bindings",
                 "-bind-dialect=mhlo",
             ],
-            "python/mlir/dialects/_mhlo_ops_gen.py",
+            "bindings/python/mlir/dialects/_mhlo_ops_gen.py",
         ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "python/mlir/dialects/MhloOps.td",
+    td_file = "bindings/python/mlir/dialects/MhloOps.td",
     deps = [":MhloOpsPyTdFiles"],
 )
 
 filegroup(
     name = "MhloOpsPyFiles",
     srcs = [
-        "python/mlir/dialects/mhlo.py",
+        "bindings/python/mlir/dialects/mhlo.py",
         ":MhloOpsPyGen",
     ],
 )
@@ -1530,6 +1570,7 @@ td_library(
 gentbl_cc_library(
     name = "gml_st_ops_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-decls"],
@@ -1577,9 +1618,9 @@ cc_library(
     srcs = ["gml_st/IR/gml_st_ops.cc"],
     hdrs = ["gml_st/IR/gml_st_ops.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st_ops_inc_gen",
         "@llvm-project//llvm:Support",
@@ -1611,6 +1652,7 @@ td_library(
 gentbl_cc_library(
     name = "tiling_interface_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-interface-decls"],
@@ -1635,9 +1677,9 @@ cc_library(
     ],
     hdrs = ["gml_st/interfaces/tiling_interface.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":tiling_interface_inc_gen",
         "@llvm-project//mlir:DialectUtils",
@@ -1651,9 +1693,9 @@ cc_library(
     srcs = ["gml_st/interfaces/tiling_interface_impl.cc"],
     hdrs = ["gml_st/interfaces/tiling_interface_impl.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st",
         ":thlo",
@@ -1678,9 +1720,9 @@ cc_library(
     srcs = ["gml_st/interfaces/bufferizable_op_interface_impl.cc"],
     hdrs = ["gml_st/interfaces/bufferizable_op_interface_impl.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st",
         "@llvm-project//mlir:ArithDialect",
@@ -1695,6 +1737,7 @@ cc_library(
 gentbl_cc_library(
     name = "gml_st_passes_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -1714,9 +1757,9 @@ cc_library(
     srcs = ["gml_st/transforms/transforms.cc"],
     hdrs = ["gml_st/transforms/transforms.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st",
         "@llvm-project//mlir:AffineDialect",
@@ -1747,6 +1790,7 @@ td_library(
 gentbl_cc_library(
     name = "thlo_ops_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             ["-gen-op-decls"],
@@ -1779,9 +1823,9 @@ cc_library(
     srcs = ["thlo/IR/thlo_ops.cc"],
     hdrs = ["thlo/IR/thlo_ops.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":gml_st",
         ":thlo_ops_inc_gen",
@@ -1810,9 +1854,9 @@ cc_library(
     srcs = ["thlo/interfaces/bufferizable_op_interface_impl.cc"],
     hdrs = ["thlo/interfaces/bufferizable_op_interface_impl.h"],
     includes = [
-        ".",
         "include",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":thlo",
         "@llvm-project//mlir:BufferizationDialect",
@@ -1823,6 +1867,7 @@ cc_library(
 gentbl_cc_library(
     name = "thlo_passes_inc_gen",
     compatible_with = get_compatible_with_cloud(),
+    strip_include_prefix = ".",
     tbl_outs = [
         (
             [
@@ -1846,6 +1891,7 @@ cc_library(
     hdrs = [
         "thlo/transforms/passes.h",
     ],
+    strip_include_prefix = ".",
     deps = [
         ":thlo",
         ":thlo_passes_inc_gen",

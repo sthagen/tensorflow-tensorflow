@@ -32,8 +32,11 @@ namespace gml_st {
 
 constexpr llvm::StringRef kTransformedMarker =
     "__internal_transformed_marker__";
+constexpr llvm::StringRef kPeeledMarker = "__internal_peeled_marker__";
+constexpr llvm::StringRef kVectorizedMarker = "__internal_vectorized_marker__";
 
 bool isZero(Value v);
+bool isOne(Value v);
 
 /// Perform standalone tiling of a single LinalgOp by `tileSizes`.
 /// An empty vector is interpreted as the identity permutation and the
