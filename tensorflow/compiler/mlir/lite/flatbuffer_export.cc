@@ -21,6 +21,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,7 +38,6 @@ limitations under the License.
 #include "flatbuffers/flexbuffers.h"  // from @flatbuffers
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -70,6 +70,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/op_or_arg_name_mapper.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_saved_model.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/export_tf_dialect_op.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_tensor.h"
@@ -436,7 +437,7 @@ static std::unique_ptr<::tensorflow::NodeDef> GetTensorFlowNodeDef(
 }
 
 // Converts a mlir padding StringRef to TfLitePadding.
-// Returns llvm::None if conversion fails.
+// Returns std::nullopt if conversion fails.
 static Optional<TfLitePadding> GetTflitePadding(Operation* inst,
                                                 llvm::StringRef padding) {
   const tflite::Padding padding_attr =
@@ -451,13 +452,13 @@ static Optional<TfLitePadding> GetTflitePadding(Operation* inst,
   }
 
   return inst->emitOpError() << "Invalid padding attribute: " << padding,
-         llvm::None;
+         std::nullopt;
 }
 
 // Extracts TfLitePoolParams from a TFL custom op.
 // Template parameter, TFLOp, should be a TFL custom op containing attributes
 // generated from TfLitePoolParams.
-// Returns llvm::None if conversion fails.
+// Returns std::nullopt if conversion fails.
 template <typename TFLOp>
 static Optional<TfLitePoolParams> GetTflitePoolParams(Operation* inst,
                                                       TFLOp op) {
@@ -474,10 +475,13 @@ static Optional<TfLitePoolParams> GetTflitePoolParams(Operation* inst,
     return pool_params;
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 namespace {
+
+using ::mlir::tf_saved_model::kTfSavedModelExportedNamesAttr;
+using ::mlir::tf_saved_model::kTfSavedModelIndexPathAttr;
 
 // Helper struct that wraps inputs/outputs of a single SignatureDef.
 struct SignatureDefData {
@@ -498,8 +502,8 @@ struct SignatureDefData {
 class Translator {
  public:
   // Translates the given MLIR module into TFLite FlatBuffer format and returns
-  // the serialized output. Returns llvm::None on unsupported, invalid inputs or
-  // internal error.
+  // the serialized output. Returns std::nullopt on unsupported, invalid inputs
+  // or internal error.
   static Optional<std::string> Translate(
       ModuleOp module, const toco::TocoFlags& toco_flags,
       const std::unordered_set<std::string>& tags,
@@ -547,7 +551,7 @@ class Translator {
 
   // Returns TFLite buffer populated with constant value if the operation is
   // TFLite constant operation. Otherwise, returns an empty buffer. Emits error
-  // and returns llvm::None on failure.
+  // and returns std::nullopt on failure.
   Optional<BufferOffset<tflite::Buffer>> BuildBuffer(Value value);
 
   // Build TFLite tensor from the given type. This function is for tfl.lstm
@@ -555,14 +559,14 @@ class Translator {
   Optional<BufferOffset<tflite::Tensor>> BuildTensorFromType(
       mlir::Type type, const std::string& name);
 
-  // Builds TF::VariantType from the given element type. Returns llvm::None if
+  // Builds TF::VariantType from the given element type. Returns std::nullopt if
   // failure. Returns empty vector if the element type is not TF::VariantType or
   // there is empty TensorType in the TF::VariantType.
   Optional<std::vector<BufferOffset<tflite::VariantSubType>>>
   BuildTFVariantType(mlir::Type element_type);
 
   // Builds TFLite tensor from the given value. `buffer_idx` is index of the
-  // corresponding buffer. Emits error and returns llvm::None on failure.
+  // corresponding buffer. Emits error and returns std::nullopt on failure.
   Optional<BufferOffset<tflite::Tensor>> BuildTensor(
       Value value, const std::string& name, unsigned buffer_idx,
       const Optional<BufferOffset<tflite::QuantizationParameters>>&
@@ -609,7 +613,7 @@ class Translator {
                           tflite::BuiltinOperator builtin);
 
   // Builds operator for the given operation with specified operand and result
-  // tensor indices. Emits an error and returns llvm::None on failure.
+  // tensor indices. Emits an error and returns std::nullopt on failure.
   Optional<BufferOffset<tflite::Operator>> BuildOperator(
       Operation* inst, std::vector<int32_t> operands,
       const std::vector<int32_t>& results,
@@ -793,7 +797,7 @@ Optional<BufferOffset<tflite::Buffer>> Translator::BuildBuffer(
     inst->emitError(
         Twine("failed to convert value attribute to tensor with error: " +
               status.ToString()));
-    return llvm::None;
+    return std::nullopt;
   }
 
   // TensorFlow and TensorFlow Lite use different string encoding formats.
@@ -829,7 +833,7 @@ Translator::BuildTFVariantType(mlir::Type element_type) {
 
   // We only support up to one nested type in tf_type.variant_type.
   if (variant_type.getSubtypes().size() > 1) {
-    return llvm::None;
+    return std::nullopt;
   }
   if (variant_type.getSubtypes().empty()) {
     return variant_params;
@@ -861,7 +865,7 @@ Optional<BufferOffset<tflite::Tensor>> Translator::BuildTensorFromType(
       shape_ref = tensor_type.getShape();
       shape = std::vector<int32_t>(shape_ref.begin(), shape_ref.end());
     } else {
-      return llvm::None;
+      return std::nullopt;
     }
   }
 
@@ -871,7 +875,7 @@ Optional<BufferOffset<tflite::Tensor>> Translator::BuildTensorFromType(
   Optional<std::vector<BufferOffset<tflite::VariantSubType>>> variant_params =
       BuildTFVariantType(element_type);
   if (!variant_params.has_value()) {
-    return llvm::None;
+    return std::nullopt;
   }
   BufferOffset<tflite::QuantizationParameters> q_params = 0;
   if (auto qtype = element_type.dyn_cast<mlir::quant::UniformQuantizedType>()) {
@@ -924,7 +928,7 @@ Optional<BufferOffset<tflite::Tensor>> Translator::BuildTensor(
   auto* inst = value.getDefiningOp();
   if (type.hasStaticShape()) {
     llvm::ArrayRef<int64_t> shape_ref = type.getShape();
-    if (mlir::failed(check_shape(shape_ref))) return llvm::None;
+    if (mlir::failed(check_shape(shape_ref))) return std::nullopt;
 
     shape = std::vector<int32_t>(shape_ref.begin(), shape_ref.end());
   } else if (inst && IsConst(inst)) {
@@ -934,12 +938,12 @@ Optional<BufferOffset<tflite::Tensor>> Translator::BuildTensor(
     auto tensor_attr = inst->getAttr("value").cast<mlir::TypedAttr>();
     llvm::ArrayRef<int64_t> shape_ref =
         tensor_attr.getType().cast<TensorType>().getShape();
-    if (mlir::failed(check_shape(shape_ref))) return llvm::None;
+    if (mlir::failed(check_shape(shape_ref))) return std::nullopt;
 
     shape = std::vector<int32_t>(shape_ref.begin(), shape_ref.end());
   } else if (type.hasRank()) {
     llvm::ArrayRef<int64_t> shape_ref = type.getShape();
-    if (mlir::failed(check_shape(shape_ref))) return llvm::None;
+    if (mlir::failed(check_shape(shape_ref))) return std::nullopt;
 
     shape.reserve(shape_ref.size());
     for (auto& dim : shape_ref) {
@@ -968,7 +972,7 @@ Optional<BufferOffset<tflite::Tensor>> Translator::BuildTensor(
   Optional<std::vector<BufferOffset<tflite::VariantSubType>>> variant_params =
       BuildTFVariantType(element_type);
   if (!variant_params.has_value()) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   BufferOffset<tflite::QuantizationParameters> q_params;
@@ -1065,16 +1069,16 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildWhileOperator(
     const std::vector<int32_t>& results) {
   auto opcode_index = GetOpcodeIndex("while", tflite::BuiltinOperator_WHILE);
   auto get_call_index = [&](mlir::Block& b) -> Optional<int> {
-    if (b.getOperations().size() != 2) return llvm::None;
+    if (b.getOperations().size() != 2) return std::nullopt;
     if (auto call_op = dyn_cast<mlir::func::CallOp>(b.front()))
       return subgraph_index_map_.at(call_op.getCallee().str());
-    return llvm::None;
+    return std::nullopt;
   };
   auto body_subgraph_index = get_call_index(op.getBody().front());
   auto cond_subgraph_index = get_call_index(op.getCond().front());
   if (!body_subgraph_index || !cond_subgraph_index)
     return op.emitOpError("only single call cond/body while export supported"),
-           llvm::None;
+           std::nullopt;
   auto builtin_options =
       tflite::CreateWhileOptions(builder_, *cond_subgraph_index,
                                  *body_subgraph_index)
@@ -1130,7 +1134,7 @@ Optional<CustomOptionsOffset> Translator::CreateFlexOpCustomOptions(
   std::string node_def_str;
   if (!node_def.SerializeToString(&node_def_str)) {
     return emitError(loc, "failed to serialize tensorflow node_def"),
-           llvm::None;
+           std::nullopt;
   }
 
   auto flex_builder = std::make_unique<flexbuffers::Builder>();
@@ -1246,7 +1250,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
   const auto* dialect = inst->getDialect();
   if (!dialect) {
     inst->emitOpError("dialect is not registered");
-    return llvm::None;
+    return std::nullopt;
   }
 
   // If TFLite built in op, create operator as a builtin op.
@@ -1256,7 +1260,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
     if (!enabled_op_types_.contains(OpType::kTfliteBuiltin)) {
       return inst->emitOpError(
                  "is a TFLite builtin op but builtin emission is not enabled"),
-             llvm::None;
+             std::nullopt;
     }
 
     auto builtin_code = GetBuiltinOpCode(inst);
@@ -1272,13 +1276,13 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
           inst->emitOpError(
               "number of operands and results don't match, only canonical "
               "TFL While supported");
-          return llvm::None;
+          return std::nullopt;
         }
         return BuildWhileOperator(whileOp, operands, results);
       }
 
       inst->emitOpError("is not a supported TFLite op");
-      return llvm::None;
+      return std::nullopt;
     }
 
     if (*builtin_code == tflite::BuiltinOperator_CALL_ONCE) {
@@ -1327,7 +1331,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
     //    we emit the op as custom.
     auto node_def = GetTensorFlowNodeDef(inst);
     if (!node_def) {
-      return llvm::None;
+      return std::nullopt;
     }
 
     std::string op_name = node_def->op();
@@ -1358,7 +1362,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
       if (auto options = CreateFlexOpCustomOptions(*node_def, inst->getLoc())) {
         custom_options = *options;
       } else {
-        return llvm::None;
+        return std::nullopt;
       }
 
       // Gather flex ops.
@@ -1371,7 +1375,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
               CreateCustomOpCustomOptions(*node_def, inst->getLoc())) {
         custom_options = *options;
       } else {
-        return llvm::None;
+        return std::nullopt;
       }
 
       // Gather custom ops.
@@ -1389,7 +1393,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
             inst->emitOpError("is neither a custom op nor a flex op"),
             tflite::metrics::ConverterErrorData::ERROR_NEEDS_CUSTOM_OPS);
       }
-      return llvm::None;
+      return std::nullopt;
     }
 
     uint32_t opcode_index =
@@ -1408,7 +1412,7 @@ Optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
   return inst->emitOpError(
              "is not any of a builtin TFLite op, a flex TensorFlow op or a "
              "custom TensorFlow op"),
-         llvm::None;
+         std::nullopt;
 }
 
 void Translator::InitializeNamesFromAttribute(FuncOp fn, bool* has_input_attr) {
@@ -1546,7 +1550,7 @@ Optional<BufferOffset<tflite::SubGraph>> Translator::BuildSubGraph(
     if (has_input_attr)
       tensor_name = std::string(name_mapper_.GetUniqueName(arg));
     if (tensor_name.empty()) tensor_name = absl::StrCat("arg", i);
-    if (!build_tensor_and_buffer(arg, index, tensor_name)) return llvm::None;
+    if (!build_tensor_and_buffer(arg, index, tensor_name)) return std::nullopt;
   }
 
   bool failed_once = false;
@@ -1598,7 +1602,8 @@ Optional<BufferOffset<tflite::SubGraph>> Translator::BuildSubGraph(
         tensor_name = "NumericVerify/" + UniqueName(quantized_op_val) + ":" +
                       std::to_string(tensor_index_map[quantized_op_val]);
       }
-      if (!build_tensor_and_buffer(val, index, tensor_name)) return llvm::None;
+      if (!build_tensor_and_buffer(val, index, tensor_name))
+        return std::nullopt;
     }
 
     // Skip constant ops as they don't represent a TFLite operator.
@@ -1650,7 +1655,7 @@ Optional<BufferOffset<tflite::SubGraph>> Translator::BuildSubGraph(
     subgraph_op_inst_map_.resize(index + 1);
   }
   subgraph_op_inst_map_[index] = operators_in_mlir;
-  if (failed_once) return llvm::None;
+  if (failed_once) return std::nullopt;
 
   // Get input and output tensor indices for the subgraph.
   std::vector<int32_t> inputs, outputs;
@@ -1701,7 +1706,7 @@ Translator::CreateMetadataVector() {
         module_.emitError(
             "all values in tfl.metadata's dictionary key-value pairs should be "
             "string attributes");
-        return llvm::None;
+        return std::nullopt;
       }
     }
   }
@@ -1750,14 +1755,14 @@ llvm::SmallVector<llvm::StringRef, 2> GetStringsFromAttrWithSeparator(
 // Attribute identified by 'attr_name'.
 std::vector<std::string> GetStringsFromDictionaryAttr(
     const llvm::SmallVector<mlir::DictionaryAttr, 4>& dict_attrs,
-    const std::string& attr_name) {
+    const StringRef attr_name) {
   std::vector<std::string> result;
   for (const auto& arg_attr : dict_attrs) {
     if (!arg_attr) continue;
 
     auto attrs = arg_attr.getValue();
     for (const auto attr : attrs) {
-      if (attr.getName().str() == attr_name) {
+      if (attr.getName() == attr_name) {
         auto array_attr = attr.getValue().dyn_cast_or_null<mlir::ArrayAttr>();
         if (!array_attr || array_attr.empty()) continue;
         auto string_attr = array_attr[0].dyn_cast_or_null<mlir::StringAttr>();
@@ -1772,7 +1777,6 @@ std::vector<std::string> GetStringsFromDictionaryAttr(
 std::vector<SignatureDefData> BuildSignaturedef(
     FuncOp main_op, const std::string& saved_model_tag,
     const uint32_t subgraph_index, tensorflow::OpOrArgNameMapper& name_mapper) {
-  static const char kSignatureDefIndexPath[] = "tf_saved_model.index_path";
   static const char kEntryFunctionAttributes[] = "tf.entry_function";
 
   // Fetch inputs and outputs from the signature.
@@ -1780,9 +1784,9 @@ std::vector<SignatureDefData> BuildSignaturedef(
   main_op.getAllArgAttrs(arg_attrs);
   main_op.getAllResultAttrs(res_attrs);
   std::vector<std::string> sig_def_inputs =
-      GetStringsFromDictionaryAttr(arg_attrs, kSignatureDefIndexPath);
+      GetStringsFromDictionaryAttr(arg_attrs, kTfSavedModelIndexPathAttr);
   std::vector<std::string> sig_def_outputs =
-      GetStringsFromDictionaryAttr(res_attrs, kSignatureDefIndexPath);
+      GetStringsFromDictionaryAttr(res_attrs, kTfSavedModelIndexPathAttr);
 
   // If no defined saved model signature, then return empty list.
   // This can happen when we are converting model not from SavedModel.
@@ -1823,7 +1827,7 @@ std::vector<SignatureDefData> BuildSignaturedef(
   }
   // Exported method name.
   auto exported_name =
-      main_op->getAttrOfType<mlir::ArrayAttr>("tf_saved_model.exported_names");
+      main_op->getAttrOfType<mlir::ArrayAttr>(kTfSavedModelExportedNamesAttr);
   if (exported_name.empty()) {
     main_op.emitError("Empty exported names for main Function");
     return {};
@@ -1922,8 +1926,8 @@ Optional<std::string> Translator::Translate(
   OpOrArgLocNameMapper default_op_or_arg_name_mapper;
   if (!op_or_arg_name_mapper)
     op_or_arg_name_mapper = &default_op_or_arg_name_mapper;
-  if (!UpdateEntryFunction(module)) return llvm::None;
-  if (!IsValidTFLiteMlirModule(module)) return llvm::None;
+  if (!UpdateEntryFunction(module)) return std::nullopt;
+  if (!IsValidTFLiteMlirModule(module)) return std::nullopt;
   Translator translator(module, toco_flags, tags, op_or_arg_name_mapper,
                         metadata);
   return translator.TranslateInternal();
@@ -2084,7 +2088,7 @@ Optional<std::string> Translator::TranslateInternal() {
     return failed_region.second->getParentOp()->emitError()
                << "failed while converting: '" << failed_region.first
                << "': " << err,
-           llvm::None;
+           std::nullopt;
   }
 
   // Log MAC count.
@@ -2123,7 +2127,7 @@ Optional<std::string> Translator::TranslateInternal() {
   auto description = builder_.CreateString(model_description.data());
   VectorBufferOffset<int32_t> metadata_buffer = 0;  // Deprecated
   auto metadata = CreateMetadataVector();
-  if (!metadata) return llvm::None;
+  if (!metadata) return std::nullopt;
 
   std::vector<SignatureDefData> signature_defs_vec;
   subgraph_index = 0;
@@ -2152,13 +2156,13 @@ Optional<std::string> Translator::TranslateInternal() {
   // There is a limit of 2GB for a flatbuffer.
   if (builder_.GetSize() > 2147483648) {
     LOG(ERROR) << "Model size is bigger than 2gb";
-    return llvm::None;
+    return std::nullopt;
   }
   tflite::UpdateOpVersion(builder_.GetBufferPointer());
   tflite::UpdateMinimumRuntimeVersionForModel(builder_.GetBufferPointer());
   if (supported_backends_.find("GPU") != supported_backends_.end()) {
     if (!CheckGpuDelegateCompatibility(builder_.GetBufferPointer())) {
-      return llvm::None;
+      return std::nullopt;
     }
   }
 

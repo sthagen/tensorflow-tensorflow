@@ -1,7 +1,10 @@
-load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow/compiler/xla:xla.bzl", "xla_cc_test")
 
 package_group(
     name = "friends",
+    includes = [
+        "//tensorflow/compiler/xla/python:friends",
+    ],
     packages = [
         "//tensorflow/compiler/xla/python/...",
     ],
@@ -61,10 +64,11 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+        "@tf_runtime//:ref_count",
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "array_test",
     size = "small",
     srcs = ["array_test.cc"],
@@ -75,7 +79,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "future_test",
     size = "small",
     srcs = ["future_test.cc"],
@@ -87,7 +91,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "shape_test",
     size = "small",
     srcs = ["shape_test.cc"],
@@ -97,7 +101,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "sharding_test",
     size = "small",
     srcs = ["sharding_test.cc"],
@@ -122,6 +126,15 @@ cc_library(
 )
 
 cc_library(
+    name = "no_impl_test_main",
+    testonly = 1,
+    srcs = ["no_impl_test_main.cc"],
+    deps = [
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
     name = "array_impl_test_lib",
     testonly = 1,
     srcs = ["array_impl_test_lib.cc"],
@@ -134,12 +147,12 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cc_test(
-    name = "array_impl_test",
-    srcs = ["array_impl_test.cc"],
+xla_cc_test(
+    name = "array_test_no_impl",
+    srcs = [],
     deps = [
         ":array_impl_test_lib",
-        "@com_google_googletest//:gtest",
+        ":no_impl_test_main",
     ],
 )
 
@@ -155,11 +168,12 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cc_test(
-    name = "client_impl_test",
-    srcs = ["client_impl_test.cc"],
+xla_cc_test(
+    name = "client_test_no_impl",
+    srcs = [],
     deps = [
         ":client_impl_test_lib",
+        ":no_impl_test_main",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -180,11 +194,12 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cc_test(
-    name = "executable_impl_test",
-    srcs = ["executable_impl_test.cc"],
+xla_cc_test(
+    name = "executable_test_no_impl",
+    srcs = [],
     deps = [
         ":executable_impl_test_lib",
+        ":no_impl_test_main",
         "@com_google_googletest//:gtest",
     ],
 )

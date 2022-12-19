@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 #include "mlir/Parser/Parser.h"  // from @llvm-project
@@ -43,7 +44,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/gpu_constants.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable_run_options.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_types.h"
-#include "tensorflow/compiler/xla/service/gpu/jitrt_custom_calls.h"
 #include "tensorflow/compiler/xla/service/gpu/runtime/collectives.h"
 #include "tensorflow/compiler/xla/service/gpu/runtime/cublas_lt_matmul.h"
 #include "tensorflow/compiler/xla/service/gpu/runtime/executable.h"
@@ -186,7 +186,7 @@ namespace {
 Status MaybeSyncAndProfile(const ServiceExecutableRunOptions* run_options,
                            uint64_t start_nanos, se::Stream* stream_to_sync);
 
-Status ExecuteThunks(const std::string& module_name,
+Status ExecuteThunks(const std::string& module_name, ModuleIdentifier module_id,
                      const ThunkSequence& thunk_sequence,
                      const ServiceExecutableRunOptions* run_options,
                      const BufferAllocations& buffer_allocations,
@@ -202,6 +202,15 @@ Status ExecuteThunks(const std::string& module_name,
   tsl::profiler::TraceMe hlo_module_activity(
       [&] { return absl::StrCat(module_name, ":XLA GPU module"); },
       tsl::profiler::TraceMeLevel::kInfo);
+
+  ScopedAnnotation annotation([&] {
+    std::string module_id_str;
+    if (module_id >= 0) {
+      module_id_str = absl::StrFormat(",program_id=%d", module_id);
+    }
+    return absl::StrFormat("XlaModule:#hlo_module=%s%s#", module_name,
+                           module_id_str);
+  });
 
   for (const std::unique_ptr<Thunk>& thunk : thunk_sequence) {
     // Annotate execution of this op if tracing was enabled when we started
@@ -635,7 +644,14 @@ Status GpuExecutable::ExecuteThunksOrXlaRuntime(
     for (const std::unique_ptr<Thunk>& thunk : *thunks_) {
       TF_RETURN_IF_ERROR(thunk->Initialize(*this, executor));
     }
-    return ExecuteThunks(module_name_, *thunks_, run_options,
+
+    // There isn't always an HLO module.
+    ModuleIdentifier unique_id = -1;
+    if (has_module()) {
+      unique_id = module().unique_id();
+    }
+
+    return ExecuteThunks(module_name_, unique_id, *thunks_, run_options,
                          buffer_allocations, block_host_until_done);
   }
 
@@ -871,8 +887,8 @@ StatusOr<std::unique_ptr<Executable>> GpuExecutable::LoadFromObjFile(
   runtime::FunctionType signature(std::move(args), /*results=*/{});
   runtime::FunctionType rt_signature(std::move(rt_args), /*results=*/{});
 
-  auto symbol_map = runtime::ToSymbolsBinding(PopulateXlaGpuCustomCalls,
-                                              PopulateXlaGpuTypeIdNames);
+  auto symbol_map = runtime::ToSymbolsBinding(RegisterXlaGpuRuntimeCustomCalls,
+                                              RegisterXlaGpuTypeIdNames);
 
   // Gpu executable has a single exported function.
   std::vector<runtime::Executable::LoadFunction> functions;

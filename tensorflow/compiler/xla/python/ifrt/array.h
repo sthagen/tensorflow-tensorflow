@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/ifrt/shape.h"
 #include "tensorflow/compiler/xla/python/ifrt/sharding.h"
 #include "tensorflow/compiler/xla/status.h"
+#include "tfrt/concurrency/ref_count.h"  // from @tf_runtime
 
 namespace xla {
 namespace ifrt {
@@ -53,7 +54,8 @@ enum class ArrayCopySemantics : int {
 
 // Represents a single logical array from one or more sharded buffers.
 // Implementations must be thread-safe.
-class Array : public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
+class Array : public tsl::ReferenceCounted<Array>,
+              public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
  public:
   Array() = default;
 
@@ -71,9 +73,9 @@ class Array : public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
   virtual std::shared_ptr<const Sharding> shared_ptr_sharding() const = 0;
 
   // Breaks an array up into per-device arrays. This is the elimination
-  // counterpart of `Client::AssembleArray()`.
-  virtual StatusOr<std::vector<std::unique_ptr<Array>>> Explode(
-      ArrayCopySemantics semantics) = 0;
+  // counterpart of `Client::AssembleArrayFromSingleDeviceArrays()`.
+  virtual StatusOr<std::vector<tsl::RCReference<Array>>>
+  DisassembleIntoSingleDeviceArrays(ArrayCopySemantics semantics) = 0;
 
   // Fetches the array to host and stores it as unreplicated, unsharded data.
   //
@@ -90,6 +92,18 @@ class Array : public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
   // `data` must remain valid until the returned future becomes ready. It will
   // contain a valid data only if the returned future has an OK. Otherwise, its
   // content is undefined.
+  //
+  // TODO(hyeontaek): Add a `size` argument or change the type of `data` to
+  // `absl::Span<char>` to guard against buffer underflows and overflows.
+  //
+  // TODO(hyeontaek): Clarify memory alignment issues and document them.
+  // Implementations may impose alignment requirements on `data`. They can fail
+  // if the requirements are not satisfied so that they avoid extra memory
+  // copies that could incur performance overhead or extra memory use. The
+  // required alignments may be different across backends (e.g., depending on
+  // they use DMA) and across different `DType` and `Shape`. We may need to add
+  // an API that lets users query the alignment requirement of the specific
+  // implementation.
   ABSL_MUST_USE_RESULT
   virtual Future<Status> CopyToHostBuffer(
       void* data, std::optional<absl::Span<const int64_t>> byte_strides,
@@ -111,7 +125,7 @@ class Array : public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
   //
   // It may fail if the buffer data would be sent from/to an unaddressable
   // device.
-  virtual StatusOr<std::unique_ptr<Array>> Reshard(
+  virtual StatusOr<tsl::RCReference<Array>> Reshard(
       std::shared_ptr<const Sharding> new_sharding,
       ArrayCopySemantics semantics) = 0;
 
@@ -134,9 +148,9 @@ class Array : public llvm::RTTIExtends<Array, llvm::RTTIRoot> {
 };
 
 // Convenience function to create a list of pointer Arrays from a list of
-// unique_ptr Arrays.
+// RCReference<Array>s.
 std::vector<Array*> MakeArrayPointerList(
-    absl::Span<const std::unique_ptr<Array>> arrays);
+    absl::Span<const tsl::RCReference<Array>> arrays);
 
 }  // namespace ifrt
 }  // namespace xla

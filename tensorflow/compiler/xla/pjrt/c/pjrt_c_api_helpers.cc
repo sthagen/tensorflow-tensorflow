@@ -29,6 +29,7 @@ namespace pjrt {
 
 const absl::string_view kHloFormat = "hlo";
 const absl::string_view kMlirFormat = "mlir";
+const absl::string_view kHloWithConfigFormat = "hlo_with_config";
 
 PJRT_ClientDeleter MakeClientDeleter(const PJRT_Api* api) {
   return [api](PJRT_Client* client) -> void {
@@ -364,6 +365,19 @@ xla::PjRtFuture<xla::Status> ConvertCEventToCppFuture(PJRT_Event* c_event,
     return PjRtFuture<Status>(s);
   }
   return PjRtFuture<Status>(std::move(promise));
+}
+
+PJRT_SerializedExecutableDeleter MakeSerializedExecutableDeleter(
+    const PJRT_Api* api) {
+  return [api](PJRT_SerializedExecutable* serialized_executable) -> void {
+    PJRT_SerializedExecutable_Destroy_Args destroy_args;
+    destroy_args.struct_size =
+        PJRT_SerializedExecutable_Destroy_Args_STRUCT_SIZE;
+    destroy_args.priv = nullptr;
+    destroy_args.serialized_executable = serialized_executable;
+    pjrt::LogFatalIfPjrtError(
+        api->PJRT_SerializedExecutable_Destroy(&destroy_args), api);
+  };
 }
 
 }  // namespace pjrt

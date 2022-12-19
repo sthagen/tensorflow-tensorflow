@@ -66,14 +66,8 @@ Attribute convertAttr(Attribute hloAttr) {
         attr.getKernelSpatialDimensions(), attr.getOutputBatchDimension(),
         attr.getOutputFeatureDimension(), attr.getOutputSpatialDimensions());
   }
-  if (auto attr = hloAttr.dyn_cast<mhlo::CustomCallApiVersionAttr>()) {
-    // This API version value is used to experiment with XLA runtime typed
-    // custom calls. Needs more experimental data before we decide whether or
-    // not to propose it to StableHLO.
-    if (attr.getValue() == mhlo::CustomCallApiVersion::API_VERSION_TYPED_FFI)
-      return {};
-    RETURN_CONVERTED_ENUM_ATTR(CustomCallApiVersion);
-  }
+  // NOTE: We cannot process CustomCallApiVersionAttr here because
+  // `dyn_cast<mhlo::CustomCallApiVersionAttr>()` succeeds for IntegerAttr too.
   if (auto attr = hloAttr.dyn_cast<mhlo::DotDimensionNumbersAttr>()) {
     return stablehlo::DotDimensionNumbersAttr::get(
         attr.getContext(), attr.getLhsBatchingDimensions(),
@@ -169,6 +163,9 @@ class HloToStablehloOpConverter : public OpConversionPattern<HloOpTy> {
       // StableHLO AllToAll doesn't support the tuple form yet.
       // Proposal: https://github.com/openxla/stablehlo/issues/574.
       if (hloOp.getNumOperands() != 1) return failure();
+      // StableHLO AllToAll doesn't support ChannelHandle attribute yet.
+      // Proposal: https://github.com/openxla/stablehlo/issues/660
+      if (hloOp.getChannelHandle().has_value()) return failure();
     }
 
     if constexpr (std::is_same<HloOpTy, mhlo::CustomCallOp>::value) {
@@ -176,6 +173,10 @@ class HloToStablehloOpConverter : public OpConversionPattern<HloOpTy> {
       // Proposal: https://github.com/openxla/stablehlo/issues/637
       auto backendConfig = hloOp.getBackendConfig();
       if (backendConfig && !backendConfig->template isa<mlir::StringAttr>())
+        return failure();
+      // StableHLO CustomCall doesn't support schedules, and there are no plans
+      // to propose them to StableHLO because they are private to XLA.
+      if (hloOp.getCustomCallSchedule() != mhlo::CustomCallSchedule::NONE)
         return failure();
     }
 
@@ -199,6 +200,19 @@ class HloToStablehloOpConverter : public OpConversionPattern<HloOpTy> {
     // with the exception of ArrayAttr which is converted recursively.
     SmallVector<NamedAttribute> stablehloAttrs;
     for (NamedAttribute hloAttr : hloOp->getAttrs()) {
+      if constexpr (std::is_same<HloOpTy, mhlo::CustomCallOp>::value) {
+        // StableHLO CustomCall doesn't support API_VERSION_TYPED_FFI yet.
+        // Proposal: https://github.com/openxla/stablehlo/issues/637.
+        if (hloAttr.getName() == "api_version" &&
+            hloOp.getApiVersion() ==
+                mhlo::CustomCallApiVersion::API_VERSION_TYPED_FFI)
+          return failure();
+        // custom_call_schedule is private to XLA, but we still want to allow
+        // #mhlo<custom_call_schedule NONE> (by ignoring it).
+        if (hloAttr.getName() == "custom_call_schedule" &&
+            hloOp.getCustomCallSchedule() == mhlo::CustomCallSchedule::NONE)
+          continue;
+      }
       auto stablehloAttr = convertAttr(hloAttr.getValue());
       if (!stablehloAttr) return failure();
       stablehloAttrs.push_back({hloAttr.getName(), stablehloAttr});
@@ -224,6 +238,10 @@ class HloToStablehloOpConverter : public OpConversionPattern<HloOpTy> {
          llvm::zip(hloOp->getRegions(), stablehloOp->getRegions())) {
       rewriter.inlineRegionBefore(hloRegion, stablehloRegion,
                                   stablehloRegion.end());
+      if (failed(rewriter.convertRegionTypes(&stablehloRegion,
+                                             *this->getTypeConverter(),
+                                             /*entryConversion=*/nullptr)))
+        return failure();
     }
     return success();
   }

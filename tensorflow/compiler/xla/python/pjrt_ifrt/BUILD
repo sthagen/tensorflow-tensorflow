@@ -1,7 +1,10 @@
-load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow/compiler/xla:xla.bzl", "xla_cc_test")
 
 package_group(
     name = "friends",
+    includes = [
+        "//tensorflow/compiler/xla/python:friends",
+    ],
     packages = [
         "//tensorflow/compiler/xla/python/...",
     ],
@@ -54,6 +57,7 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+        "@tf_runtime//:ref_count",
     ],
 )
 
@@ -69,7 +73,7 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "pjrt_array_impl_test_tfrt_cpu",
     size = "small",
     srcs = [],
@@ -80,7 +84,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "pjrt_client_impl_test_tfrt_cpu",
     size = "small",
     srcs = [],
@@ -91,7 +95,7 @@ tf_cc_test(
     ],
 )
 
-tf_cc_test(
+xla_cc_test(
     name = "pjrt_executable_impl_test_tfrt_cpu",
     size = "small",
     srcs = ["pjrt_executable_impl_test_tfrt_cpu.cc"],

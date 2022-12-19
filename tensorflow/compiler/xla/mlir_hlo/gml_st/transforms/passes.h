@@ -17,6 +17,7 @@ limitations under the License.
 #define MLIR_HLO_DIALECT_GML_ST_TRANSFORMS_PASSES_H
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -89,6 +90,13 @@ std::unique_ptr<OperationPass<func::FuncOp>> createVectorizeGmlStLoopsPass(
     bool vectorizeGmlStOps = false,
     ArrayRef<StringRef> distributionLabels = {});
 
+/// Pass to vectorize gml_st.for loops that are tiled perfectly.
+std::unique_ptr<OperationPass<func::FuncOp>>
+createVectorizePerfectlyTiledLoopsPass();
+
+/// Pass to vectorize `memref.copy`.
+std::unique_ptr<OperationPass<func::FuncOp>> createVectorizeCopyPass();
+
 /// Pass to lower vector.contract.
 std::unique_ptr<OperationPass<func::FuncOp>> createLowerVectorContractPass();
 
@@ -97,8 +105,16 @@ std::unique_ptr<OperationPass<func::FuncOp>> createTransformScatterForCpuPass();
 
 /// Pass to transform a linalg.matmul op for CPU backend.
 std::unique_ptr<OperationPass<func::FuncOp>> createTransformMatmulForCpuPass(
-    ArrayRef<int64_t> matmulTileSizes = llvm::None,
+    ArrayRef<int64_t> matmulTileSizes = std::nullopt,
     bool lowerToMmt4DOp = false);
+
+/// Pass to transform a linalg.matmul op for Triton.
+std::unique_ptr<OperationPass<func::FuncOp>> createTransformMatmulForTritonPass(
+    ArrayRef<int64_t> matmulTileSizes = std::nullopt,
+    StringRef distributionLabel = "");
+
+/// Pass to fuse linalg on tensor operations.
+std::unique_ptr<OperationPass<func::FuncOp>> createFusionOfTensorOpsPass();
 
 /// Pass to transform a linalg.map op for CPU backend.
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
@@ -106,11 +122,16 @@ createTransformMapForCpuPass(int64_t tileSize = 1);
 
 /// Pass to transform a linalg.reduce op for CPU backend.
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
-createTransformReduceForCpuPass(ArrayRef<int64_t> reduceTileSizes = {});
+createTransformReduceForCpuPass(int64_t vectorSize = 8, int64_t tileSize1D = 32,
+                                ArrayRef<int64_t> tileSizes2D = {});
 
 /// Pass to transform a linalg.transpose op for CPU backend.
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
-createTransformTransposeForCpuPass(ArrayRef<int64_t> tileSizes = llvm::None);
+createTransformTransposeForCpuPass(ArrayRef<int64_t> tileSizes = std::nullopt);
+
+/// Pass to transform a thlo.sort op for CPU backend.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createTransformSortForCpuPass();
 
 #define GEN_PASS_REGISTRATION
 #include "gml_st/transforms/passes.h.inc"

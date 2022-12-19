@@ -72,6 +72,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/location_exporter.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/type_to_shape.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
+#include "tensorflow/tsl/platform/float8.h"
 
 using ::int64_t;
 using ::stream_executor::port::StatusOr;
@@ -181,6 +182,19 @@ static std::vector<int64_t> Convert_broadcast_dimensions(
   if (!broadcast_dimensions.has_value()) return {};
 
   return ConvertDenseIntAttr(*broadcast_dimensions);
+}
+
+static std::vector<xla::CrossProgramPrefetch> Convert_cross_program_prefetches(
+    mlir::ArrayAttr prefetches) {
+  std::vector<xla::CrossProgramPrefetch> cross_program_prefetches;
+  for (auto prefetch : prefetches) {
+    auto cpp = prefetch.cast<mlir::mhlo::CrossProgramPrefetchAttr>();
+    xla::CrossProgramPrefetch xla_cpp;
+    xla_cpp.set_parameter(cpp.getParameter());
+    for (auto index : cpp.getIndices()) xla_cpp.add_index(index);
+    cross_program_prefetches.push_back(xla_cpp);
+  }
+  return cross_program_prefetches;
 }
 
 // Converts StringRef to xla FftType enum
@@ -826,7 +840,8 @@ LogicalResult ExportXlaOp(AllToAllOp op, OpLoweringContext ctx) {
       layout = shape_or->layout();
     }
     auto tuple = xla::AllToAllTuple(
-        operands, Convert_replica_groups(op.getReplicaGroups()), layout);
+        operands, Convert_replica_groups(op.getReplicaGroups()), layout,
+        Convert_channel_handle(op.getChannelHandle()));
     for (auto [index, result] : llvm::enumerate(op.getResults())) {
       value_map[result] = xla::GetTupleElement(tuple, index);
     }
@@ -834,7 +849,8 @@ LogicalResult ExportXlaOp(AllToAllOp op, OpLoweringContext ctx) {
     // ArrayAllToAll always has exactly one operand (checked in the verifier).
     value_map[op->getResults()[0]] = xla::AllToAll(
         operands[0], *op.getSplitDimension(), *op.getConcatDimension(),
-        *op.getSplitCount(), Convert_replica_groups(op.getReplicaGroups()));
+        *op.getSplitCount(), Convert_replica_groups(op.getReplicaGroups()),
+        /*layout=*/std::nullopt, Convert_channel_handle(op.getChannelHandle()));
   }
 
   return success();
@@ -1530,7 +1546,7 @@ LogicalResult ExportXlaOp(CustomCallOp op, OpLoweringContext ctx) {
 
   auto& value_map = *ctx.values;
   auto aliasInfo =
-      xla::ConvertCustomCallOutputOperandAliasing(op.getOutputOperandAliases());
+      xla::ConvertOutputOperandAliasing(op.getOutputOperandAliases());
   auto output_operand_aliasing = absl::MakeSpan(*aliasInfo);
   auto custom_call_schedule =
       xla::ConvertCustomCallSchedule(op.getCustomCallSchedule());
@@ -2136,6 +2152,9 @@ LogicalResult ExportXlaOp(FusionOp op, OpLoweringContext ctx) {
     return failure();
 
   auto& values = *ctx.values;
+  auto aliasInfo =
+      xla::ConvertOutputOperandAliasing(op.getOutputOperandAliases());
+  auto output_operand_aliasing = absl::MakeSpan(*aliasInfo);
   llvm::SmallVector<xla::XlaOp, 4> operands;
   for (auto operand : op.getInputs()) operands.push_back(values[operand]);
 
@@ -2144,7 +2163,7 @@ LogicalResult ExportXlaOp(FusionOp op, OpLoweringContext ctx) {
   xla::XlaOp fusion = xla::internal::XlaBuilderFriend::BuildFusion(
       ctx.builder, operands,
       absl::string_view(fusion_kind_string.data(), fusion_kind_string.size()),
-      fused_computation);
+      fused_computation, output_operand_aliasing);
   if (op.getNumResults() == 1) {
     values[op.getResult(0)] = fusion;
   } else {
@@ -2257,6 +2276,8 @@ StatusOr<xla::Literal> CreateArrayLiteralFromAttr(ElementsAttr attr,
     ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::C128, std::complex<double>)
     ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F16, Eigen::half)
     ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::BF16, Eigen::bfloat16)
+    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F8E5M2, tsl::float8_e5m2)
+    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F8E4M3FN, tsl::float8_e4m3fn)
     default:
       return tsl::errors::Internal(absl::StrCat(  // NOLINT
           "Unsupported type: ", xla::PrimitiveType_Name(shape.element_type())));
@@ -3024,6 +3045,13 @@ xla::Status ConvertMlirHloToHlo(mlir::ModuleOp module, xla::HloProto* hlo_proto,
   auto hlo_module = converter.ConsumeMainProto();
   StringRef module_name = module.getName() ? *module.getName() : "main";
   hlo_module.set_name(module_name.str());
+  if (auto cross_program_prefetches = module->getAttrOfType<mlir::ArrayAttr>(
+          "mhlo.cross_program_prefetches")) {
+    for (const auto& prefetch :
+         Convert_cross_program_prefetches(cross_program_prefetches)) {
+      *hlo_module.add_cross_program_prefetches() = std::move(prefetch);
+    }
+  }
   hlo_proto->mutable_hlo_module()->Swap(&hlo_module);
   return ::tsl::OkStatus();
 }

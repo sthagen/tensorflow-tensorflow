@@ -15,7 +15,7 @@
 """Utitiles for Cache Key generation based on Function Trace Type."""
 
 import collections.abc
-from typing import Any, Callable, Hashable
+from typing import Any, Callable, Hashable, Optional
 import weakref
 
 from tensorflow.core.function.trace_type import default_types
@@ -87,9 +87,10 @@ class InternalTracingContext(trace.TracingContext):
 class InternalPlaceholderContext(trace.PlaceholderContext):
   """Container with mappings shared across TraceTypes for placeholder values."""
 
-  def __init__(self, use_default_placeholder: bool = True):
-    self._use_default_placeholder = use_default_placeholder
+  def __init__(self, context_graph=None):
     self._alias_id_to_placeholder = {}
+    self._naming_scope = None
+    self._context_graph = context_graph
 
   def has_placeholder(self, alias_id: Hashable) -> bool:
     return alias_id in self._alias_id_to_placeholder
@@ -106,9 +107,16 @@ class InternalPlaceholderContext(trace.PlaceholderContext):
                      "instance of placeholder context.")
     self._alias_id_to_placeholder[alias_id] = placeholder
 
+  def update_naming_scope(self, naming_scope: Optional[str]) -> None:
+    self._naming_scope = naming_scope
+
   @property
-  def use_default_placeholder(self) -> bool:
-    return self._use_default_placeholder
+  def naming_scope(self) -> Optional[str]:
+    return self._naming_scope
+
+  @property
+  def context_graph(self):
+    return self._context_graph
 
 
 def from_value(value: Any,
