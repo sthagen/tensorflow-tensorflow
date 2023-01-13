@@ -363,12 +363,13 @@ tf_cc_test(
         ":test_cluster",
         ":test_util",
         "@com_google_absl//absl/container:flat_hash_set",
-        "//tensorflow/core/platform:status_matchers",
         "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "//tensorflow/core/data/service/snapshot:path_utils",
         "//tensorflow/core/platform:errors",
+        "//tensorflow/core/platform:status_matchers",
         "//tensorflow/core/platform:statusor",
     ] + tf_grpc_cc_dependencies() + tf_protos_profiler_service(),
 )
@@ -391,6 +392,7 @@ cc_library(
         ":grpc_util",
         ":journal",
         ":journal_proto_cc",
+        ":split_provider",
         ":task_remover",
         ":validate_utils",
         ":worker_cc_grpc_proto",
@@ -420,20 +422,6 @@ cc_library(
         "//tensorflow/core/platform:strcat",
         "//tensorflow/core/platform:thread_annotations",
     ] + tf_grpc_cc_dependencies(),
-)
-
-tf_cc_test(
-    name = "dispatcher_impl_test",
-    srcs = ["dispatcher_impl_test.cc"],
-    deps = [
-        ":dispatcher_impl",
-        ":dispatcher_proto_cc",
-        ":test_util",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "//tensorflow/core/platform:status",
-        "//tensorflow/core/platform:status_matchers",
-    ],
 )
 
 cc_library(
@@ -702,10 +690,12 @@ cc_library(
     ],
     # copybara:uncomment copts = ["-Wthread-safety-analysis"],
     deps = [
+        ":common_proto_cc",
         ":dispatcher_client",
         ":grpc_util",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+        "//tensorflow/core/data:standalone",
     ],
 )
 
@@ -1062,8 +1052,6 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "//tensorflow/c:c_api_internal",
-        "//tensorflow/c:tf_status_helper",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",

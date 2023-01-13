@@ -1346,6 +1346,7 @@ cc_library(
         "gml_st/transforms/transform_matmul_for_cpu/transform_matmul_for_cpu.cc",
         "gml_st/transforms/transform_matmul_for_triton/transform_matmul_for_triton.cc",
         "gml_st/transforms/transform_reduce_for_cpu/transform_reduce_for_cpu.cc",
+        "gml_st/transforms/transform_reverse_for_cpu/transform_reverse_for_cpu.cc",
         "gml_st/transforms/transform_scatter_for_cpu/transform_scatter_for_cpu.cc",
         "gml_st/transforms/transform_sort_for_cpu/transform_sort_for_cpu.cc",
         "gml_st/transforms/transform_tileable_ops_for_cpu/transform_tileable_ops_for_cpu.cc",
@@ -1577,9 +1578,6 @@ gentbl_cc_library(
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "gml_st/IR/gml_st_ops.td",
-    td_srcs = [
-        "gml_st/IR/gml_st_legacy_ops.td",
-    ],
     deps = [":gml_st_ops_td_files"],
 )
 

@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/OpDefinition.h"
@@ -172,6 +173,8 @@ struct MaterializeUpdateTransferWriteTensorOperand
 
   LogicalResult matchAndRewrite(vector::TransferWriteOp op,
                                 PatternRewriter &rewriter) const override {
+    if (!op->getParentOfType<ForOp>()) return failure();
+
     // Sanity checks of TransferWriteOp.
     if (op.hasOutOfBoundsDim()) return failure();
     if (op.getVectorType().getRank() != op.getShapedType().getRank())
@@ -211,6 +214,8 @@ struct SetYieldUpdateTransferWriteTensorOperand
 
   LogicalResult matchAndRewrite(SetYieldOp op,
                                 PatternRewriter &rewriter) const override {
+    if (!op->getParentOfType<ForOp>()) return failure();
+
     bool changed = false;
     for (const auto &[src, dst, set] :
          llvm::zip(op.getSrcs(), op.getDsts(), op.getSets())) {
@@ -669,7 +674,7 @@ RewritePatternSet getDefaultVectorizationPatterns(MLIRContext *ctx) {
 
 bool isInsideGmlStLoop(Operation *op) {
   Operation *parent = op->getParentOp();
-  return isa<LoopOp>(parent) || isa<ParallelOp>(parent) || isa<ForOp>(parent);
+  return isa<ParallelOp>(parent) || isa<ForOp>(parent);
 }
 
 bool isFillTiledOrSmall(FillOp fill) {
@@ -862,6 +867,7 @@ struct VectorizePerfectlyTiledLoopsPass
       (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
     }
 
+    // TODO(vuson): remove these patterns once gml_st.for is retired.
     {
       RewritePatternSet patterns = getDefaultVectorizationPatterns(ctx);
       linalg::populatePadOpVectorizationPatterns(patterns);
@@ -870,8 +876,6 @@ struct VectorizePerfectlyTiledLoopsPass
                    IdentityTransposeOpFoldingPattern>(ctx);
       (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
     }
-
-    // Hoisting transfer_read/transfer_write.
     {
       RewritePatternSet patterns(ctx);
       patterns.add<IdentityMaterializeOpFoldingPattern>(ctx);
@@ -879,6 +883,8 @@ struct VectorizePerfectlyTiledLoopsPass
 
       hoistRedundantVectorTransfersOnTensor(func);
     }
+    // Hoisting transfer_read/transfer_write.
+    linalg::hoistRedundantVectorTransfersOnTensor(func);
   }
 };
 
