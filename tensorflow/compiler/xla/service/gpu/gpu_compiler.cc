@@ -91,6 +91,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/all_reduce_blueconnect.h"
 #include "tensorflow/compiler/xla/service/gpu/conditional_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/conv_layout_normalization.h"
+#include "tensorflow/compiler/xla/service/gpu/dot_dimension_sorter.h"
 #include "tensorflow/compiler/xla/service/gpu/for_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_broadcast_folding_rewriter.h"
@@ -354,7 +355,6 @@ GpuTargetConfig::GpuTargetConfig(const se::GpuTargetConfigProto& proto)
     gpu_version = rocm_compute_capability;
   }
 
-  autotune_results = proto.autotune_results();
   device_description_str = proto.device_description_str();
 }
 
@@ -376,7 +376,6 @@ se::GpuTargetConfigProto GpuTargetConfig::ToProto() const {
 
   proto.set_platform_name(platform_name);
   *proto.mutable_dnn_version_info() = dnn_version_info.ToProto();
-  *proto.mutable_autotune_results() = autotune_results;
   proto.set_device_description_str(device_description_str);
   return proto;
 }
@@ -409,7 +408,8 @@ void AddHloVerifier(HloPassPipeline* pipeline, HloVerifierOpts&& opts = {},
 Status GpuCompiler::OptimizeHloModule(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
     se::DeviceMemoryAllocator* device_allocator,
-    const GpuTargetConfig& gpu_target_config) {
+    const GpuTargetConfig& gpu_target_config,
+    const AutotuneResults* autotune_results) {
   const DebugOptions& debug_options = hlo_module->config().debug_options();
 
   AlgebraicSimplifierOptions layout_insensitive_algsimp_opts({},
@@ -515,6 +515,7 @@ Status GpuCompiler::OptimizeHloModule(
     // TODO(b/64094172): make Call work on GPU instead of inlining.
     pipeline.AddPass<CallInliner>();
 
+    pipeline.AddPass<DotDimensionSorter>();
     pipeline.AddPass<DotDecomposer>();
 
     pipeline.AddPass<StochasticConvertDecomposer>();
@@ -599,6 +600,7 @@ Status GpuCompiler::OptimizeHloModule(
       pipeline.AddPass<AlgebraicSimplifier>(layout_insensitive_algsimp_opts);
       pipeline.AddPass<BitcastDtypesExpander>();
       // AlgebraicSimplifier may add contracting dimensions to a dot.
+      pipeline.AddPass<DotDimensionSorter>();
       pipeline.AddPass<DotDecomposer>();
       // Only merge "smallish" dots.  This threshold was not set carefully, but
       // so far we know that 1mb is too small.
@@ -698,8 +700,9 @@ Status GpuCompiler::OptimizeHloModule(
   }
 
   // Run target-specific HLO optimization passes after layout assignment.
-  TF_RETURN_IF_ERROR(OptimizeHloPostLayoutAssignment(
-      hlo_module, stream_exec, device_allocator, gpu_target_config));
+  TF_RETURN_IF_ERROR(
+      OptimizeHloPostLayoutAssignment(hlo_module, stream_exec, device_allocator,
+                                      gpu_target_config, autotune_results));
 
   {
     HloPassFix<HloPassPipeline> fusion("fusion");
@@ -827,7 +830,8 @@ Status GpuCompiler::PrepareHloModuleForIrEmitting(HloModule* hlo_module) {
 Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
     se::DeviceMemoryAllocator* device_allocator,
-    const GpuTargetConfig& gpu_target_config) {
+    const GpuTargetConfig& gpu_target_config,
+    const AutotuneResults* autotune_results) {
   const DebugOptions& debug_options = hlo_module->config().debug_options();
 
   {
@@ -943,8 +947,16 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // wouldn't be able to simplify away the new_tuple bits.
   if (stream_exec) {
     // Autotune if stream_exec is available.
-    // TODO(b/248362914): Enable autotuning for convolutions without GPU.
     GpuConvAlgorithmPicker::DeviceConfig config{stream_exec, device_allocator};
+    pipeline.AddPass<GpuConvAlgorithmPicker>(config);
+  } else {
+    // Device not available. Use autotune results from gpu_target_config.
+    GpuConvAlgorithmPicker::ClearAutotuneResults();
+    TF_RETURN_IF_ERROR(
+        GpuConvAlgorithmPicker::LoadAutotuneResults(*autotune_results));
+
+    GpuConvAlgorithmPicker::DevicelessConfig config{
+        gpu_target_config.device_description_str};
     pipeline.AddPass<GpuConvAlgorithmPicker>(config);
   }
 
@@ -981,8 +993,9 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
       tsl::profiler::TraceMeLevel::kInfo);
 
   GpuTargetConfig gpu_target_config = GetGpuTargetConfig(stream_exec);
-  TF_RETURN_IF_ERROR(OptimizeHloModule(
-      module.get(), stream_exec, options.device_allocator, gpu_target_config));
+  TF_RETURN_IF_ERROR(
+      OptimizeHloModule(module.get(), stream_exec, options.device_allocator,
+                        gpu_target_config, /*autotune_results=*/nullptr));
 
   TF_RETURN_IF_ERROR(PrepareHloModuleForIrEmitting(module.get()));
 
@@ -997,7 +1010,8 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
 
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPassesWithoutDevice(
     std::unique_ptr<HloModule> module, const CompileOptions& options,
-    const GpuTargetConfig& gpu_target_config) {
+    const GpuTargetConfig& gpu_target_config,
+    const AutotuneResults& autotune_results) {
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER(
       absl::StrCat("GpuCompiler::RunHloPasses for ", module->name()));
@@ -1005,8 +1019,9 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPassesWithoutDevice(
   tsl::profiler::TraceMe activity(
       [&] { return absl::StrCat("HLO Transforms:", module->name()); },
       tsl::profiler::TraceMeLevel::kInfo);
-  TF_RETURN_IF_ERROR(OptimizeHloModule(
-      module.get(), nullptr, options.device_allocator, gpu_target_config));
+  TF_RETURN_IF_ERROR(OptimizeHloModule(module.get(), nullptr,
+                                       options.device_allocator,
+                                       gpu_target_config, &autotune_results));
 
   TF_RETURN_IF_ERROR(PrepareHloModuleForIrEmitting(module.get()));
 
