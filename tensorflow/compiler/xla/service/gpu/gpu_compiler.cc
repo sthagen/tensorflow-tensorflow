@@ -43,7 +43,6 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/Diagnostics.h"  // from @llvm-project
-#include "mlir/IR/TypeUtilities.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
@@ -296,7 +295,6 @@ class GpuBfloat16Support : public BFloat16Support {
                std::pair<se::dnn::VersionInfo, se::CudaComputeCapability>>
       gpu_info_;
 };
-
 
 bool ConvIsLowerable(HloInstruction* conv) {
   return GpuConvRewriter::ConvIsLowerable(conv);
@@ -704,6 +702,8 @@ Status GpuCompiler::OptimizeHloModule(
       OptimizeHloPostLayoutAssignment(hlo_module, stream_exec, device_allocator,
                                       gpu_target_config, autotune_results));
 
+  const GpuDeviceInfo& gpu_device_info = gpu_target_config.gpu_device_info;
+
   {
     HloPassFix<HloPassPipeline> fusion("fusion");
     // We try to split variadic ops with many parameters into several such ops
@@ -714,9 +714,10 @@ Status GpuCompiler::OptimizeHloModule(
         HloVerifierOpts{}.MakeLayoutSensitive().WithInstructionCanChangeLayout(
             LayoutAssignment::InstructionCanChangeLayout),
         /*debug_only=*/true);
-    fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/false);
-    fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/true);
-    const GpuDeviceInfo gpu_device_info = gpu_target_config.gpu_device_info;
+    fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/false,
+                                         gpu_device_info);
+    fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/true,
+                                         gpu_device_info);
     fusion.AddPass<FusionMerger>(gpu_device_info, ShapeSizeBytesFunction());
     fusion.AddPass<GpuMultiOutputFusion>(gpu_device_info,
                                          ShapeSizeBytesFunction());
@@ -729,7 +730,7 @@ Status GpuCompiler::OptimizeHloModule(
   {
     HloPassFix<HloPassPipeline> horizontal_fusion("horizontal fusion");
     horizontal_fusion.AddPass<GpuHorizontalLoopFusion>();
-    horizontal_fusion.AddPass<GpuHorizontalInputFusion>();
+    horizontal_fusion.AddPass<GpuHorizontalInputFusion>(gpu_device_info);
     horizontal_fusion.AddPass<HloCSE>(/*is_layout_sensitive=*/true,
                                       /*only_fusion_computations=*/true);
     horizontal_fusion.AddPass<HloDCE>();
@@ -784,8 +785,6 @@ Status GpuCompiler::OptimizeHloModule(
     AlgebraicSimplifierOptions options = layout_insensitive_algsimp_opts;
     options.set_is_layout_sensitive(true);
     pipeline.AddPass<AlgebraicSimplifier>(options);
-    pipeline.AddPass<OptimizationBarrierExpander>();
-    pipeline.AddPass<TupleSimplifier>();
 
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
@@ -1224,6 +1223,12 @@ static Status CompileModuleToLlvmIrImpl(
 
   TF_RETURN_IF_ERROR(
       ScheduleGpuModule(hlo_module, pointer_size, gpu_device_info));
+  {
+    HloPassPipeline pipeline("opt-barrier-expander");
+    pipeline.AddPass<OptimizationBarrierExpander>();
+
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
 
   auto buffer_size_bytes_function =
       [pointer_size](const BufferValue& buffer_value) -> int64_t {
