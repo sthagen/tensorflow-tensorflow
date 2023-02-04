@@ -374,7 +374,8 @@ func.func @fold_extract_from_elements_into_gml_st(%in: tensor<8x2xf32>,
   %c2 = arith.constant 2 : index
   %c8 = arith.constant 8 : index
 
-  %copy = gml_st.parallel (%i, %j) = (%c0, %c0) to (%c8, %c2) step (%c1, %c1) {
+  %copy = gml_st.parallel (%i, %j) = (%c0, %c0) to (%c8, %c2) step (%c1, %c1)
+      outs (%out_ = %out: tensor<8x2xf32>) {
     %in_sub = tensor.extract_slice %in[%i, %j] [1, 1] [1, 1]
       : tensor<8x2xf32> to tensor<1x1xf32>
 
@@ -383,7 +384,7 @@ func.func @fold_extract_from_elements_into_gml_st(%in: tensor<8x2xf32>,
     %out_sub = tensor.from_elements %elem : tensor<1x1xf32>
 
     %tile = gml_st.tile [%i, %j] [1, 1] [1, 1] : !gml_st.tile<1x1>
-    gml_st.set_yield %out_sub into %out[%tile]
+    gml_st.set_yield %out_sub into %out_[%tile]
       : tensor<1x1xf32> into tensor<8x2xf32>[!gml_st.tile<1x1>]
   } : tensor<8x2xf32>
   func.return %copy: tensor<8x2xf32>
@@ -562,14 +563,60 @@ func.func @linalg_matmul(%lhs: tensor<1x1xf32>,
 
 // -----
 
-func.func @thlo_reverse(%arg : tensor<1x1xf32>,
-                                    %init: tensor<1x1xf32>)
-                                    -> tensor<1x1xf32>  {
+func.func @thlo_reverse(%arg : tensor<1x1xf32>, %init: tensor<1x1xf32>)
+    -> tensor<1x1xf32> {
   %0 = thlo.reverse ins(%arg : tensor<1x1xf32>)
         outs(%init : tensor<1x1xf32>)
         reverse_dimensions = [0, 1]
   func.return %0 : tensor<1x1xf32>
 }
+
 // CHECK-LABEL: @thlo_reverse(
 //  CHECK-SAME: %[[ARG:.*]]: tensor<1x1xf32>, %[[INIT:.*]]: tensor<1x1xf32>)
 //       CHECK:   return %[[ARG]]
+
+// -----
+
+func.func @ite_1d(%arg0: i1, %arg1: tensor<1xf32>, %arg2: tensor<1xf32>)
+    -> tensor<1xf32> {
+  %0 = scf.if %arg0 -> (tensor<1xf32>) {
+    scf.yield %arg2 : tensor<1xf32>
+  } else {
+    scf.yield %arg1 : tensor<1xf32>
+  }
+  return %0 : tensor<1xf32>
+}
+
+// CHECK:     func.func @ite_1d(%[[ARG0:.*]]: i1, %[[ARG1:.*]]: tensor<1xf32>, %[[ARG2:.*]]: tensor<1xf32>)
+// CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : index
+// CHECK:       %[[IF:.*]] = scf.if %[[ARG0]] -> (f32)
+// CHECK:         %[[EXTRACTED:.*]] = tensor.extract %[[ARG2]][%[[C0]]]
+// CHECK:         scf.yield %[[EXTRACTED]] : f32
+// CHECK:       else
+// CHECK:         %[[EXTRACTED_0:.*]] = tensor.extract %[[ARG1]][%[[C0]]]
+// CHECK:         scf.yield %[[EXTRACTED_0]] : f32
+// CHECK:       %[[FROM_ELEMENTS:.*]] = tensor.from_elements %[[IF]]
+// CHECK:       return %[[FROM_ELEMENTS]]
+
+// -----
+
+func.func @ite_2d(%arg0: i1, %arg1: tensor<1x1xf32>, %arg2: tensor<1x1xf32>)
+    -> tensor<1x1xf32> {
+  %0 = scf.if %arg0 -> (tensor<1x1xf32>) {
+    scf.yield %arg2 : tensor<1x1xf32>
+  } else {
+    scf.yield %arg1 : tensor<1x1xf32>
+  }
+  return %0 : tensor<1x1xf32>
+}
+
+// CHECK:     func.func @ite_2d(%[[ARG0:.*]]: i1, %[[ARG1:.*]]: tensor<1x1xf32>, %[[ARG2:.*]]: tensor<1x1xf32>)
+// CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : index
+// CHECK:       %[[IF:.*]] = scf.if %[[ARG0]] -> (f32)
+// CHECK:         %[[EXTRACTED:.*]] = tensor.extract %[[ARG2]][%[[C0]], %[[C0]]]
+// CHECK:         scf.yield %[[EXTRACTED]] : f32
+// CHECK:       else
+// CHECK:         %[[EXTRACTED_0:.*]] = tensor.extract %[[ARG1]][%[[C0]], %[[C0]]]
+// CHECK:         scf.yield %[[EXTRACTED_0]] : f32
+// CHECK:       %[[FROM_ELEMENTS:.*]] = tensor.from_elements %[[IF]]
+// CHECK:       return %[[FROM_ELEMENTS]]

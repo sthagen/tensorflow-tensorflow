@@ -20,6 +20,7 @@ tf_cc_test(
     deps = [
         ":path_utils",
         ":snapshot_reader",
+        ":test_utils",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "//tensorflow/core:framework",
@@ -52,6 +53,7 @@ cc_library(
         "//tensorflow/tsl/platform:env",
         "//tensorflow/tsl/platform:errors",
         "//tensorflow/tsl/platform:protobuf",
+        "//tensorflow/tsl/platform:random",
         "//tensorflow/tsl/platform:status",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/strings",
@@ -122,6 +124,7 @@ cc_library(
         "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/platform:thread_annotations",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/time",
     ],
 )
@@ -134,6 +137,7 @@ tf_cc_test(
         ":path_utils",
         ":snapshot_reader",
         ":snapshot_split_provider",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/time",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -174,6 +178,7 @@ cc_library(
         "//tensorflow/tsl/platform:errors",
         "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/platform:statusor",
+        "@com_google_absl//absl/time",
     ],
 )
 

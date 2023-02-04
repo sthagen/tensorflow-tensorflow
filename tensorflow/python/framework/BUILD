@@ -246,6 +246,7 @@ py_library(
         ":op_def_registry",
         ":ops",
         ":registry",
+        ":tensor_conversion_registry",
         ":tensor_shape",
         ":versions",
     ],
@@ -375,6 +376,7 @@ py_library(
         ":tensor_shape",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:execute",
+        "//tensorflow/python/framework:tensor_conversion_registry",
         "//tensorflow/python/profiler:trace",
     ],
 )
@@ -1076,9 +1078,14 @@ py_library(
         ":tensor_conversion_registry",
         ":tensor_shape",
         ":type_spec",
+        "//tensorflow/core:protos_all_py",
+        "//tensorflow/python:tf2",
         "//tensorflow/python/eager:context",
+        "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/types",
         "//tensorflow/python/util",
+        "//tensorflow/python/util:tf_export",
+        "//third_party/py/numpy",
     ],
 )
 
@@ -1132,7 +1139,6 @@ py_library(
         "//tensorflow/python/eager:tape",
         "//tensorflow/python/platform",
         "//tensorflow/python/saved_model:save_context",
-        "//tensorflow/python/types",
         "//tensorflow/python/util",
         "//tensorflow/python/util:tf_decorator",
         "//tensorflow/python/util:tf_export",
@@ -1315,6 +1321,8 @@ py_library(
         ":tensor_util",
         ":type_spec",
         ":type_spec_registry",
+        "//tensorflow/core:protos_all_py",
+        "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/types",
     ],
 )
@@ -1369,7 +1377,9 @@ py_library(
         ":tensor_spec",
         ":type_spec",
         ":type_spec_registry",
+        "//tensorflow/core:protos_all_py",
         "//tensorflow/python:composite_tensor_ops",
+        "//tensorflow/python/saved_model:nested_structure_coder",
     ],
 )
 
@@ -1404,6 +1414,7 @@ py_library(
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python:tf2",
         "//tensorflow/python/eager:monitoring",
+        "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/util",
     ],
 )
@@ -1421,6 +1432,7 @@ pytype_library(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python:platform",
+        "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/types",
         "//tensorflow/python/util",
         "//third_party/py/numpy",
@@ -1468,6 +1480,7 @@ py_library(
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python/eager:graph_only_ops",
         "//tensorflow/python/platform",
+        "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/types",
         "//tensorflow/python/util",
         "//third_party/py/numpy",
