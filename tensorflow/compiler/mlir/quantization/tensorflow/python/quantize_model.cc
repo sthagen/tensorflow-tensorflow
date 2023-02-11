@@ -116,6 +116,7 @@ void AddExportPasses(const bool duplicate_shape_determining_constants,
       mlir::CreateFunctionalToExecutorDialectConversionPass());
   pm.addPass(mlir::CreateBreakUpIslandsPass());
   pm.addPass(mlir::quant::CreateMergeInitializerFunctionOpsToMainPass());
+  pm.addPass(mlir::quant::CreateMergeSaveFunctionOpsToMainPass());
 
   // Used to clean up the "tf._noinliner" attribute that is previously used to
   // prevent certain functions from being inlined (see
@@ -276,6 +277,7 @@ absl::StatusOr<std::vector<std::string>> UnfreezeConstantsAndSaveVariables(
           /*add_passes_func=*/
           [](mlir::PassManager &pm) {
             pm.addPass(mlir::quant::CreateInsertRestoreOpPass());
+            pm.addPass(mlir::quant::CreateInsertSaveOpPass());
             // Initialization by `tf.ConstOp` is no longer required as there is
             // a `tf.RestoreV2Op` now.
             pm.addPass(

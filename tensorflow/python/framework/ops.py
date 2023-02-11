@@ -50,7 +50,6 @@ from tensorflow.python.framework import cpp_shape_inference_pb2
 from tensorflow.python.framework import device as pydev
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
-from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import registry
 from tensorflow.python.framework import tensor_conversion_registry
 from tensorflow.python.framework import tensor_shape
@@ -285,9 +284,8 @@ def disable_tensor_equality():
   Tensor._USE_EQUALITY = False  # pylint: disable=protected-access
 
 
-# TODO(mdan): This object should subclass Symbol, not just Tensor.
 @tf_export("Tensor", "experimental.numpy.ndarray", v1=["Tensor"])
-class Tensor(internal.NativeObject, core_tf_types.Tensor):
+class Tensor(internal.NativeObject, core_tf_types.Symbol):
   """A `tf.Tensor` represents a multidimensional array of elements.
 
   All elements are of a single known data type.
@@ -509,6 +507,11 @@ class Tensor(internal.NativeObject, core_tf_types.Tensor):
     else:
       shape_vec = [None if d == -1 else d for d in shape_vec]
       return tensor_shape.TensorShape(shape_vec)
+
+  @property
+  def ndim(self):
+    """Returns the number of Tensor dimensions."""
+    return self.shape.ndims
 
   @property
   def _shape(self):
@@ -1047,7 +1050,7 @@ class Tensor(internal.NativeObject, core_tf_types.Tensor):
 
 # TODO(agarwal): consider getting rid of this.
 # TODO(mdan): This object should not subclass ops.Tensor.
-class _EagerTensorBase(Tensor):
+class _EagerTensorBase(Tensor, core_tf_types.Value):
   """Base class for EagerTensor."""
 
   # __complex__, __int__, __float__ and __index__ may copy the tensor to CPU and
@@ -1274,11 +1277,6 @@ class _EagerTensorBase(Tensor):
   def _shape_as_list(self):
     """The shape of the tensor as a list."""
     return list(self._shape_tuple())
-
-  @property
-  def ndim(self):
-    """Returns the number of Tensor dimensions."""
-    return self.shape.ndims
 
   @deprecation.deprecated(
       None, "Use tf.identity with explicit device placement instead.")
@@ -2100,7 +2098,7 @@ class Operation(object):
         control_op = None
         if isinstance(c, Operation):
           control_op = c
-        elif isinstance(c, (Tensor, indexed_slices.IndexedSlices)):
+        elif isinstance(c, (Tensor, internal.IndexedSlices)):
           control_op = c.op
         else:
           raise TypeError(f"Control input must be an Operation, "
@@ -5101,7 +5099,7 @@ class Graph(object):
       # The hasattr(handle) is designed to match ResourceVariables. This is so
       # control dependencies on a variable or on an unread variable don't
       # trigger reads.
-      if (isinstance(c, indexed_slices.IndexedSlices) or
+      if (isinstance(c, internal.IndexedSlices) or
           (hasattr(c, "_handle") and hasattr(c, "op"))):
         c = c.op
       c = self.as_graph_element(c)
