@@ -584,12 +584,12 @@ def GMLST_SetYieldOp : GMLST_Op<"set_yield", [
 }
 
 def GMLST_YieldOp : GMLST_Op<"yield", [Pure, ReturnLike, Terminator,
-    HasParent<"::mlir::gml_st::SetYieldOp">]>,
+    HasParent<"::mlir::gml_st::SetYieldOp, ::mlir::gml_st::FusionOp">]>,
     Arguments<(ins AnyType:$value)> {
   let summary = "Yield operation";
   let description = [{
     `gml_st.yield` is a special terminator operation for accumulator regions of
-    `gml_st.set_yield`.
+    `gml_st.set_yield` and `gml_st.fusion` region.
 
     Example:
 
@@ -629,6 +629,20 @@ def GMLST_DistributeOp : GMLST_Op<"distribute", [
       `into` type($result) `[` type($set) `]`
   }];
 
+  let hasVerifier = 0;
+}
+
+def GMLST_FusionOp : GMLST_Op<"fusion", [
+      IsolatedFromAbove,
+      SingleBlockImplicitTerminator<"gml_st::YieldOp">
+    ]> {
+  let summary = "A cluster of operations to be tiled and fused.";
+
+  let arguments = (ins Variadic<AnyRankedTensor>:$inputs);
+  let results = (outs Variadic<AnyRankedTensor>:$results);
+  let regions = (region SizedRegion<1>:$region);
+
+  let hasCustomAssemblyFormat = 1;
   let hasVerifier = 0;
 }
 

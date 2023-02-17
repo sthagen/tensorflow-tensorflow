@@ -407,6 +407,7 @@ cc_library(
         ":tensor_array_side_effect_analysis",
         ":tf_jitrt_opdefs",
         ":tf_jitrt_pipeline",
+        ":tfrt_compile_options",
         ":transforms/gpu_passes",
         ":transforms/set_shape_invariant_in_while_ops",
         "@llvm-project//llvm:Support",
@@ -437,7 +438,7 @@ cc_library(
         "@tf_runtime//backends/jitrt:jitrt_opdefs",
         "@tf_runtime//:stream_analysis",
         "@tf_runtime//:test_kernels_opdefs",
-        "//tensorflow/compiler/mlir/tfrt:transform_utils",
+        ":transform_utils",
         "//tensorflow/tsl/platform:status",
     ] + if_google([
         "//learning/brain/tfrt/tpu/compiler/mlir:tf_to_tfrt_tpu",
@@ -827,6 +828,7 @@ cc_library(
     srcs = ["transforms/update_op_cost_in_tfrt_mlir.cc"],
     hdrs = ["transforms/update_op_cost_in_tfrt_mlir.h"],
     deps = [
+        ":cost_analysis",
         "//tensorflow/core/tfrt/fallback:cost_recorder",
         "@llvm-project//mlir:IR",
     ],

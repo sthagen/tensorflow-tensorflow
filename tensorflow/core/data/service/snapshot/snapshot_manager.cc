@@ -29,6 +29,7 @@ limitations under the License.
 #include "tensorflow/core/data/service/split_provider.h"
 #include "tensorflow/core/data/snapshot_utils.h"
 #include "tensorflow/core/platform/status.h"
+#include "tensorflow/tsl/lib/io/compression.h"
 #include "tensorflow/tsl/platform/env.h"
 #include "tensorflow/tsl/platform/errors.h"
 #include "tensorflow/tsl/platform/statusor.h"
@@ -69,6 +70,8 @@ Status SnapshotManager::WriteOnDiskSkeleton() {
 Status SnapshotManager::WriteOnDiskMetadata(const SnapshotRequest& request) {
   TF_RETURN_IF_ERROR(WriteTextProto(env_, SnapshotMetadataFilePath(path_),
                                     request.metadata()));
+  TF_RETURN_IF_ERROR(WriteStringToFile(env_, DatasetSpecFilePath(path_),
+                                       request.metadata().element_spec()));
   TF_RETURN_IF_ERROR(
       WriteBinaryProto(env_, DatasetDefFilePath(path_), request.dataset()));
   return OkStatus();
@@ -296,6 +299,7 @@ SnapshotManager::MaybeGetOrCreateStreamAssignment(
     assigned_stream_index = it->second;
   }
   if (snapshot_progress) {
+    // TODO(b/258691097): Handle worker errors if any.
     if (assigned_stream_index.has_value() &&
         *assigned_stream_index !=
             snapshot_progress->snapshot_task().stream_index()) {
@@ -394,7 +398,8 @@ Status SnapshotManager::GetSnapshotSplit(const GetSnapshotSplitRequest& request,
   std::string split_path =
       SplitPath(path_, request.stream_index(), request.source_index(),
                 local_split_index, global_split_index);
-  TF_RETURN_IF_ERROR(AtomicallyWriteTFRecord(split_path, split, env_));
+  TF_RETURN_IF_ERROR(AtomicallyWriteTFRecord(
+      split_path, split, tsl::io::compression::kNone, env_));
   split.AsProtoTensorContent(response.mutable_split());
 
   ++stream.num_assigned_splits[request.source_index()];

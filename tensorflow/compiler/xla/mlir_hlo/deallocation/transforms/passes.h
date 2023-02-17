@@ -24,10 +24,27 @@ limitations under the License.
 namespace mlir {
 namespace deallocation {
 
+// Pass to split bufferization.alloc_tensor ops to optimize buffer reuse.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createSplitAllocTensorsPass();
+
 // Pass to insert deallocations (in the form of `deallocation.retain`) ops. Most
 // deallocations are typically converted to `memref.dealloc` by
 // canonicalization.
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>> createDeallocatePass();
+
+// Pass to reuse buffers (hoisting, double buffering, dealloc/alloc
+// coalescing).
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createBufferReusePass();
+
+// Convert `deallocation` ops to LLVM.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createConvertDeallocationOpsToLLVM();
+
+// Lowers retain to SCF.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createDeallocationToScfPass();
 
 #define GEN_PASS_REGISTRATION
 #include "deallocation/transforms/passes.h.inc"

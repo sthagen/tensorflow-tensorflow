@@ -1303,8 +1303,9 @@ xla_test(
     backends = ["gpu"],
     deps = [
         ":hlo_test_base",
-        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        ":xla_internal_test_main",
         "//tensorflow/tsl/platform:test",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -2215,27 +2216,6 @@ xla_test(
         "//tensorflow/tsl/platform:status",
         "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/platform:test",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-xla_test(
-    name = "gpu_dump_mlir_passes_test",
-    srcs = ["gpu_dump_mlir_passes_test.cc"],
-    backends = [
-        "gpu",
-    ],
-    deps = [
-        ":hlo_test_base",
-        ":xla_internal_test_main",
-        "//tensorflow/compiler/xla:status",
-        "//tensorflow/compiler/xla:test",
-        "//tensorflow/compiler/xla/service:hlo_proto_cc",
-        "//tensorflow/tsl/lib/core:status_test_util",
-        "//tensorflow/tsl/platform:env",
-        "//tensorflow/tsl/platform:path",
-        "//tensorflow/tsl/platform:status",
-        "//tensorflow/tsl/platform:statusor",
         "@com_google_googletest//:gtest_main",
     ],
 )
