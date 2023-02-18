@@ -31,13 +31,11 @@ from tensorflow.python.eager.graph_only_ops import graph_placeholder
 from tensorflow.python.eager.polymorphic_function import composite_tensor_utils
 from tensorflow.python.framework import auto_control_deps
 from tensorflow.python.framework import composite_tensor
-from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_spec
-from tensorflow.python.framework import tensor_util
 from tensorflow.python.framework import type_spec
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import handle_data_util
@@ -708,40 +706,57 @@ class FuncGraph(ops.Graph):
       # Small EagerTensors are captured with Const ops
       if (tensor.dtype in dtypes.TF_VALUE_DTYPES and
           np.prod(tensor.shape) <= _EAGER_CONST_THRESHOLD):
-        return self.capture_eager_tensor(tensor, name)
+        capture = self._function_captures.by_val_captures.get(id(tensor))
+        if capture is None:
+          graph_const = tensor._capture_as_const(name)  # pylint: disable=protected-access
+          if graph_const is None:
+            # Some eager tensors, e.g. parallel tensors, are not convertible to
+            # a single constant. We'll use a placeholder for this case.
+            graph_const = self._capture_helper(tensor, name)  # pylint: disable=protected-access
+          self.add_capture(tensor, graph_const)
+        else:
+          graph_const = capture.internal
+        tape.record_operation(
+            "captured_value", [graph_const], [tensor],
+            backward_function=lambda x: [x],
+            forward_function=lambda x: [x])
+        return graph_const
 
       # Large EagerTensors and resources are captured with Placeholder ops
       return self._capture_helper(tensor, name, shape)
     if tensor.graph is not self:
+      self._validate_in_scope(tensor)
       if name is None:
         name = tensor.op.name
-      inner_graph = tensor.graph
-      while inner_graph is not None and isinstance(inner_graph, FuncGraph):
-        if inner_graph is self:
-          try:
-            tb = tensor.op.traceback
-          except AttributeError:
-            tensor_traceback = "<unknown>"
-          else:
-            tensor_traceback_list = []
-            for frame in traceback.format_list(tb.get_user_frames()):
-              tensor_traceback_list.extend(
-                  [f"  {line}" for line in frame.split("\n") if line.strip()])
-            tensor_traceback = "\n".join(tensor_traceback_list)
-          # Keep in sync with tfe_wrapper.cc.
-          # TODO(b/200991648): Unify those two paths.
-          raise errors.InaccessibleTensorError(
-              f"{tensor!r} is out of scope and cannot be used here. Use return "
-              "values, explicit Python locals or TensorFlow collections to "
-              "access it.\n"
-              "Please see https://www.tensorflow.org/guide/function#all_outputs_of_a_tffunction_must_be_return_values "
-              "for more information.\n\n"
-              f"{tensor!r} was defined here:\n{tensor_traceback}\n\n"
-              f"The tensor {tensor!r} cannot be accessed from {self}, because "
-              f"it was defined in {tensor.graph}, which is out of scope.")
-        inner_graph = inner_graph.outer_graph
       return self._capture_helper(tensor, name)
     return tensor
+
+  def _validate_in_scope(self, tensor):
+    inner_graph = tensor.graph
+    while inner_graph is not None and isinstance(inner_graph, FuncGraph):
+      if inner_graph is self:
+        try:
+          tb = tensor.op.traceback
+        except AttributeError:
+          tensor_traceback = "<unknown>"
+        else:
+          tensor_traceback_list = []
+          for frame in traceback.format_list(tb.get_user_frames()):
+            tensor_traceback_list.extend(
+                [f"  {line}" for line in frame.split("\n") if line.strip()])
+          tensor_traceback = "\n".join(tensor_traceback_list)
+        # Keep in sync with tfe_wrapper.cc.
+        # TODO(b/200991648): Unify those two paths.
+        raise errors.InaccessibleTensorError(
+            f"{tensor!r} is out of scope and cannot be used here. Use return "
+            "values, explicit Python locals or TensorFlow collections to "
+            "access it.\n"
+            "Please see https://www.tensorflow.org/guide/function#all_outputs_of_a_tffunction_must_be_return_values "  # pylint: disable=line-too-long
+            "for more information.\n\n"
+            f"{tensor!r} was defined here:\n{tensor_traceback}\n\n"
+            f"The tensor {tensor!r} cannot be accessed from {self}, because "
+            f"it was defined in {tensor.graph}, which is out of scope.")
+      inner_graph = inner_graph.outer_graph
 
   def _capture_helper(self, tensor, name, shape=None):
     capture = self._function_captures.by_val_captures.get(id(tensor))
@@ -895,26 +910,6 @@ class FuncGraph(ops.Graph):
         key=id(tensor),
         default_value=default_value,
         placeholder=placeholder)
-
-  def capture_eager_tensor(self, tensor, name):
-    capture = self._function_captures.by_val_captures.get(id(tensor))
-    if capture is None:
-      with ops.control_dependencies(None):
-        constant_value = tensor_util.constant_value(tensor)
-        if constant_value is None:
-          # Some eager tensors, e.g. parallel tensors, are not convertible to a
-          # single constant. We'll use a placeholder for this case.
-          return self._capture_helper(tensor, name)
-        graph_const = constant_op.constant(
-            constant_value, dtype=tensor.dtype, shape=tensor.shape, name=name)
-      self.add_capture(tensor, graph_const)
-    else:
-      graph_const = capture.internal
-    tape.record_operation(
-        "captured_value", [graph_const], [tensor],
-        backward_function=lambda x: [x],
-        forward_function=lambda x: [x])
-    return graph_const
 
   @property
   def external_captures(self):

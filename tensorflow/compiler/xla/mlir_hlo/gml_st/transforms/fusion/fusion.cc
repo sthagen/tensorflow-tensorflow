@@ -35,6 +35,7 @@ limitations under the License.
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Transforms/InliningUtils.h"
 #include "mlir/Transforms/RegionUtils.h"
 #include "mlir/Transforms/TopologicalSortUtils.h"
 #include "thlo/IR/thlo_ops.h"
@@ -254,8 +255,9 @@ void reifyDimOp(PatternRewriter& rewriter, tensor::DimOp dimOp) {
 
   SmallVector<SmallVector<Value>> reifiedResultShapes;
   if (failed(
-          rankedShapeTypeOp.reifyResultShapes(rewriter, reifiedResultShapes)))
+          rankedShapeTypeOp.reifyResultShapes(rewriter, reifiedResultShapes))) {
     return;
+  }
 
   if (reifiedResultShapes.size() != rankedShapeTypeOp->getNumResults()) return;
 
@@ -346,15 +348,21 @@ LogicalResult fuseGreedilyOneOpIntoBlock(
     // `tiledFusionOp(tensor.extract_slice)`.
     if (auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(candidateUser)) {
       if (auto castOp = dyn_cast<tensor::CastOp>(fusionCandidate)) {
-        return fuseTensorCast(rewriter, castOp, extractSliceOp);
+        if (succeeded(fuseTensorCast(rewriter, castOp, extractSliceOp))) {
+          return success();
+        }
+        continue;
       }
-      return fuse(rewriter, extractSliceOp);
+      if (succeeded(fuse(rewriter, extractSliceOp))) {
+        return success();
+      }
+      continue;
     }
 
     // TODO(shyshkov): Implement fusion into `tensor.extract` using
     // TilingInterface.
     if (auto extractOp = dyn_cast<tensor::ExtractOp>(candidateUser)) {
-      return failure();
+      continue;
     }
 
     // Otherwise, the fusion candidate op is moved inside of the region.
@@ -540,8 +548,9 @@ LogicalResult tilePeeledOpsToScalars(
         cast<linalg::LinalgOp>(definingOp).getNumLoops(), 1));
 
     if (failed(tileUsingGmlStParallelAndFuseGreedily(rewriter, definingOp, opts,
-                                                     label, fuseFilterFn)))
+                                                     label, fuseFilterFn))) {
       return failure();
+    }
   }
   return success();
 }
@@ -617,6 +626,18 @@ FailureOr<gml_st::FusionOp> wrapFusionCluster(
   }
 
   return fusionClusterOp;
+}
+
+LogicalResult inlineFusionCluster(FusionOp fusionOp,
+                                  PatternRewriter& rewriter) {
+  InlinerInterface interface(rewriter.getContext());
+  if (failed(inlineRegion(interface, &fusionOp.getRegion(), fusionOp,
+                          fusionOp.getOperands(), fusionOp.getResults(),
+                          fusionOp.getLoc(),
+                          /*shouldCloneInlinedRegion=*/false)))
+    return failure();
+  rewriter.eraseOp(fusionOp);
+  return success();
 }
 
 FailureOr<Value> createFusedOp(PatternRewriter& rewriter,

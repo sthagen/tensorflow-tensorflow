@@ -173,6 +173,13 @@ def TransformScatterForCpuPass :
   let constructor = "createTransformScatterForCpuPass()";
 }
 
+def TransformDotForCpuPass :
+    Pass<"xla-cpu-transform-dot", "mlir::func::FuncOp"> {
+  let summary = "Transform dot ops for running on CPU";
+
+  let constructor = "createTransformDotForCpuPass()";
+}
+
 def TransformMatmulForCpuPass :
     Pass<"xla-cpu-transform-matmul", "mlir::func::FuncOp"> {
   let summary = "Transform matmul ops for running on CPU";
@@ -255,7 +262,7 @@ def AddDebugInfoPass :
 def FusionPlanningForCpuPass :
     Pass<"gml-st-cpu-fusion-planning", "mlir::func::FuncOp"> {
   let summary = "Create fusion clusters.";
-  let constructor = "createFusionPlanningForCpu()";
+  let constructor = "createFusionPlanningForCpuPass()";
   let dependentDialects = [
     "::mlir::gml_st::GmlStDialect",
     "::mlir::arith::ArithDialect",
@@ -264,3 +271,11 @@ def FusionPlanningForCpuPass :
   ];
 }
 
+def InlineFusionClustersPass :
+    Pass<"gml-st-inline-fusion-clusters", "mlir::func::FuncOp"> {
+  let summary = "Replaces all gml_st.fusion op with ops from the region.";
+  let constructor = "createInlineFusionClustersPass()";
+  let dependentDialects = [
+    "::mlir::gml_st::GmlStDialect",
+  ];
+}

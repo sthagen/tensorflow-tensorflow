@@ -236,17 +236,18 @@ cc_library(
 
 xla_cc_test(
     name = "gpu_device_info_test",
-    srcs = ["gpu_device_info_test.cc"],
+    srcs = if_cuda_is_configured(["gpu_device_info_test.cc"]),
     tags = tf_cuda_tests_tags(),
-    deps = [
+    deps = if_cuda_is_configured([
         ":gpu_device_info_for_tests",
+        "@com_google_absl//absl/strings",
+        "@local_config_cuda//cuda:cuda_headers",
         "//tensorflow/compiler/xla/stream_executor",
         "//tensorflow/compiler/xla/stream_executor:device_description",
-        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_driver",
-        "//tensorflow/tsl/platform:test_main",
-        "@com_google_googletest//:gtest_main",
-        "@local_config_cuda//cuda:cuda_headers",
-    ],
+        "//tensorflow/compiler/xla/stream_executor/cuda:cuda_gpu_executor_header",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "//tensorflow/tsl/platform:test",
+    ]),
 )
 
 cc_library(
@@ -653,6 +654,27 @@ tsl_gpu_library(
 bool_flag(
     name = "enable_xlir",
     build_setting_default = if_google(True, False),
+)
+
+cc_library(
+    name = "non_atomically_upgradeable_rw_lock",
+    srcs = [],
+    hdrs = [
+        "non_atomically_upgradeable_rw_lock.h",
+    ],
+    deps = [
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+xla_cc_test(
+    name = "non_atomically_upgradeable_rw_lock_test",
+    srcs = ["non_atomically_upgradeable_rw_lock_test.cc"],
+    deps = [
+        ":non_atomically_upgradeable_rw_lock",
+        "//tensorflow/tsl/platform:test",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_library(
