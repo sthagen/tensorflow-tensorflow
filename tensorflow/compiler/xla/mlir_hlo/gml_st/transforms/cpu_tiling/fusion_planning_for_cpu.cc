@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/DestinationStyleOpInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "thlo/IR/thlo_ops.h"
@@ -36,9 +37,24 @@ namespace {
 #define GEN_PASS_DEF_INLINEFUSIONCLUSTERSPASS
 #include "gml_st/transforms/passes.h.inc"
 
+static constexpr llvm::StringRef kFusionPlanningLabel =
+    "__fusion_planning_label__";
+
 // Returns true is consumer and producer should be fused and tiled together.
 bool allowedToFuse(Operation* consumerOp, Operation* producerOp) {
   if (isa<thlo::ScatterOp, thlo::SortOp>(producerOp)) return false;
+
+  if (isa<linalg::FillOp>(producerOp)) {
+    auto dstStyleOp = dyn_cast<DestinationStyleOpInterface>(consumerOp);
+    if (!dstStyleOp) return false;
+
+    return llvm::any_of(dstStyleOp.getDpsInitOperands(),
+                        [&](OpOperand* operand) {
+                          return operand->get().getDefiningOp() == producerOp;
+                        });
+
+    return false;
+  }
 
   if (isa<linalg::MapOp, thlo::ReverseOp>(consumerOp)) return true;
   if (isa<linalg::BroadcastOp>(consumerOp)) return false;
@@ -55,6 +71,9 @@ template <typename OpTy>
 LogicalResult fusionPattern(OpTy op, PatternRewriter& rewriter) {
   // The op is already in a fusion cluster.
   if (isa<gml_st::FusionOp>(op.getOperation()->getParentOp())) return failure();
+
+  // The op was already processed.
+  if (hasLabel(op, kFusionPlanningLabel)) return failure();
 
   for (auto& use : op->getUses()) {
     auto* useOp = use.getOwner();
@@ -95,6 +114,9 @@ LogicalResult fusionPattern(OpTy op, PatternRewriter& rewriter) {
   fusionCluster.root = op;
   fusionCluster.operations = resultOps;
   if (failed(wrapFusionCluster(rewriter, fusionCluster))) return failure();
+
+  // Mark all ops as processed.
+  for (auto* op : resultOps) setLabel(op, kFusionPlanningLabel);
 
   return success();
 }
