@@ -36,6 +36,10 @@ void addCPUTilingPipeline(OpPassManager& pm,
                           const GmlStCPUTilingOptions& options) {
   using func::FuncOp;
 
+  if (options.enableFusionClusters) {
+    pm.addNestedPass<FuncOp>(createFusionPlanningForCpuPass());
+  }
+
   pm.addNestedPass<FuncOp>(createTransformScatterForCpuPass());
   pm.addNestedPass<FuncOp>(createTransformReduceForCpuPass(
       options.vectorSize, options.reduction1DTileSize,
@@ -44,11 +48,15 @@ void addCPUTilingPipeline(OpPassManager& pm,
       createTransformDotForCpuPass(options.matmulTileSizes));
   pm.addNestedPass<FuncOp>(createTransformMatmulForCpuPass(
       options.matmulTileSizes, options.lowerToMmt4d));
+  // TODO(b/270534416): Re-enable.
+  // pm.addNestedPass<FuncOp>(createTransformGenericForCpuPass());
   pm.addNestedPass<FuncOp>(createTransformTransposeForCpuPass());
   pm.addNestedPass<FuncOp>(createTransformMapForCpuPass(options.vectorSize));
   pm.addNestedPass<FuncOp>(createTransformSortForCpuPass());
   pm.addNestedPass<mlir::func::FuncOp>(
       mlir::gml_st::createTransformReverseForCpuPass());
+
+  pm.addNestedPass<FuncOp>(createInlineFusionClustersPass());
 
   pm.addPass(createCSEPass());
   pm.addPass(createCanonicalizerPass());
