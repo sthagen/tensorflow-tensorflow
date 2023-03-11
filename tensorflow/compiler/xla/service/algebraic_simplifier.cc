@@ -730,6 +730,24 @@ Status AlgebraicSimplifierVisitor::HandleAdd(HloInstruction* add) {
                                           sum_of_constants));
   }
 
+  VLOG(10) << "trying transform [(C1 - A) + C2 => (C1 + C2) - A]";
+  if (Match(add, m::Add(m::Subtract(m::Constant(&c1), m::NonConstant(&a)),
+                        m::Constant(&c2))) ||
+      Match(add, m::Add(m::Subtract(m::Broadcast(m::ConstantScalar(&c1)),
+                                    m::NonConstant(&a)),
+                        m::Broadcast(m::ConstantScalar(&c2))))) {
+    TF_ASSIGN_OR_RETURN(HloInstruction * sum_of_constants,
+                        MakeBinaryHlo(HloOpcode::kAdd, c1, c2));
+    if (ShapeUtil::IsScalar(sum_of_constants->shape()) &&
+        !ShapeUtil::IsScalar(add->shape())) {
+      sum_of_constants = add->AddInstruction(
+          HloInstruction::CreateBroadcast(add->shape(), sum_of_constants, {}));
+    }
+    return ReplaceWithNewInstruction(
+        add, HloInstruction::CreateBinary(add->shape(), HloOpcode::kSubtract,
+                                          sum_of_constants, a));
+  }
+
   // Convert add with fullshape into add with partial shape when a
   // portion of add is effective:
   //             zero (fullshape)   rhs (partialshape)
@@ -2772,9 +2790,12 @@ Status AlgebraicSimplifierVisitor::HandleDot(HloInstruction* dot) {
       new_rhs = dot->AddInstruction(HloInstruction::CreateBroadcast(
           dot->shape(), new_rhs, rhs_broadcast_dims));
     }
-    return ReplaceWithNewInstruction(
-        dot, HloInstruction::CreateBinary(dot->shape(), HloOpcode::kMultiply,
-                                          new_lhs, new_rhs));
+    auto new_instruction = HloInstruction::CreateBinary(
+        dot->shape(), HloOpcode::kMultiply, new_lhs, new_rhs);
+    dot->SetupDerivedInstruction(new_lhs);
+    dot->SetupDerivedInstruction(new_rhs);
+    dot->SetupDerivedInstruction(new_instruction.get());
+    return ReplaceWithNewInstruction(dot, std::move(new_instruction));
   }
 
   // If the lhs or rhs have only batch and contracting dimensions, a dot can be
@@ -5856,24 +5877,36 @@ Status AlgebraicSimplifierVisitor::HandleReduce(HloInstruction* hlo) {
   }
   // Convert Reduce(concat({a,b,...})) to
   //  map(reduce(a),map(reduce(b),...,))
+  // provided that the shapes of a,b,... have the same dimensions.
   //
   // This should make fusion easier or use less memory bandwidth in the unfused
   // case.
   if (arg->opcode() == HloOpcode::kConcatenate &&
       absl::c_linear_search(reduce->dimensions(),
                             arg->concatenate_dimension())) {
-    HloInstruction* old_reduce = nullptr;
-    for (HloInstruction* operand : arg->operands()) {
-      HloInstruction* new_reduce = reduce->AddInstruction(
-          HloInstruction::CreateReduce(reduce_result_shape, operand, init_value,
-                                       reduce->dimensions(), function));
-      if (old_reduce != nullptr) {
-        new_reduce = reduce->AddInstruction(HloInstruction::CreateMap(
-            reduce_result_shape, {old_reduce, new_reduce}, function));
+    bool same_shapes = true;
+    for (int64_t i = 1; i < arg->operand_count(); ++i) {
+      if (!Shape::Equal().IgnoreLayout()(arg->operand(i)->shape(),
+                                         arg->operand(0)->shape())) {
+        same_shapes = false;
+        break;
       }
-      old_reduce = new_reduce;
     }
-    return ReplaceInstruction(reduce, old_reduce);
+    if (same_shapes || reduce->shape().rank() == 0) {
+      HloInstruction* old_reduce = nullptr;
+      for (HloInstruction* operand : arg->operands()) {
+        HloInstruction* new_reduce =
+            reduce->AddInstruction(HloInstruction::CreateReduce(
+                reduce_result_shape, operand, init_value, reduce->dimensions(),
+                function));
+        if (old_reduce != nullptr) {
+          new_reduce = reduce->AddInstruction(HloInstruction::CreateMap(
+              reduce_result_shape, {old_reduce, new_reduce}, function));
+        }
+        old_reduce = new_reduce;
+      }
+      return ReplaceInstruction(reduce, old_reduce);
+    }
   }
 
   HloInstruction *dot, *lhs, *rhs;

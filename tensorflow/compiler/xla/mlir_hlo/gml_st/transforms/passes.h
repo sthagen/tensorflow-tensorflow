@@ -89,6 +89,9 @@ std::unique_ptr<OperationPass<func::FuncOp>> createSimplifyDeadCopyPass();
 std::unique_ptr<OperationPass<func::FuncOp>> createLowerVectorsPass(
     bool enableAVX2 = true);
 
+/// Pass to transform a conv op for CPU backend.
+std::unique_ptr<OperationPass<func::FuncOp>> createTransformConvForCpuPass();
+
 /// Pass to transform a thlo.scatter op for CPU backend.
 std::unique_ptr<OperationPass<func::FuncOp>> createTransformScatterForCpuPass();
 
@@ -134,7 +137,7 @@ createTransformGenericForCpuPass();
 
 /// Pass to create fusion clusters.
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
-createFusionPlanningForCpuPass();
+createFusionPlanningForCpuPass(int64_t vectorSize = 8);
 
 /// Pass to outline fusion regions into functions.
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createFusionOutliningPass();
@@ -143,8 +146,15 @@ std::unique_ptr<OperationPass<mlir::ModuleOp>> createFusionOutliningPass();
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
 createInlineFusionClustersPass();
 
+/// Pass to rewrite tensor.from_elements into tensor.insert.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createRewriteFromElementsOpPass();
+
 /// Pass to add debug info to be propagated into LLVM backend.
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createAddDebugInfoPass();
+
+/// Populate pattern to remove single/zero iteration scf.forall dimensions.
+void populateCollapseForallOpDimensionsPattern(RewritePatternSet &patterns);
 
 struct GmlStCPUTilingOptions
     : public mlir::PassPipelineOptions<GmlStCPUTilingOptions> {
@@ -186,17 +196,23 @@ struct GmlStCPUTilingOptions
   Option<bool> enableFusionClusters{
       *this, "enable-fusion-clusters",
       llvm::cl::desc("Enable the pass to create gml_st.fusion clusters."),
-      llvm::cl::init(false)};
+      llvm::cl::init(true)};
 
   Option<bool> enableFusionClusterOutlining{
       *this, "enable-fusion-cluster-outlining",
       llvm::cl::desc(
           "Enable passes to outline and deduplicate gml_st.fusion clusters."),
       llvm::cl::init(false)};
+
+  Option<StringRef> cpuName{
+      *this, "cpu",
+      llvm::cl::desc("CPU name, similar to llc's -mcpu flag. e.g. 'znver2', "
+                     "'skylake-avx512'."),
+      llvm::cl::init("")};
 };
 
 // Returns default "optimized" tiling parameters.
-GmlStCPUTilingOptions getDefaultCPUPipelineOptions();
+GmlStCPUTilingOptions getDefaultCPUPipelineOptions(StringRef cpuName);
 
 // Adds tiling-fusion-vectorization passes for tHLO/Linalg ops mix.
 void addCPUTilingPipeline(OpPassManager &pm,
@@ -204,7 +220,7 @@ void addCPUTilingPipeline(OpPassManager &pm,
 
 // Adds tiling-fusion-vectorization passes for tHLO/Linalg ops mix with the
 // "optimized" tiling parameters.
-void addDefaultCPUTilingPipeline(OpPassManager &pm);
+void addDefaultCPUTilingPipeline(OpPassManager &pm, StringRef cpuName);
 
 #define GEN_PASS_REGISTRATION
 #include "gml_st/transforms/passes.h.inc"

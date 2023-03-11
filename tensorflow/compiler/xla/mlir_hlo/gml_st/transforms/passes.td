@@ -129,7 +129,6 @@ def ScalarizationPass : Pass<"scalarize", "mlir::func::FuncOp"> {
   let summary = "Converts ops on tensors with 1 element to scalar ops.";
   let dependentDialects = [
     "arith::ArithDialect",
-    "gml_st::GmlStDialect",
     "scf::SCFDialect",
     "tensor::TensorDialect"
   ];
@@ -160,6 +159,12 @@ def TransformMatmulForCpuPass :
     Option<"lowerToMmt4D", "lower-to-mmt4d", "bool", "false",
            "If true, lower linalg.matmul into linalg.mmt4d">,
   ];
+}
+
+def TransformConvForCpuPass :
+    Pass<"xla-cpu-transform-conv", "mlir::func::FuncOp"> {
+  let summary = "Transform conv ops for running on CPU";
+  let constructor = "createTransformConvForCpuPass()";
 }
 
 def TransformMapForCpuPass :
@@ -243,6 +248,17 @@ def FusionPlanningForCpuPass :
     "::mlir::linalg::LinalgDialect",
     "::mlir::tensor::TensorDialect"
   ];
+
+  let options = [
+    Option<"vectorSize", "vector-size", "int64_t", "8",
+           "Tile size for the innermost dimension of `linalg.map`">,
+  ];
+}
+
+def RewriteFromElementsOpPass
+    : Pass<"gml-st-rewrite-from-elements-ops", "mlir::func::FuncOp"> {
+  let summary = "Pass to rewrite tensor.from_elements into tensor.insert.";
+  let constructor = "createRewriteFromElementsOpPass()";
 }
 
 def FusionOutliningPass : Pass<"gml-fusion-outlining", "mlir::ModuleOp"> {
