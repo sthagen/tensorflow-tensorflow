@@ -208,7 +208,7 @@ std::optional<Value> convertPackOp(PatternRewriter& rewriter, Operation* op,
   // Negative values are also allowed up to -(rank(input)+1)
   // where the axis "wraps around".
   if (axis < 0) axis += input_tensor_rank;
-  if ((axis < 0) || (axis > (input_tensor_rank + 1))) {
+  if ((axis < 0) || (axis > input_tensor_rank)) {
     (void)rewriter.notifyMatchFailure(op, "axis out of valid range");
     return std::nullopt;
   }
@@ -2222,7 +2222,7 @@ std::optional<SmallVector<Value>> convertSplitVOp(
 // the only legal negative stride.
 static Value reverseNegativeStride(PatternRewriter& rewriter, Operation* op,
                                    Value input, ArrayRef<int32_t> strides) {
-  for (auto it : llvm::enumerate(strides)) {
+  for (const auto& it : llvm::enumerate(strides)) {
     auto axis = it.index();
     auto stride = it.value();
     if (stride != -1) continue;
@@ -2321,7 +2321,7 @@ std::optional<Value> convertStridedSliceOp(
   }
 
   // Set begin mask values if possible.
-  for (auto& val : llvm::enumerate(begin))
+  for (const auto& val : llvm::enumerate(begin))
     begin_mask |= (val.value() == 0) << val.index();
 
   // If all begin/end masks are set and striding is one we can just return

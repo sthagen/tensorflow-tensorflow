@@ -30,8 +30,7 @@ limitations under the License.
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-namespace mlir {
-namespace gml_st {
+namespace mlir::gml_st {
 namespace {
 
 #define GEN_PASS_DEF_TILINGSOFTMAXPASS
@@ -44,10 +43,9 @@ Operation *fuseIthOperandInPlace(PatternRewriter &rewriter, Operation *op,
                                  int64_t i) {
   auto matOp =
       llvm::cast<tensor::ExtractSliceOp>(op->getOperand(i).getDefiningOp());
-  FailureOr<Value> fused = createFusedOp(rewriter, matOp);
+  FailureOr<Operation *> fused = fuse(rewriter, matOp);
   assert(succeeded(fused) && "expect success after matching");
-  rewriter.replaceOp(matOp, *fused);
-  return fused->getDefiningOp();
+  return *fused;
 }
 
 LogicalResult tilePartialSoftmax(
@@ -155,25 +153,25 @@ struct TilePartialSoftmaxPattern
         [&](Operation *op,
             int64_t commonReductionDim) -> FailureOr<Operation *> {
           // Populate tiling options.
-          TilingOptions tilingOptions;
-          tilingOptions.tileSizeComputationFn =
+          scf::SCFTilingOptions tilingOptions;
+          tilingOptions.setTileSizeComputationFunction(
               [&](OpBuilder &b, Operation *op) -> SmallVector<Value> {
-            Location loc = op->getLoc();
-            SmallVector<Value> tileSizeValues;
-            for (int64_t i = 0; i < static_cast<int64_t>(tileSizes.size());
-                 i++) {
-              // Skip tiling the reduction dimension. By convention, this is a
-              // tile size of 0.
-              int64_t tileSizeInDim =
-                  i == commonReductionDim ? 0 : tileSizes[i];
-              tileSizeValues.push_back(
-                  b.create<arith::ConstantIndexOp>(loc, tileSizeInDim));
-            }
-            return tileSizeValues;
-          };
+                Location loc = op->getLoc();
+                SmallVector<Value> tileSizeValues;
+                for (int64_t i = 0; i < static_cast<int64_t>(tileSizes.size());
+                     i++) {
+                  // Skip tiling the reduction dimension. By convention, this is
+                  // a tile size of 0.
+                  int64_t tileSizeInDim =
+                      i == commonReductionDim ? 0 : tileSizes[i];
+                  tileSizeValues.push_back(
+                      b.create<arith::ConstantIndexOp>(loc, tileSizeInDim));
+                }
+                return tileSizeValues;
+              });
           // Tile.
           FailureOr<TilingResult> tilingResult =
-              tileUsingGmlSt(tilingOptions, rewriter, op);
+              tileUsingSCFForallOp(rewriter, op, tilingOptions);
           if (failed(tilingResult)) return failure();
 
           rewriter.replaceOp(op, tilingResult->loop->getResults());
@@ -239,11 +237,7 @@ struct FuseUnaryCwisePattern : public OpRewritePattern<tensor::ExtractSliceOp> {
     auto mapOp = dyn_cast_or_null<linalg::MapOp>(source);
     if (!mapOp || mapOp.getNumDpsInputs() != 1) return failure();
     // Fuse.
-    FailureOr<Value> fused = createFusedOp(rewriter, op);
-    if (failed(fused)) return failure();
-
-    rewriter.replaceOp(op, *fused);
-    return success();
+    return fuse(rewriter, op);
   }
 };
 
@@ -290,5 +284,4 @@ std::unique_ptr<OperationPass<func::FuncOp>> createTilingSoftmaxPass(
   return std::make_unique<TilingSoftmaxPass>(tileSizes);
 }
 
-}  // namespace gml_st
-}  // namespace mlir
+}  // namespace mlir::gml_st

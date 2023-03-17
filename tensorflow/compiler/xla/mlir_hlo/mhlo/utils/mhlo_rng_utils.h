@@ -12,18 +12,21 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "tensorflow/tsl/profiler/convert/trace_container.h"
 
-#include <string>
+#ifndef MLIR_HLO_MHLO_UTILS_MHLO_RNG_UTILS_H_
+#define MLIR_HLO_MHLO_UTILS_MHLO_RNG_UTILS_H_
 
-#include "tensorflow/tsl/platform/protobuf.h"
+#include "mhlo/IR/hlo_ops.h"
+#include "mlir/IR/Value.h"
 
-namespace tsl {
-namespace profiler {
+namespace mlir {
+namespace mhlo {
 
-bool TraceContainer::ParseMetadataFromString(const std::string& description) {
-  return protobuf::TextFormat::ParseFromString(description, &trace_);
-}
+LogicalResult generateLinalgThreeFry(OpBuilder& builder, Location loc,
+                                     ShapedType resultTy, Value& state,
+                                     Value& result);
 
-}  // namespace profiler
-}  // namespace tsl
+}  // namespace mhlo
+}  // namespace mlir
+
+#endif  // MLIR_HLO_MHLO_UTILS_MHLO_RNG_UTILS_H_

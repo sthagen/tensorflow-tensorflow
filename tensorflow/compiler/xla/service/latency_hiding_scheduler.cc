@@ -584,9 +584,11 @@ class ReadySetLt {
   // It needs to outlive the comparator object.
   explicit ReadySetLt(
       const DefaultSchedulerCore::SchedulingState* sched_state,
-      DefaultSchedulerCore::TargetSchedulingRule target_scheduling_rule)
+      DefaultSchedulerCore::TargetSchedulingRule target_scheduling_rule,
+      DefaultSchedulerCore::TargetSchedulingRule early_target_scheduling_rule)
       : sched_state_(*sched_state),
-        target_scheduling_rule_(target_scheduling_rule) {}
+        target_scheduling_rule_(target_scheduling_rule),
+        early_target_scheduling_rule_(early_target_scheduling_rule) {}
   // The comparison here implements the priority for the nodes in the ready set.
   DefaultSchedulerCore::CandidateResult operator()(
       DefaultSchedulerCore::ScheduleCandidate& a,
@@ -596,6 +598,11 @@ class ReadySetLt {
             !a.node->GetForceDelay(), a, !b.node->GetForceDelay(), b,
             "kForceDelay")) {
       return *value;
+    }
+    if (early_target_scheduling_rule_) {
+      if (auto value = early_target_scheduling_rule_(a, b)) {
+        return *value;
+      }
     }
     // Prioritize instructions that are NOPs as they have no memory pressure
     // issue and unlock different operations for being scheduled.
@@ -766,6 +773,7 @@ class ReadySetLt {
  private:
   const DefaultSchedulerCore::SchedulingState& sched_state_;
   DefaultSchedulerCore::TargetSchedulingRule target_scheduling_rule_;
+  DefaultSchedulerCore::TargetSchedulingRule early_target_scheduling_rule_;
 
   int ReadyIfScheduled(const HloGraphNode& gn) const {
     int ready_nodes_if_scheduled = 0;
@@ -827,7 +835,7 @@ class ReadySetLt {
     }
     return true;
   }
-  // Compute and cache memory pressure change computation for candidiate.
+  // Compute and cache memory pressure change computation for candidate.
   std::pair<int64_t, int64_t> GetMemoryPressureChanges(
       DefaultSchedulerCore::ScheduleCandidate& cand) const {
     if (cand.pressure_change) {
@@ -868,7 +876,8 @@ HloGraphNode* DefaultSchedulerCore::FindAndExtractBestNodeAvailable(
         return false;
       };
   VLOG(6) << "Current time: " << sched_state.current_time;
-  ReadySetLt ready_lt{&sched_state, target_scheduling_rule_};
+  ReadySetLt ready_lt{&sched_state, target_scheduling_rule_,
+                      early_target_scheduling_rule_};
   // Construct a schedule candidate for caching.
   ScheduleCandidate ready_chosen;
   auto chosen_it = sched_state.ready_set.end();
@@ -1306,6 +1315,10 @@ DefaultSchedulerCore::ScheduleComputation(const HloComputation* computation) {
   }
   module_pressure_state_->UpdatePressureStateForComputation(
       computation, memory_pressure_tracker.pressure_state());
+  absl::c_reverse(sched_state.new_sequence_reversed);
+  if (post_processing_fn_) {
+    post_processing_fn_(sched_state);
+  }
   CHECK_EQ(sched_state.new_sequence_reversed.size(),
            sched_state.sched_graph.GetOriginalInstrList().size())
       << "Not all instructions have been scheduled "
@@ -1313,9 +1326,8 @@ DefaultSchedulerCore::ScheduleComputation(const HloComputation* computation) {
       << sched_state.sched_graph.GetOriginalInstrList().size();
   VLOG(1) << "Total time: "
           << sched_state.sched_graph
-                 .GetNode(sched_state.new_sequence_reversed.back())
+                 .GetNode(sched_state.new_sequence_reversed.front())
                  .GetReadyTime();
-  absl::c_reverse(sched_state.new_sequence_reversed);
 
   const auto& debug_options = xla::GetDebugOptionsFromFlags();
   if (debug_options.xla_dump_latency_hiding_schedule() &&

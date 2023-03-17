@@ -43,6 +43,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
@@ -581,17 +582,32 @@ IrEmitterUnnested::BuildReusableKernelPrototype(
     absl::string_view suggested_name,
     absl::Span<const ReusableKernelArgument> arguments,
     const LaunchDimensions& launch_dimensions) {
+  // If some arguments have the same buffer, we will pass them only once.
+  llvm::SmallVector<int> to_llvm_arg_no(arguments.size());
+  llvm::SmallVector<int> to_arg_no;
+  to_arg_no.reserve(arguments.size());
+  for (const auto& [arg_no, argument] : llvm::enumerate(arguments)) {
+    if (argument.first_with_same_slice.has_value()) {
+      to_llvm_arg_no[arg_no] =
+          to_llvm_arg_no[argument.first_with_same_slice.value()];
+      continue;
+    }
+
+    to_llvm_arg_no[arg_no] = to_arg_no.size();
+    to_arg_no.push_back(arg_no);
+  }
+  const int kNumLlvmArgs = to_arg_no.size();
+
   // Compute the kernel name. The opcode string may contain "-" which cannot be
   // in a PTX function name, so sanitize the name before uniquifying it.
   std::string kernel_name = ir_emitter_context_->name_uniquer()->GetUniqueName(
       llvm_ir::SanitizeFunctionName(std::string(suggested_name)));
-  std::vector<llvm_ir::IrArray> ir_arrays;
 
   // Create the kernel and add it to the module.
   llvm::LLVMContext& context = module_->getContext();
   llvm::FunctionType* kernel_type = llvm::FunctionType::get(
       /*Result=*/llvm::Type::getVoidTy(context),
-      std::vector<llvm::Type*>(arguments.size(), b_.getInt8PtrTy()),
+      std::vector<llvm::Type*>(kNumLlvmArgs, b_.getInt8PtrTy()),
       /*isVarArg=*/false);
   llvm::Function* kernel = llvm::Function::Create(
       kernel_type, llvm::GlobalValue::ExternalLinkage, kernel_name, module_);
@@ -610,33 +626,42 @@ IrEmitterUnnested::BuildReusableKernelPrototype(
   // that return instruction.
   b_.SetInsertPoint(llvm::ReturnInst::Create(context, entry_bb));
 
-  for (size_t arg_no = 0; arg_no < arguments.size(); ++arg_no) {
-    const auto& kernel_argument = arguments.at(arg_no);
-    llvm::Argument& fn_arg = *kernel->getArg(arg_no);
+  for (size_t llvm_arg_no = 0; llvm_arg_no < kernel->arg_size();
+       ++llvm_arg_no) {
+    const ReusableKernelArgument& kernel_argument =
+        arguments[to_arg_no[llvm_arg_no]];
+    llvm::Argument& llvm_arg = *kernel->getArg(llvm_arg_no);
 
-    fn_arg.setName(StrCat("arg", arg_no));
+    llvm_arg.setName(StrCat("arg", llvm_arg_no));
 
-    kernel->addDereferenceableParamAttr(arg_no, kernel_argument.slice.size());
+    kernel->addDereferenceableParamAttr(llvm_arg_no,
+                                        kernel_argument.slice.size());
 
     kernel->addParamAttr(
-        arg_no,
-        llvm::Attribute::get(fn_arg.getContext(), llvm::Attribute::Alignment,
+        llvm_arg_no,
+        llvm::Attribute::get(llvm_arg.getContext(), llvm::Attribute::Alignment,
                              kernel_argument.alignment));
 
     if (!kernel_argument.aliased) {
-      kernel->addParamAttr(
-          arg_no,
-          llvm::Attribute::get(fn_arg.getContext(), llvm::Attribute::NoAlias));
+      kernel->addParamAttr(llvm_arg_no,
+                           llvm::Attribute::get(llvm_arg.getContext(),
+                                                llvm::Attribute::NoAlias));
     }
+  }
+
+  std::vector<llvm_ir::IrArray> ir_arrays;
+  for (size_t arg_no = 0; arg_no < arguments.size(); ++arg_no) {
+    const ReusableKernelArgument& kernel_argument = arguments[arg_no];
+    llvm::Argument& llvm_arg = *kernel->getArg(to_llvm_arg_no[arg_no]);
 
     llvm::Type* ir_type =
         llvm_ir::ShapeToIrType(kernel_argument.shape, module_);
     llvm_ir::IrArray ir_array(
-        CastToTypedValue(kernel_argument.shape, &fn_arg, &b_), ir_type,
+        CastToTypedValue(kernel_argument.shape, &llvm_arg, &b_), ir_type,
         kernel_argument.shape);
 
     if (!kernel_argument.written) {
-      ir_array.MarkInvariantOverWholeProgram(&fn_arg.getContext());
+      ir_array.MarkInvariantOverWholeProgram(&llvm_arg.getContext());
     }
 
     ir_arrays.push_back(ir_array);
@@ -1812,17 +1837,22 @@ Status IrEmitterUnnested::EmitTritonFusion(
                                           /*is_fusion=*/false));
 
   const std::string fingerprint =
-      hlo_computation->ToString(HloPrintOptions::Fingerprint());
+      hlo_computation->ToString(HloPrintOptions::Fingerprint()
+                                    .set_print_only_essential_constants(false)
+                                    .set_print_operand_shape(false));
 
   // TODO(tdanyluk): Consider removing this level of caching, because we already
-  // cache the wrapper_fn now.
+  // cache the wrapper_fn now. But we have to measure the compile time if we do
+  // that, because the reusability criteria of triton_cache_ is actually more
+  // permissive than the criteria of kernel_reuse_cache_, so removing it may
+  // make compilation slower.
   auto cache_it = triton_cache_.find(fingerprint);
   llvm::Function* impl_fn;
   if (cache_it == triton_cache_.end()) {
     const std::string fn_name =
         ir_emitter_context_->name_uniquer()->GetUniqueName(
             llvm_ir::SanitizeFunctionName(
-                fusion_op->getName().getStringRef().str()));
+                absl::StrCat(GetIrNameFromLoc(fusion_op->getLoc()), "_impl")));
     const std::optional<LaunchDimensions> launch_dimensions = TritonWrapper(
         fn_name, hlo_computation,
         ir_emitter_context_->cuda_compute_capability(),
@@ -3365,6 +3395,13 @@ StatusOr<std::vector<llvm_ir::IrArray>> IrEmitterUnnested::BuildKernelThunkImpl(
     llvm::Type* ir_type = llvm_ir::ShapeToIrType(slice.shape, module_);
     llvm_ir::IrArray ir_array(CastToTypedValue(slice.shape, loc, &b_), ir_type,
                               slice.shape);
+    // Note: This code here doesn't check if any partially overlapping buffers
+    // are written. Our investigation shows that HloDataflowAnalysis only
+    // aliases input and output buffers if they are exactly the same size and
+    // location and it aliases one output with at most one input. If that
+    // changes then we will have to modify this to something like:
+    //
+    // if (!OverlapsAny(buffers_written, slice.buffer_slice))
     if (!buffers_written.contains(slice.buffer_slice)) {
       ir_array.MarkInvariantOverWholeProgram(&loc->getContext());
     }
@@ -3401,7 +3438,7 @@ StatusOr<std::vector<llvm_ir::IrArray>> IrEmitterUnnested::BuildKernelThunk(
   TF_RET_CHECK(!mlir::isa<mlir::lmhlo::FusionOp>(op));
 
   std::vector<KernelArgument> kernel_arguments(operands.size());
-  for (auto& [i, operand] : llvm::enumerate(operands)) {
+  for (const auto& [i, operand] : llvm::enumerate(operands)) {
     TF_ASSIGN_OR_RETURN(
         kernel_arguments[i],
         ValueToKernelArgument(operand, i, WritesMlirBuffer(op, operand)));
@@ -3466,7 +3503,29 @@ IrEmitterUnnested::GetReusableKernelArguments(mlir::lmhlo::FusionOp fusion_op) {
     }
   }
 
-  for (ReusableKernelArgument& kernel_argument : kernel_arguments) {
+  for (int i = 0; i < static_cast<int>(kernel_arguments.size()); ++i) {
+    ReusableKernelArgument& kernel_argument = kernel_arguments[i];
+
+    kernel_argument.first_with_same_slice = [&]() -> std::optional<int> {
+      for (int j = 0; j < i; ++j) {
+        const ReusableKernelArgument& other_kernel_argument =
+            kernel_arguments[j];
+        if (kernel_argument.slice == other_kernel_argument.slice) {
+          return j;
+        }
+      }
+      return std::nullopt;
+    }();
+
+    if (kernel_argument.first_with_same_slice.has_value()) {
+      const ReusableKernelArgument& same =
+          kernel_arguments[kernel_argument.first_with_same_slice.value()];
+      kernel_argument.alignment = same.alignment;
+      kernel_argument.aliased = same.aliased;
+      kernel_argument.written = same.written;
+      continue;
+    }
+
     kernel_argument.alignment = [&] {
       const BufferAllocation* alloc = kernel_argument.slice.allocation();
       if (alloc->is_entry_computation_parameter()) {
@@ -3478,18 +3537,27 @@ IrEmitterUnnested::GetReusableKernelArguments(mlir::lmhlo::FusionOp fusion_op) {
       }
     }();
 
-    kernel_argument.aliased = [&] {
-      for (const ReusableKernelArgument& other_kernel_argument :
-           kernel_arguments) {
-        if (&kernel_argument != &other_kernel_argument &&
+    // Note: This code here doesn't check if any partially overlapping buffers
+    // are written. Our investigation shows that HloDataflowAnalysis only
+    // aliases input and output buffers if they are exactly the same size and
+    // location and it aliases one output with at most one input. If that
+    // changes then we will have to modify this to something like:
+    //
+    // kernel_argument.written =
+    //   OverlapsAny(buffers_written, kernel_argument.slice);
+    kernel_argument.written = buffers_written.contains(kernel_argument.slice);
+
+    kernel_argument.aliased = kernel_argument.written && [&] {
+      for (size_t j = 0; j < kernel_arguments.size(); ++j) {
+        const ReusableKernelArgument& other_kernel_argument =
+            kernel_arguments[j];
+        if (i != j && kernel_argument.slice != other_kernel_argument.slice &&
             kernel_argument.slice.OverlapsWith(other_kernel_argument.slice)) {
           return true;
         }
       }
       return false;
     }();
-
-    kernel_argument.written = buffers_written.contains(kernel_argument.slice);
   }
 
   return kernel_arguments;
@@ -3499,6 +3567,11 @@ std::string IrEmitterUnnested::GetArgumentFingerprint(
     absl::Span<const ReusableKernelArgument> kernel_arguments) {
   return absl::StrJoin(kernel_arguments, ",",
                        [](std::string* s, const ReusableKernelArgument& arg) {
+                         if (arg.first_with_same_slice.has_value()) {
+                           absl::StrAppend(s, "=",
+                                           arg.first_with_same_slice.value());
+                           return;
+                         }
                          absl::StrAppend(s, arg.alignment);
                          if (arg.aliased) {
                            absl::StrAppend(s, "a");
@@ -3518,8 +3591,9 @@ std::string IrEmitterUnnested::GetFingerprint(
   //
   // It is not a problem to recursively print subcomputations, because we don't
   // have them at this point.
-  auto print_options =
-      HloPrintOptions::Fingerprint().set_print_only_essential_constants(false);
+  auto print_options = HloPrintOptions::Fingerprint()
+                           .set_print_only_essential_constants(false)
+                           .set_print_operand_shape(false);
 
   return absl::StrCat(discriminator, "(",
                       GetArgumentFingerprint(kernel_arguments), ")",
@@ -3559,15 +3633,19 @@ StatusOr<ReusableKernelThunk*> IrEmitterUnnested::BuildReusableKernelThunkImpl(
   std::vector<BufferAllocation::Slice> arg_slices;
   arg_slices.reserve(kernel_arguments.size());
   for (const auto& kernel_argument : kernel_arguments) {
-    arg_slices.push_back(kernel_argument.slice);
+    if (!kernel_argument.first_with_same_slice.has_value()) {
+      arg_slices.push_back(kernel_argument.slice);
+    }
   }
 
   std::vector<mlir::Value> values;
   values.reserve(kernel_arguments.size());
   for (const auto& kernel_argument : kernel_arguments) {
-    TF_ASSIGN_OR_RETURN(mlir::Value value,
-                        RemoveTransformingOperations(kernel_argument.value));
-    values.push_back(value);
+    if (!kernel_argument.first_with_same_slice.has_value()) {
+      TF_ASSIGN_OR_RETURN(mlir::Value value,
+                          RemoveTransformingOperations(kernel_argument.value));
+      values.push_back(value);
+    }
   }
 
   auto thunk_ptr = std::make_unique<ReusableKernelThunk>(
@@ -3594,7 +3672,8 @@ IrEmitterUnnested::BuildReusableKernelThunk(
                                           /*is_fusion=*/true));
   std::string fingerprint =
       GetFingerprint(fused_computation, kernel_arguments, discriminator);
-  VLOG(4) << "Fingerprint: " << fingerprint;
+  VLOG(4) << "Fingerprint: ";
+  XLA_VLOG_LINES(4, fingerprint);
 
   auto cache_it = kernel_reuse_cache_.find(fingerprint);
   if (cache_it != kernel_reuse_cache_.end()) {
@@ -3607,7 +3686,7 @@ IrEmitterUnnested::BuildReusableKernelThunk(
     // deduplicated.
     // TODO(tdanyluk): Consider avoiding the recalculation of launch dimensions
     // when reusing kernels.
-    CHECK_EQ(old_thunk->launch_dimensions(), launch_dimensions);
+    TF_RET_CHECK(old_thunk->launch_dimensions() == launch_dimensions);
 
     // We are not reusing the ThunkInfo of the old thunk, because the current
     // thunk info must reference the current HLO operation.
@@ -3615,8 +3694,6 @@ IrEmitterUnnested::BuildReusableKernelThunk(
         BuildReusableKernelThunkImpl(old_thunk->kernel_name(), kernel_arguments,
                                      GetThunkInfo(fusion_op), launch_dimensions)
             .status());
-
-    b_.SetInsertPoint(b_.GetInsertBlock()->getTerminator());
 
     return {std::nullopt};
   }

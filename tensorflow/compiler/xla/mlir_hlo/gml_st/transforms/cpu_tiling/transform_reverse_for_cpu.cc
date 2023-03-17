@@ -44,10 +44,9 @@ constexpr llvm::StringRef kReverseTransformedLabel =
 FailureOr<TilingResult> tileReverseAndUpdateResultIfTiled(
     PatternRewriter &rewriter, thlo::ReverseOp &reverseOp,
     ArrayRef<int64_t> tileSizes) {
-  TilingOptions opts;
-  opts.setTileSizeComputationFn(tileSizes);
-  auto tilingResult = tileUsingGmlSt(
-      opts, rewriter, cast<TilingInterface>(reverseOp.getOperation()));
+  auto opts = getSCFTilingOptions(tileSizes);
+  auto tilingResult = tileUsingSCFForallOp(
+      rewriter, cast<TilingInterface>(reverseOp.getOperation()), opts);
 
   if (failed(tilingResult)) return failure();
 
@@ -108,12 +107,8 @@ struct ReverseTransformPattern : public OpRewritePattern<thlo::ReverseOp> {
 
     // Tile ops in the peeled loop again, to size 1, so they can be
     // scalarized.
-    if (failed(tilePeeledOpsToScalars(rewriter, peelingResult,
-                                      kReverseTransformedLabel,
-                                      /*fuseFilterFn=*/nullptr)))
-      return failure();
-
-    return success();
+    return tilePeeledOpsToScalars(rewriter, peelingResult,
+                                  /*fuseFilterFn=*/nullptr);
   }
 
  private:

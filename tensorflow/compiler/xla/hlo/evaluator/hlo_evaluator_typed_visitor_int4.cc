@@ -1,4 +1,4 @@
-/* Copyright 2021 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2018 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,19 +12,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_CORE_TFRT_TPU_TPU_RESOURCES_H_
-#define TENSORFLOW_CORE_TFRT_TPU_TPU_RESOURCES_H_
 
-// This file contains stub implementations for Google internal TPU APIs.
+#include "tensorflow/compiler/xla/hlo/evaluator/hlo_evaluator.h"
+#include "tensorflow/compiler/xla/hlo/evaluator/hlo_evaluator_typed_visitor.h"
+#include "tensorflow/compiler/xla/types.h"
 
-namespace tfrt {
-
-namespace tpu {
-class TpuModelResource {
-};
-}  // namespace tpu
-
-inline void AddTpuResources(class ResourceContext* resource_context, tpu::TpuModelResource* tpu_model_resource) {}
-}  // namespace tfrt
-
-#endif  // TENSORFLOW_CORE_TFRT_TPU_TPU_RESOURCES_H_
+namespace xla {
+template class HloEvaluatorTypedVisitor<s4, int64_t>;
+template class HloEvaluatorTypedVisitor<u4, uint64_t>;
+}  // namespace xla

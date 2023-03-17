@@ -21,6 +21,7 @@ import time
 
 from absl.testing import parameterized
 
+import numpy as np
 from tensorflow.python.data.experimental.kernel_tests.service import test_base as data_service_test_base
 from tensorflow.python.data.experimental.ops import data_service_ops
 from tensorflow.python.data.experimental.ops import distributed_save_op
@@ -28,6 +29,7 @@ from tensorflow.python.data.kernel_tests import test_base
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.framework import combinations
 from tensorflow.python.framework import errors
+from tensorflow.python.ops import array_ops
 from tensorflow.python.platform import test
 
 
@@ -52,8 +54,10 @@ class DistributedSaveTest(
     except FileNotFoundError:
       pass
 
+  # TODO(mpcallanan): Add test for multiple workers.
+
   @combinations.generate(test_base.eager_only_combinations())
-  def testSimple(self):
+  def testSaveLoad(self):
     cluster = data_service_test_base.TestCluster(num_workers=1)
     dataset = dataset_ops.Dataset.range(10)
     distributed_save_op.distributed_save(
@@ -64,7 +68,25 @@ class DistributedSaveTest(
     dataset = dataset_ops.Dataset.load(self._test_dir)
     self.assertDatasetProduces(dataset, list(range(10)))
 
-  # TODO(mpcallanan): Add test for multiple workers.
+  @combinations.generate(
+      combinations.times(
+          test_base.eager_only_combinations(),
+          combinations.combine(compression=[None, "AUTO", "GZIP"]),
+      )
+  )
+  def testCompression(self, compression):
+    cluster = data_service_test_base.TestCluster(num_workers=1)
+    dataset = dataset_ops.Dataset.range(10)
+    distributed_save_op.distributed_save(
+        dataset,
+        self._test_dir,
+        cluster.dispatcher_address(),
+        compression=compression,
+    )
+    self._wait_for_snapshot(cluster)
+
+    dataset = dataset_ops.Dataset.load(self._test_dir)
+    self.assertDatasetProduces(dataset, list(range(10)))
 
   @combinations.generate(test_base.eager_only_combinations())
   def testChooseFromDatasets(self):
@@ -103,6 +125,17 @@ class DistributedSaveTest(
     self.assertDatasetProduces(dataset, list(range(10)))
 
   @combinations.generate(test_base.eager_only_combinations())
+  def testWorkerFailure(self):
+    cluster = data_service_test_base.TestCluster(num_workers=1)
+    components = np.array([1.0, 2.0, 3.0, np.nan, 5.0]).astype(np.float32)
+    dataset = dataset_ops.Dataset.from_tensor_slices(components)
+    dataset = dataset.map(lambda x: array_ops.check_numerics(x, "message"))
+    distributed_save_op.distributed_save(
+        dataset, self._test_dir, cluster.dispatcher_address()
+    )
+    self._wait_for_error(cluster)
+
+  @combinations.generate(test_base.eager_only_combinations())
   def testBadDispatcherAddress(self):
     dataset = dataset_ops.Dataset.range(10)
     with self.assertRaisesRegex(ValueError, "must be a string"):
@@ -124,6 +157,10 @@ class DistributedSaveTest(
 
   def _wait_for_snapshot(self, cluster):
     while not os.path.exists(os.path.join(self._test_dir, "DONE")):
+      time.sleep(0.1)
+
+  def _wait_for_error(self, cluster):
+    while not os.path.exists(os.path.join(self._test_dir, "ERROR")):
       time.sleep(0.1)
 
 

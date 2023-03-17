@@ -587,18 +587,6 @@ class DefaultSchedulerCore : public SchedulerCore {
     return std::nullopt;
   }
 
-  DefaultSchedulerCore(HloCostAnalysis::ShapeSizeFunction shape_size_bytes,
-                       const AsyncTracker* async_tracker,
-                       const LatencyEstimator* latency_estimator,
-                       const SchedulerConfig& config)
-      : shape_size_bytes_(shape_size_bytes),
-        async_tracker_(async_tracker),
-        latency_estimator_(latency_estimator),
-        config_(config) {}
-  Status InitializeScheduler(const HloModule* module) override;
-  StatusOr<std::vector<HloInstruction*>> ScheduleComputation(
-      const HloComputation* computation) override;
-
   // The scheduling state contains everything that is required for the
   // bookkeeping of the scheduling algorithm. Functions that perform operations
   // over the scheduling state can directly operate on the state contained into
@@ -649,9 +637,28 @@ class DefaultSchedulerCore : public SchedulerCore {
           latency_estimator(latency_estimator),
           async_tracker(async_tracker),
           memory_pressure_tracker(memory_pressure_tracker),
-          config(config) {
-    }
+          config(config) {}
   };
+
+  using PostProcessingFn = std::function<void(SchedulingState&)>;
+
+  DefaultSchedulerCore(
+      HloCostAnalysis::ShapeSizeFunction shape_size_bytes,
+      const AsyncTracker* async_tracker,
+      const LatencyEstimator* latency_estimator, const SchedulerConfig& config,
+      TargetSchedulingRule target_scheduling_rule = nullptr,
+      TargetSchedulingRule early_target_scheduling_rule = nullptr,
+      PostProcessingFn post_processing_fn = nullptr)
+      : shape_size_bytes_(shape_size_bytes),
+        async_tracker_(async_tracker),
+        latency_estimator_(latency_estimator),
+        config_(config),
+        target_scheduling_rule_(target_scheduling_rule),
+        early_target_scheduling_rule_(early_target_scheduling_rule),
+        post_processing_fn_(post_processing_fn) {}
+  Status InitializeScheduler(const HloModule* module) override;
+  StatusOr<std::vector<HloInstruction*>> ScheduleComputation(
+      const HloComputation* computation) override;
 
  protected:
   virtual void LogInstruction(const HloInstruction* instr) const;
@@ -673,10 +680,12 @@ class DefaultSchedulerCore : public SchedulerCore {
   HloCostAnalysis::ShapeSizeFunction shape_size_bytes_;
   std::unique_ptr<ModulePressureState> module_pressure_state_;
   std::unique_ptr<HloAliasAnalysis> alias_analysis_;
-  TargetSchedulingRule target_scheduling_rule_ = nullptr;
   const AsyncTracker* async_tracker_;
   const LatencyEstimator* latency_estimator_;
   SchedulerConfig config_;
+  TargetSchedulingRule target_scheduling_rule_ = nullptr;
+  TargetSchedulingRule early_target_scheduling_rule_ = nullptr;
+  PostProcessingFn post_processing_fn_ = nullptr;
 };
 
 // A scheduler oriented to hiding latencies of operations that can run in
