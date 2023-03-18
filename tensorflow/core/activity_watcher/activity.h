@@ -42,6 +42,7 @@ enum ActivityCategory {
   kMisc = 2,
   kDatasetOp = 3,
   kTpuOp = 4,
+  kRendezvous = 5,
 };
 
 static tsl::string ToString(ActivityCategory category) {
@@ -56,6 +57,8 @@ static tsl::string ToString(ActivityCategory category) {
       return "Dataset Op";
     case ActivityCategory::kTpuOp:
       return "TPU Op";
+    case ActivityCategory::kRendezvous:
+      return "Rendezvous";
   }
 }
 
@@ -164,6 +167,10 @@ class ActivityScope {
       std::enable_if_t<is_activity_generator<ActivityGenerator>, bool> = true>
   explicit ActivityScope(ActivityGenerator&& gen, int level = 1) {
     activity_id_ = ActivityStart(std::forward<ActivityGenerator>(gen), level);
+  }
+  ActivityScope(ActivityScope&& activity) {
+    activity_id_ = activity.activity_id_;
+    activity.activity_id_ = kActivityNotRecorded;
   }
   ~ActivityScope() { ActivityEnd(activity_id_); }
 
