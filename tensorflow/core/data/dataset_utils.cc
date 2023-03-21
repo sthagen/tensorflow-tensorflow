@@ -964,9 +964,8 @@ REGISTER_DATASET_EXPERIMENT("serialize_input_cycle_length",
 REGISTER_DATASET_EXPERIMENT("stage_based_autotune",
                             RandomJobSamplePercentage<0>, IndependentHostTasks);
 REGISTER_DATASET_EXPERIMENT("stage_based_autotune_v2",
-                            RandomJobSamplePercentage<50>,
-                            IndependentHostTasks);
-REGISTER_DATASET_EXPERIMENT("data_transfer", RandomJobSamplePercentage<3>,
+                            RandomJobSamplePercentage<0>, IndependentHostTasks);
+REGISTER_DATASET_EXPERIMENT("data_transfer", RandomJobSamplePercentage<5>,
                             IndependentHostTasks);
 }  // namespace
 }  // namespace data
