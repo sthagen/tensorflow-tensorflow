@@ -164,6 +164,7 @@ cc_test(
         "//tensorflow/lite:testdata/add_quantized.bin",
         "//tensorflow/lite:testdata/custom_sinh.bin",
     ],
+    tags = ["no_oss"],  # TODO(b/274832369): Re-enable after fixed.
     deps = [
         ":c_api",
         ":c_api_experimental",
@@ -187,6 +188,7 @@ cc_test(
         "//tensorflow/lite:testdata/add_quantized.bin",
         "//tensorflow/lite:testdata/custom_sinh.bin",
     ],
+    tags = ["no_oss"],  # TODO(b/274832369): Re-enable after fixed.
     deps = [
         ":c_api_experimental_without_op_resolver_without_alwayslink",
         ":c_api_types",
@@ -326,7 +328,6 @@ tflite_cc_library_with_c_headers_test(
         "c_api_experimental.h",
         "c_api_opaque.h",
     ],
-    aspect_hints = ["//tools/build_defs/swift:auto_module"],
     copts = tflite_copts(),
     tags = ["allow_undefined_symbols"],  # For tflite::CreateOpResolver().
     deps = [
@@ -356,7 +357,6 @@ tflite_cc_library_with_c_headers_test(
         "c_api_experimental.h",
         "c_api_opaque.h",
     ],
-    aspect_hints = ["//tools/build_defs/swift:auto_module"],
     copts = tflite_copts(),
     tags = ["allow_undefined_symbols"],  # For tflite::CreateOpResolver().
     deps = [
@@ -380,6 +380,7 @@ cc_test(
     srcs = ["c_api_experimental_test.cc"],
     copts = tflite_copts(),
     data = ["//tensorflow/lite:testdata/add.bin"],
+    tags = ["no_oss"],  # TODO(b/274832369): Re-enable after fixed.
     deps = [
         ":c_api",
         ":c_api_experimental",

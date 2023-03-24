@@ -391,7 +391,7 @@ cc_library(
         "//tensorflow/lite:macros",
         "//tensorflow/lite:external_cpu_backend_context",
         "//tensorflow/lite/kernels/internal:compatibility",
-        "@pthreadpool//:pthreadpool",
+        "@pthreadpool",
     ] + select({
         # This select must match the similar select in `copts`
         "//tensorflow:linux_ppc64le": [],
@@ -586,6 +586,7 @@ BUILTIN_KERNEL_SRCS = [
     "batch_to_space_nd.cc",
     "bidirectional_sequence_lstm.cc",
     "bidirectional_sequence_rnn.cc",
+    "bitcast.cc",
     "broadcast_args.cc",
     "broadcast_to.cc",
     "bucketize.cc",
@@ -2972,6 +2973,18 @@ cc_test(
         ":test_main",
         ":test_util",
         "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "bitcast_test",
+    size = "small",
+    srcs = ["bitcast_test.cc"],
+    deps = [
+        ":test_main",
+        ":test_util",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
     ],

@@ -43,8 +43,10 @@
     *   Add 16-bit int type support for built-in op `less`, `greater_than`,
         `equal`
     *   Add 8-bit and 16-bit support for `floor_div` and `floor_mod`.
+    *   Add 16-bit and 32-bit int support for the built-in op `bitcast`.
     *   Add int16 indices support for built-in op `gather` and `gather_nd`.
     *   Add reference implementation for 16-bit int unquantized `add`.
+    *   Add reference implementation for 16-bit int and 32-bit unsigned int unquantized `mul`.
 
 *   `tf.keras`
 
@@ -76,6 +78,13 @@
         `tf.keras.__internal__.RaggedKerasTensor` classes. You can use these
         classes to do instance type checking and type annotations for
         layer/model inputs and outputs.
+    *   All the `tf.keras.dtensor.experimental.optimizers` classes have been 
+        merged with `tf.keras.optimizers`. You can migrate your code to use
+        `tf.keras.optimizers` directly. The API namespace for
+        `tf.keras.dtensor.experimental.optimizers` will be removed in future
+        releases.
+    *   Added support for `class_weight` for 3+ dimensional targets (e.g.
+        image segmentation masks) in `Model.fit`.
 
 *   `tf.function`:
 
@@ -129,6 +138,13 @@
     *   List of members of dtensor.Layout and dtensor.Mesh have slightly changed
         as part of efforts to consolidate the C++ and Python source
         code with pybind11. Most notably, Layout.serialized_string is removed.
+    *   Minor API changes to represent Single Device Layout for non-distributed
+        Tensors inside DTensor functions. Runtime support will be added soon.
+
+*   `tf.experimental.ExtensionType`:
+
+    *   `tf.experimental.ExtensionType` now supports Python `tuple` as
+        the type annotation of its fields.
 
 ## Thanks to our Contributors
 

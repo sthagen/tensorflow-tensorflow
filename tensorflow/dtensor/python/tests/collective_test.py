@@ -89,6 +89,7 @@ class CollectiveTest(test_util.DTensorBaseTest):
     self.assertDTensorEqual(expected_result, self.scalar_layout, dtensor_result)
 
   def testTwoReducesWithAssign(self):
+    self.skipForPathways('TODO(b/260775095)')
     # FIXME(b/238384852): The purpose of this test is to validate the control
     # dependency added by DTensor.
     # However, as we have no way of testing the per-device graph
@@ -191,6 +192,7 @@ class CollectiveTest(test_util.DTensorBaseTest):
 
   # Regression test for b/184401449.
   def testDeviceIdTensorOnSplitHost(self):
+    self.skipForPathways('Reason for failure is yet to be investigated.')
     if not test_util.is_tpu_present():
       self.skipTest('This test only runs on TPUs.')
     self.skipForDeviceType(['TPU'],

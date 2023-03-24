@@ -168,19 +168,22 @@ void Emplace(void* int_ptr, AsyncValue* dst) {
   v = *reinterpret_cast<int32_t*>(int_ptr);
 }
 
-struct ReturnI32 {
+template <typename T>
+struct ReturnScalar {
   LogicalResult operator()(unsigned result_index, const Type* type,
                            const Type* runtime_type, void* ret) const {
-    auto* scalar = llvm::dyn_cast<ScalarType>(type);
-    if (scalar && scalar->type() == PrimitiveType::S32) {
-      ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(ret, sizeof(int32_t));
-      *ptr = *reinterpret_cast<int32_t*>(ret);
+    PrimitiveType dtype = primitive_util::NativeToPrimitiveType<T>();
+
+    if (auto* s = llvm::dyn_cast<ScalarType>(type); s && s->type() == dtype) {
+      ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(ret, sizeof(T));
+      *ptr = *reinterpret_cast<T*>(ret);
       return success();
     }
+
     return failure();
   }
 
-  int32_t* ptr = nullptr;
+  T* ptr = nullptr;
 };
 
 struct ReturnMemref {
@@ -307,7 +310,7 @@ TEST(ExecutableTest, ReturnScalar) {
   )";
 
   int32_t result = 0;
-  ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
   ASSERT_TRUE(CompileAndExecute(module, {}, converter).ok());
   EXPECT_EQ(result, 42);
@@ -342,12 +345,33 @@ TEST(ExecutableTest, ScalarArgs) {
   )";
 
   int32_t result = 0;
-  ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
   ScalarArg arg0(static_cast<int32_t>(20));
   ScalarArg arg1(static_cast<int32_t>(22));
 
   ASSERT_TRUE(CompileAndExecute(module, {arg0, arg1}, converter).ok());
+  EXPECT_EQ(result, 42);
+}
+
+TEST(ExecutableTest, MemrefF8Arg) {
+  absl::string_view module = R"(
+    func.func @test(%arg0: memref<?xf8E4M3FN>) -> index {
+      %c0 = arith.constant 0 : index
+      %0 = memref.dim %arg0, %c0 : memref<?xf8E4M3FN>
+      return %0 : index
+    }
+  )";
+
+  int64_t result = 0;
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int64_t>{&result});
+
+  MemrefDesc arg0(PrimitiveType::F8E4M3FN, nullptr, 0, {42}, {1});
+
+  Arguments<MemrefDesc> args(1);
+  args.emplace_back(std::move(arg0));
+
+  ASSERT_TRUE(CompileAndExecute(module, args, converter).ok());
   EXPECT_EQ(result, 42);
 }
 
@@ -369,7 +393,7 @@ TEST(ExecutableTest, MultipleFunctions) {
   EXPECT_EQ(compiled->num_functions(), 2);
 
   int32_t result = 0;
-  ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
   ScalarArg arg0(static_cast<int32_t>(20));
   ScalarArg arg1(static_cast<int32_t>(22));
@@ -420,7 +444,7 @@ TEST(ExecutableTest, AssertionFailureOrResult) {
 
   {
     int32_t result = 0;
-    ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+    ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
     ScalarArg arg0(int32_t{20});
     EXPECT_TRUE(CompileAndExecute(module, {arg0}, converter).ok());
@@ -429,7 +453,7 @@ TEST(ExecutableTest, AssertionFailureOrResult) {
 
   {
     int32_t result = 0;
-    ResultConverterSet converter(IgnoreError, ReturnI32{&result});
+    ResultConverterSet converter(IgnoreError, ReturnScalar<int32_t>{&result});
 
     ScalarArg arg0(int32_t{42});
     auto executed = CompileAndExecute(module, {arg0}, converter);
@@ -453,7 +477,7 @@ TEST(ExecutableTest, AsyncExecuteAndAwait) {
   )";
 
   int32_t result = 0;
-  ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
   ScalarArg arg0(static_cast<int32_t>(20));
   ScalarArg arg1(static_cast<int32_t>(22));
@@ -545,10 +569,19 @@ TEST(ExecutableTest, AsyncScalarArg) {
 
 TEST(ExecutableTest, AsyncMemrefArg) {
   absl::string_view module = R"(
-    async.func @test(%arg0: !async.value<memref<?xf32>>) ->
-    !async.value<memref<?xf32>> {
-      %0 = async.await %arg0 : !async.value<memref<?xf32>>
-      return %0 : memref<?xf32>
+    async.func @test(%arg0: !async.value<memref<?x?xf32>>) ->
+    !async.value<memref<?x?xf32>> {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+
+      %0 = async.await %arg0 : !async.value<memref<?x?xf32>>
+      %dim0 = memref.dim %0, %c0 : memref<?x?xf32>
+      %dim1 = memref.dim %0, %c1 : memref<?x?xf32>
+      %1 = memref.alloc(%dim0, %dim1) : memref<?x?xf32>
+
+      memref.copy %0, %1 : memref<?x?xf32> to memref<?x?xf32>
+
+      return %1 : memref<?x?xf32>
     }
   )";
 
@@ -556,22 +589,22 @@ TEST(ExecutableTest, AsyncMemrefArg) {
       MakeConstructedAsyncValueRef<OwnedMemref>();
   ResultConverterSet converter(AssertNoError,
                                ReturnAsyncMemref{result.AsPtr()});
-  std::vector<float> input = {42.0, 42.0, 42.0, 42.0};
+  std::vector<float> input = {42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0};
   MemrefDesc memref{
-      PrimitiveType::F32, input.data(), 0, {4}, {4} /*fake strides*/};
+      PrimitiveType::F32, input.data(), 0, {4, 2}, {4, 2} /*fake strides*/};
   AsyncValueRef<MemrefDesc> async_memref =
       tsl::MakeAvailableAsyncValueRef<MemrefDesc>(std::move(memref));
 
   AsyncMemrefArg arg0(async_memref);
 
   ASSERT_TRUE(CompileAndExecute(module, {arg0}, converter).ok());
-
   ASSERT_TRUE(result.get().desc.has_value());
-  EXPECT_EQ(result.get()->rank(), 1);
+  EXPECT_EQ(result.get()->rank(), 2);
   EXPECT_EQ(result.get()->size(0), 4);
+  EXPECT_EQ(result.get()->size(1), 2);
 
   float* data = reinterpret_cast<float*>(result.get()->data());
-  EXPECT_TRUE(std::all_of(data, data + 4, [](float v) { return v == 42.0f; }));
+  EXPECT_TRUE(std::all_of(data, data + 8, [](float v) { return v == 42.0f; }));
 }
 
 TEST(ExecutableTest, AsyncMemrefRet) {
@@ -761,7 +794,7 @@ void BM_AsyncExecuteAndAwait(benchmark::State& state) {
   )";
 
   int32_t result = 0;
-  ResultConverterSet converter(AssertNoError, ReturnI32{&result});
+  ResultConverterSet converter(AssertNoError, ReturnScalar<int32_t>{&result});
 
   ScalarArg arg0(static_cast<int32_t>(20));
   ScalarArg arg1(static_cast<int32_t>(22));
