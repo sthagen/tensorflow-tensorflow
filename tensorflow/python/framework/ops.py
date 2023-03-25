@@ -53,7 +53,6 @@ from tensorflow.python.framework import errors
 from tensorflow.python.framework import op_callbacks
 from tensorflow.python.framework import registry
 from tensorflow.python.framework import stack
-from tensorflow.python.framework import tensor_conversion
 from tensorflow.python.framework import tensor_conversion_registry
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
@@ -1357,22 +1356,6 @@ class _EagerTensorBase(Tensor, internal.NativeObject, core_tf_types.Value):
 # expect it to be eventually covered by tf Tensor types and typing.
 EagerTensor = tf_export("__internal__.EagerTensor", v1=[])(
     pywrap_tfe.TFE_Py_InitEagerTensor(_EagerTensorBase))
-
-
-convert_to_tensor_v1_with_dispatch = (
-    tensor_conversion.convert_to_tensor_v1_with_dispatch
-)
-
-
-convert_to_tensor_v1 = tensor_conversion.convert_to_tensor_v1
-
-
-convert_to_tensor_v2_with_dispatch = (
-    tensor_conversion.convert_to_tensor_v2_with_dispatch
-)
-
-
-convert_to_tensor_v2 = tensor_conversion.convert_to_tensor_v2
 
 
 def _add_error_prefix(msg, *, name=None):
@@ -3210,13 +3193,14 @@ class Graph(pywrap_tf_session.PyGraph):
     else:
       self._add_function(function)
 
-    for f in function.graph._functions.values():  # pylint: disable=protected-access
-      if self._is_function(f.name):
-        if overwrite:
-          self._remove_function(f.name)
+    if hasattr(function, "graph"):
+      for f in function.graph._functions.values():  # pylint: disable=protected-access
+        if self._is_function(f.name):
+          if overwrite:
+            self._remove_function(f.name)
+            self._add_function(f)
+        else:
           self._add_function(f)
-      else:
-        self._add_function(f)
 
   def _add_function(self, function):
     """Adds a function to the graph.
