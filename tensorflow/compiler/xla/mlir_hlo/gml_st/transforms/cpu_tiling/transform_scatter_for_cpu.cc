@@ -23,6 +23,7 @@ limitations under the License.
 #include "gml_st/transforms/transforms.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -42,11 +43,6 @@ struct TileScatterPattern : public OpRewritePattern<thlo::ScatterOp> {
   LogicalResult matchAndRewrite(thlo::ScatterOp scatterOp,
                                 PatternRewriter &rewriter) const override {
     if (hasLabel(scatterOp, kTransformedLabel)) return failure();
-
-    if (isa<scf::ForOp>(scatterOp->getParentOp())) {
-      return rewriter.notifyMatchFailure(
-          scatterOp, "has already been tiled by another pass.");
-    }
 
     // Tile everything to points and fuse.
     scf::SCFTilingOptions opts;
@@ -102,17 +98,10 @@ struct TransformScatterForCpuPass
 
     if (failed(applyPatternsAndFoldGreedily(f, std::move(patterns))))
       return signalPassFailure();
-    // Ensure we drop the marker in the end.
-    f.walk([](thlo::ScatterOp scatterOp) {
-      removeLabel(scatterOp, kTransformedLabel);
-    });
   }
 };
 
 }  // namespace
-}  // namespace mlir::gml_st
-
-namespace mlir::gml_st {
 
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
 createTransformScatterForCpuPass() {

@@ -59,7 +59,8 @@ std::unique_ptr<OperationPass<func::FuncOp>>
 createComposeExtractInsertSlicePass();
 
 /// Pass to vectorize compute ops and scf.for loops that are tiled perfectly.
-std::unique_ptr<OperationPass<func::FuncOp>> createVectorizeForCPUPass();
+std::unique_ptr<OperationPass<func::FuncOp>> createVectorizeForCPUPass(
+    int64_t numElementsThreshold = 1024);
 
 /// Pass to vectorize `memref.copy`.
 std::unique_ptr<OperationPass<func::FuncOp>> createVectorizeCopyPass();
@@ -133,6 +134,10 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createAddDebugInfoPass();
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>> createCollectStatsPass(
     int64_t level = 0);
 
+/// Pass to remove all transformed labels from tiled ops.
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+createRemoveLabelPass();
+
 /// Populate pattern to remove single/zero iteration scf.forall dimensions.
 void populateCollapseForallOpDimensionsPattern(RewritePatternSet &patterns);
 
@@ -169,6 +174,15 @@ struct GmlStCPUTilingOptions
       llvm::cl::desc("Tile sizes for `linalg.matmul`. Leave empty to determine "
                      "sizes automatically."),
       llvm::cl::list_init<int64_t>({}), llvm::cl::ZeroOrMore};
+
+  Option<int64_t> vectorizationSizeThreshold{
+      *this, "vectorization-size-threshold",
+      llvm::cl::desc("Threshold size for vectorization."), llvm::cl::init(128)};
+
+  Option<int64_t> vectorizationTiledSizeThreshold{
+      *this, "vectorization-tiled-size-threshold",
+      llvm::cl::desc("Threshold size for vectorization after tiling."),
+      llvm::cl::init(1024)};
 
   Option<bool> lowerToMmt4d{
       *this, "lower-to-mmt4d",

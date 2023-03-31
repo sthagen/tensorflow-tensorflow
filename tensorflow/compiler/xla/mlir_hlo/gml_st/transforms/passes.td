@@ -63,6 +63,11 @@ def VectorizeForCPUPass : Pass<"vectorize-for-cpu", "mlir::func::FuncOp"> {
     "::mlir::vector::VectorDialect",
     "::mlir::tensor::TensorDialect"
   ];
+  let options = [
+    Option<"numElementsThreshold", "num-elements-threshold", "int64_t",
+           /*default=*/"128",
+           "Number of elements max of the tensor operands in order for the op to be vectorized.">,
+  ];
 }
 
 def VectorizeCopyPass :
@@ -185,6 +190,11 @@ def CollectStatsPass :
     Pass<"collect-stats", "mlir::func::FuncOp"> {
   let summary = "Print stats about tileable ops";
   let constructor = "::mlir::gml_st::createCollectStatsPass()";
+}
+
+def RemoveLabelPass : Pass<"remove-label", "mlir::func::FuncOp"> {
+  let summary = "Remove transformed labels from tiled ops";
+  let constructor = "::mlir::gml_st::createRemoveLabelPass()";
 }
 
 def FusionPlanningForCpuPass :

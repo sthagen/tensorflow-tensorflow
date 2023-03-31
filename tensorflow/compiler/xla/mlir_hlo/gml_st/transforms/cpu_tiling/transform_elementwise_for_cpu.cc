@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/TilingInterfaceImpl.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
@@ -251,11 +252,6 @@ struct TileElementwisePattern : public OpRewritePattern<OpTy> {
     if (hasSingleElementOperandsAndResults(op)) return failure();
     if (hasLabel(op, kTransformedLabel)) return failure();
 
-    if (isa<scf::ForallOp, scf::ForOp>(op->getParentOp())) {
-      return rewriter.notifyMatchFailure(
-          op, "has already been tiled by another pass.");
-    }
-
     // Find the root from which to start tiling and fusion.
     auto fusionFilterFn = [&](Operation *op) {
       if (fuseDegenerateReshapes) {
@@ -312,10 +308,9 @@ struct TransformElementwiseForCpuPass
 
   void runOnOperation() override {
     func::FuncOp f = getOperation();
-    MLIRContext *context = &getContext();
+    MLIRContext *ctx = &getContext();
 
-    RewritePatternSet patterns(context);
-    populateCollapseForallOpDimensionsPattern(patterns);
+    RewritePatternSet patterns(ctx);
     // clang-format off
     patterns.add<
       TileElementwisePattern<linalg::BroadcastOp>,
@@ -323,12 +318,11 @@ struct TransformElementwiseForCpuPass
       TileElementwisePattern<linalg::MapOp>,
       TileElementwisePattern<linalg::TransposeOp>,
       TileElementwisePattern<thlo::ReverseOp>
-    >(context, vectorSize, fuseDegenerateReshapes);
+    >(ctx, vectorSize, fuseDegenerateReshapes);
     // clang-format on
 
     if (failed(applyPatternsAndFoldGreedily(f, std::move(patterns))))
       return signalPassFailure();
-    f.walk([](linalg::MapOp op) { removeLabel(op, kTransformedLabel); });
   }
 };
 
