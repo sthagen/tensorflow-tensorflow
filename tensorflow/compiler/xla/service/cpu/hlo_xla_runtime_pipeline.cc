@@ -183,6 +183,7 @@ static Status CreateHloXlaPipeline(
   if (options.enable_tiling_and_fusion) {
     mlir::gml_st::GmlStCPUTilingOptions opts =
         mlir::gml_st::getDefaultCPUPipelineOptions(options.cpu_name);
+    opts.matmulTileSizes = options.matmul_tile_sizes;
     if (options.enable_fusion_outlining) {
       opts.enableFusionClusters = true;
       opts.enableFusionClusterOutlining = true;
@@ -256,6 +257,8 @@ static Status CreateHloXlaPipeline(
     pm.addNestedPass<FuncOp>(mlir::deallocation::createDeallocatePass());
     pm.addNestedPass<FuncOp>(
         mlir::deallocation::createDeallocationSimplificationPass());
+    // Remove SCF iter args that became redundant after simplification.
+    pm.addPass(mlir::createCanonicalizerPass());
     pm.addNestedPass<FuncOp>(mlir::deallocation::createBufferReusePass());
     pm.addNestedPass<FuncOp>(
         mlir::deallocation::createDeallocationSimplificationPass());

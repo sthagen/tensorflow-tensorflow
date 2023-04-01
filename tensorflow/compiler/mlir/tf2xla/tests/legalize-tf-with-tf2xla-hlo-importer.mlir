@@ -29,4 +29,19 @@ module attributes {tf.versions = {bad_consumers = [], min_consumer = 0 : i32, pr
     func.return %0#0 : tensor<i64>
   }
 
+  // CHECK-LABEL: constant_parameter
+  func.func @constant_parameter(%arg0: tensor<2xf32>) -> tensor<2xf32> {
+    %0 = "tf.Const"() {value = dense<1.42> : tensor<2xf32>} : () -> tensor<2xf32>
+    // CHECK: call @translated_tf2xla_kernel_tf.Atan2_3(%arg0, %0)
+    %1 = "tf.Atan2"(%arg0, %0) : (tensor<2xf32>, tensor<2xf32>) -> tensor<2xf32>
+    func.return %0 : tensor<2xf32>
+  }
+
+  // CHECK-LABEL: uses_translated_return_type
+  func.func @uses_translated_return_type(%arg0: tensor<3xf32>) -> tensor<?xf32> {
+    // CHECK: call @translated_tf2xla_kernel_tf.Unique_0(%arg0) : (tensor<3xf32>) -> (tensor<?xf32, #mhlo.type_extensions<bounds = [3]>>, tensor<3xi32>)
+    %y, %idx = "tf.Unique"(%arg0) {device = ""} : (tensor<3xf32>) -> (tensor<?xf32>, tensor<3xi32>)
+    return %y : tensor<?xf32>
+  }
+
 }
