@@ -1267,10 +1267,6 @@ cc_library(
         ":maybe_owning_device_memory",
         ":shaped_buffer",
         ":stream_pool",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/types:span",
-        "@com_google_absl//absl/types:variant",
         "//tensorflow/compiler/xla:debug_options_flags",
         "//tensorflow/compiler/xla:executable_run_options",
         "//tensorflow/compiler/xla:shape_tree",
@@ -1288,6 +1284,10 @@ cc_library(
         "//tensorflow/tsl/platform:errors",
         "//tensorflow/tsl/platform:logging",
         "//tensorflow/tsl/platform:status",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
+        "@com_google_absl//absl/types:variant",
     ] + internal_hlo_deps(),
 )
 
@@ -3744,9 +3744,6 @@ cc_library(
     hdrs = ["computation_placer.h"],
     deps = [
         ":global_device_id",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
         "//tensorflow/compiler/xla:array2d",
         "//tensorflow/compiler/xla:literal",
         "//tensorflow/compiler/xla:shape_util",
@@ -3764,6 +3761,9 @@ cc_library(
         "//tensorflow/tsl/platform:errors",
         "//tensorflow/tsl/platform:logging",
         "//tensorflow/tsl/platform:status",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
     ] + if_libtpu([":tpu_computation_placer"]),
     alwayslink = True,  # Contains per-platform computation placer registration
 )
@@ -4594,6 +4594,7 @@ cc_library(
     deps = [
         ":heap_simulator",
         ":hlo_cost_analysis",
+        ":memory_space_assignment_proto_cc",
         ":memory_space_assignment_repacking",
         ":memory_space_assignment_tuning_utils",
         ":memory_space_assignment_utils",
@@ -5723,6 +5724,7 @@ cc_library(
         "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -6944,11 +6946,6 @@ xla_cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":compiler",
-        "@llvm-project//mlir:ArithDialect",
-        "@llvm-project//mlir:FuncDialect",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Parser",
-        "@stablehlo//:register",
         "//tensorflow/compiler/xla:autotune_results_proto_cc",
         "//tensorflow/compiler/xla:debug_options_flags",
         "//tensorflow/compiler/xla:statusor",
@@ -6960,6 +6957,11 @@ xla_cc_binary(
         "//tensorflow/tsl/platform:platform_port",
         "//tensorflow/tsl/platform:protobuf",
         "//tensorflow/tsl/util:command_line_flags",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@stablehlo//:register",
     ] + if_cuda_is_configured([
         "//tensorflow/compiler/xla/service/gpu:executable_proto_cc",
         "//tensorflow/compiler/xla/service/gpu:gpu_compiler",
@@ -7098,4 +7100,11 @@ xla_cc_test(
         "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/platform:test",
     ]),
+)
+
+tf_proto_library(
+    name = "memory_space_assignment_proto",
+    srcs = ["memory_space_assignment.proto"],
+    cc_api_version = 2,
+    make_default_target_header_only = True,
 )

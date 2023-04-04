@@ -627,7 +627,6 @@ const llvm::DenseSet<mlir::TypeID> &MlirPreferredOps() {
   static const llvm::DenseSet<mlir::TypeID>* ops =
       new llvm::DenseSet<mlir::TypeID>{
     // Ops that are legalized in the old bridge using MlirXlaOpKernel
-    TypeID::get<TF::AbsOp>(),
     TypeID::get<TF::AtanOp>(),
     TypeID::get<TF::AvgPool3DOp>(),
     TypeID::get<TF::BiasAddGradOp>(),
@@ -700,10 +699,8 @@ const llvm::DenseSet<mlir::TypeID> &MlirPreferredOps() {
     // These ops have undetermined bugs, may not be legalizable with XlaOpKernel
     // legalization in TF2XLA fallback. By legalization with MLIR, we can fix
     // the bug. b/195583695 describes the motivation of this change.
-    // See b/216355804 how to reproduce the bug regarding tf.RandomUniform Op
     // See b/216353817 how to reproduce the bug regarding tf.StridedSlice Op
     // See b/245615401 how to reproduce the bug regarding tf.SliceOp
-    TypeID::get<TF::RandomUniformOp>(),
     TypeID::get<TF::StridedSliceOp>(),
     TypeID::get<TF::SliceOp>(),
 
