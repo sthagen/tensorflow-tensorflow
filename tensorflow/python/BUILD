@@ -75,6 +75,7 @@ py_library(
         ":gradient_checker_v2",
         ":no_contrib",
         "//tensorflow/python/estimator:estimator_py",
+        "//tensorflow/python/summary:summary_py",
         "//tensorflow/python/tpu:tpu_estimator",
         "//tensorflow/python/util:all_util",
         "//tensorflow/python/util:compat",
@@ -225,7 +226,7 @@ py_library(
         "//tensorflow/python/ops/distributions",
         "//tensorflow/python/ops/linalg",
         "//tensorflow/python/ops/linalg:linear_operator_test_util",
-        "//tensorflow/python/ops/linalg/sparse",
+        "//tensorflow/python/ops/linalg/sparse:sparse_py",
         "//tensorflow/python/ops/losses",
         "//tensorflow/python/ops/numpy_ops:numpy",
         "//tensorflow/python/ops/parallel_for",
@@ -237,7 +238,7 @@ py_library(
         "//tensorflow/python/profiler:profiler_v2",
         "//tensorflow/python/profiler:trace",
         "//tensorflow/python/saved_model",
-        "//tensorflow/python/summary",
+        "//tensorflow/python/summary:summary_py",
         "//tensorflow/python/summary/writer",
         "//tensorflow/python/tools:module_util",
         "//tensorflow/python/tools/api/generator:create_python_api",
@@ -1709,7 +1710,7 @@ py_library(
     ],
 )
 
-tf_py_test(
+cuda_py_test(
     name = "bincount_ops_test",
     size = "small",
     srcs = ["ops/bincount_ops_test.py"],
@@ -1829,6 +1830,7 @@ py_library(
     deps = [
         ":protos_all_py",
         "//tensorflow/python/client:pywrap_tf_session",
+        "//tensorflow/python/framework:cpp_shape_inference_proto_py",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/types",
         "//tensorflow/python/util:compat",
@@ -2340,6 +2342,7 @@ py_library(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:tape",
         "//tensorflow/python/framework:auto_control_deps_utils",
+        "//tensorflow/python/framework:cpp_shape_inference_proto_py",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:tensor_conversion_registry",
@@ -2378,6 +2381,7 @@ py_library(
         ":array_ops",
         ":handle_data_util",
         ":list_ops_gen",
+        "//tensorflow/python/framework:cpp_shape_inference_proto_py",
         "//tensorflow/python/util:lazy_loader",
         "//third_party/py/numpy",
     ],
@@ -3040,7 +3044,6 @@ py_library(
         "//tensorflow/python/eager:wrap_function",
         "//tensorflow/python/ops/distributions",
         "//tensorflow/python/ops/linalg",
-        "//tensorflow/python/ops/linalg/sparse",
         "//tensorflow/python/ops/ragged",
         "//tensorflow/python/ops/structured",
     ],

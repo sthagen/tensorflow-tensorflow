@@ -109,7 +109,6 @@ cc_library(
         ":op_reg_offset_proto_cc",
         "//tensorflow/core:portable_gif_internal",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core/platform:stringpiece",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
@@ -484,6 +483,7 @@ py_library(
     srcs_version = "PY3",
     visibility = visibility,
     deps = [
+        ":cpp_shape_inference_proto_py",
         ":framework",
         ":function",
         ":ops",
@@ -1508,8 +1508,10 @@ py_library(
     srcs = ["tensor.py"],
     deps = [
         ":common_shapes",
+        ":constant_op",
         ":dtypes",
         ":tensor_shape",
+        ":tensor_util",
         ":type_spec",
         ":type_spec_registry",
         "//tensorflow/core:protos_all_py",

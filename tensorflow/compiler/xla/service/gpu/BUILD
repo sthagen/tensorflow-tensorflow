@@ -2,7 +2,6 @@
 #   GPU-specific components in XLA service implementation.
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@local_config_cuda//cuda:build_defs.bzl", "cuda_library")
 load(
     "//tensorflow/tsl/platform:build_config.bzl",
     "tf_proto_library",
@@ -380,6 +379,7 @@ cc_library(
         ":launch_dimensions",
         ":matmul_utils",
         "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
@@ -414,7 +414,7 @@ cc_library(
 
 xla_test(
     name = "ir_emitter_triton_test",
-    srcs = ["ir_emitter_triton_test.cc"],
+    srcs = if_cuda_is_configured(["ir_emitter_triton_test.cc"]),
     backend_tags = {"gpu": [
         "requires-gpu-sm70",
     ]},
@@ -423,6 +423,7 @@ xla_test(
     ],
     tags = ["nomac"],
     deps = [
+        ":gpu_device_info",
         ":ir_emitter_triton",
         "//tensorflow/compiler/xla:comparison_util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
@@ -431,8 +432,12 @@ xla_test(
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:test_utils",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "//tensorflow/tsl/lib/core:status_test_util",
+        "//tensorflow/tsl/platform:errors",
+        "//tensorflow/tsl/platform:status_matchers",
         "//tensorflow/tsl/platform:test",
         "//tensorflow/tsl/platform/default/build_config:cublas_plugin",
+        "//tensorflow/tsl/protobuf:autotuning_proto_cc",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -609,7 +614,6 @@ tsl_gpu_library(
         ":nccl_utils",
         ":thunk",
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla:status",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
@@ -619,11 +623,8 @@ tsl_gpu_library(
         "//tensorflow/compiler/xla/service:collective_ops_utils",
         "//tensorflow/compiler/xla/service:global_device_id",
         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
-        "//tensorflow/compiler/xla/stream_executor",
-        "//tensorflow/compiler/xla/stream_executor/gpu:gpu_activation",
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_activation_header",
         "//tensorflow/compiler/xla/stream_executor/gpu:gpu_stream",
-        "//tensorflow/compiler/xla/stream_executor/gpu:gpu_types_header",
         "//tensorflow/compiler/xla/translate/hlo_to_mhlo:hlo_utils",
         "//tensorflow/compiler/xla/translate/mhlo_to_hlo:attribute_exporter",
         "//tensorflow/compiler/xla/translate/mhlo_to_hlo:type_to_shape",
@@ -637,17 +638,7 @@ tsl_gpu_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@llvm-project//mlir:IR",
-    ] + if_nccl([":all_reduce_kernel"]),
-)
-
-cuda_library(
-    name = "all_reduce_kernel",
-    srcs = if_cuda_is_configured(["all_reduce_kernel.cu.cc"]),
-    hdrs = if_cuda_is_configured(["all_reduce_kernel.h"]),
-    compatible_with = [],
-    tags = ["manual"],  # only builds if_nccl.
-    deps = if_cuda_is_configured(["@local_config_nccl//:nccl"]),
-    alwayslink = 1,
+    ],
 )
 
 # Empty library to implement nested dependency conditions.
@@ -1020,6 +1011,7 @@ cc_library(
     deps = [
         ":ir_emission_utils",
         ":matmul_utils",
+        "//tensorflow/compiler/xla:literal_util",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla:status",
         "//tensorflow/compiler/xla:util",
@@ -1035,6 +1027,8 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -1878,6 +1872,71 @@ cc_library(
 )
 
 cc_library(
+    name = "gpu_float_support",
+    srcs = ["gpu_float_support.cc"],
+    hdrs = ["gpu_float_support.h"],
+    deps = [
+        "//tensorflow/compiler/xla/service:float_support",
+    ],
+)
+
+cc_library(
+    name = "compile_module_to_llvm_ir",
+    srcs = [
+        "compile_module_to_llvm_ir.cc",
+    ],
+    hdrs = [
+        "compile_module_to_llvm_ir.h",
+    ],
+    deps = [
+        ":executable_proto_cc",
+        ":gpu_constants",
+        ":gpu_device_info",
+        ":gpu_executable",
+        ":gpu_float_support",
+        ":gpu_hlo_schedule",
+        ":ir_emitter",
+        ":metrics",
+        ":runtime_intrinsics",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+        "//tensorflow/compiler/xla/mlir/backends/gpu/transforms:passes",
+        "//tensorflow/compiler/xla/mlir/runtime/transforms:compilation_pipeline_gpu",
+        "//tensorflow/compiler/xla/mlir_hlo:transforms_gpu_passes",
+        "//tensorflow/compiler/xla/service:bitcast_dtypes_expander",
+        "//tensorflow/compiler/xla/service:buffer_assignment",
+        "//tensorflow/compiler/xla/service:convert_async_collectives_to_sync",
+        "//tensorflow/compiler/xla/service:dump",
+        "//tensorflow/compiler/xla/service:hlo_dataflow_analysis",
+        "//tensorflow/compiler/xla/service:hlo_pass_pipeline",
+        "//tensorflow/compiler/xla/service:hlo_proto_cc",
+        "//tensorflow/compiler/xla/service:hlo_rematerialization",
+        "//tensorflow/compiler/xla/service:optimization_barrier_expander",
+        "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
+        "//tensorflow/compiler/xla/stream_executor",
+        "//tensorflow/compiler/xla/stream_executor:device_description",
+        "//tensorflow/compiler/xla/stream_executor/rocm:rocm_platform_id",
+        "//tensorflow/compiler/xla/translate/hlo_to_mhlo:hlo_utils",
+        "//tensorflow/compiler/xla/translate/mhlo_to_hlo:location_exporter",
+        "//tensorflow/compiler/xla/translate/mhlo_to_lhlo_with_xla",
+        "//tensorflow/tsl/platform:env",
+        "//tensorflow/tsl/platform:errors",
+        "//tensorflow/tsl/platform:statusor",
+        "@com_google_absl//absl/strings",
+        "@llvm-project//llvm:AsmParser",
+        "@llvm-project//llvm:TransformUtils",
+        "@llvm-project//llvm:ir_headers",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
     name = "gpu_compiler",
     srcs = [
         "gpu_compiler.cc",
@@ -1888,6 +1947,7 @@ cc_library(
     deps = [
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
+        ":compile_module_to_llvm_ir",
         ":conv_layout_normalization",
         ":dot_dimension_sorter",
         ":executable_proto_cc",
@@ -1900,6 +1960,7 @@ cc_library(
         ":gpu_conv_rewriter",
         ":gpu_device_info",
         ":gpu_executable",
+        ":gpu_float_support",
         ":gpu_hlo_cost_analysis",
         ":gpu_hlo_schedule",
         ":gpu_layout_assignment",
@@ -1946,7 +2007,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:all_reduce_folder",
         "//tensorflow/compiler/xla/service:all_reduce_promotion",
         "//tensorflow/compiler/xla/service:all_reduce_reassociate",
-        "//tensorflow/compiler/xla/service:all_to_all_decomposer",
         "//tensorflow/compiler/xla/service:async_collective_creator",
         "//tensorflow/compiler/xla/service:batchnorm_expander",
         "//tensorflow/compiler/xla/service:bitcast_dtypes_expander",
@@ -2546,6 +2606,7 @@ xla_cc_test(
     srcs = if_cuda_is_configured(["buffer_comparator_test.cc"]),
     tags = tf_cuda_tests_tags(),
     deps = [
+        ":stream_executor_util",
         "//tensorflow/compiler/xla:shape_util",
         "//tensorflow/compiler/xla:types",
         "//tensorflow/tsl/platform:test",

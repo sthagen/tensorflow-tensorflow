@@ -29,8 +29,9 @@ GmlStCPUTilingOptions getDefaultCPUPipelineOptions(StringRef cpuName,
                                                    int64_t statsDetailLevel) {
   GmlStCPUTilingOptions opts;
   opts.vectorSize = 8;
+  opts.reductionEnableHeuristic = false;
   opts.reduction1DSplitRatio = 8;
-  opts.reduction1DTileSize = 32;
+  opts.reduction1DTileSize = 8;
   opts.reduction2DParallelDimTileSize = 4;
   opts.reduction2DReductionDimTileSize = 4;
   opts.matmulTileSizes = {};
@@ -66,12 +67,15 @@ void addCPUTilingPipeline(OpPassManager& pm,
     pm.addPass(createCSEPass());
   }
 
+  pm.addNestedPass<FuncOp>(createRewriteDotAsReducePass());
   if (options.lowerToMmt4d) pm.addNestedPass<FuncOp>(createPackMatmulPass());
 
+  pm.addNestedPass<FuncOp>(createTransformBatchMatmulForCpuPass());
   pm.addNestedPass<FuncOp>(createTransformConvForCpuPass());
   pm.addNestedPass<FuncOp>(createTransformScatterForCpuPass());
 
   TransformReduceForCpuPassOptions reductionOpts;
+  reductionOpts.enableHeuristic = options.reductionEnableHeuristic;
   reductionOpts.tileSize1D = options.reduction1DTileSize;
   reductionOpts.splitRatio1D = options.reduction1DSplitRatio;
   reductionOpts.parallelDimTileSize2D = options.reduction2DParallelDimTileSize;
@@ -105,6 +109,7 @@ void addCPUTilingPipeline(OpPassManager& pm,
   // Tile remaining ops by size one and scalarize what we can.
   pm.addNestedPass<FuncOp>(createTileByOnePass());
   pm.addNestedPass<FuncOp>(createScalarizationPass());
+  pm.addNestedPass<FuncOp>(createComposeExtractInsertSlicePass());
 
   pm.addPass(createCanonicalizerPass());
 

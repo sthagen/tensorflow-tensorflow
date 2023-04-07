@@ -524,6 +524,26 @@ class LoadTest(test.TestCase, parameterized.TestCase):
     self.assertEqual(4, imported.f(constant_op.constant(2), True).numpy())
     self.assertEqual(7, imported.f(constant_op.constant(2)).numpy())
 
+  def test_function_with_defaults_input(self, cycles, use_cpp_bindings):
+    # TODO(b/264869228) Fix LoadTest
+    if use_cpp_bindings:
+      self.skipTest("Not implemented for cpp.")
+
+    @def_function.function(input_signature=[tensor_spec.TensorSpec([])])
+    def func(x=constant_op.constant(5.0)):
+      return x
+
+    root = autotrackable.AutoTrackable()
+    root.f = func
+
+    self.assertAllEqual(5.0, root.f())
+    self.assertAllEqual(7.0, root.f(7.0))
+
+    imported = cycle(root, cycles, use_cpp_bindings=use_cpp_bindings)
+
+    self.assertEqual(5.0, imported.f().numpy())
+    self.assertEqual(7.0, imported.f(constant_op.constant(7.0)).numpy())
+
   def test_function_with_default_none_input(self, cycles, use_cpp_bindings):
     # TODO(b/264869228) Fix LoadTest
     if use_cpp_bindings:
@@ -2908,11 +2928,11 @@ class SingleCycleTests(test.TestCase, parameterized.TestCase):
         return a
 
     root = ObjWithFunction()
-    with self.assertLogs(level="WARNING") as logs:
+    with self.assertLogs(level="INFO") as logs:
       loaded = cycle(root, 1, use_cpp_bindings=use_cpp_bindings)
 
     expected_save_message = (
-        "WARNING:absl:Found untraced functions such as foo while saving "
+        "INFO:absl:Found untraced functions such as foo while saving "
         "(showing 1 of 1). These functions will not be directly callable after "
         "loading."
     )
@@ -3053,6 +3073,55 @@ class SingleCycleTests(test.TestCase, parameterized.TestCase):
         18,  # 3 * (1 + 2 + 3)
         loaded(constant_op.constant(3, dtype=dtypes.int32)).numpy(),
     )
+
+  def test_function_aliases(self, use_cpp_bindings):
+    if use_cpp_bindings:
+      self.skipTest("Not implemented for cpp.")
+
+    root = autotrackable.AutoTrackable()
+    root.f = def_function.function(
+        lambda x: 2. * x,
+        input_signature=[tensor_spec.TensorSpec(None, dtypes.float32)])
+    save_dir = os.path.join(self.get_temp_dir(), "saved_model")
+    options = save_options.SaveOptions(function_aliases={
+        "my_func": root.f,
+    })
+    save.save(root, save_dir, root.f, options=options)
+    loaded = test_load(
+        save_dir,
+        use_cpp_bindings=use_cpp_bindings,
+        options=load_options.LoadOptions(
+            experimental_load_function_aliases=True
+        ),
+    )
+    self.assertLen(loaded.function_aliases, 1)
+    self.assertIn("my_func", loaded.function_aliases)
+    self.assertEqual(loaded.function_aliases["my_func"](1.0).numpy(), 2.0)
+
+  def test_function_aliases_name_collision(self, use_cpp_bindings):
+    if use_cpp_bindings:
+      self.skipTest("Not implemented for cpp.")
+
+    root = autotrackable.AutoTrackable()
+    root.f = def_function.function(
+        lambda x: 2. * x,
+        input_signature=[tensor_spec.TensorSpec(None, dtypes.float32)])
+    root.function_aliases = variables.Variable(1.0)
+    save_dir = os.path.join(self.get_temp_dir(), "saved_model")
+    options = save_options.SaveOptions(function_aliases={
+        "my_func": root.f,
+    })
+    save.save(root, save_dir, root.f, options=options)
+    with self.assertRaisesRegex(
+        ValueError, "Could not load with experimental_load_function_aliases"
+    ):
+      test_load(
+          save_dir,
+          use_cpp_bindings=use_cpp_bindings,
+          options=load_options.LoadOptions(
+              experimental_load_function_aliases=True
+          ),
+      )
 
 
 # TODO(b/264882754) Support Cpp bindings DeferredInitModuleVariablesTest

@@ -71,11 +71,18 @@ std::unique_ptr<OperationPass<func::FuncOp>> createNaiveCopyRemovalPass();
 std::unique_ptr<OperationPass<func::FuncOp>> createLowerVectorsPass(
     bool enableAVX2 = true);
 
+/// Pass to rewrite linalg.dot as linalg.reduce(linalg.map).
+std::unique_ptr<Pass> createRewriteDotAsReducePass();
+
 /// Pass to pack linalg.matmul as linalg.mmt4d.
 std::unique_ptr<OperationPass<func::FuncOp>> createPackMatmulPass();
 
 /// Pass to transform a conv op for CPU backend.
 std::unique_ptr<OperationPass<func::FuncOp>> createTransformConvForCpuPass();
+
+/// Pass to transform a batch_matmul op for CPU backend.
+std::unique_ptr<OperationPass<func::FuncOp>>
+createTransformBatchMatmulForCpuPass();
 
 /// Pass to transform a thlo.scatter op for CPU backend.
 std::unique_ptr<OperationPass<func::FuncOp>> createTransformScatterForCpuPass();
@@ -160,6 +167,11 @@ struct GmlStCPUTilingOptions
   Option<int64_t> vectorSize{*this, "vector-size",
                              llvm::cl::desc("Vector size for a 1D reduction."),
                              llvm::cl::init(8)};
+
+  Option<bool> reductionEnableHeuristic{
+      *this, "reduction-enable-heuristic",
+      llvm::cl::desc("Enable tiling parameters heuristic for reductions."),
+      llvm::cl::init(false)};
 
   Option<int64_t> reduction1DTileSize{
       *this, "reduction-1d-tile-size",

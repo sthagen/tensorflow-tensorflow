@@ -3368,15 +3368,9 @@ cc_library(
     deps = [
         ":hlo_pass",
         ":op_expander_pass",
-        "//tensorflow/compiler/xla:literal_util",
         "//tensorflow/compiler/xla:shape_util",
-        "//tensorflow/compiler/xla:status_macros",
-        "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
-        "//tensorflow/tsl/platform:logging",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -5735,7 +5729,6 @@ xla_cc_test(
     deps = [
         ":hlo_verifier",
         ":while_loop_all_reduce_code_motion",
-        "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/compiler/xla/hlo/utils:hlo_matchers",
         "//tensorflow/compiler/xla/tests:hlo_test_base",

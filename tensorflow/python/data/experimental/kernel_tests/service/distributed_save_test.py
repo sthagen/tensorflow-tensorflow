@@ -37,9 +37,8 @@ from tensorflow.python.platform import test
 # TODO(mpcallanan): Restructure this and snapshot_ft_test.py to share more.
 
 
-class DistributedSaveTest(
-    data_service_test_base.TestBase, parameterized.TestCase
-):
+class DistributedSaveTestBase:
+  """Base class for setting up snapshot directories."""
 
   def setUp(self):
     super().setUp()
@@ -55,18 +54,30 @@ class DistributedSaveTest(
     except FileNotFoundError:
       pass
 
+
+class DistributedSaveTest(
+    DistributedSaveTestBase,
+    data_service_test_base.TestBase,
+    parameterized.TestCase,
+):
+
   # TODO(mpcallanan): Add test for multiple workers.
 
-  @combinations.generate(test_base.default_test_combinations())
-  def testSaveLoad(self):
-    cluster = data_service_test_base.TestCluster(num_workers=1)
+  @combinations.generate(
+      combinations.times(
+          test_base.default_test_combinations(),
+          combinations.combine(num_workers=[1, 3])))
+  def testSaveLoad(self, num_workers):
+    cluster = data_service_test_base.TestCluster(num_workers=num_workers)
     dataset = dataset_ops.Dataset.range(10)
     self.evaluate(distributed_save_op.distributed_save(
         dataset, self._test_dir, cluster.dispatcher_address()))
     _wait_for_snapshot(self._test_dir)
 
     dataset = dataset_ops.Dataset.load(self._test_dir)
-    self.assertDatasetProduces(dataset, list(range(10)))
+    ignore_order = num_workers > 1
+    self.assertDatasetProduces(
+        dataset, list(range(10)), assert_items_equal=ignore_order)
 
   @combinations.generate(
       combinations.times(
@@ -193,24 +204,11 @@ class DistributedSaveTest(
 
 
 class LoadCheckpointTest(
+    DistributedSaveTestBase,
     data_service_test_base.TestBase,
-    parameterized.TestCase,
     checkpoint_test_base.CheckpointTestBase,
+    parameterized.TestCase,
 ):
-
-  def setUp(self):
-    super().setUp()
-    self._test_dir = os.path.join(
-        tempfile.mkdtemp(dir=self.get_temp_dir()),
-        "distributed_save_test",
-    )
-
-  def tearDown(self):
-    super().tearDown()
-    try:
-      shutil.rmtree(self._test_dir)
-    except FileNotFoundError:
-      pass
 
   @combinations.generate(
       combinations.times(
