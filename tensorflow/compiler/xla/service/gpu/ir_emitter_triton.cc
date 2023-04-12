@@ -199,7 +199,7 @@ void CreateTritonPipeline(mlir::OpPassManager& pm,
                           int num_stages) {
   const int ccAsInt = cc.major * 10 + cc.minor;
   // Based on optimize_triton_ir() in
-  // @triton//:python/triton/compiler.py
+  // @triton//:python/triton/compiler/compiler.py
   pm.addPass(mlir::createInlinerPass());
   pm.addPass(mt::createCombineOpsPass());
   pm.addPass(mlir::createCanonicalizerPass());
@@ -207,10 +207,10 @@ void CreateTritonPipeline(mlir::OpPassManager& pm,
   pm.addPass(mlir::createLoopInvariantCodeMotionPass());
   pm.addPass(mlir::createSymbolDCEPass());
   // Based on ttir_to_ttgir() in
-  // @triton//:python/triton/compiler.py
+  // @triton//:python/triton/compiler/compiler.py
   pm.addPass(mt::createConvertTritonToTritonGPUPass(num_warps));
   // Based on optimize_ttgir() in
-  // @triton//:python/triton/compiler.py
+  // @triton//:python/triton/compiler/compiler.py
   pm.addPass(mlir::createTritonGPUCoalescePass());
   pm.addPass(mlir::createTritonGPURemoveLayoutConversionsPass());
   pm.addPass(mlir::createTritonGPUAccelerateMatmulPass(ccAsInt));
@@ -686,7 +686,8 @@ StatusOr<LaunchDimensions> MatMul(
       build_bcast(rm_cmp.getResult().cast<TensorValue>(), shape_m_n),
       build_bcast(rn_cmp.getResult().cast<TensorValue>(), shape_m_n));
 
-  b.create<mt::StoreOp>(out_ptrs, Cast(b, loc, acc_final, root_ty), mask);
+  b.create<mt::StoreOp>(out_ptrs, Cast(b, loc, acc_final, root_ty), mask,
+                        mt::CacheModifier::NONE, mt::EvictionPolicy::NORMAL);
   return launch_dimensions;
 }
 
@@ -694,9 +695,7 @@ StatusOr<LaunchDimensions> TritonWrapper(
     absl::string_view fn_name, const HloComputation* hlo_computation,
     const se::CudaComputeCapability& cc, const GpuDeviceInfo& device_info,
     const AutotuneResult::TritonGemmKey& config, llvm::Module* llvm_module,
-    LaunchDimensionsGenerator generator) {
-  // TODO(b/264317991): Pass in a context instead if this becomes to slow.
-  mlir::MLIRContext mlir_context;
+    LaunchDimensionsGenerator generator, mlir::MLIRContext& mlir_context) {
   mlir_context.loadDialect<mt::TritonDialect>();
   mlir::OpBuilder b(&mlir_context);
   auto loc = mlir::NameLoc::get(b.getStringAttr(hlo_computation->name()));
@@ -790,8 +789,8 @@ StatusOr<LaunchDimensions> TritonWrapper(
   }
   launch_dimensions.SetSharedMemBytes(shared_mem_bytes);
 
-  std::unique_ptr<llvm::Module> ll_triton_module =
-      mt::translateLLVMToLLVMIR(&llvm_module->getContext(), triton_module);
+  std::unique_ptr<llvm::Module> ll_triton_module = mt::translateLLVMToLLVMIR(
+      &llvm_module->getContext(), triton_module, /*isROCM=*/false);
   LogAndVerify(ll_triton_module.get());
   for (auto& metadata :
        llvm::make_early_inc_range(ll_triton_module->named_metadata())) {
