@@ -328,6 +328,7 @@ py_strict_library(
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/eager:function",
         "//tensorflow/python/trackable:base",
+        "//tensorflow/python/types",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:nest",
         "@absl_py//absl/logging",
@@ -868,7 +869,10 @@ tf_python_pybind_extension(
     #    }),
     #    static_deps = tf_python_pybind_static_deps(),
     features = ["-layering_check"],
-    visibility = ["//tensorflow/python/training:__subpackages__"],
+    visibility = [
+        "//tensorflow/python/checkpoint:__subpackages__",
+        "//tensorflow/python/training:__subpackages__",
+    ],
     deps = [
         ":pywrap_saved_model_headers",
         "//tensorflow/cc/experimental/libexport:save",

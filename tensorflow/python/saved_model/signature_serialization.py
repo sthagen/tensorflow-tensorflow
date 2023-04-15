@@ -26,6 +26,7 @@ from tensorflow.python.saved_model import function_serialization
 from tensorflow.python.saved_model import revived_types
 from tensorflow.python.saved_model import signature_constants
 from tensorflow.python.trackable import base
+from tensorflow.python.types import core
 from tensorflow.python.util import compat
 from tensorflow.python.util import nest
 from tensorflow.python.util.compat import collections_abc
@@ -194,16 +195,15 @@ def canonicalize_signatures(signatures):
     # pylint: enable=protected-access
     concrete_signatures[signature_key] = final_concrete
     # pylint: enable=cell-var-from-loop
-    if (
-        hasattr(function, "_function_spec")
-        and hasattr(function._function_spec, "fullargspec")  # pylint: disable=protected-access
-        and function._function_spec.fullargspec.defaults  # pylint: disable=protected-access
-    ):
-      defaults[signature_key] = (
-          function._function_spec.fullargspec.defaults.defaults  # pylint: disable=protected-access
-      )  # pylint: disable=protected-access
-    else:
-      defaults[signature_key] = None
+    if isinstance(function, core.GenericFunction):
+      full_arg_spec = function._function_spec.fullargspec  # pylint: disable=protected-access
+      len_defaults = len(full_arg_spec.defaults or [])
+      for arg, default in zip(
+          full_arg_spec.args[-len_defaults:], full_arg_spec.defaults or []
+      ):
+        if not default:
+          continue
+        defaults[(signature_key, arg)] = default
   return concrete_signatures, wrapped_functions, defaults
 
 

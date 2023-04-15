@@ -427,6 +427,12 @@ def IsLastDimEqualToNumElements : Constraint<CPred<
 def IsDefinedByFullyConnectedOp : Constraint<CPred<
   "$0.getDefiningOp<TFL::FullyConnectedOp>() != nullptr">>;
 
+// Returns true if the supplied value-
+// 1) Has only one use or
+// 2) Is only used by binary op like AddOp, SubOp, MulOp or DivOp.
+def HasOneUseOrUsedByOnlyBinaryOps : Constraint<CPred<
+  "TFL::HasOneUseOrUsedByOnlyBinaryOps($0)">>;
+
 // Pattern for skipping Tile if it is mainly for broadcasting and the
 // Op is already supporting broadcasting.
 multiclass FuseTileBroadcastIntoFollowingBinary<Op BinaryOp> {
@@ -553,6 +559,7 @@ foreach BinaryOp = [TFL_AddOp, TFL_SubOp, TFL_DivOp, TFL_MulOp] in {
      (IsRankLessThanEqualTo $input, $lhs),
      (IsRankLessThanEqualTo $lhs, $rhs),
      (IsReducedTailOfShape $lhs, $input),
+     (HasOneUseOrUsedByOnlyBinaryOps $lhs),
      // Restrict operands to have at most rank 4 because TFLite binary
      // kernel supports up to 4D broadcast.
      (HasRankAtMost<4> $input),
@@ -576,6 +583,7 @@ foreach BinaryOp = [TFL_AddOp, TFL_SubOp, TFL_DivOp, TFL_MulOp] in {
      (IsRankLessThanEqualTo $input, $rhs),
      (IsRankLessThanEqualTo $rhs, $lhs),
      (IsReducedTailOfShape $rhs, $input),
+     (HasOneUseOrUsedByOnlyBinaryOps $rhs),
      // Restrict operands to have at most rank 4 because TFLite binary
      // kernel supports up to 4D broadcast.
      (HasRankAtMost<4> $input),
