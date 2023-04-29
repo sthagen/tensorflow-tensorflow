@@ -24,6 +24,7 @@ limitations under the License.
 #include "gml_st/transforms/transforms.h"
 #include "gml_st/utils/tensor_utils.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
@@ -546,6 +547,7 @@ FusionCluster getFusionCluster(
 
     rootOp = users[0];
   }
+  resultOps.insert(rootOp);
 
   // Run DFS to find all ops that satisfy producerFilterFn.
   SmallVector<Operation*> remainingProducers;
@@ -555,6 +557,11 @@ FusionCluster getFusionCluster(
   while (!remainingProducers.empty()) {
     Operation* curOp = remainingProducers.pop_back_val();
     if (!curOp || resultOps.contains(curOp)) continue;
+    if (!llvm::all_of(curOp->getUsers(),
+                      [&](Operation* op) { return resultOps.contains(op); })) {
+      continue;
+    }
+
     if (curOp == op || producerFilterFn(curOp)) {
       resultOps.insert(curOp);
       for (Value operand : curOp->getOperands())
@@ -588,7 +595,8 @@ FailureOr<GMLSTTilingResult> tileUsingSCFForallOpAndFuseGreedily(
 FailureOr<scf::SCFTilingResult> tileUsingSCFForOpAndFuseGreedily(
     PatternRewriter& rewriter, Operation* op, const scf::SCFTilingOptions& opts,
     llvm::function_ref<bool(Operation*)> fuseFilterFn) {
-  auto tilingResult = scf::tileUsingSCFForOp(rewriter, op, opts);
+  auto tilingResult =
+      scf::tileUsingSCFForOp(rewriter, cast<TilingInterface>(op), opts);
   if (failed(tilingResult)) return failure();
   rewriter.replaceOp(op, tilingResult->replacements);
 
@@ -741,6 +749,31 @@ LogicalResult inlineFusionCluster(FusionOp fusionOp,
   }
 
   return success();
+}
+
+// Duplicates the op so each copy has only one use as init parameter.
+template <typename OpTy>
+LogicalResult duplicateInitOps(OpTy op, PatternRewriter& rewriter) {
+  // Nothing to do, because the op has 0 or 1 users.
+  if (std::distance(op->user_begin(), op->user_end()) <= 1) return failure();
+
+  bool modified = false;
+  for (auto& use : llvm::make_early_inc_range(op->getUses())) {
+    Operation* ownerOp = use.getOwner();
+
+    auto dstStyleOp = dyn_cast<DestinationStyleOpInterface>(ownerOp);
+    if (!dstStyleOp || !dstStyleOp.isDpsInit(&use)) continue;
+
+    auto newOp = cast<OpTy>(rewriter.clone(*op));
+    use.set(newOp->getResult(0));
+    modified = true;
+  }
+  return success(modified);
+}
+
+void populateDuplicateInitOpsPatterns(RewritePatternSet& patterns) {
+  patterns.add(duplicateInitOps<linalg::FillOp>);
+  patterns.add(duplicateInitOps<tensor::EmptyOp>);
 }
 
 }  // namespace mlir::gml_st
