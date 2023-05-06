@@ -1,3 +1,45 @@
+# Release 2.14.0
+
+<INSERT SMALL BLURB ABOUT RELEASE FOCUS AREA AND POTENTIAL TOOLCHAIN CHANGES>
+
+# Breaking Changes
+
+* <DOCUMENT BREAKING CHANGES HERE>
+* <THIS SECTION SHOULD CONTAIN API, ABI AND BEHAVIORAL BREAKING CHANGES>
+
+*  `tf.Tensor`
+    * The class hierarchy for `tf.Tensor` has changed, and there are now
+      explicit `EagerTensor` and `SymbolicTensor` classes for eager and
+      tf.function respectively. Users who relied on the exact type of Tensor
+      (e.g. `type(t) == tf.Tensor`) will need to update their code to use
+      `isinstance(t, tf.Tensor)`. The `tf.is_symbolic_tensor` helper added in
+      2.13 may be used when it is necessary to determine if a value is
+      specifically a symbolic tensor.
+
+# Known Caveats
+
+* <CAVEATS REGARDING THE RELEASE (BUT NOT BREAKING CHANGES).>
+* <ADDING/BUMPING DEPENDENCIES SHOULD GO HERE>
+* <KNOWN LACK OF SUPPORT ON SOME PLATFORM, SHOULD GO HERE>
+
+# Major Features and Improvements
+
+*   <INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
+*   <IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
+
+# Bug Fixes and Other Changes
+* `tf.lite`
+    * Strided_Slice now supports `UINT32`.
+* <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
+* <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
+* <NOTES SHOULD BE GROUPED PER AREA>
+
+# Thanks to our Contributors
+
+This release contains contributions from many people at Google, as well as:
+
+<INSERT>, <NAME>, <HERE>, <USING>, <GITHUB>, <HANDLE>
+
 # Release 2.13.0
 
 ## Breaking Changes
@@ -198,6 +240,9 @@
 *    `tf.nest`:
     *   Deprecated API `tf.nest.is_sequence` has now been deleted.
         Please use `tf.nest.is_nested` instead.
+
+*   `tf.lite`:
+    *   Add UINT32 support to tfl.pack
 
 ## Thanks to our Contributors
 

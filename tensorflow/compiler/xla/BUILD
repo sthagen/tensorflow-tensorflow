@@ -29,6 +29,7 @@ package_group(
         "//third_party/mlir_edge/model_curriculum/...",
         "//third_party/py/jax/...",
         "//third_party/py/t5x/...",
+        "//third_party/py/tpu_graphs/...",
         "//tensorflow/compiler/...",
         "//tensorflow/python/tpu/...",
     ],
@@ -773,6 +774,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 
