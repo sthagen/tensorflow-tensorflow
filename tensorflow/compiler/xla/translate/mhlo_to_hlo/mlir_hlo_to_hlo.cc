@@ -70,6 +70,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/mlir/utils/error_util.h"
 #include "tensorflow/compiler/xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "tensorflow/compiler/xla/mlir_hlo/mhlo/transforms/passes.h"
+#include "tensorflow/compiler/xla/primitive_util.h"
 #include "tensorflow/compiler/xla/service/gpu/backend_configs.pb.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -158,38 +159,22 @@ StatusOr<xla::Literal> CreateArrayLiteralFromAttr(mlir::ElementsAttr attr,
 
   xla::Shape shape = xla::TypeToShape(dense_attr.getType());
 
-#define ELEMENTS_ATTR_TO_LITERAL(xla_type, cpp_type)                         \
-  case xla_type: {                                                           \
-    xla::Array<cpp_type> source_data(shape.dimensions());                    \
-    source_data.SetValues(dense_attr.getValues<cpp_type>());                 \
-    return xla::LiteralUtil::CreateFromArrayWithLayout(source_data, layout); \
-  }
-
-  switch (shape.element_type()) {
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::PRED, bool)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F32, float)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F64, double)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::S8, int8)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::S16, int16)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::S32, int32)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::S64, int64_t)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::U8, uint8)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::U16, uint16)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::U32, uint32)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::U64, uint64)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::C64, std::complex<float>)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::C128, std::complex<double>)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F16, Eigen::half)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::BF16, Eigen::bfloat16)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F8E5M2, tsl::float8_e5m2)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F8E4M3FN, tsl::float8_e4m3fn)
-    ELEMENTS_ATTR_TO_LITERAL(xla::PrimitiveType::F8E4M3B11FNUZ,
-                             tsl::float8_e4m3b11)
-    default:
-      return tsl::errors::Internal(absl::StrCat(  // NOLINT
-          "Unsupported type: ", xla::PrimitiveType_Name(shape.element_type())));
-  }
-#undef ELEMENTS_ATTR_TO_LITERAL
+  return xla::primitive_util::PrimitiveTypeSwitch<StatusOr<xla::Literal>>(
+      [&](auto primitive_type_constant) -> StatusOr<xla::Literal> {
+        if constexpr (xla::primitive_util::IsArrayType(
+                          primitive_type_constant)) {
+          using cpp_type =
+              xla::primitive_util::NativeTypeOf<primitive_type_constant>;
+          xla::Array<cpp_type> source_data(shape.dimensions());
+          source_data.SetValues(dense_attr.getValues<cpp_type>());
+          return xla::LiteralUtil::CreateFromArrayWithLayout(source_data,
+                                                             layout);
+        }
+        return tsl::errors::Internal(absl::StrCat(  // NOLINT
+            "Unsupported type: ",
+            xla::PrimitiveType_Name(shape.element_type())));
+      },
+      shape.element_type());
 }
 
 // Convert APInt into an int.
@@ -3486,8 +3471,7 @@ xla::Status ConvertMlirHloToHlo(mlir::ModuleOp module, xla::HloProto* hlo_proto,
   xla::XlaBuilder module_builder("main");
   ConvertToHloModule converter(module, module_builder, use_tuple_args,
                                return_tuple, options);
-  if (failed(converter.Run()))
-    return ::tsl::FromAbslStatus(diag_handler.ConsumeStatus());
+  if (failed(converter.Run())) return diag_handler.ConsumeStatus();
   auto hlo_module = converter.ConsumeMainProto();
   StringRef module_name = module.getName() ? *module.getName() : "main";
   hlo_module.set_name(module_name.str());
@@ -3560,7 +3544,7 @@ xla::Status BuildHloFromMlirHlo(mlir::Block& block, xla::XlaBuilder& builder,
         unsigned index = ret.getOperandNumber();
         xla::XlaOp operand;
         if (failed(GetXlaOp(ret.get(), lowering, &operand, &inst)))
-          return ::tsl::FromAbslStatus(diag_handler.ConsumeStatus());
+          return diag_handler.ConsumeStatus();
         returns[index] = operand;
       }
     } else {
@@ -3568,7 +3552,7 @@ xla::Status BuildHloFromMlirHlo(mlir::Block& block, xla::XlaBuilder& builder,
       if (failed(converter.Lower(&inst, /*is_entry_function=*/true,
                                  /*ret_shardings=*/{}, &builder, &lowering,
                                  &return_value)))
-        return ::tsl::FromAbslStatus(diag_handler.ConsumeStatus());
+        return diag_handler.ConsumeStatus();
     }
   }
 

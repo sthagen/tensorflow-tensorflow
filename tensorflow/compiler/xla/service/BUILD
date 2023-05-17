@@ -3298,6 +3298,33 @@ xla_cc_test(
         "//tensorflow/compiler/xla/tests:hlo_test_base",
         "//tensorflow/compiler/xla/tests:test_utils",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "dot_dimension_merger",
+    srcs = ["dot_dimension_merger.cc"],
+    hdrs = ["dot_dimension_merger.h"],
+    deps = [
+        ":hlo_creation_utils",
+        ":hlo_pass",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:status",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+        "@com_google_absl//absl/algorithm:container",
+    ],
+)
+
+xla_cc_test(
+    name = "dot_dimension_merger_test",
+    srcs = ["dot_dimension_merger_test.cc"],
+    deps = [
+        ":dot_dimension_merger",
+        ":hlo_parser",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
     ],
 )
 
@@ -6405,9 +6432,35 @@ cc_library(
         "//tensorflow/compiler/xla:literal_util",
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla:xla_data_proto_cc",
         "//tensorflow/compiler/xla/hlo/ir:hlo",
         "//tensorflow/tsl/platform:blocking_counter",
         "@com_google_absl//absl/functional:function_ref",
+    ],
+)
+
+cc_library(
+    name = "collective_transformation_reorderer",
+    srcs = ["collective_transformation_reorderer.cc"],
+    hdrs = ["collective_transformation_reorderer.h"],
+    deps = [
+        ":hlo_dce",
+        ":hlo_pass",
+        "//tensorflow/compiler/xla:status",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_transformation_reorderer_test",
+    srcs = ["collective_transformation_reorderer_test.cc"],
+    deps = [
+        ":collective_transformation_reorderer",
+        "//tensorflow/compiler/xla/hlo/utils:hlo_matchers",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest",
     ],
 )
 

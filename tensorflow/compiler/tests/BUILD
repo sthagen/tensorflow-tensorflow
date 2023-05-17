@@ -854,6 +854,7 @@ tf_xla_py_test(
         "gpu",
         "gpu_a100",
     ],
+    flaky = True,
     python_version = "PY3",
     shard_count = 10,
     tags = [
@@ -2500,6 +2501,7 @@ tf_xla_py_test(
     use_xla_device = False,  # Uses tf.function(jit_compile=True)
     deps = [
         ":xla_test",
+        "//tensorflow/compiler/mlir/stablehlo",
         "//tensorflow/compiler/tf2xla/python:xla",
         "//tensorflow/python:framework",
         "//tensorflow/python:platform_test",
