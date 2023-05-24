@@ -14,7 +14,6 @@
 # ==============================================================================
 """Tracing Compiler implementation."""
 
-import collections
 import contextlib
 import threading
 from typing import List
@@ -80,7 +79,6 @@ class TracingCompiler:
       autograph=True,
       autograph_options=None,
       reduce_retracing=False,
-      capture_by_value=None,
       jit_compile=None,
   ):
     """Initializes a `TracingCompiler`.
@@ -101,9 +99,6 @@ class TracingCompiler:
       reduce_retracing: When True, `tf.function` uses
         `tf.types.experimental.TraceType` to trace supertypes of arguments to
         reduce the number of traces.
-      capture_by_value: Experimental. Whether to capture resource variables by
-        value or reference. If None, will inherit from a parent context or
-        default to False.
       jit_compile: Force-compile the function with XLA, cf. tf.function doc on
         jit_compile.
 
@@ -130,7 +125,6 @@ class TracingCompiler:
             f"TracingCompiler does not support `{attribute}` as an attribute."
         )
 
-    self._capture_by_value = capture_by_value
     self.tracing_count = 0
     # Maintein a dict of all captures: identifier -> lambda function. It's used
     # to get runtime values for all captures during ConcreteFunction dispatch,
@@ -212,54 +206,56 @@ class TracingCompiler:
   ) -> List[concrete_function_lib.ConcreteFunction]:
     return self._function_cache.values()
 
-  def _create_concrete_function(self, args, kwargs, func_graph):
+  def _create_concrete_function(
+      self, function_type, type_context, func_graph
+  ):
     """Create a `ConcreteFunction` from `args`, `kwargs`, and `func_graph`."""
     self.tracing_count += 1
 
-    arglen = len(args)
-    all_arg_names = function_type_utils.to_arg_names(self._function_type)
-    base_arg_names = all_arg_names[:arglen]
-    num_missing_args = arglen - len(all_arg_names)
-    if num_missing_args > 0:
-      # Must have variable positional args if there are missing args.
-      var_arg_name = next(
-          p.name
-          for p in self._function_type.parameters.values()
-          if p.kind is function_type_lib.Parameter.VAR_POSITIONAL
+    placeholder_context = trace_type.InternalPlaceholderContext(
+        func_graph, type_context.get_placeholder_mapping()
+    )
+    with func_graph.as_default():
+      placeholder_bound_args = function_type.placeholder_arguments(
+          placeholder_context
       )
-      missing_arg_names = [var_arg_name] * num_missing_args
-      # Produce a list of missing args of the form ["arg_0", "arg_1", ...],
-      # where arg is based on the VAR_POSITIONAL arg name in FunctionType.
-      missing_arg_names = [
-          "%s_%d" % (arg, i) for i, arg in enumerate(missing_arg_names)
-      ]
-      arg_names = base_arg_names + missing_arg_names
-    else:
-      arg_names = base_arg_names
 
     traced_func_graph = func_graph_module.func_graph_from_py_func(
         self._name,
         self._python_function,
-        args,
-        kwargs,
+        placeholder_bound_args.args,
+        placeholder_bound_args.kwargs,
         None,
         func_graph=func_graph,
-        arg_names=arg_names,
-        capture_by_value=self._capture_by_value,
+        arg_names=function_type_utils.to_arg_names(function_type),
         create_placeholders=False,
     )
 
     transform.apply_func_graph_transforms(traced_func_graph)
 
+    graph_capture_container = traced_func_graph.function_captures
+    # Maintain the list of all captures
+    self._func_captures.merge_by_ref_with(graph_capture_container)
+
+    # Create a new FunctionType including captures and outputs.
+    output_type = trace_type.from_value(
+        traced_func_graph.structured_outputs, type_context
+    )
+    traced_func_type = function_type_lib.FunctionType(
+        function_type.parameters.values(),
+        traced_func_graph.function_captures.capture_types,
+        return_annotation=output_type
+    )
+
     concrete_function = concrete_function_lib.ConcreteFunction(
         traced_func_graph,
         self._function_attributes,
-        spec=self.function_spec,
         # Tell the ConcreteFunction to clean up its graph once it goes out of
         # scope. This is not the default behavior since it gets used in some
         # places (like Keras) where the FuncGraph lives longer than the
         # ConcreteFunction.
         shared_func_graph=False,
+        function_type=traced_func_type
     )
 
     transform.call_concrete_function_callbacks(concrete_function)
@@ -340,56 +336,22 @@ class TracingCompiler:
         with ag_ctx.ControlStatusCtx(
             status=ag_status, options=self._autograph_options
         ):
-          func_graph = func_graph_module.FuncGraph(
-              self._name, capture_by_value=self._capture_by_value
-          )
+          func_graph = func_graph_module.FuncGraph(self._name)
           if self.input_signature is None and self._reduce_retracing:
             target_func_type = self._function_cache.generalize(
                 current_func_context, lookup_func_type
             )
           else:
             target_func_type = lookup_func_type
-          placeholder_mapping = lookup_func_context.get_placeholder_mapping()
-          placeholder_context = trace_type.InternalPlaceholderContext(
-              func_graph, placeholder_mapping
-          )
-          with func_graph.as_default():
-            placeholder_bound_args = target_func_type.placeholder_arguments(
-                placeholder_context
-            )
-          args = placeholder_bound_args.args
-          kwargs = placeholder_bound_args.kwargs
-
           concrete_function = self._create_concrete_function(
-              args, kwargs, func_graph
-          )
-
-          # TODO(b/263520817): Remove access to private attribute.
-          graph_capture_container = concrete_function.graph.function_captures
-          # Maintain the list of all captures
-          self._func_captures.merge_by_ref_with(graph_capture_container)
-          # Get current active captures snapshot
-          captures = graph_capture_container.get_by_ref_snapshot()
-
-          # Create a cache_key with args and captures
-          traced_func_type = _insert_capture_type(
-              target_func_type, captures, lookup_func_context
+              target_func_type, lookup_func_context, func_graph
           )
 
           self._function_cache.add(
-              current_func_context, traced_func_type, concrete_function
+              current_func_context, target_func_type, concrete_function
           )
 
           return concrete_function, filtered_flat_args
-
-
-def _insert_capture_type(original_func_type, captures, type_context):
-  capture_types = collections.OrderedDict()
-  for name, value in captures.items():
-    capture_types[name] = trace_type.from_value(value, type_context)
-  return function_type_lib.FunctionType(
-      original_func_type.parameters.values(), capture_types
-  )
 
 
 def _set_arg_keywords(concrete_function):

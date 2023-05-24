@@ -382,7 +382,7 @@ SnapshotManager::MaybeGetOrCreateStreamAssignment(
         *assigned_stream_index !=
             snapshot_progress->snapshot_task().stream_index()) {
       return absl::InternalError(absl::StrCat(
-          "Worker ", worker_address, " was assigned stream ",
+          "tf.data snapshot worker ", worker_address, " was assigned stream ",
           snapshot_progress->snapshot_task().stream_index(),
           ", but is now assigned a different stream ", *assigned_stream_index));
     }
@@ -459,10 +459,10 @@ Status SnapshotManager::GetSnapshotSplit(const GetSnapshotSplitRequest& request,
                             request.stream_index(),
                             ", but the assignment is no longer available.");
   } else if (it->second != request.stream_index()) {
-    return errors::Internal("worker ", request.worker_address(),
-                            " think it's assigned stream ",
-                            request.stream_index(),
-                            " but it's actually assigned stream ", it->second);
+    return errors::Internal(
+        "tf.data snapshot worker ", request.worker_address(),
+        " was assigned stream ", request.stream_index(),
+        " but is now assigned a different stream ", it->second);
   }
 
   Stream& stream = streams_[request.stream_index()];
@@ -476,13 +476,20 @@ Status SnapshotManager::GetSnapshotSplit(const GetSnapshotSplitRequest& request,
     response.set_end_of_splits(true);
     return OkStatus();
   }
+  while (request.repetition_index() > source.repetition_index) {
+    // This could happen if an iterator is repeated before reaching end of
+    // input, e.g. for the longer input to `Dataset.zip`. In this case we mark
+    // the previous repetitions as completed and advance to the requested
+    // repetition.
+    TF_RETURN_IF_ERROR(ResetSource(source, request.source_index()));
+  }
 
   Tensor split;
   bool end_of_splits;
   TF_RETURN_IF_ERROR(source.split_provider->GetNext(&split, &end_of_splits));
   if (end_of_splits) {
     response.set_end_of_splits(true);
-    return ResetSource(source, request.source_index());
+    return OkStatus();
   }
 
   std::string split_path = SplitPath(
@@ -500,6 +507,8 @@ Status SnapshotManager::GetSnapshotSplit(const GetSnapshotSplitRequest& request,
 Status SnapshotManager::ResetSource(Source& source, int64_t source_index) {
   TF_RETURN_IF_ERROR(source.split_provider->Reset());
   ++source.repetition_index;
+  LOG(INFO) << "Starting the " << source.repetition_index << "th repetition "
+            << " for snapshot " << path_ << ", source " << source_index;
   for (int64_t i = 0; i < streams_.size(); ++i) {
     TF_RETURN_IF_ERROR(env_->RecursivelyCreateDir(RepetitionDirectory(
         path_, /*stream_index=*/i, source_index, source.repetition_index)));
