@@ -49,10 +49,6 @@ namespace data {
 using ::tsl::OkStatus;
 using ::tsl::errors::InvalidArgument;
 
-// The time for which an UNKNOWN stream should transition to ORPHAN if no worker
-// claims ownership of it via heartbeat.
-const absl::Duration kUnknownStreamTimeout = absl::Seconds(45);
-
 StatusOr<std::unique_ptr<SnapshotManager>> SnapshotManager::Start(
     const SnapshotRequest& request, Env* env) {
   SnapshotManager* snapshot_manager = new SnapshotManager(request.path(), env);
@@ -120,8 +116,7 @@ Status SnapshotManager::WriteOnDiskMetadata(const SnapshotRequest& request) {
 
 StatusOr<std::unique_ptr<SnapshotManager>> SnapshotManager::Resume(
     absl::string_view path, Env* env) {
-  SnapshotManager* snapshot_manager =
-      new SnapshotManager(path, env, absl::Microseconds(env->NowMicros()));
+  SnapshotManager* snapshot_manager = new SnapshotManager(path, env);
   TF_RETURN_IF_ERROR(snapshot_manager->Resume());
   return absl::WrapUnique(snapshot_manager);
 }
@@ -413,11 +408,6 @@ SnapshotManager::MaybeGetOrCreateStreamAssignment(
 
 Status SnapshotManager::WorkerHeartbeat(const WorkerHeartbeatRequest& request,
                                         WorkerHeartbeatResponse& response) {
-  LOG_EVERY_N_SEC(INFO, 60)
-      << "tf.data snapshot progress [" << path_ << "]: " << num_assigned_splits_
-      << " of " << num_total_splits_
-      << " total splits have been assigned or completed.";
-
   dead_workers_.erase(request.worker_address());
 
   if (mode_ == Mode::kDone || mode_ == Mode::kError) {
@@ -425,6 +415,11 @@ Status SnapshotManager::WorkerHeartbeat(const WorkerHeartbeatRequest& request,
     // empty response to inform the workers to cancel the ongoing tasks.
     return OkStatus();
   }
+
+  LOG_EVERY_N_SEC(INFO, 60)
+      << "tf.data snapshot progress [" << path_ << "]: " << num_assigned_splits_
+      << " of " << num_total_splits_
+      << " total splits have been assigned or completed.";
 
   const SnapshotTaskProgress* snapshot_progress = nullptr;
   if (auto it = request.snapshot_task_progress().find(path_);

@@ -53,16 +53,25 @@ struct BufferUse {
   BlockArgument arg;
   size_t offset;
   size_t len;
+  bool is_constant;
 };
 
 BufferUse GetBufferUse(Value operand) {
   Operation* defining_op = operand.getDefiningOp();
   if (!defining_op) {
     auto block_argument = cast<mlir::BlockArgument>(operand);
+
+    // Check if the input buffer is marked as constant.
+    Region* parent_region = block_argument.getParentRegion();
+    auto parent_func = parent_region->getParentOfType<FuncOp>();
+    unsigned parent_func_arg_index = block_argument.getArgNumber();
+    auto cst = parent_func.getArgAttrOfType<StringAttr>(parent_func_arg_index,
+                                                        "lmhlo.constant_name");
+
     auto memref_type = cast<MemRefType>(block_argument.getType());
     size_t len = memref_type.getNumElements() *
                  (memref_type.getElementTypeBitWidth() / 8);
-    return {block_argument, 0, len};
+    return {block_argument, 0, len, cst ? true : false};
   }
 
   if (isa<memref::ViewOp>(defining_op)) {
@@ -83,7 +92,8 @@ BufferUse GetBufferUse(Value operand) {
     size_t len = memref_type.getNumElements() *
                  (memref_type.getElementTypeBitWidth() / 8);
 
-    return {buffer_use.arg, buffer_use.offset + offset, len};
+    return {buffer_use.arg, buffer_use.offset + offset, len,
+            buffer_use.is_constant};
   }
 
   if (auto cast = dyn_cast<mlir::memref::ReinterpretCastOp>(defining_op)) {
@@ -96,9 +106,12 @@ BufferUse GetBufferUse(Value operand) {
 // Check if buffer_use has any overlap with buffers in the region.
 bool HasDependency(llvm::ArrayRef<BufferUse> region_buffer_uses,
                    BufferUse buffer_use) {
+  if (buffer_use.is_constant) return false;
+
   for (auto buffer_use_in_region : region_buffer_uses) {
-    if (buffer_use_in_region.arg.getArgNumber() !=
-        buffer_use.arg.getArgNumber()) {
+    if (buffer_use_in_region.is_constant ||
+        buffer_use_in_region.arg.getArgNumber() !=
+            buffer_use.arg.getArgNumber()) {
       continue;
     }
 
@@ -150,7 +163,6 @@ llvm::SmallVector<RegionStartAndEnd> GetRegionStartAndEnd(FuncOp capture_func) {
     buffer_uses.clear();
   };
 
-  auto launch_func_ops = llvm::to_vector(capture_func.getOps<LaunchFuncOp>());
   auto operations = capture_func.getOps();
   for (auto& operation : operations) {
     // TODO(anlunx): Support other ops.
@@ -225,7 +237,6 @@ void AddConcurrentRegionsPass::runOnOperation() {
     // Find the cuda graph capture function.
     if (absl::StrContains(func_op.getSymNameAttr().str(),
                           "xla.gpu.cuda.graph.capture")) {
-      auto region_start_and_end = GetRegionStartAndEnd(func_op);
       InsertConcurrentRegions(func_op, custom_calls);
     }
   }
