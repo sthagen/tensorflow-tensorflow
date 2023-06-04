@@ -50,6 +50,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_memory_scheduler.h"
 #include "tensorflow/compiler/xla/service/hlo_ordering.h"
 #include "tensorflow/compiler/xla/service/sharding_propagation.h"
+#include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/tsl/platform/errors.h"
 #include "tensorflow/tsl/platform/status.h"
 #include "ortools/linear_solver/linear_solver.h"
@@ -159,7 +160,8 @@ GenerateReshardingCostsAndMissingShardingsForAllOperands(
             GetInputSharding(ins, operand, k, output_sharding, call_graph);
       }
       if (!cur_input_sharding.has_value() &&
-          ins->opcode() == HloOpcode::kGather && k == 0) {
+          ((ins->opcode() == HloOpcode::kGather && k == 0) ||
+           (ins->opcode() == HloOpcode::kScatter && k != 0))) {
         cur_input_sharding = HloSharding::Replicate();
       }
       CHECK(cur_input_sharding.has_value());
@@ -224,7 +226,7 @@ std::unique_ptr<StrategyVector> MaybeFollowInsStrategyVector(
           pretrimmed_strategy_map));
     }
   } else {
-    CHECK(shape.IsArray());
+    CHECK(shape.IsArray() || shape.IsToken());
     strategies =
         CreateLeafStrategyVectorWithoutInNodes(instruction_id, leaf_strategies);
     strategies->in_nodes.push_back(src_strategies);
@@ -959,6 +961,11 @@ StatusOr<std::unique_ptr<StrategyVector>> CreateAllStrategiesVector(
       TF_RETURN_IF_ERROR(FilterStrategy(ins, shape, strategies, cluster_env,
                                         batch_dim_map, solver_option));
     }
+  } else if (shape.IsToken()) {
+    strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                          leaf_strategies);
+    AddReplicatedStrategy(ins, shape, cluster_env, strategy_map, strategies,
+                          replicated_penalty);
   } else {
     LOG(FATAL) << "Unsupported instruction shape: " << shape.DebugString();
   }
@@ -1339,6 +1346,38 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                                             leaf_strategies);
         AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
                               strategies, 0);
+        break;
+      }
+      case HloOpcode::kScatter: {
+        strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
+                                              leaf_strategies);
+        // We follow the first operand (the array we're scattering into)
+        auto src_strategies = strategy_map.at(ins->operand(0)).get();
+        CHECK(!src_strategies->is_tuple);
+        for (int64_t sid = 0; sid < src_strategies->leaf_vector.size(); ++sid) {
+          HloSharding output_spec =
+              src_strategies->leaf_vector[sid].output_sharding;
+          std::string name = ToStringSimple(output_spec);
+          double compute_cost = 0, communication_cost = 0;
+          double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
+
+          std::vector<std::optional<HloSharding>> input_shardings_optional(
+              {output_spec, std::nullopt, std::nullopt});
+          std::vector<std::vector<double>> resharding_cost =
+              GenerateReshardingCostsAndMissingShardingsForAllOperands(
+                  ins, output_spec, strategy_map, cluster_env, call_graph,
+                  input_shardings_optional);
+
+          std::vector<HloSharding> input_shardings;
+          for (auto sharding_optional : input_shardings_optional) {
+            CHECK(sharding_optional.has_value());
+            input_shardings.push_back(sharding_optional.value());
+          }
+
+          strategies->leaf_vector.push_back(ShardingStrategy(
+              {name, output_spec, compute_cost, communication_cost, memory_cost,
+               std::move(resharding_cost), input_shardings}));
+        }
         break;
       }
       case HloOpcode::kGather: {
@@ -2118,6 +2157,18 @@ void PrintLargestInstructions(
   }
 }
 
+struct ORToolsSolverResult {
+ public:
+  ORToolsSolverResult(
+      StatusOr<std::tuple<std::vector<int64_t>, std::vector<int64_t>, double>>
+          status,
+      bool skip_auto_sharding)
+      : status(status), skip_auto_sharding(skip_auto_sharding) {}
+  StatusOr<std::tuple<std::vector<int64_t>, std::vector<int64_t>, double>>
+      status;
+  bool skip_auto_sharding;
+};
+
 // NOLINTEND
 
 // We formulate the auto sharding process as the following ILP problem:
@@ -2164,19 +2215,18 @@ void PrintLargestInstructions(
 //        s[i][p] + s[j][q] <= 1 if v[p, q] == 1.0
 // Serialize parameters of the ILP problem as numpy arrays and call the python
 // solver.
-StatusOr<std::tuple<std::vector<int64_t>, std::vector<int64_t>, double>>
-CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
-                  const std::vector<int>& s_follow,
-                  const std::vector<std::pair<int, int>>& E,
-                  const std::vector<std::vector<int>>& L,
-                  const std::vector<std::vector<double>>& c,
-                  const std::vector<std::vector<double>>& d,
-                  const std::vector<std::vector<double>>& m,
-                  const std::vector<std::vector<double>>& r,
-                  const std::vector<std::pair<int, int>>& A,
-                  const std::vector<std::vector<double>>& v,
-                  const std::vector<std::string>& instruction_names,
-                  bool crash_at_infinity_costs_check) {
+ORToolsSolverResult CallORToolsSolver(
+    int64_t N, int64_t M, const std::vector<int>& s_len,
+    const std::vector<int>& s_follow, const std::vector<std::pair<int, int>>& E,
+    const std::vector<std::vector<int>>& L,
+    const std::vector<std::vector<double>>& c,
+    const std::vector<std::vector<double>>& d,
+    const std::vector<std::vector<double>>& m,
+    const std::vector<std::vector<double>>& r,
+    const std::vector<std::pair<int, int>>& A,
+    const std::vector<std::vector<double>>& v,
+    const std::vector<std::string>& instruction_names,
+    int64_t solver_timeout_in_seconds, bool crash_at_infinity_costs_check) {
   size_t num_edges = E.size();
 
   int32_t num_workers = 32;
@@ -2294,7 +2344,7 @@ CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
         LOG(FATAL) << err_msg;
       } else {
         LOG(WARNING) << err_msg;
-        return absl::InternalError(err_msg);
+        return ORToolsSolverResult(absl::InternalError(err_msg), false);
       }
     }
   }
@@ -2398,7 +2448,7 @@ CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
     }
   }
 #endif
-  solver->set_time_limit(3600 * 1000);  // in ms
+  solver->SetTimeLimit(absl::Seconds(solver_timeout_in_seconds));
   VLOG(0) << "Starting solver " << solver->ProblemType() << "\n"
           << "Solver parameter string: " << solver_parameter_str << "\n"
           << "Number of workers: " << num_workers << "\n"
@@ -2410,6 +2460,7 @@ CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
           << "Memory budget: " << M / (1024 * 1024 * 1024) << "GB\n"
           << "Number of ILP constraints: " << solver->NumConstraints();
   auto status = solver->Solve();
+
   if (status == operations_research::MPSolver::INFEASIBLE) {
     LOG(ERROR) << "MPSolver could not find any feasible solution.";
 #ifdef PLATFORM_GOOGLE
@@ -2438,12 +2489,16 @@ CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
     }
 #endif
 
-    return absl::InternalError(
-        "MPSolver could not find any feasible solution.");
-  }
-  if (status != operations_research::MPSolver::OPTIMAL) {
-    return absl::InternalError(
-        absl::StrCat("Solver crashed with the status ", status, "."));
+    return ORToolsSolverResult(
+        absl::InternalError("MPSolver could not find any feasible solution."),
+        false);
+  } else if (status != operations_research::MPSolver::OPTIMAL) {
+    auto err_msg = "Solver timed out. Will proceed without auto sharding.";
+    LOG(WARNING) << err_msg;
+
+    // The solver timed out. We now rely on heuristic-based sharding propagation
+    // to degrade gracefully.
+    return ORToolsSolverResult(absl::InternalError(err_msg), true);
   }
 
   LOG(INFO) << "Solver Status: " << status
@@ -2495,16 +2550,18 @@ CallORToolsSolver(int64_t N, int64_t M, const std::vector<int>& s_len,
     LOG(INFO) << "memory budget: " << M / (1024 * 1024 * 1024) << " GB";
   }
   PrintLargestInstructions(chosen_strategy, m, L, instruction_names);
-  return std::make_tuple(std::move(chosen_strategy), std::move(e_val),
-                         solver->Objective().Value());
+  return ORToolsSolverResult(
+      std::make_tuple(std::move(chosen_strategy), std::move(e_val),
+                      solver->Objective().Value()),
+      false);
 }
 
-StatusOr<std::tuple<std::vector<int64_t>, std::vector<int64_t>, double>>
-CallSolver(const HloInstructionSequence& sequence,
-           const LivenessSet& liveness_set, const StrategyMap& strategy_map,
-           const LeafStrategies& leaf_strategies, const CostGraph& cost_graph,
-           const AliasSet& alias_set, int64_t memory_budget_per_device,
-           bool crash_at_infinity_costs_check) {
+ORToolsSolverResult CallSolver(
+    const HloInstructionSequence& sequence, const LivenessSet& liveness_set,
+    const StrategyMap& strategy_map, const LeafStrategies& leaf_strategies,
+    const CostGraph& cost_graph, const AliasSet& alias_set,
+    int64_t memory_budget_per_device, bool crash_at_infinity_costs_check,
+    int64_t solver_timeout_in_seconds) {
   // Serialize edges and edge costs to 1d numpy arrays
   int64_t N = leaf_strategies.size();
   int64_t M = memory_budget_per_device;
@@ -2622,7 +2679,8 @@ CallSolver(const HloInstructionSequence& sequence,
     }
   }
   return CallORToolsSolver(N, M, s_len, s_follow, E, L, c, d, m, r, A, v,
-                           instruction_names, crash_at_infinity_costs_check);
+                           instruction_names, solver_timeout_in_seconds,
+                           crash_at_infinity_costs_check);
 }
 
 void CheckHloSharding(const HloInstructionSequence& sequence,
@@ -3189,28 +3247,63 @@ void CheckUserShardingPreservation(
 
 int64_t MemoryBudgetLowerBound(const HloModule& module,
                                const LivenessSet& liveness_set,
+                               const HloAliasAnalysis* alias_analysis,
                                int64_t num_devices) {
+  auto get_value_sharding = [](const HloValue* value) {
+    return !value->index().empty()
+               ? value->instruction()->sharding().GetSubSharding(
+                     value->instruction()->shape(), value->index())
+               : value->instruction()->sharding();
+  };
+
+  // We below, that is HloValues A and B alias, and A has a sharding specified,
+  // the same sharding is also used to compute the per-device memory
+  // requirements of B. This can be done by associating shardings with buffers
+  // as aliasing HloValues are mapped to the same buffer.
+  absl::flat_hash_map<HloBuffer::Id, const HloValue*>
+      buffer_to_sharded_value_mapping;
+  for (size_t t = 0; t < liveness_set.size(); ++t) {
+    for (const HloValue* value : liveness_set[t]) {
+      auto buffer = alias_analysis->GetBufferContainingValue(*value);
+      if (value->instruction()->has_sharding()) {
+        auto this_value_sharding = get_value_sharding(value);
+        auto iter = buffer_to_sharded_value_mapping.find(buffer.id());
+        if (iter != buffer_to_sharded_value_mapping.end()) {
+          auto buffer_value_sharding = get_value_sharding(iter->second);
+          if (this_value_sharding != buffer_value_sharding) {
+            // TODO(pratikf): This is an unavoidable situation, but possibly
+            // there is a better design decision that can be made here.
+            VLOG(1) << "We have a situation where two HloValues alias, but "
+                       "they have different shardings. This can happen in the "
+                       "presence of user-specified shardings, and is expected. "
+                       "This, however, means that the memory budget estimate "
+                       "is not very accurate. The aliasing HLOs are "
+                    << value->ToShortString() << " and "
+                    << iter->second->ToShortString();
+          }
+        }
+        buffer_to_sharded_value_mapping[buffer.id()] = value;
+      }
+    }
+  }
+
   int64_t max_memory_usage = 0;
   for (size_t t = 0; t < liveness_set.size(); ++t) {
     int64_t memory_usage = 0;
     for (const HloValue* value : liveness_set[t]) {
-      size_t tmp;
       if (value->instruction()->shape().IsTuple() && value->index().empty()) {
         continue;
       }
       Shape shape =
           ShapeUtil::GetSubshape(value->instruction()->shape(), value->index());
-      if (value->instruction()->has_sharding()) {
-        tmp = GetShardedInstructionSize(
-            shape, num_devices,
-            !value->index().empty()
-                ? value->instruction()->sharding().GetSubSharding(
-                      value->instruction()->shape(), value->index())
-                : value->instruction()->sharding());
-      } else {
-        tmp = GetShardedInstructionSize(shape, num_devices);
+      auto buffer = alias_analysis->GetBufferContainingValue(*value);
+      auto iter = buffer_to_sharded_value_mapping.find(buffer.id());
+      std::optional<HloSharding> optional_sharding = std::nullopt;
+      if (iter != buffer_to_sharded_value_mapping.end()) {
+        optional_sharding = get_value_sharding(iter->second);
       }
-      memory_usage += tmp;
+      memory_usage +=
+          GetShardedInstructionSize(shape, num_devices, optional_sharding);
     }
     max_memory_usage = std::max(max_memory_usage, memory_usage);
   }
@@ -3970,9 +4063,12 @@ AutoShardingImplementation::AutoShardingImplementation(
     const AutoShardingOption& option)
     : option_(option) {}
 
-StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
+StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
+  if (!option_.enable) {
+    return AutoShardingResult::kModuleUnchanged;
+  }
   bool module_is_changed = false;
 
   bool set_to_memory_lower_bound = (option_.memory_budget_per_device == 0);
@@ -4029,7 +4125,7 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
       &unspecified_dims, /*saved_root_shardings=*/nullptr,
       /*saved_parameter_shardings=*/nullptr);
   if (!status_or_changed.ok()) {
-    return status_or_changed;
+    return status_or_changed.status();
   }
   if (status_or_changed.value()) {
     module_is_changed = true;
@@ -4050,7 +4146,7 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
     StatusOr<bool> status_or_changed =
         RemoveShardingAnnotation(module, execution_threads);
     if (!status_or_changed.ok()) {
-      return status_or_changed;
+      return status_or_changed.status();
     }
     if (status_or_changed.value()) {
       module_is_changed = true;
@@ -4118,6 +4214,7 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
     LOG(INFO) << "Processing partial mesh shape: "
               << spmd::ToString(mesh_shape);
     Array<int64_t> device_mesh(mesh_shape);
+
     int64_t total_devices = 1;
     for (auto i : mesh_shape) {
       total_devices *= i;
@@ -4131,7 +4228,7 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
             << "Shardings are adjusted based on current partial mesh shape: "
             << *changed_or;
       } else {
-        return changed_or;
+        return changed_or.status();
       }
     }
     std::vector<int64_t> device_mesh_ids = std::vector<int64_t>(total_devices);
@@ -4144,8 +4241,10 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
         original_device_mesh, device_mesh, option_.device_mesh_alpha,
         option_.device_mesh_beta, prof_result, solver_option);
 
+    XLA_VLOG_LINES(1, module->ToString());
     int64_t memory_lower_bound = spmd::MemoryBudgetLowerBound(
-        *module, liveness_set, device_mesh.num_elements());
+        *module, liveness_set, alias_analysis.get(),
+        device_mesh.num_elements());
     // Rounds up to the next GB.
     int64_t memory_lower_bound_gb =
         1 + memory_lower_bound / (1024 * 1024 * 1024);
@@ -4175,7 +4274,7 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
     if (!solver_option.force_simple_heuristic.empty()) {
       AnnotateShardingWithSimpleHeuristic(
           module, solver_option.force_simple_heuristic, alias_map, cluster_env);
-      return true;
+      return AutoShardingResult::kModuleChangedShardingPerformed;
     }
 
     if (solver_option.force_batch_dim_to_mesh_dim >= 0) {
@@ -4209,14 +4308,18 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
     std::vector<int64_t> s_val, e_val;
     double objective = -1.0;
     if (!solver_option.load_solution_vector) {
-      TF_ASSIGN_OR_RETURN(
-          auto solution,
-          CallSolver(sequence, liveness_set, strategy_map, leaf_strategies,
-                     cost_graph, alias_set, option_.memory_budget_per_device,
-                     /*crash_at_infinity_costs_check*/
-                     !option_.try_multiple_mesh_shapes));
-      std::tie(s_val, e_val, objective) = solution;
-      this->solver_optimal_objective_value_ = objective;
+      auto solver_result = CallSolver(
+          sequence, liveness_set, strategy_map, leaf_strategies, cost_graph,
+          alias_set, option_.memory_budget_per_device,
+          /*crash_at_infinity_costs_check*/
+          !option_.try_multiple_mesh_shapes, option_.solver_timeout_in_seconds);
+      if (solver_result.skip_auto_sharding) {
+        return AutoShardingResult::kModuleUnchangedNoShardingPerfomed;
+      } else {
+        TF_ASSIGN_OR_RETURN(auto solution, solver_result.status);
+        std::tie(s_val, e_val, objective) = solution;
+        this->solver_optimal_objective_value_ = objective;
+      }
     } else {
       s_val = option_.strategy_vector;
     }
@@ -4259,7 +4362,24 @@ StatusOr<bool> AutoShardingImplementation::RunAutoSharding(
                                  ":\n", module->ToString()));
   DumpHloModuleIfEnabled(*module, "after_auto_spmd_sharding");
 
-  return module_is_changed;
+  return module_is_changed ? AutoShardingResult::kModuleChangedShardingPerformed
+                           : AutoShardingResult::kModuleUnchanged;
+}
+
+bool ModuleHasUserShardings(const HloModule* module) {
+  bool has_shardings = false;
+  for (auto computation : module->computations()) {
+    for (auto instruction : computation->instructions()) {
+      if (instruction->has_sharding()) {
+        has_shardings = true;
+        break;
+      }
+    }
+    if (has_shardings) {
+      break;
+    }
+  }
+  return has_shardings;
 }
 
 AutoSharding::AutoSharding(const AutoShardingOption& option)
@@ -4286,15 +4406,6 @@ StatusOr<bool> AutoSharding::Run(
   TF_RETURN_IF_ERROR(option_.CheckAndSetup());
   VLOG(1) << "AutoShardingOptions:\n" << option_.ToString();
 
-  if (!option_.try_multiple_mesh_shapes) {
-    AutoShardingImplementation pass(option_);
-    auto result = pass.RunAutoSharding(module, execution_threads);
-    this->solver_optimal_objective_value_ =
-        pass.GetSolverOptimalObjectiveValue();
-    this->chosen_mesh_shape_ = option_.device_mesh_shape;
-    return result;
-  }
-
   bool asymmetrical_mesh_dims = false;
   for (size_t i = 0; i < option_.device_mesh_shape.size(); ++i) {
     if (option_.device_mesh_beta[0] != option_.device_mesh_beta[i] ||
@@ -4317,13 +4428,15 @@ StatusOr<bool> AutoSharding::Run(
 
   size_t num_meshes = mesh_shapes.size();
   std::vector<std::unique_ptr<HloModule>> modules(num_meshes);
-  std::vector<StatusOr<bool>> changed(num_meshes, false);
+  std::vector<StatusOr<AutoShardingResult>> changed(
+      num_meshes, AutoShardingResult::kModuleUnchanged);
   std::vector<double> objective_values(num_meshes, -1);
 
   VLOG(1) << "Original mesh shape "
           << spmd::ToString(option_.device_mesh_shape);
   double min_objective_value = std::numeric_limits<double>::max();
   int min_mesh_shape_index = -1;
+  bool skip_auto_sharding = true;
   for (size_t i = 0; i < mesh_shapes.size(); ++i) {
     VLOG(1) << "Trying mesh shape " << spmd::ToString(mesh_shapes[i]);
     AutoShardingOption this_option = option_;
@@ -4345,46 +4458,66 @@ StatusOr<bool> AutoSharding::Run(
       min_mesh_shape_index = i;
       min_objective_value = objective_values[i];
     }
+    if (pass_result.ok() &&
+        pass_result.value() !=
+            AutoShardingResult::kModuleUnchangedNoShardingPerfomed) {
+      skip_auto_sharding = false;
+    }
   }
 
-  CHECK_GE(min_mesh_shape_index, 0)
-      << "The auto-sharding pass could not find a device mesh that works for "
-         "this input. This could be the result of a low memory budget. If you "
-         "think you have a reasonably large memory budget, please report this "
-         "an a bug.";
-
   StatusOr<bool> module_is_changed;
-  if (!changed[min_mesh_shape_index].ok()) {
-    module_is_changed = changed[min_mesh_shape_index];
+  if (skip_auto_sharding) {
+    VLOG(1) << "Solver timed out. Will now rely on sharding propagation to "
+               "perform sharding.";
+    if (!ModuleHasUserShardings(module)) {
+      LOG(WARNING)
+          << "The auto-sharding solver has timed out without a solution. "
+             "Further, as the input module does not contain any sharding "
+             "annotations, we cannot rely on sharding propagation to perform "
+             "heuristic-guided sharding. The module therefore may not be "
+             "sharded leading to low performance.";
+    }
+    module_is_changed = false;
   } else {
-    solver_optimal_objective_value_ = min_objective_value;
-    chosen_mesh_shape_ = mesh_shapes[min_mesh_shape_index];
-    if (*changed[min_mesh_shape_index]) {
-      VLOG(1) << "Choosing mesh shape "
-              << spmd::ToString(mesh_shapes[min_mesh_shape_index])
-              << " which had the minimal solver objective value of "
-              << min_objective_value;
+    CHECK_GE(min_mesh_shape_index, 0)
+        << "The auto-sharding pass could not find a device mesh that works for "
+           "this input. This could be the result of a low memory budget. If "
+           "you think you have set a reasonably large memory budget, please "
+           "report this as a bug.";
 
-      absl::flat_hash_map<HloComputation*, HloComputation*>
-          computation_replacements;
-      for (size_t i = 0; i < module->computation_count(); ++i) {
-        auto original_computation = module->mutable_computation(i);
-        auto new_computation =
-            modules[min_mesh_shape_index]->mutable_computation(i);
-        computation_replacements[original_computation] = new_computation;
-      }
-
-      module->ReplaceComputations(computation_replacements);
-      module->MoveComputationsFrom(modules[min_mesh_shape_index].get());
-
-      *module->config().mutable_entry_computation_layout() =
-          modules[min_mesh_shape_index]->entry_computation_layout();
-
-      module_is_changed = true;
-    } else if (!*changed[min_mesh_shape_index]) {
-      module_is_changed = false;
+    if (!changed[min_mesh_shape_index].ok()) {
+      module_is_changed = changed[min_mesh_shape_index].status();
     } else {
-      module_is_changed = false;
+      solver_optimal_objective_value_ = min_objective_value;
+      if (changed[min_mesh_shape_index].value() ==
+          AutoShardingResult::kModuleChangedShardingPerformed) {
+        VLOG(1) << "Choosing mesh shape "
+                << spmd::ToString(mesh_shapes[min_mesh_shape_index])
+                << " which had the minimal solver objective value of "
+                << min_objective_value;
+
+        absl::flat_hash_map<HloComputation*, HloComputation*>
+            computation_replacements;
+        for (size_t i = 0; i < module->computation_count(); ++i) {
+          auto original_computation = module->mutable_computation(i);
+          auto new_computation =
+              modules[min_mesh_shape_index]->mutable_computation(i);
+          computation_replacements[original_computation] = new_computation;
+        }
+
+        module->ReplaceComputations(computation_replacements);
+        module->MoveComputationsFrom(modules[min_mesh_shape_index].get());
+
+        *module->config().mutable_entry_computation_layout() =
+            modules[min_mesh_shape_index]->entry_computation_layout();
+
+        module_is_changed = true;
+      } else if (changed[min_mesh_shape_index].value() ==
+                 AutoShardingResult::kModuleUnchanged) {
+        module_is_changed = false;
+      } else {
+        module_is_changed = false;
+      }
     }
   }
 

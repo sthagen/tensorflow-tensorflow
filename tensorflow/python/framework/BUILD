@@ -291,6 +291,7 @@ py_strict_library(
         "meta_graph.py",
     ],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":_errors_test_helper",
         ":_pywrap_python_api_dispatcher",
@@ -369,6 +370,7 @@ py_strict_library(
     name = "c_api_util",
     srcs = ["c_api_util.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:pywrap_tf_session",
@@ -390,6 +392,10 @@ py_strict_library(
     name = "constant_op",
     srcs = ["constant_op.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":dtypes",
         ":ops",
@@ -410,6 +416,7 @@ py_strict_library(
     name = "device_spec",
     srcs = ["device_spec.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//third_party/py/tf_slim:__subpackages__"],
     deps = [
         "//tensorflow/python:pywrap_tfe",
         "//tensorflow/python/util:tf_export",
@@ -420,6 +427,7 @@ py_strict_library(
     name = "device",
     srcs = ["device.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":device_spec",
         "//tensorflow/python:tf2",
@@ -429,6 +437,7 @@ py_strict_library(
 tf_python_pybind_extension(
     name = "_dtypes",
     srcs = ["dtypes.cc"],
+    visibility = visibility + ["//third_party/py/tensorfn:__subpackages__"],
     deps = [
         "//tensorflow/core:framework_headers_lib",
         "//tensorflow/core:protos_all_cc",
@@ -441,6 +450,13 @@ py_strict_library(
     name = "dtypes",
     srcs = ["dtypes.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//smartass:__subpackages__",
+        "//tensorflow:internal",
+        "//third_party/cloud_tpu/convergence_tools:__subpackages__",
+        "//third_party/mlperf:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":_dtypes",
         # copybara:uncomment_begin(google-only)
@@ -467,6 +483,11 @@ py_strict_library(
         "errors_impl.py",
     ],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//third_party/cloud_tpu/convergence_tools:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":c_api_util",
         "//tensorflow/core:protos_all_py",
@@ -494,6 +515,13 @@ py_strict_library(
     name = "function",
     srcs = ["function.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//smartass/brain:__subpackages__",
+        "//tensorflow:internal",
+        "//tensorflow_models:__subpackages__",
+        "//third_party/cloud_tpu/convergence_tools:__subpackages__",
+        "//third_party/mlperf:__subpackages__",
+    ],
     deps = [
         ":c_api_util",
         ":dtypes",
@@ -570,6 +598,7 @@ py_strict_library(
         "graph_util_impl.py",
     ],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":_proto_comparators",
         ":dtypes",
@@ -589,6 +618,7 @@ py_strict_library(
     visibility = visibility + [
         "//learning/deepmind/deepfunc:__subpackages__",
         "//platforms/darwinn:__subpackages__",
+        "//tensorflow:internal",
     ],
     deps = [
         ":dtypes",
@@ -690,6 +720,7 @@ py_strict_library(
     name = "op_def_registry",
     srcs = ["op_def_registry.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":_op_def_registry",
         "//tensorflow/core:protos_all_py",
@@ -1117,10 +1148,19 @@ py_strict_library(
     name = "ops",  # "ops" is already the name of a deprecated target
     srcs = ["ops.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//tensorflow_models:__subpackages__",
+        "//third_party/cloud_tpu/convergence_tools:__subpackages__",
+        "//third_party/mlperf:__subpackages__",
+        "//third_party/py/tf_agents:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":c_api_util",
         ":composite_tensor",
         ":device",
+        ":device_spec",
         ":dtypes",
         ":errors",
         ":op_callbacks",
@@ -1166,6 +1206,7 @@ py_strict_library(
     name = "op_callbacks",
     srcs = ["op_callbacks.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//third_party/cloud_tpu/convergence_tools:__subpackages__"],
     deps = [
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:execute",
@@ -1203,6 +1244,10 @@ py_strict_library(
     name = "indexed_slices",
     srcs = ["indexed_slices.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":composite_tensor",
         ":composite_tensor_gradient",
@@ -1365,6 +1410,7 @@ py_strict_library(
     name = "config",
     srcs = ["config.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":errors",
         "//tensorflow/python/eager:context",
@@ -1456,6 +1502,10 @@ py_strict_library(
     name = "random_seed",
     srcs = ["random_seed.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":config",
         ":ops",
@@ -1479,6 +1529,7 @@ py_strict_library(
     name = "smart_cond",
     srcs = ["smart_cond.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow_model_optimization:__subpackages__"],
     deps = [
         ":ops",
         ":tensor_util",
@@ -1511,6 +1562,12 @@ py_strict_library(
     name = "sparse_tensor",
     srcs = ["sparse_tensor.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//tensorflow_models:__subpackages__",
+        "//third_party/mlperf:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":composite_tensor",
         ":constant_op",
@@ -1532,6 +1589,43 @@ py_strict_library(
         "//tensorflow/python/util:_pywrap_utils",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
+    ],
+)
+
+py_strict_library(
+    name = "weak_tensor",
+    srcs = ["weak_tensor.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":dtypes",
+        ":errors",
+        ":extension_type",
+        ":ops",
+        "//tensorflow/python/eager:context",
+        "//third_party/py/numpy",
+    ],
+)
+
+tf_py_strict_test(
+    name = "weak_tensor_test",
+    srcs = ["weak_tensor_test.py"],
+    main = "weak_tensor_test.py",
+    python_version = "PY3",
+    srcs_version = "PY3",
+    tags = ["no_pip"],  # weak_tensor_test is not available in pip.
+    deps = [
+        ":constant_op",
+        ":dtypes",
+        ":errors",
+        ":ops",
+        ":tensor_spec",
+        ":test_lib",
+        ":weak_tensor",
+        "//tensorflow/python:platform_test",
+        "//tensorflow/python/eager:def_function",
+        "//tensorflow/python/module",
+        "//tensorflow/python/saved_model:load",
+        "//tensorflow/python/saved_model:save",
     ],
 )
 
@@ -1635,6 +1729,13 @@ py_strict_library(
     name = "tensor_shape",
     srcs = ["tensor_shape.py"],
     srcs_version = "PY3",
+    visibility = [
+        "//smartass/brain/configure/python:__pkg__",
+        "//tensorflow:internal",
+        "//third_party/py/reverb:__subpackages__",
+        "//third_party/py/tf_agents:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         "//tensorflow/core:protos_all_py",
         "//tensorflow/core/function/trace_type",
@@ -1652,7 +1753,7 @@ pytype_strict_library(
     name = "type_spec",
     srcs = ["type_spec.py"],
     srcs_version = "PY3",
-    visibility = visibility,
+    visibility = visibility + ["//third_party/py/tensorflow_gnn:__subpackages__"],
     deps = [
         ":composite_tensor",
         ":dtypes",
@@ -1753,6 +1854,11 @@ py_strict_library(
 py_strict_library(
     name = "tensor_spec",
     srcs = ["tensor_spec.py"],
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//third_party/py/reverb:__subpackages__",
+        "//third_party/py/tf_agents:__subpackages__",
+    ],
     deps = [
         ":tensor",
     ],
@@ -1762,6 +1868,11 @@ py_strict_library(
     name = "tensor_util",
     srcs = ["tensor_util.py"],
     srcs_version = "PY3",
+    visibility = visibility + [
+        "//tensorflow:internal",
+        "//tensorflow_models:__subpackages__",
+        "//third_party/py/tf_slim:__subpackages__",
+    ],
     deps = [
         ":dtypes",
         ":errors",
@@ -1808,8 +1919,13 @@ py_strict_library(
     srcs = ["test_util.py"],
     srcs_version = "PY3",
     visibility = visibility + [
+        "//tensorflow:internal",
         "//tensorflow_estimator/python/estimator:__subpackages__",
+        "//tensorflow_model_optimization:__subpackages__",
+        "//third_party/cloud_tpu/convergence_tools:__subpackages__",
         "//third_party/py/keras:__subpackages__",
+        "//third_party/py/neural_structured_learning:__subpackages__",
+        "//third_party/py/tf_agents:__subpackages__",
     ],
     deps = [
         ":_test_metrics_util",
@@ -1886,7 +2002,7 @@ py_strict_library(
     name = "is_mlir_bridge_test_true",
     srcs = ["is_mlir_bridge_test_true.py"],
     srcs_version = "PY3",
-    visibility = visibility,
+    visibility = visibility + ["//tensorflow:internal"],
 )
 
 # Including this as a dependency will result in tests using
@@ -1908,6 +2024,7 @@ py_strict_library(
     name = "combinations",
     srcs = ["combinations.py"],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":ops",
         ":test_combinations_lib",
@@ -1947,6 +2064,7 @@ py_strict_library(
         "python_memory_checker.py",
     ],
     srcs_version = "PY3",
+    visibility = visibility + ["//tensorflow:internal"],
     deps = [
         ":_python_memory_checker_helper",
         # copybara:uncomment "//tensorflow/python/platform:cpp_memory_checker",
@@ -2160,12 +2278,12 @@ tf_py_strict_test(
         "//tensorflow/python:cond",
         "//tensorflow/python:gradients_impl",
         "//tensorflow/python:math_ops",
-        "//tensorflow/python:nn_grad",
         "//tensorflow/python:nn_ops",
         "//tensorflow/python:random_ops",
         "//tensorflow/python:resource_variable_ops",
         "//tensorflow/python:variables",
         "//tensorflow/python:while_loop",
+        "//tensorflow/python/ops:nn_grad",
         "//third_party/py/numpy",
     ],
 )

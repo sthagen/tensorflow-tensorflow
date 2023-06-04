@@ -24,21 +24,11 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/pjrt/distributed/client.h"
 #include "tensorflow/compiler/xla/pjrt/gpu/gpu_helpers.h"
+#include "tensorflow/compiler/xla/pjrt/gpu/gpu_topology.h"
 #include "tensorflow/compiler/xla/pjrt/pjrt_stream_executor_client.h"
 #include "tensorflow/compiler/xla/statusor.h"
 
 namespace xla {
-class GpuTopology {
- public:
-  explicit GpuTopology(const std::vector<int>& gpu_device_ids)
-      : devices_ids_(gpu_device_ids) {}
-
-  int number_of_devices() const { return devices_ids_.size(); }
-  const std::vector<int>& device_ids() const { return devices_ids_; }
-
- private:
-  const std::vector<int> devices_ids_;
-};
 
 class StreamExecutorGpuTopologyDescription : public PjRtTopologyDescription {
  public:
@@ -86,6 +76,28 @@ class StreamExecutorGpuTopologyDescription : public PjRtTopologyDescription {
 
   const GpuTopology& gpu_topology() const { return gpu_topology_; }
   const GpuTopology* gpu_topology_ptr() const { return &gpu_topology_; }
+
+  // No subslice is supported.
+  bool is_subslice_topology() const override { return false; }
+
+  // The topology support only single host now.
+  absl::StatusOr<int> ProcessCount() const override { return 1; }
+
+  absl::StatusOr<int> CoreCountOfDefaultType() const override {
+    return gpu_topology_.number_of_devices();
+  }
+
+  absl::StatusOr<int> LogicalDeviceCountOfDefaultType() const override {
+    return gpu_topology_.number_of_devices();
+  }
+
+  absl::StatusOr<int> CoreCountOfDefaultTypePerProcess() const override {
+    return gpu_topology_.number_of_devices();
+  }
+
+  absl::StatusOr<int> CoreCountOfDefaultTypePerChip() const override {
+    return 1;
+  }
 
  private:
   const PjRtPlatformId platform_id_;

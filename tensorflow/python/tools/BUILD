@@ -78,34 +78,6 @@ py_strict_library(
     deps = [
         ":saved_model_utils",
         "//tensorflow/core:protos_all_py",
-        "//tensorflow/python:framework",
-        "//tensorflow/python:py_checkpoint_reader",
-        "//tensorflow/python/checkpoint:checkpoint_management",
-        "//tensorflow/python/client:session",
-        "//tensorflow/python/framework:convert_to_constants",
-        "//tensorflow/python/platform:gfile",
-        "//tensorflow/python/saved_model:loader",
-        "//tensorflow/python/saved_model:tag_constants",
-        "//tensorflow/python/training:saver",
-        "@absl_py//absl:app",
-    ],
-)
-
-py_strict_binary(
-    name = "freeze_graph",
-    srcs = ["freeze_graph.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
-    deps = [":freeze_graph_main_lib"],
-)
-
-py_strict_library(
-    name = "freeze_graph_main_lib",
-    srcs = ["freeze_graph.py"],
-    srcs_version = "PY3",
-    deps = [
-        ":saved_model_utils",
-        "//tensorflow/core:protos_all_py",
         "//tensorflow/python/checkpoint:checkpoint_management",
         "//tensorflow/python/client:session",
         "//tensorflow/python/framework",
@@ -117,6 +89,14 @@ py_strict_library(
         "//tensorflow/python/training:saver",
         "@absl_py//absl:app",
     ],
+)
+
+py_strict_binary(
+    name = "freeze_graph",
+    srcs = ["freeze_graph.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [":freeze_graph_lib"],
 )
 
 py_strict_binary(
@@ -310,6 +290,9 @@ py_strict_library(
     srcs_version = "PY3",
     visibility = ["//visibility:public"],
     deps = [
+        # copybara:comment_begin(oss-only)
+        "//tensorflow/python",  # to fix libtensorflow_framework.so.2 import error.
+        # copybara:comment_end
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python/platform:gfile",
         "//tensorflow/python/platform:tf_logging",

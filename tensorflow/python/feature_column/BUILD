@@ -63,8 +63,6 @@ py_strict_library(
     name = "feature_column_v2",
     srcs = [
         "feature_column_v2.py",
-        "sequence_feature_column.py",  # TODO(b/283983575): Remove this once references are updated.
-        "serialization.py",  # TODO(b/283983575): Remove this once references are updated.
     ],
     srcs_version = "PY3",
     deps = [
@@ -229,6 +227,7 @@ py_strict_library(
     deps = [
         ":feature_column",
         ":feature_column_v2",
+        ":feature_column_v2_types",
         ":serialization",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:array_ops",
