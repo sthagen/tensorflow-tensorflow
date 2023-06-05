@@ -195,6 +195,32 @@ ENTRY e {
   EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{/*aabs=*/1e-3, /*arel=*/1e-3}));
 }
 
+TEST_F(TritonGemmTest, SplitAndTransposeLhsExecutesCorrectly) {
+  const std::string kHloText = R"(
+HloModule m
+
+ENTRY e {
+  tmp_0 = s8[5,50,2,128] parameter(1)
+  tmp_2 = s8[50,5,2,128] transpose(tmp_0), dimensions={1,0,2,3}
+  tmp_3 = s8[50,1280] reshape(tmp_2)
+  tmp_4 = f16[50,1280] convert(tmp_3)
+  tmp_5 = f16[50,79] parameter(0)
+  ROOT tmp_6 = f16[1280,79] dot(tmp_4, tmp_5),
+    lhs_contracting_dims={0}, rhs_contracting_dims={0}
+})";
+
+  MatchOptimizedHlo(kHloText, R"(
+; CHECK: ENTRY
+; CHECK-NEXT: parameter
+; CHECK-NEXT: parameter
+; CHECK-NEXT: ROOT
+; CHECK-SAME: fusion
+; CHECK-SAME: kind=kCustom
+)");
+
+  EXPECT_TRUE(RunAndCompare(kHloText, ErrorSpec{/*aabs=*/1e-3, /*arel=*/1e-3}));
+}
+
 TEST_F(TritonGemmTest, DoNotFuseSplitRhsContractingTranspose) {
   const std::string hlo_text = R"(
 HloModule t
@@ -332,16 +358,8 @@ ENTRY e {
   EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{/*aabs=*/1e-4, /*arel=*/1e-4}));
 }
 
-// TODO(sergachev): This test doesn't do what it thinks it's doing.  Early HLO
-// middle-end passes merge multiple batch dims into one batch dim, so by the
-// time the Triton passes see these gemms, they only have one batch dim.
-//
-// The test passed before cl/535552775 because after autotuning, the fusion
-// didn't contain the string "__triton" even though it did in fact use Triton
-// gemms.  After cl/535552775, the node contains this string, and the test
-// fails.
-TEST_F(TritonGemmTest, DISABLED_SkipMultipleBatch) {
-  const std::string hlo_text = R"(
+TEST_F(TritonGemmTest, MultipleBatchRequireSeparateTranspose) {
+  const std::string kHloText = R"(
 HloModule m
 
 ENTRY e {
@@ -353,9 +371,17 @@ ENTRY e {
     rhs_batch_dims={0,1,2}, rhs_contracting_dims={4}
 })";
 
-  MatchOptimizedHlo(hlo_text, R"(
-; CHECK-NOT: __triton
+  MatchOptimizedHlo(kHloText, R"(
+; CHECK: ENTRY
+; CHECK-NEXT: parameter
+; CHECK-NEXT: parameter
+; CHECK-NEXT: kLoop
+; CHECK-NEXT: kCustom
+; CHECK-NEXT: ROOT
+; CHECK-SAME: bitcast
 )");
+
+  EXPECT_TRUE(RunAndCompare(kHloText, ErrorSpec{/*aabs=*/1e-4, /*arel=*/1e-4}));
 }
 
 TEST_F(TritonGemmTest, SkipU8) {
