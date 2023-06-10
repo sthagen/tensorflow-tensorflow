@@ -11,6 +11,8 @@ load(
     "dtensor_test",
 )
 
+# copybara:uncomment package(default_applicable_licenses = ["//tensorflow:license"])
+
 # File used by internal tests.
 exports_files([
     "spmd_test.py",
@@ -443,7 +445,6 @@ dtensor_test(
         "//tensorflow/dtensor/python:config",
         "//tensorflow/dtensor/python:d_variable",
         "//tensorflow/dtensor/python:layout",
-        "//tensorflow/dtensor/python:mesh_util",
         "//tensorflow/python/eager:backprop",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager/polymorphic_function",
@@ -454,7 +455,6 @@ dtensor_test(
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:math_ops",
         "//tensorflow/python/ops:math_ops_gen",
-        "//tensorflow/python/ops:variables",
         "//tensorflow/python/platform:client_testlib",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
