@@ -617,6 +617,7 @@ xla_cc_test(
     name = "outfeed_receiver_test_cpu",
     size = "small",
     srcs = ["outfeed_receiver_test.cc"],
+    tags = ["nomsan"],
     deps = [
         ":outfeed_receiver",
         "//tensorflow/compiler/xla:test",
@@ -783,6 +784,7 @@ cc_library(
         "//tensorflow/tsl/profiler/lib:profiler_session",
         "//tensorflow/tsl/profiler/rpc:profiler_server_impl",
         "//tensorflow/tsl/profiler/rpc/client:capture_profile",
+        "//tensorflow/tsl/profiler/rpc/client:profiler_client_impl",
         "@pybind11",
     ],
 )
