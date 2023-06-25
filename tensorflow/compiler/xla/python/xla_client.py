@@ -44,7 +44,7 @@ profiler = _xla.profiler
 
 # Just an internal arbitrary increasing number to help with backward-compatible
 # changes.
-_version = 162
+_version = 164
 
 # Version number for MLIR:Python components.
 mlir_api_version = 50
@@ -111,7 +111,7 @@ DeviceTopology = _xla.DeviceTopology
 
 
 def make_tfrt_tpu_c_api_device_topology(
-    topology_name: Optional[str] = None, **kwargs
+    topology_name: str = '', **kwargs
 ) -> DeviceTopology:
   """Creates a PJRT C API TopologyDescription."""
 
@@ -119,13 +119,7 @@ def make_tfrt_tpu_c_api_device_topology(
     raise NotImplementedError(
         'make_tfrt_tpu_c_api_device_topology only works with the pjrt c-api.'
     )
-  if topology_name is not None or kwargs:
-    raise NotImplementedError(
-        'Unsupported arguments to'
-        ' make_tfrt_tpu_c_api_device_topology(topology_name=%s, %s)'
-        % (repr(topology_name), repr(kwargs))
-    )
-  return _xla.get_default_c_api_topology('tpu')
+  return _xla.get_default_c_api_topology('tpu', topology_name, dict(**kwargs))
 
 
 def pjrt_plugin_loaded(plugin_name: str) -> bool:
@@ -169,8 +163,9 @@ def _use_pjrt_c_api() -> bool:
 def make_tpu_client(use_pjrt_c_api: bool = False):
   """Returns a TPU client. Defaults to allowing 32 in-flight computations."""
   if use_pjrt_c_api or _use_pjrt_c_api():
-    library_path = os.getenv('TPU_LIBRARY_PATH', 'libtpu.so')
-    load_pjrt_plugin_dynamically('tpu', library_path)
+    if not pjrt_plugin_loaded('tpu'):
+      library_path = os.getenv('TPU_LIBRARY_PATH', 'libtpu.so')
+      load_pjrt_plugin_dynamically('tpu', library_path)
     return make_tfrt_tpu_c_api_client()
 
   max_inflight_computations = os.getenv(

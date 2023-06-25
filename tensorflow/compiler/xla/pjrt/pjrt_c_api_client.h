@@ -346,6 +346,9 @@ class PjRtCApiExecutable : public PjRtExecutable {
 
   int64_t SizeOfGeneratedCodeInBytes() const override;
 
+  StatusOr<absl::flat_hash_map<std::string, PjRtValueType>> GetCostAnalysis()
+      const override;
+
   StatusOr<std::vector<std::shared_ptr<HloModule>>> GetHloModules()
       const override;
 
@@ -374,7 +377,9 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
   }
 
   StatusOr<absl::flat_hash_map<std::string, PjRtValueType>> GetCostAnalysis()
-      const override;
+      const override {
+    return executable_->GetCostAnalysis();
+  }
 
   const DeviceAssignment& device_assignment() const override {
     CHECK(false) << "PJRT C API does not support device_assignment";
@@ -540,7 +545,8 @@ StatusOr<std::unique_ptr<PjRtClient>> GetCApiClient(
     const absl::flat_hash_map<std::string, PjRtValueType>& create_options = {});
 
 StatusOr<std::unique_ptr<PjRtTopologyDescription>> GetCApiTopology(
-    absl::string_view device_type);
+    absl::string_view device_type, absl::string_view topology_name,
+    const absl::flat_hash_map<std::string, PjRtValueType>& create_options = {});
 
 }  // namespace xla
 

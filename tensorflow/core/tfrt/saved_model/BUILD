@@ -24,6 +24,7 @@ package_group(
         "//tensorflow/core/tfrt/saved_model/python/...",
         # copybara:uncomment "//platforms/xla/tests/saved_models/...",
         # copybara:uncomment "//quality/webanswers/servo2/...",
+        "//tensorflow/core/tfrt/saved_model/python",  #python wrapping
     ],
 )
 
@@ -117,7 +118,6 @@ cc_library(
         "@tf_runtime//:support",
     ] + if_google([
         "//third_party/tf_runtime_google:streamz_metrics_registry_alwayslink",
-        "//learning/brain/experimental/tfrt/native_lowering/kernels",
     ]),
 )
 
