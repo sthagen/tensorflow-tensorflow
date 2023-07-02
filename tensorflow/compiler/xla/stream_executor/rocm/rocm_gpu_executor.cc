@@ -636,20 +636,6 @@ fft::FftSupport* GpuExecutor::CreateFft() {
   return status.value()(this);
 }
 
-rng::RngSupport* GpuExecutor::CreateRng() {
-  PluginRegistry* registry = PluginRegistry::Instance();
-  tsl::StatusOr<PluginRegistry::RngFactory> status =
-      registry->GetFactory<PluginRegistry::RngFactory>(rocm::kROCmPlatformId,
-                                                       plugin_config_.rng());
-  if (!status.ok()) {
-    LOG(ERROR) << "Unable to retrieve RNG factory: "
-               << status.status().message();
-    return nullptr;
-  }
-
-  return status.value()(this);
-}
-
 // TODO(rspringer): Remove in b/18544742.
 bool GpuExecutor::SupportsDnn() const { return true; }
 
@@ -693,27 +679,24 @@ bool GpuExecutor::GetSymbol(const string& symbol_name,
   return false;
 }
 
-bool FillBlockDimLimit(GpuDeviceHandle device, BlockDim* block_dim_limit) {
+tsl::Status FillBlockDimLimit(GpuDeviceHandle device,
+                              BlockDim* block_dim_limit) {
   // The BlockDim name is a mismatch against these GRID_DIM_* queries because
   // we use BlockDims to express the dimensions of blocks within a grid
   // (as opposed to ThreadDim which expresses the dimensions of threads
   // within a block).
   int x, y, z;
-  if (!GpuDriver::GetGridLimits(&x, &y, &z, device)) {
-    return false;
-  }
+  TF_RETURN_IF_ERROR(GpuDriver::GetGridLimits(&x, &y, &z, device));
 
   block_dim_limit->x = x;
   block_dim_limit->y = y;
   block_dim_limit->z = z;
-  return true;
+  return tsl::OkStatus();
 }
 
 bool GpuExecutor::SupportsBlas() const { return true; }
 
 bool GpuExecutor::SupportsFft() const { return true; }
-
-bool GpuExecutor::SupportsRng() const { return true; }
 
 std::unique_ptr<internal::EventInterface>
 GpuExecutor::CreateEventImplementation() {
@@ -866,7 +849,7 @@ GpuExecutor::CreateDeviceDescription(int device_ordinal) {
 
   {
     BlockDim block_dim_limit;
-    FillBlockDimLimit(device, &block_dim_limit);
+    TF_RETURN_IF_ERROR(FillBlockDimLimit(device, &block_dim_limit));
     builder.set_block_dim_limit(block_dim_limit);
   }
 

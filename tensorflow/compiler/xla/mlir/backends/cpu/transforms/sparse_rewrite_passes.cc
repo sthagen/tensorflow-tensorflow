@@ -109,9 +109,8 @@ struct SparseBroadcastInDimCallRewriter {
            "Need argument and broadcast dimensions");
     assert(op.getResults().size() == 1 && "Need one output tensor");
     // Broadcast dimensions are passed in as a constant of dense int elements.
-    auto dims_constant = op.getInputs()[1].getDefiningOp<mhlo::ConstantOp>();
-    auto broadcast_dimensions =
-        dims_constant.getValue().cast<DenseIntElementsAttr>();
+    auto dims_constant = op.getInputs()[1];
+    auto broadcast_dimensions = getDenseIntAttrFromConstant(dims_constant);
     // Reconstruct the broadcast_in_dim operation.
     Value ret_sp_tensor = op.getResults()[0];
     rewriter.replaceOpWithNewOp<mhlo::BroadcastInDimOp>(
@@ -313,6 +312,17 @@ struct SparseReshapeCallRewriter {
   }
 };
 
+struct SparseSelectRewriter {
+  LogicalResult operator()(mhlo::CustomCallOp op, PatternRewriter& rewriter) {
+    assert(op.getInputs().size() == 3 && "Need three input tensors");
+    assert(op.getResults().size() == 1 && "Need one output tensor");
+    // Reconstruct the operation.
+    rewriter.replaceOpWithNewOp<mhlo::SelectOp>(op, op.getResults().getTypes(),
+                                                op.getInputs());
+    return success();
+  }
+};
+
 struct SparseSliceCallRewriter {
   LogicalResult operator()(mhlo::CustomCallOp op, PatternRewriter& rewriter) {
     assert(op.getInputs().size() == 4 &&
@@ -402,12 +412,72 @@ struct SparseUnpackCallRewriter {
   }
 };
 
+struct SparseSDDMMCallRewriter {
+  LogicalResult operator()(mhlo::CustomCallOp op, PatternRewriter& rewriter) {
+    assert(op.getInputs().size() == 3 && "Need S, A, B matrices");
+    assert(op.getResults().size() == 1 && "Need one output tensor");
+    Location loc = op.getLoc();
+    Value matS = op.getInputs()[0];
+    Value matA = op.getInputs()[1];
+    Value matB = op.getInputs()[2];
+    auto etp = matS.getType().dyn_cast<RankedTensorType>().getElementType();
+    // Build the enveloping generic op with the following trait:
+    //   indexing_maps = [
+    //     affine_map<(i,j,k) -> (i,k)>,  // A
+    //     affine_map<(i,j,k) -> (k,j)>,  // B
+    //     affine_map<(i,j,k) -> (i,j)>   // S
+    //   ],
+    //   iterator_types = ["parallel", "parallel", "reduction"],
+    //   doc = "S(i,j) += spy[S(i,j)] x SUM_k A(i,k) B(k,j)"
+    SmallVector<utils::IteratorType, 3> iteratorTypes;
+    iteratorTypes.push_back(utils::IteratorType::parallel);
+    iteratorTypes.push_back(utils::IteratorType::parallel);
+    iteratorTypes.push_back(utils::IteratorType::reduction);
+    using MapList = ArrayRef<ArrayRef<AffineExpr>>;
+    auto infer = [](MapList m) { return AffineMap::inferFromExprList(m); };
+    AffineExpr i, j, k;
+    bindDims(op.getContext(), i, j, k);
+    auto indexingMaps = infer({{i, k}, {k, j}, {i, j}});
+    auto genericOp = rewriter.create<linalg::GenericOp>(
+        loc, TypeRange{matS.getType()}, ValueRange{matA, matB},
+        ValueRange{matS}, indexingMaps, iteratorTypes);
+    // Construct semi-ring op.
+    Block* main = rewriter.createBlock(&genericOp.getRegion(), {},
+                                       {etp, etp, etp}, {loc, loc, loc});
+    Value argS = main->getArgument(2);
+    rewriter.setInsertionPointToStart(&genericOp.getRegion().front());
+    auto semiring = rewriter.create<sparse_tensor::UnaryOp>(loc, etp, argS);
+    rewriter.createBlock(&semiring.getPresentRegion(), {}, etp, loc);
+    rewriter.setInsertionPointToStart(&semiring.getPresentRegion().front());
+    auto mul = rewriter.create<arith::MulFOp>(loc, main->getArgument(0),
+                                              main->getArgument(1));
+    rewriter.create<sparse_tensor::YieldOp>(loc, mul.getResult());
+    rewriter.setInsertionPointAfter(semiring);
+    // Construct reduction op.
+    auto identity =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getZeroAttr(etp));
+    auto custom = rewriter.create<sparse_tensor::ReduceOp>(
+        loc, etp, argS, semiring.getResult(), identity);
+    Block* red =
+        rewriter.createBlock(&custom.getRegion(), {}, {etp, etp}, {loc, loc});
+    rewriter.setInsertionPointToStart(&custom.getRegion().front());
+    auto add = rewriter.create<arith::AddFOp>(loc, red->getArgument(0),
+                                              red->getArgument(1));
+    rewriter.create<sparse_tensor::YieldOp>(loc, add.getResult());
+    rewriter.setInsertionPointAfter(custom);
+    rewriter.create<linalg::YieldOp>(loc, custom.getResult());
+    rewriter.replaceOp(op, genericOp.getResults());
+    return success();
+  }
+};
+
 class SparseCustomCallRewriter : public OpRewritePattern<mhlo::CustomCallOp> {
   using OpRewritePattern<mhlo::CustomCallOp>::OpRewritePattern;
   using SparseCustomTargetRewriter = std::function<LogicalResult(
       mhlo::CustomCallOp op, PatternRewriter& rewriter)>;
 
   const llvm::StringMap<SparseCustomTargetRewriter> rewriter_map_{
+      // Internal custom ops that need rewriting.
       std::make_pair("sparse_tensor_add",
                      SparseBinaryCallRewriter<mhlo::AddOp>()),
       std::make_pair("sparse_tensor_asin",
@@ -483,6 +553,7 @@ class SparseCustomCallRewriter : public OpRewritePattern<mhlo::CustomCallOp> {
       std::make_pair("sparse_tensor_reduce_xor",
                      SparseReduceCallRewriter<mhlo::XorOp>()),
       std::make_pair("sparse_tensor_reshape", SparseReshapeCallRewriter()),
+      std::make_pair("sparse_tensor_select_n", SparseSelectRewriter()),
       std::make_pair("sparse_tensor_sinh",
                      SparseUnaryChloCallRewriter<chlo::SinhOp>()),
       std::make_pair("sparse_tensor_slice", SparseSliceCallRewriter()),
@@ -494,6 +565,8 @@ class SparseCustomCallRewriter : public OpRewritePattern<mhlo::CustomCallOp> {
       std::make_pair("sparse_tensor_tan",
                      SparseUnaryChloCallRewriter<chlo::TanOp>()),
       std::make_pair("sparse_tensor_transpose", SparseTransposeCallRewriter()),
+      // User custom ops that need rewriting.
+      std::make_pair("sparse_jax_sddmm", SparseSDDMMCallRewriter()),
   };
 
   // Rewrites a CustomCallOp to corresponding sparse_tensor operation.
