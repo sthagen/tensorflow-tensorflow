@@ -91,7 +91,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/all_reduce_blueconnect.h"
 #include "tensorflow/compiler/xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "tensorflow/compiler/xla/service/gpu/conv_layout_normalization.h"
-#include "tensorflow/compiler/xla/service/gpu/copy_fusion.h"
 #include "tensorflow/compiler/xla/service/gpu/dot_dimension_sorter.h"
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_broadcast_folding_rewriter.h"
@@ -318,13 +317,6 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
   // GPU only supports canonical convolutions.
   layout_insensitive_algsimp_opts.set_supports_non_canonical_dots(false);
 
-  // On GPU we deem it safe to convert mul(conv(input, filter), c) to
-  // conv(input, mul(filter, c)).  (This is not 100% true if you are running a
-  // conv with tf32 precision, because the first multiply works in fp32 mode,
-  // and the second effectively gets truncated to tf32.  But it's close enough,
-  // and tf32 is, for the most part, invisible to users.)
-  layout_insensitive_algsimp_opts.set_enable_scalar_multiply_reduction(true);
-
   // "slow" minmax means we propagate nan.
   layout_insensitive_algsimp_opts.set_minmax_propagate_nan(
       !debug_options.xla_gpu_enable_fast_min_max());
@@ -340,6 +332,8 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
   if (gpu_target_config.platform_name == "ROCM") {
     layout_insensitive_algsimp_opts.set_enable_conv_operand_swap(false);
   }
+  layout_insensitive_algsimp_opts
+      .set_enable_unconditional_reduce_of_concat_replacement(false);
 
   HloPassPipeline pre_spmd_pipeline("pre-spmd-partitioner");
   // Run some IR cleanup passes before running the SPMD partitioning
@@ -878,7 +872,6 @@ Status GpuCompiler::PrepareHloModuleForIrEmitting(HloModule* hlo_module) {
   auto& sub_pipeline =
       pipeline.AddPass<HloPassPipeline>("horizontal-loop-fusion-for-copy");
   // To fuse the copy.
-  sub_pipeline.AddPass<CopyFusion>();
   sub_pipeline.AddPass<GpuHorizontalLoopFusion>("copy_");
   sub_pipeline.AddPass<HloDCE>();
   pipeline.AddPass<GpuSanitizeConstantNames>();
@@ -902,10 +895,10 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     options.set_supports_non_canonical_dots(false);
     options.set_is_layout_sensitive(true);
     options.set_enable_conv_operand_swap(false);
-    options.set_enable_scalar_multiply_reduction(true);
     // "slow" minmax means we propagate nan.
     options.set_minmax_propagate_nan(
         !debug_options.xla_gpu_enable_fast_min_max());
+    options.set_enable_unconditional_reduce_of_concat_replacement(false);
     pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(options);
 
     // GemmRewriter assumes that all transposes are folded into gemms, but,
@@ -1027,10 +1020,10 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     options.set_supports_non_canonical_dots(false);
     options.set_is_layout_sensitive(true);
     options.set_enable_conv_operand_swap(false);
-    options.set_enable_scalar_multiply_reduction(true);
     // "slow" minmax means we propagate nan.
     options.set_minmax_propagate_nan(
         !hlo_module->config().debug_options().xla_gpu_enable_fast_min_max());
+    options.set_enable_unconditional_reduce_of_concat_replacement(false);
     pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(options);
   }
 
