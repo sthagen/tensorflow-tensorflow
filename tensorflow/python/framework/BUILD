@@ -351,6 +351,7 @@ py_strict_library(
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
+        "@pypi_packaging//:pkg",
     ] + if_xla_available([
         "//tensorflow/python:_pywrap_tfcompile",
     ]),
@@ -1319,7 +1320,7 @@ py_strict_library(
         ":errors",
         ":indexed_slices",
         ":ops",
-        ":tensor_spec",
+        ":tensor",
         ":type_spec",
         "//tensorflow/core/function/capture:capture_container",
         "//tensorflow/core/function/trace_type",
@@ -1995,6 +1996,7 @@ py_strict_library(
         "//tensorflow/python/util/protobuf",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
+        "@pypi_portpicker//:pkg",
     ],
 )
 
@@ -3111,6 +3113,7 @@ py_strict_test(
         ":ops",
         ":weak_tensor",
         "//tensorflow/python/ops:variables",
+        "//tensorflow/python/ops:weak_tensor_test_util",
         "//tensorflow/python/platform:client_testlib",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",

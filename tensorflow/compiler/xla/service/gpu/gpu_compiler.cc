@@ -589,16 +589,6 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
       pipeline.AddPass<AlgebraicSimplifier>(layout_insensitive_algsimp_opts);
     }();
 
-    // Run WhileLoopTripCountAnnotator at the end of the simplification
-    // pipeline, before layout assignment and fusion.  This pass does some
-    // pattern-matching on while bodies/conditions, and this is where the HLO is
-    // "nicest".
-    //
-    // It's important that we don't make semantic changes (e.g. unrolling) to
-    // any `while` loops after this point, because otherwise the trip-count
-    // annotations added by this pass may not be correct after the
-    // modifications.
-    pipeline.AddPass<WhileLoopTripCountAnnotator>();
     pipeline.AddPass<HloComputationDeduplicator>(
         /*mark_fusion_duplications=*/false);
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
@@ -618,7 +608,7 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
         /*enable_reduce_scatter=*/debug_options
             .xla_gpu_enable_while_loop_reduce_scatter_code_motion());
     if (debug_options.xla_gpu_enable_pipelined_all_reduce()) {
-      DataParallelCollectiveOptimizer::DataParallelCollectiveConfig config{
+      DataParallelCollectiveOptimizer::Config config{
           /*level_to_operate_on=*/0,
           /*max_pipelining_per_loop=*/INT64_MAX,
           /*last_run=*/true,
@@ -629,7 +619,7 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
       collectives_pipeline.AddPass<DataParallelCollectiveOptimizer>(config);
     }
     if (debug_options.xla_gpu_enable_pipelined_all_gather()) {
-      DataParallelCollectiveOptimizer::DataParallelCollectiveConfig config{
+      DataParallelCollectiveOptimizer::Config config{
           /*level_to_operate_on=*/0,
           /*max_pipelining_per_loop=*/INT64_MAX,
           /*last_run=*/true,
@@ -654,6 +644,16 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
     collectives_pipeline.AddPass<AllReducePromotion>(ar_promoted_types);
     // Remove dead computations left over after ar/rs promotion.
     collectives_pipeline.AddPass<HloDCE>();
+
+    // Run WhileLoopTripCountAnnotator after collective pipelining and before
+    // layout assignment and fusion.This pass does some pattern-matching on
+    // while bodies/conditions, and this is where the HLO is "nicest".
+    //
+    // It's important that we don't make semantic changes (e.g. unrolling) to
+    // any `while` loops after this point, because otherwise the trip-count
+    // annotations added by this pass may not be correct after the
+    // modifications.
+    collectives_pipeline.AddPass<WhileLoopTripCountAnnotator>();
 
     TF_RETURN_IF_ERROR(collectives_pipeline.Run(hlo_module).status());
   }
