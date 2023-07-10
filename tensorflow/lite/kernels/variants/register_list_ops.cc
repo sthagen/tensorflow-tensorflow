@@ -12,35 +12,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_KERNELS_VARIANTS_LIST_OPS_LIB_H_
-#define TENSORFLOW_LITE_KERNELS_VARIANTS_LIST_OPS_LIB_H_
+#include "tensorflow/lite/kernels/variants/register_list_ops.h"
 
-#include "tensorflow/lite/core/c/common.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/kernels/variants/list_ops_lib.h"
+#include "tensorflow/lite/mutable_op_resolver.h"
 
 namespace tflite {
 namespace variants {
-namespace detail {
-
-struct ListReserveOptions {
-  TensorType element_type;
-};
-
-}  // namespace detail
 namespace ops {
 
-TfLiteRegistration* Register_LIST_RESERVE();
-
-TfLiteRegistration* Register_LIST_STACK();
-
-TfLiteRegistration* Register_LIST_SET_ITEM();
-
-TfLiteRegistration* Register_LIST_FROM_TENSOR();
-
-TfLiteRegistration* Register_LIST_GET_ITEM();
+void RegisterListOps(MutableOpResolver* resolver) {
+  resolver->AddCustom("TensorListReserve", Register_LIST_RESERVE());
+  resolver->AddCustom("TensorListStack", Register_LIST_STACK());
+  resolver->AddCustom("TensorListSetItem", Register_LIST_SET_ITEM());
+  resolver->AddCustom("TensorListFromTensor", Register_LIST_FROM_TENSOR());
+  resolver->AddCustom("TensorListGetItem", Register_LIST_GET_ITEM());
+}
 
 }  // namespace ops
 }  // namespace variants
 }  // namespace tflite
-
-#endif  // TENSORFLOW_LITE_KERNELS_VARIANTS_LIST_OPS_LIB_H_
