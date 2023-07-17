@@ -42,19 +42,6 @@ bool HasDefaultLayout(const Shape& shape) {
          LayoutUtil::IsMonotonicWithDim0Major(shape.layout());
 }
 
-bool IsSupportedReductionComputation(HloComputation* computation) {
-  static const absl::flat_hash_set<HloOpcode>* const kSupportedOpcodes =
-      new absl::flat_hash_set<HloOpcode>{HloOpcode::kAdd, HloOpcode::kMaximum};
-
-  HloInstruction* root = computation->root_instruction();
-  if (root->operand_count() != 2 ||
-      root->operand(0)->opcode() != HloOpcode::kParameter ||
-      root->operand(1)->opcode() != HloOpcode::kParameter) {
-    return false;
-  }
-  return kSupportedOpcodes->contains(root->opcode());
-}
-
 bool IsTritonSupportedInstruction(const HloInstruction* instr) {
   // TODO(bchetioui): expand with non-trivial instructions.
   if (instr->IsElementwise()) {
@@ -81,6 +68,10 @@ bool TrivialEdge(HloInstruction** producer, HloInstruction* consumer,
 
 bool BitcastIsTilingNoop(HloInstruction* bitcast) {
   CHECK_EQ(bitcast->opcode(), HloOpcode::kBitcast);
+
+  if (bitcast->shape().rank() == 0) {
+    return true;
+  }
 
   // In the Softmax rewriter for now, tiling is derived from a hero reduction
   // operation, which should be reducing its input on the last axis. Therefore,
@@ -226,6 +217,12 @@ std::optional<HloInstruction*> MatchesTritonCompatibleClosedReductionDiamond(
         reduce->dimensions(0) == producer->shape().rank() - 1 &&
         !absl::c_linear_search(broadcast->dimensions(),
                                broadcast->shape().rank() - 1))) {
+    return match_failure;
+  }
+
+  // TODO(b/291204753): remove this filter. This heuristic enables flipping the
+  // default flag while filtering out cases that could result in regressions.
+  if (reduce->operand(0)->shape().dimensions().back() < 64) {
     return match_failure;
   }
 
