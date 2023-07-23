@@ -265,9 +265,9 @@ cc_library(
         ":data_transfer_visibility",
     ],
     deps = [
-        ":common_proto_cc",
         ":worker_proto_cc",
         "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
         "//tensorflow/core/framework:dataset_proto_cc",
         "//tensorflow/core/framework:types_proto_cc",
         "//tensorflow/core/platform:errors",
@@ -418,6 +418,7 @@ cc_library(
         "//tensorflow/core/data:hash_utils",
         "//tensorflow/core/data:snapshot_utils",
         "//tensorflow/core/data:standalone",
+        "//tensorflow/core/data/service:auto_scaler",
         "//tensorflow/core/data/service/snapshot:file_utils",
         "//tensorflow/core/data/service/snapshot:path_utils",
         "//tensorflow/core/data/service/snapshot:snapshot_manager",
