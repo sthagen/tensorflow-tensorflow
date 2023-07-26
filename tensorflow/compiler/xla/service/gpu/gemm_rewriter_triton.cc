@@ -121,26 +121,6 @@ int64_t NonContractingDimensionIndex(const HloInstruction& dot,
   return non_contracting_dims->front();
 }
 
-// Data types that are tested to work in the triton GEMM emitter.
-bool IsSupportedDataType(PrimitiveType type, GpuVersion gpu_version) {
-  auto cuda_compute_capability =
-      std::get<se::CudaComputeCapability>(gpu_version);
-  switch (type) {
-    case PRED:
-    case S8:
-    case S16:
-    case S32:
-    case F16:
-    case F32:
-      return true;
-    case BF16:
-      return cuda_compute_capability.IsAtLeast(
-          stream_executor::CudaComputeCapability::AMPERE);
-    default:
-      return false;
-  }
-}
-
 // Tells if f(a+b) == f(a) + f(b).
 bool IsDistributiveOverAddition(const HloInstruction& hlo) {
   // The list is most likely incomplete.
@@ -622,11 +602,12 @@ FusionDecision CanFuse(const HloInstruction& hlo, bool as_input,
     return "Unsupported instruction.";
   }
   for (const HloInstruction* operand : hlo.operands()) {
-    if (!IsSupportedDataType(operand->shape().element_type(), gpu_version)) {
+    if (!IsTritonSupportedDataType(operand->shape().element_type(),
+                                   gpu_version)) {
       return "Unsupported input data type.";
     }
   }
-  if (!IsSupportedDataType(hlo.shape().element_type(), gpu_version)) {
+  if (!IsTritonSupportedDataType(hlo.shape().element_type(), gpu_version)) {
     return "Unsupported output data type.";
   }
   if (hlo.opcode() == HloOpcode::kBroadcast &&
@@ -795,11 +776,11 @@ void FuseWithInputsRecursively(
             inputs.erase(operand);
           }
           inputs.insert(operand->operands().begin(), operand->operands().end());
-          // Save the dimension order description of operand's input.
-          CHECK(dim_orders.insert({operand, operand_dim_order}).second)
-              << operand->ToString();
           top_is_ready_to_fuse = false;
         }
+        // Save the dimension order description of operand's input.
+        CHECK(dim_orders.insert({operand, operand_dim_order}).second)
+            << operand->ToString();
       }
     }
     if (top_is_ready_to_fuse) {
@@ -858,7 +839,8 @@ StatusOr<FusionDecision> FuseDot(HloInstruction& dot,
     // the same tiling.
     auto first_lhs_parameter_it = lhs_dim_orders.cbegin();
     while (first_lhs_parameter_it != lhs_dim_orders.cend()) {
-      if (first_lhs_parameter_it->first->opcode() == HloOpcode::kParameter) {
+      if (old_to_new_mapping[first_lhs_parameter_it->first]->opcode() ==
+          HloOpcode::kParameter) {
         break;
       }
       ++first_lhs_parameter_it;
@@ -1011,6 +993,19 @@ void CopyIncrementingAboveThreshold(
   }
 }
 
+// Copy source values into destination incrementing those >= threshold by 1.
+void CopyIncrementingAboveThreshold(absl::Span<const int64_t> source,
+                                    DimensionVector& destination,
+                                    const int threshold) {
+  destination.reserve(source.size());
+  for (int64_t x : source) {
+    if (x >= threshold) {
+      ++x;
+    }
+    destination.push_back(x);
+  }
+}
+
 Status UncompilableMatmul(absl::string_view explanation) {
   Status s = absl::CancelledError(explanation);
   s.SetPayload(kUncompilableFusion, absl::Cord(explanation));
@@ -1151,6 +1146,15 @@ Status MakeDotComputationSplitKBatch(
       expanded = MakeDotHlo(lhs, rhs, new_dim_numbers, dot->precision_config(),
                             dot->shape().element_type())
                      .value();
+      // Make the added batch dimension the major-most, keep the order of the
+      // original dimensions.
+      expanded->mutable_shape()->mutable_layout()->clear_minor_to_major();
+      CopyIncrementingAboveThreshold(dot->shape().layout().minor_to_major(),
+                                     *expanded->mutable_shape()
+                                          ->mutable_layout()
+                                          ->mutable_minor_to_major(),
+                                     0);
+      expanded->mutable_shape()->mutable_layout()->add_minor_to_major(0);
       dot->SetupDerivedInstruction(expanded);
     } else {
       expanded = computation->AddInstruction(
@@ -1250,6 +1254,26 @@ Status PropagateDimensionOrdersToParameters(
 
 }  // anonymous namespace
 
+// Data types that are supported by the Triton emitters.
+bool IsTritonSupportedDataType(PrimitiveType type, GpuVersion gpu_version) {
+  auto cuda_compute_capability =
+      std::get<se::CudaComputeCapability>(gpu_version);
+  switch (type) {
+    case PRED:
+    case S8:
+    case S16:
+    case S32:
+    case F16:
+    case F32:
+      return true;
+    case BF16:
+      return cuda_compute_capability.IsAtLeast(
+          stream_executor::CudaComputeCapability::AMPERE);
+    default:
+      return false;
+  }
+}
+
 // BF16 is supported in a sense that all operations on it are implemented
 // through F32 and converts have to be inserted into the HLO graph, but
 // they can be missing during fusion.
@@ -1341,8 +1365,7 @@ Status MakeDotSplitKBatch(HloInstruction* dot_fusion,
       HloInstruction * reduce,
       MakeReduceHlo(dot_fusion, zero, /*dimensions=*/{0}, HloOpcode::kAdd));
 
-  // If the original dot had non-standard layout, this reduce should have that
-  // too.
+  // The output of the reduce has to have the layout of the original dot.
   *reduce->mutable_shape()->mutable_layout() = output_layout;
 
   if (dot_fusion->IsRoot()) {
@@ -1465,10 +1488,10 @@ FusionDecision CanTritonHandleGEMM(const HloInstruction& dot,
     return "Unsupported output data type.";
   }
 
-  if (!IsSupportedDataType(dot.operand(0)->shape().element_type(),
-                           gpu_version) ||
-      !IsSupportedDataType(dot.operand(1)->shape().element_type(),
-                           gpu_version)) {
+  if (!IsTritonSupportedDataType(dot.operand(0)->shape().element_type(),
+                                 gpu_version) ||
+      !IsTritonSupportedDataType(dot.operand(1)->shape().element_type(),
+                                 gpu_version)) {
     return "Unsupported input data type.";
   }
 

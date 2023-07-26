@@ -398,7 +398,7 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
       } else {
         // Use a simple mesh shape if not specified.
         option.device_mesh_shape = {
-            stream_exec->GetDeviceDescription().core_count(), 1};
+            gpu_target_config.gpu_device_info.core_count, 1};
       }
       if (!hlo_module->config().auto_spmd_partitioning_mesh_ids().empty()) {
         option.device_mesh_ids =
@@ -443,8 +443,8 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
       if (gpu_target_config.platform_name == "ROCM") {
         return !gpu::IsMatrixMultiplication(*instr);
       } else {
-        return !stream_exec->GetDeviceDescription()
-                    .cuda_compute_capability()
+        return !std::get<se::CudaComputeCapability>(
+                    gpu_target_config.gpu_version)
                     .IsAtLeast(se::CudaComputeCapability::VOLTA) ||
                !gpu::IsMatrixMultiplication(*instr);
       }
@@ -1417,7 +1417,7 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     HloCostAnalysis::Options cost_analysis_options{ShapeSizeBytesFunction()};
     cost_analysis_options.set_bytes_per_second(
         stream_exec->GetDeviceDescription().memory_bandwidth());
-    GpuHloCostAnalysis cost_analysis(cost_analysis_options);
+    GpuHloCostAnalysis cost_analysis(cost_analysis_options, &gpu_device_info);
     TF_RETURN_IF_ERROR(module->entry_computation()->Accept(&cost_analysis));
     if (!options.is_autotuning_compilation) {
       VLOG(1) << "HLO memory read+written: "

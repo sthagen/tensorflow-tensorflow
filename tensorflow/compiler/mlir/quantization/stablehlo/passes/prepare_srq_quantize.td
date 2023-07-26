@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The StableHLO Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,13 +12,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "tensorflow/core/common_runtime/next_pluggable_device/next_pluggable_device_c_api_flag.h"
 
-namespace tensorflow {
-namespace npd {
+include "mlir/IR/OpBase.td"
+include "mlir/IR/PatternBase.td"
+include "mlir/Dialect/Func/IR/FuncOps.td"
+include "mlir/Dialect/Arith/IR/ArithOps.td"
+include "stablehlo/dialect/StablehloOps.td"
 
-// Define as a weak symbol so that it can be overridden when necessary.
-extern const bool kTfNextPluggableDeviceUseCApi __attribute__((weak)) = false;
-
-}  // namespace npd
-}  // namespace tensorflow
+// Converts stablehlo.constant to arith.constant for statically shaped
+// constants. Needed for QuantizationDriver to recognize constants.
+def ConvertStableHloConstToArithConst : Pat<
+  (StableHLO_ConstantOp:$res ElementsAttr:$value),
+  (Arith_ConstantOp $value),
+  [(AnyStaticShapeTensor $res)], (addBenefit 10)>;
+  

@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Suite of verification tests for the SINGLE TensorFlow wheel in /tf/pkg
-# or whatever path is set as $TF_WHEEL.
+# Suite of verification tests for the SINGLE TensorFlow wheel in the "build"
+# directory, or whatever path is set as $TF_WHEEL.
 
 setup_file() {
-    cd "$TFCI_GIT_DIR/build"
+    cd build
     if [[ -z "$TF_WHEEL" ]]; then
-        export TF_WHEEL=$(find "$TFCI_GIT_DIR/build" -iname "*.whl")
+        export TF_WHEEL=$(find build -iname "*.whl")
     fi
 }
 

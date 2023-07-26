@@ -1190,6 +1190,39 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "latency_hiding_scheduler_preparation",
+    srcs = ["latency_hiding_scheduler_preparation.cc"],
+    hdrs = ["latency_hiding_scheduler_preparation.h"],
+    deps = [
+        ":collective_ops_utils",
+        ":hlo_pass",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+        "//tensorflow/compiler/xla/hlo/ir:hlo_reachability",
+        "//tensorflow/compiler/xla/service/gpu:backend_configs_cc",
+        "//tensorflow/compiler/xla/service/graphcycles",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+xla_cc_test(
+    name = "latency_hiding_scheduler_preparation_test",
+    srcs = ["latency_hiding_scheduler_preparation_test.cc"],
+    deps = [
+        ":hlo_parser",
+        ":latency_hiding_scheduler_preparation",
+        "//tensorflow/compiler/xla:test",
+        "//tensorflow/compiler/xla/hlo/ir:hlo",
+        "//tensorflow/compiler/xla/hlo/utils:hlo_matchers",
+        "//tensorflow/compiler/xla/tests:hlo_test_base",
+        "//tensorflow/compiler/xla/tests:test_utils",
+        "//tensorflow/tsl/lib/core:status_test_util",
+        "//tensorflow/tsl/platform:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
     name = "profile_guided_latency_estimator",
     srcs = ["profile_guided_latency_estimator.cc"],
     hdrs = ["profile_guided_latency_estimator.h"],
@@ -6740,6 +6773,7 @@ build_test(
 xla_cc_binary(
     name = "xla_compile",
     srcs = ["xla_compile_main.cc"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured(["TENSORFLOW_USE_ROCM"]),
     visibility = ["//visibility:public"],
     deps = [
         ":compiler",

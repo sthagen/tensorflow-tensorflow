@@ -12,15 +12,22 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_NEXT_PLUGGABLE_DEVICE_NEXT_PLUGGABLE_DEVICE_C_API_FLAG_H_
-#define TENSORFLOW_CORE_COMMON_RUNTIME_NEXT_PLUGGABLE_DEVICE_NEXT_PLUGGABLE_DEVICE_C_API_FLAG_H_
 
-namespace tensorflow {
-namespace npd {
+#ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_OPENXLA_DEFAULT_COMPILER_H_
+#define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_OPENXLA_DEFAULT_COMPILER_H_
 
-extern const bool kTfNextPluggableDeviceUseCApi;
+#include <cstdlib>
+#include <string>
 
-}  // namespace npd
-}  // namespace tensorflow
+namespace xla::gpu {
 
-#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_NEXT_PLUGGABLE_DEVICE_NEXT_PLUGGABLE_DEVICE_C_API_FLAG_H_
+inline std::string GetIREECompilerPath() {
+  if (const char* path = std::getenv("XLA_OPENXLA_IREE_COMPILER_LIB")) {
+    return std::string(path);
+  }
+  return "libIREECompiler.so";
+}
+
+}  // namespace xla::gpu
+
+#endif  // TENSORFLOW_COMPILER_XLA_SERVICE_GPU_OPENXLA_DEFAULT_COMPILER_H_
