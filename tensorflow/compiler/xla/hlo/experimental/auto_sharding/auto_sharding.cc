@@ -153,7 +153,8 @@ GenerateReshardingCostsAndMissingShardingsForAllOperands(
       }
       if (!cur_input_sharding.has_value() &&
           ((ins->opcode() == HloOpcode::kGather && k == 0) ||
-           (ins->opcode() == HloOpcode::kScatter && k != 0))) {
+           (ins->opcode() == HloOpcode::kScatter && k != 0) ||
+           ins->opcode() == HloOpcode::kCustomCall)) {
         cur_input_sharding = HloSharding::Replicate();
       }
       CHECK(cur_input_sharding.has_value());
@@ -524,7 +525,6 @@ void AddReplicatedStrategy(const HloInstruction* ins, const Shape& shape,
       if (ins->opcode() == HloOpcode::kConditional) {
         resharding_costs.push_back(std::vector<double>(
             strategy_map.at(operand)->leaf_vector.size(), 0));
-        input_shardings.push_back(output_spec);
       } else {
         resharding_costs.push_back(ReshardingCostVector(
             strategy_map.at(operand).get(), ins->operand(k)->shape(),
@@ -624,8 +624,6 @@ void EnumerateAll2DPartition(const HloInstruction* ins, const Shape& shape,
                              const InstructionBatchDimMap& batch_dim_map,
                              bool only_allow_divisible,
                              const CallGraph& call_graph) {
-  std::vector<int64_t> shardable_mesh_dims =
-      VectorGreaterThanOneElementIndices(device_mesh.dimensions());
   auto iter = batch_dim_map.find(GetBatchDimMapKey(ins));
   int64_t batch_dim = -1;
   if (iter != batch_dim_map.end()) {
@@ -637,23 +635,19 @@ void EnumerateAll2DPartition(const HloInstruction* ins, const Shape& shape,
       if ((batch_dim != -1 && !(batch_dim == i || batch_dim == j)) || i == j) {
         continue;
       }
-      if (shape.dimensions(i) < device_mesh.dim(shardable_mesh_dims[0]) ||
-          shape.dimensions(j) < device_mesh.dim(shardable_mesh_dims[1])) {
+      if (shape.dimensions(i) < device_mesh.dim(0) ||
+          shape.dimensions(j) < device_mesh.dim(1)) {
         continue;
       }
 
       if (only_allow_divisible &&
-          (!IsDivisible(shape.dimensions(i),
-                        device_mesh.dim(shardable_mesh_dims[0])) ||
-           !IsDivisible(shape.dimensions(j),
-                        device_mesh.dim(shardable_mesh_dims[1])))) {
+          (!IsDivisible(shape.dimensions(i), device_mesh.dim(0)) ||
+           !IsDivisible(shape.dimensions(j), device_mesh.dim(1)))) {
         continue;
       }
 
       std::string name = absl::StrFormat("S{%d,%d} @ {0,1}", i, j);
-      HloSharding output_spec =
-          Tile(shape, {i, j}, {shardable_mesh_dims[0], shardable_mesh_dims[1]},
-               device_mesh);
+      HloSharding output_spec = Tile(shape, {i, j}, {0, 1}, device_mesh);
       double compute_cost = 0, communication_cost = 0;
       double memory_cost = GetBytes(shape) / output_spec.NumTiles();
       std::vector<HloSharding> input_shardings;
@@ -757,8 +751,6 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
                                  const InstructionBatchDimMap& batch_dim_map,
                                  std::unique_ptr<StrategyVector>& strategies,
                                  bool only_allow_divisible) {
-  std::vector<int64_t> shardable_mesh_dims =
-      VectorGreaterThanOneElementIndices(device_mesh.dimensions());
   auto iter = batch_dim_map.find(GetBatchDimMapKey(ins));
   int64_t batch_dim = -1;
   if (iter != batch_dim_map.end()) {
@@ -773,23 +765,17 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
       if ((batch_dim != -1 && !(batch_dim == i || batch_dim == j)) || i == j) {
         continue;
       }
-      if (ins->shape().dimensions(i) <
-              device_mesh.dim(shardable_mesh_dims[0]) ||
-          ins->shape().dimensions(j) <
-              device_mesh.dim(shardable_mesh_dims[1])) {
+      if (ins->shape().dimensions(i) < device_mesh.dim(0) ||
+          ins->shape().dimensions(j) < device_mesh.dim(1)) {
         continue;
       }
       if (only_allow_divisible &&
-          (!IsDivisible(ins->shape().dimensions(i),
-                        device_mesh.dim(shardable_mesh_dims[0])) ||
-           !IsDivisible(ins->shape().dimensions(j),
-                        device_mesh.dim(shardable_mesh_dims[1])))) {
+          (!IsDivisible(ins->shape().dimensions(i), device_mesh.dim(0)) ||
+           !IsDivisible(ins->shape().dimensions(j), device_mesh.dim(1)))) {
         continue;
       }
 
-      HloSharding output_spec =
-          Tile(ins->shape(), {i, j},
-               {shardable_mesh_dims[0], shardable_mesh_dims[1]}, device_mesh);
+      HloSharding output_spec = Tile(ins->shape(), {i, j}, {0, 1}, device_mesh);
       std::optional<HloSharding> input_spec =
           hlo_sharding_util::ReshapeSharding(ins->shape(), operand->shape(),
                                              output_spec);
@@ -797,9 +783,7 @@ void Enumerate2DPartitionReshape(const HloInstruction* ins,
         continue;
       }
 
-      std::string name =
-          absl::StrFormat("S%d%d @ {%d,%d}", i, j, shardable_mesh_dims[0],
-                          shardable_mesh_dims[1]);
+      std::string name = absl::StrFormat("S%d%d @ {%d,%d}", i, j, 0, 1);
       double compute_cost = 0, communication_cost = 0;
       double memory_cost = GetBytes(ins->shape()) / output_spec.NumTiles();
 
@@ -2117,6 +2101,8 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
     if (instruction_execution_counts.contains(ins)) {
       ScaleCostsWithExecutionCounts(strategies.get(),
                                     instruction_execution_counts.at(ins));
+    } else {
+      VLOG(5) << "No execution count available for " << ins->name();
     }
     XLA_VLOG_LINES(2, absl::StrCat("strategies:\n", strategies->ToString()));
 
@@ -2582,6 +2568,7 @@ void SetHloShardingPostProcessing(
       } else {
         const ShardingStrategy& stra =
             GetShardingStrategy(inst, strategy_map, cost_graph, s_val);
+
         if (stra.input_shardings.empty()) {
           continue;
         }
@@ -3754,10 +3741,6 @@ StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
   solver_option.allow_replicated_strategy_for_dot_and_conv =
       option_.allow_replicated_strategy_for_dot_and_conv;
 
-  absl::flat_hash_map<const HloInstruction*, int64_t>
-      instruction_execution_counts = spmd::ComputeInstructionExecutionCounts(
-          module, option_.loop_iteration_count_estimate);
-
   // Remove CustomCalls with custom_call_target="Sharding" and move their
   // shardings to their input ops.
   absl::flat_hash_map<const HloInstruction*, std::vector<int64_t>>
@@ -3828,6 +3811,10 @@ StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
   XLA_VLOG_LINES(10, spmd::PrintLivenessSet(liveness_set));
   const HloInstructionSequence& sequence =
       hlo_live_range->flattened_instruction_sequence();
+
+  absl::flat_hash_map<const HloInstruction*, int64_t>
+      instruction_execution_counts = spmd::ComputeInstructionExecutionCounts(
+          module, option_.loop_iteration_count_estimate);
 
   // ----- Analyze the batch dim -----
   spmd::InstructionBatchDimMap batch_dim_map;
@@ -4004,10 +3991,6 @@ StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
 
   // ----- Canonicalize layouts based on LayoutCanonicalizationCallback. -----
   TF_RETURN_IF_ERROR(CanonicalizeLayouts(module));
-  XLA_VLOG_LINES(7, absl::StrCat("After auto sharding for mesh ",
-                                 spmd::ToString(option_.device_mesh_shape),
-                                 ":\n", module->ToString()));
-  DumpHloModuleIfEnabled(*module, "after_auto_spmd_sharding");
 
   return module_is_changed ? AutoShardingResult::kModuleChangedShardingPerformed
                            : AutoShardingResult::kModuleUnchanged;

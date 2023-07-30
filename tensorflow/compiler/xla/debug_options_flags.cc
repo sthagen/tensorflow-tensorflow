@@ -136,6 +136,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   // OpenXLA/IREE runtime flags.
   opts.set_xla_gpu_enable_openxla_runtime(false);
+  opts.set_xla_gpu_enable_openxla_hal(true);
 
   // Set 4GB space limit for redzone scratch allocator.
   opts.set_xla_gpu_redzone_scratch_max_megabytes(1LL << 12);
@@ -167,7 +168,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_cudnn_int8x32_convolution_reordering(true);
   opts.set_xla_gpu_triton_gemm_any(false);
   opts.set_xla_gpu_enable_triton_softmax_fusion(true);
-  opts.set_xla_gpu_triton_fusion_level(1);
+  opts.set_xla_gpu_triton_fusion_level(2);
 
   // Moving reduce-scatter out of while loops can increase memory footprint, so
   // turning it off by default.
@@ -969,6 +970,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       bool_setter_for(&DebugOptions::set_xla_gpu_enable_openxla_runtime),
       debug_options->xla_gpu_enable_openxla_runtime(),
       "Whether to enable OpenXLA runtime for XLA:GPU backend"));
+  flag_list->push_back(
+      tsl::Flag("xla_gpu_enable_openxla_hal",
+                bool_setter_for(&DebugOptions::set_xla_gpu_enable_openxla_hal),
+                debug_options->xla_gpu_enable_openxla_hal(),
+                "Whether to enable OpenXLA CUDA HAL for XLA:GPU backend"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_nccl_termination_timeout_seconds",
       int64_setter_for(

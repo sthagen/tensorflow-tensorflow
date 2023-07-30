@@ -47,6 +47,8 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/mlir/backends/openxla/conversion/de_bufferization.h"
+#include "tensorflow/compiler/xla/mlir/backends/openxla/conversion/xla_gpu_api.h"
+#include "tensorflow/compiler/xla/mlir/backends/openxla/ir/xla_gpu_dialect.h"
 #include "tensorflow/compiler/xla/mlir_hlo/lhlo/IR/lhlo_ops.h"
 #include "tensorflow/compiler/xla/service/gpu/copy_thunk.h"
 #include "tensorflow/compiler/xla/service/gpu/kernel_thunk.h"
@@ -59,6 +61,32 @@ namespace xla::gpu {
 namespace {
 using namespace mlir;                 // NOLINT
 using namespace mlir::iree_compiler;  // NOLINT
+
+using arith::ConstantIndexOp;
+using arith::ConstantIntOp;
+
+//===----------------------------------------------------------------------===//
+// Helper functions to build arguments to API functions.
+//===----------------------------------------------------------------------===//
+
+// Creates `iree_input.list<!iree_input.buffer_view>` list.
+TypedValue<IREE::Input::ListType> getBufferViewList(
+    ImplicitLocOpBuilder &b, ArrayRef<TypedValue<TensorType>> values) {
+  Type type = XlaGpuApi::getBufferViewListType(b);
+  Value size = b.create<ConstantIndexOp>(values.size());
+  Value list = b.create<IREE::Input::ListCreateOp>(type, size);
+
+  if (!values.empty()) b.create<IREE::Input::ListResizeOp>(list, size);
+  for (auto indexed : llvm::enumerate(values)) {
+    Value index = b.create<ConstantIndexOp>(indexed.index());
+    Value view = b.create<IREE::Input::TensorExportOp>(
+        b.getType<IREE::Input::BufferViewType>(), indexed.value(),
+        /*source_dims=*/ValueRange());
+    b.create<IREE::Input::ListSetOp>(list, index, view);
+  }
+
+  return list.cast<TypedValue<IREE::Input::ListType>>();
+}
 
 //===----------------------------------------------------------------------===//
 // Helper functions to work with ThunkSequence
@@ -265,19 +293,18 @@ IREE::Input::PipelineLayoutAttr getPipelineLayout(CompiledOp<T> &op) {
 //===----------------------------------------------------------------------===//
 
 template <typename OpTy>
-struct ConvertCompiledOp : public OpConversionPattern<OpTy> {
+struct ConvertCompiledOpToHal : public OpConversionPattern<OpTy> {
   using OpAdaptor = typename OpConversionPattern<OpTy>::OpAdaptor;
 
-  ConvertCompiledOp(TypeConverter &converter, MLIRContext *ctx,
-                    IREE::Input::ExecutableSourceOp executable_source,
-                    ThunkSequence *thunk_sequence,
-                    std::shared_ptr<DeBufferization> state,
-                    std::shared_ptr<int64_t> ordinal)
+  ConvertCompiledOpToHal(TypeConverter &converter, MLIRContext *ctx,
+                         IREE::Input::ExecutableSourceOp executable_source,
+                         ThunkSequence *thunk_sequence, DeBufferization &state,
+                         std::shared_ptr<int64_t> ordinal)
       : OpConversionPattern<OpTy>(converter, ctx),
         executable_source(executable_source.getSymNameAttr()),
         executable_source_body(&executable_source.getBody().front()),
         thunk_sequence(thunk_sequence),
-        state(std::move(state)),
+        state(state),
         ordinal(std::move(ordinal)) {}
 
   LogicalResult matchAndRewrite(
@@ -287,7 +314,7 @@ struct ConvertCompiledOp : public OpConversionPattern<OpTy> {
   StringAttr executable_source;
   Block *executable_source_body;
   ThunkSequence *thunk_sequence;
-  std::shared_ptr<DeBufferization> state;
+  DeBufferization &state;
   std::shared_ptr<int64_t> ordinal;
 
   // Keep a mapping from a kernel name to exported function declaration.
@@ -295,23 +322,25 @@ struct ConvertCompiledOp : public OpConversionPattern<OpTy> {
 };
 
 template <typename OpTy>
-LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
+LogicalResult ConvertCompiledOpToHal<OpTy>::matchAndRewrite(
     OpTy op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const {
   ImplicitLocOpBuilder b(op.getLoc(), rewriter);
 
   auto *block = op->getBlock();
 
-  // Extract compiled fusion from the thunk sequence.
-  auto compiled_fusion = extractCompiledOp(op, thunk_sequence, rewriter);
-  if (failed(compiled_fusion)) return failure();
+  // Extract compiled operation from the thunk sequence.
+  auto compiled_op = extractCompiledOp(op, thunk_sequence, rewriter);
+  if (failed(compiled_op))
+    return rewriter.notifyMatchFailure(
+        op, "failed to extract device compilation result for an operation");
 
   // Handle copy operations first, before handling kernel launch.
-  for (auto &copy : compiled_fusion->memcpy) {
+  for (auto &copy : compiled_op->memcpy) {
     auto src_memref = cast<TypedValue<MemRefType>>(copy->source_value());
     auto dst_memref = cast<TypedValue<MemRefType>>(copy->destination_value());
 
-    auto src = state->remapped[block][stripReinterpretCast(src_memref)];
-    auto dst = state->remapped[block][stripReinterpretCast(dst_memref)];
+    auto src = state.remapped[block][stripReinterpretCast(src_memref)];
+    auto dst = state.remapped[block][stripReinterpretCast(dst_memref)];
 
     assert(src && "unknown mapping from `src` memref to a tensor");
     assert(dst && "unknown mapping from `dst` memref to a tensor");
@@ -340,17 +369,17 @@ LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
     Value updated = b.create<IREE::Input::TensorUpdateOp>(
         dst, ValueRange(), start_indices, dyn_src, dims);
 
-    state->remapped[block][dst_memref] = cast<TypedValue<TensorType>>(updated);
+    state.remapped[block][dst_memref] = cast<TypedValue<TensorType>>(updated);
   }
 
   // Compiled fusion was a plain copy operation.
-  if (thunk_sequence != nullptr && !compiled_fusion->kernel) {
+  if (thunk_sequence != nullptr && !compiled_op->kernel) {
     rewriter.eraseOp(op);
     return success();
   }
 
   // Get kernel launch parameters from a compiled fusion.
-  auto [kernel_name, dims] = getKernelLaunchParams(*compiled_fusion);
+  auto [kernel_name, dims] = getKernelLaunchParams(*compiled_op);
 
   SmallVector<int64_t> workgroup_size = {
       dims.thread_counts_per_block().x,
@@ -377,7 +406,7 @@ LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
     executable_export = b.create<IREE::Input::ExecutableExportOp>(
         /*sym_name=*/b.getStringAttr(kernel_name),
         /*ordinal=*/b.getIndexAttr((*ordinal)++),
-        /*layout=*/getPipelineLayout(*compiled_fusion),
+        /*layout=*/getPipelineLayout(*compiled_op),
         /*workgroup_size=*/b.getIndexArrayAttr(workgroup_size),
         /*subgroup_size=*/nullptr,
         /*workgroup_local_memory=*/shmem ? b.getIndexAttr(shmem) : nullptr);
@@ -392,12 +421,12 @@ LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
         return b.create<arith::ConstantIndexOp>(size);
       }));
 
-  auto dispatch_args = getDispatchArguments(*compiled_fusion, *state);
+  auto dispatch_args = getDispatchArguments(*compiled_op, state);
   auto &memrefs = dispatch_args.first;
   auto &tensors = dispatch_args.second;
 
   // Prepare tied operands and corresponding result types.
-  SmallVector<int64_t> tied_operands = getTiedOperands(*compiled_fusion);
+  SmallVector<int64_t> tied_operands = getTiedOperands(*compiled_op);
   SmallVector<Type> results =
       llvm::to_vector(llvm::map_range(tied_operands, [&](int64_t idx) -> Type {
         return tensors[idx].getType();
@@ -414,7 +443,7 @@ LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
   // Keep track of all tensors updated inplace.
   for (auto result : llvm::enumerate(dispatch.getResults())) {
     auto arg = memrefs[tied_operands[result.index()]];
-    state->remapped[block][arg] = cast<TypedValue<TensorType>>(result.value());
+    state.remapped[block][arg] = cast<TypedValue<TensorType>>(result.value());
   }
 
   rewriter.eraseOp(op);
@@ -422,10 +451,106 @@ LogicalResult ConvertCompiledOp<OpTy>::matchAndRewrite(
 }
 
 //===----------------------------------------------------------------------===//
-// Converts lmhlo.fusion op to a iree_input.dispatch
+// Converts compiled op to an XLA:GPU kernel dispatch API call
 //===----------------------------------------------------------------------===//
 
-using ConvertFusionOp = ConvertCompiledOp<lmhlo::FusionOp>;
+TypedValue<ExecutionContextType> getExecutionContext(Operation *op) {
+  auto func = op->getParentOfType<func::FuncOp>();
+  return func.getArguments().front().cast<TypedValue<ExecutionContextType>>();
+}
+
+template <typename OpTy>
+struct ConvertCompiledOpToApiCall : public OpConversionPattern<OpTy> {
+  using OpAdaptor = typename OpConversionPattern<OpTy>::OpAdaptor;
+
+  ConvertCompiledOpToApiCall(TypeConverter &converter, MLIRContext *ctx,
+                             ThunkSequence *thunk_sequence,
+                             DeBufferization &state, XlaGpuApi &api)
+      : OpConversionPattern<OpTy>(converter, ctx),
+        thunk_sequence(thunk_sequence),
+        state(state),
+        api(api) {}
+
+  LogicalResult matchAndRewrite(
+      OpTy op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override;
+
+  ThunkSequence *thunk_sequence;
+  DeBufferization &state;
+  XlaGpuApi &api;
+};
+
+template <typename OpTy>
+LogicalResult ConvertCompiledOpToApiCall<OpTy>::matchAndRewrite(
+    OpTy op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const {
+  ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+
+  auto module = op->template getParentOfType<ModuleOp>();
+
+  // Extract compiled operation from the thunk sequence.
+  auto compiled_op = extractCompiledOp(op, thunk_sequence, rewriter);
+  if (failed(compiled_op))
+    return rewriter.notifyMatchFailure(
+        op, "failed to extract device compilation result for an operation");
+
+  // TODO(ezhulenev): Add support for memcpy thunks.
+  if (!compiled_op->memcpy.empty())
+    return rewriter.notifyMatchFailure(op, "memcpy thunks are not supported");
+
+  // Get kernel launch parameters from a compiled fusion.
+  auto [kernel_name, dims] = getKernelLaunchParams(*compiled_op);
+
+  // Create XLA:GPU device kernel (it will own loaded PTX/CUBIN at run time).
+  Value name = b.create<IREE::Input::ByteBufferConstantOp>(
+      b.getType<IREE::Input::ByteBufferType>(),
+      /*name=*/b.getStringAttr("kernel_name"), /*value=*/kernel_name,
+      /*alignment=*/nullptr, /*mime_type=*/nullptr);
+  Value shmem = b.create<ConstantIntOp>(dims.SharedMemBytes(), 32);
+
+  func::FuncOp create_kernel = api.getCreateKernel(b, module);
+  Value kernel = b.create<func::CallOp>(create_kernel.getSymName(),
+                                        create_kernel.getResultTypes(),
+                                        ValueRange({name, shmem}))
+                     .getResult(0);
+
+  // Prepare arguments for kernel dispatch.
+  SmallVector<Value> workgroup_size = {
+      b.create<ConstantIntOp>(dims.thread_counts_per_block().x, 32),
+      b.create<ConstantIntOp>(dims.thread_counts_per_block().y, 32),
+      b.create<ConstantIntOp>(dims.thread_counts_per_block().z, 32),
+  };
+
+  SmallVector<Value> workload_size = {
+      b.create<ConstantIntOp>(dims.block_counts().x, 32),
+      b.create<ConstantIntOp>(dims.block_counts().y, 32),
+      b.create<ConstantIntOp>(dims.block_counts().z, 32),
+  };
+
+  auto dispatch_args = getDispatchArguments(*compiled_op, state);
+  auto &tensors = dispatch_args.second;
+
+  Value buffer_views = getBufferViewList(b, tensors);
+
+  // Prepare arguments for the kernel dispatch API call.
+  SmallVector<Value> args = {getExecutionContext(op), kernel, buffer_views};
+  args.append(workgroup_size.begin(), workgroup_size.end());
+  args.append(workload_size.begin(), workload_size.end());
+
+  func::FuncOp dispatch_kernel = api.getDispatchKernel(b, module);
+  // TODO(ezhulenev): Should we import buffer view back and update remapping?
+  b.create<func::CallOp>(dispatch_kernel.getSymName(),
+                         dispatch_kernel.getResultTypes(), args);
+
+  rewriter.eraseOp(op);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Converts lmhlo.fusion op to HAL / XLA:GPU runtime
+//===----------------------------------------------------------------------===//
+
+using ConvertFusionOpToHal = ConvertCompiledOpToHal<lmhlo::FusionOp>;
+using ConvertFusionOpToApiCall = ConvertCompiledOpToApiCall<lmhlo::FusionOp>;
 
 // Returns Fusion kernel pipeline layout (ABI) inferred from the fusion
 // operation body looking at tensor<->memref conversions.
@@ -481,10 +606,10 @@ SmallVector<int64_t> getTiedOperands(lmhlo::FusionOp op) {
 }
 
 //===----------------------------------------------------------------------===//
-// Converts lmhlo.sort op to a iree_input.dispatch
+// Converts lmhlo.sort op to to HAL / XLA:GPU runtime
 //===----------------------------------------------------------------------===//
 
-using ConvertSortOp = ConvertCompiledOp<lmhlo::SortOp>;
+using ConvertSortOpToHal = ConvertCompiledOpToHal<lmhlo::SortOp>;
 
 IREE::Input::PipelineLayoutAttr getPipelineLayout(lmhlo::SortOp op) {
   auto n_args = op.getInputs().size();
@@ -525,8 +650,8 @@ SmallVector<int64_t> getTiedOperands(lmhlo::SortOp op) {
 
 struct TerminatorOpLowering : public OpConversionPattern<lmhlo::TerminatorOp> {
   TerminatorOpLowering(TypeConverter &converter, MLIRContext *ctx,
-                       std::shared_ptr<DeBufferization> state)
-      : OpConversionPattern(converter, ctx), state(std::move(state)) {}
+                       DeBufferization &state)
+      : OpConversionPattern(converter, ctx), state(state) {}
 
   LogicalResult matchAndRewrite(
       lmhlo::TerminatorOp op, OpAdaptor adaptor,
@@ -547,10 +672,10 @@ struct TerminatorOpLowering : public OpConversionPattern<lmhlo::TerminatorOp> {
     // passing style arguments.
     llvm::SetVector<Value> updated_tensors;
     for (auto result : results) {
-      for (auto memref : state->imported[result]) {
+      for (auto memref : state.imported[result]) {
         // Check that we have tensors imported from a memref.
-        auto it = state->remapped[block].find(memref);
-        if (it != state->remapped[block].end() && it->second.use_empty()) {
+        auto it = state.remapped[block].find(memref);
+        if (it != state.remapped[block].end() && it->second.use_empty()) {
           updated_tensors.insert(it->second);
         }
       }
@@ -568,7 +693,7 @@ struct TerminatorOpLowering : public OpConversionPattern<lmhlo::TerminatorOp> {
     return success();
   }
 
-  std::shared_ptr<DeBufferization> state;
+  DeBufferization &state;
 };
 
 }  // namespace
@@ -578,11 +703,22 @@ struct TerminatorOpLowering : public OpConversionPattern<lmhlo::TerminatorOp> {
 void populateCompiledOpsConversionPatterns(
     RewritePatternSet &patterns, TypeConverter &converter,
     IREE::Input::ExecutableSourceOp executable_source,
-    ThunkSequence *thunk_sequence, std::shared_ptr<DeBufferization> state) {
+    ThunkSequence *thunk_sequence, DeBufferization &state) {
   auto *ctx = patterns.getContext();
-  patterns.insert<ConvertFusionOp, ConvertSortOp>(
+  patterns.insert<ConvertFusionOpToHal, ConvertSortOpToHal>(
       converter, ctx, executable_source, thunk_sequence, state,
       /*ordinal=*/std::make_shared<int64_t>(0));
+  patterns.insert<TerminatorOpLowering>(converter, ctx, state);
+}
+
+void populateCompiledOpsConversionPatterns(mlir::RewritePatternSet &patterns,
+                                           mlir::TypeConverter &converter,
+                                           ThunkSequence *thunk_sequence,
+                                           DeBufferization &state,
+                                           XlaGpuApi &api) {
+  auto *ctx = patterns.getContext();
+  patterns.insert<ConvertFusionOpToApiCall>(converter, ctx, thunk_sequence,
+                                            state, api);
   patterns.insert<TerminatorOpLowering>(converter, ctx, state);
 }
 

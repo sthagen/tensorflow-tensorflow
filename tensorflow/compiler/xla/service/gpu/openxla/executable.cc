@@ -34,6 +34,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/buffer_assignment.h"
 #include "tensorflow/compiler/xla/service/gpu/buffer_allocations.h"
 #include "tensorflow/compiler/xla/service/gpu/openxla/compiler.h"
+#include "tensorflow/compiler/xla/service/gpu/openxla/module.h"
+#include "tensorflow/compiler/xla/service/gpu/openxla/vm.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/service_executable_run_options.h"
 #include "tensorflow/compiler/xla/status.h"
@@ -132,6 +134,12 @@ OpenXlaRuntimeExecutable::Create(std::unique_ptr<OpenXlaRuntimeProgram> program,
                                        IREE_HAL_MODULE_FLAG_NONE, allocator,
                                        &modules->emplace_back()));
 
+  // Load XLA:GPU module.
+  IREE_CHECK_OK(RegisterXlaGpuTypes(instance.get()));
+  IREE_CHECK_OK(CreateXlaGpuModule(instance.get(), allocator,
+                                   iree_hal_device_allocator(device->device),
+                                   &modules->emplace_back()));
+
   // Load module compiled from XLA program to a VM flatbuffer.
   IREE_CHECK_OK(iree_vm_bytecode_module_create(
       instance.get(),
@@ -160,13 +168,14 @@ OpenXlaRuntimeExecutable::Create(std::unique_ptr<OpenXlaRuntimeProgram> program,
 
   return std::unique_ptr<OpenXlaRuntimeExecutable>(new OpenXlaRuntimeExecutable(
       std::move(device), std::move(bytecode), std::move(program->buffer_sizes),
-      std::move(program->debug_options), context, instance, std::move(modules),
-      function));
+      std::move(program->debug_options), asm_text, binary, context, instance,
+      std::move(modules), function));
 }
 
 OpenXlaRuntimeExecutable::OpenXlaRuntimeExecutable(
     std::unique_ptr<OpenXlaDevice> device, std::unique_ptr<Bytecode> bytecode,
     std::vector<int64_t> buffer_sizes, DebugOptions debug_options,
+    std::string_view asm_text, absl::Span<const uint8_t> binary,
     iree::vm::ref<iree_vm_context_t> context,
     iree::vm::ref<iree_vm_instance_t> instance,
     std::unique_ptr<std::vector<iree_vm_module_t*>> modules,
@@ -175,6 +184,8 @@ OpenXlaRuntimeExecutable::OpenXlaRuntimeExecutable(
       bytecode_(std::move(bytecode)),
       buffer_sizes_(std::move(buffer_sizes)),
       debug_options_(std::move(debug_options)),
+      asm_text_(asm_text),
+      binary_(binary),
       context_(std::move(context)),
       instance_(std::move(instance)),
       modules_(std::move(modules)),
@@ -197,15 +208,24 @@ Status OpenXlaRuntimeExecutable::Execute(
 
   iree_allocator_t allocator = iree_allocator_system();
 
-  // Convert XLA buffer allocations to IREE buffer views.
+  // Prepare a list for passing arguments to the function.
   iree::vm::ref<iree_vm_list_t> inputs;
   IREE_CHECK_OK(iree_vm_list_create(iree_vm_make_undefined_type_def(),
                                     buffer_allocations.size(), allocator,
                                     &inputs));
 
+  // Add execution context as the first arguments.
+  auto execution_context = iree::vm::make_ref<vm::ExecutionContext>(
+      run_options, &debug_options_,
+      vm::ExecutionContext::ExecutableSource{asm_text_, binary_});
+
+  // TODO(ezhulenev): Can we do ref_move here?
+  IREE_CHECK_OK(iree_vm_list_push_ref_retain(inputs.get(), execution_context));
+
   // Import argument buffers as device-local IREE buffers.
   std::vector<iree::vm::ref<iree_hal_buffer_t>> buffers;
 
+  // Convert XLA buffer allocations to IREE buffer views.
   for (unsigned i = 0; i < num_buffer_allocations; ++i) {
     // Import XLA buffer as an IREE external buffer.
     iree_hal_external_buffer_t external_buffer;

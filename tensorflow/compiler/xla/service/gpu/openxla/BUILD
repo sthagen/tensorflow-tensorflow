@@ -1,5 +1,6 @@
 load("//tensorflow/tsl/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow/tsl/platform:build_config.bzl", "tf_platform_deps")
+load("//tensorflow/compiler/xla/mlir/backends/openxla:build_config.bzl", "if_not_openxla", "if_openxla")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -14,32 +15,13 @@ package_group(
 
 # copybara:uncomment_begin(not supported in OSS build)
 #
-# # Add `--define=xla_gpu_with_openxla_runtime=1` to build command to enable experimental OpenXLA/IREE
-# # backend for XLA:GPU executables.
-# config_setting(
-#     name = "with_openxla_runtime",
-#     values = {
-#         "define": "xla_gpu_with_openxla_runtime=1",
-#     },
-# )
-#
 # cc_library(
 #     name = "compiler",
-#     srcs = select({
-#         ":with_openxla_runtime": ["compiler.cc"],
-#         "//conditions:default": [],
-#     }),
-#     hdrs = select({
-#         ":with_openxla_runtime": ["compiler.h"],
-#         "//conditions:default": [],
-#     }),
+#     srcs = if_openxla(["compiler.cc"]),
+#     hdrs = if_openxla(["compiler.h"]),
 #     # TODO(ezhulenev): Override cc_library()'s default compatibility because IREE targets are not
 #     # compatible with `non_prod` constraint.
 #     compatible_with = [],
-#     data = select({
-#         ":with_openxla_runtime": ["//third_party/iree/lib:libIREECompiler.so"],
-#         "//conditions:default": [],
-#     }),
 #     deps = [
 #         "@com_google_absl//absl/base",
 #         "@llvm-project//llvm:Support",
@@ -51,31 +33,23 @@ package_group(
 #     ] + tf_platform_deps(
 #         "compiler",
 #         platform_dir = "//tensorflow/compiler/xla/service/gpu/openxla/",
-#     ) + select({
-#         ":with_openxla_runtime": [
-#             "//third_party/iree/compiler/bindings/c:headers",
-#             "//third_party/iree/compiler/bindings/c:loader",
-#             "//third_party/iree/llvm-external-projects/iree-dialects:IREEInputDialect",
-#         ],
-#         "//conditions:default": [],
-#     }),
+#     ) + if_openxla([
+#         "//third_party/iree/compiler/bindings/c:headers",
+#         "//third_party/iree/compiler/bindings/c:loader",
+#         "//third_party/iree/llvm-external-projects/iree-dialects:IREEInputDialect",
+#     ]),
 # )
 #
 # cc_library(
 #     name = "executable",
-#     srcs = select({
-#         ":with_openxla_runtime": ["executable.cc"],
-#         "//conditions:default": [],
-#     }),
+#     srcs = if_openxla(["executable.cc"]),
 #     hdrs = ["executable.h"],
-#     # TODO(ezhulenev): Override cc_library()'s default compatibility because IREE targets are not
-#     # compatible with `non_prod` constraint.
 #     compatible_with = [],
-#     defines = select({
-#         ":with_openxla_runtime": [],
-#         "//conditions:default": ["XLA_DISABLE_OPENXLA_RUNTIME=1"],
-#     }),
+#     defines = if_not_openxla(["XLA_DISABLE_OPENXLA_RUNTIME=1"]),
 #     deps = [
+#         ":compiler",
+#         ":module",
+#         ":vm",
 #         "@com_google_absl//absl/log",
 #         "@com_google_absl//absl/log:check",
 #         "@com_google_absl//absl/strings",
@@ -88,19 +62,111 @@ package_group(
 #         "//tensorflow/compiler/xla/service:executable",
 #         "//tensorflow/compiler/xla/service/gpu:buffer_allocations",
 #         "//tensorflow/compiler/xla/service/llvm_ir:llvm_util",
-#     ] + select({
-#         ":with_openxla_runtime": [
-#             ":compiler",
-#             "//third_party/iree/runtime/src/iree/base",
-#             "//third_party/iree/runtime/src/iree/hal",
-#             "//third_party/iree/runtime/src/iree/hal/drivers/cuda",
-#             "//third_party/iree/runtime/src/iree/modules/hal",
-#             "//third_party/iree/runtime/src/iree/modules/hal:types",
-#             "//third_party/iree/runtime/src/iree/vm",
-#             "//third_party/iree/runtime/src/iree/vm/bytecode:module",
-#         ],
-#         "//conditions:default": [],
-#     }),
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/base",
+#         "//third_party/iree/runtime/src/iree/hal",
+#         "//third_party/iree/runtime/src/iree/hal/drivers/cuda",
+#         "//third_party/iree/runtime/src/iree/modules/hal",
+#         "//third_party/iree/runtime/src/iree/modules/hal:types",
+#         "//third_party/iree/runtime/src/iree/vm",
+#         "//third_party/iree/runtime/src/iree/vm/bytecode:module",
+#     ]),
+# )
+#
+# cc_library(
+#     name = "gemm",
+#     srcs = if_openxla(["gemm.cc"]),
+#     hdrs = if_openxla(["gemm.h"]),
+#     compatible_with = [],
+#     deps = [
+#         ":hal",
+#         ":vm",
+#         "@com_google_absl//absl/container:inlined_vector",
+#         "@com_google_absl//absl/log",
+#         "//tensorflow/compiler/xla:status",
+#         "//tensorflow/compiler/xla:statusor",
+#         "//tensorflow/compiler/xla:xla_data_proto_cc",
+#         "//tensorflow/compiler/xla/service:executable",
+#         "//tensorflow/compiler/xla/service/gpu:matmul_utils",
+#         "//tensorflow/tsl/profiler/lib:scoped_annotation",
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/hal",
+#         "//third_party/iree/runtime/src/iree/vm",
+#     ]),
+# )
+#
+# cc_library(
+#     name = "kernel",
+#     srcs = if_openxla(["kernel.cc"]),
+#     hdrs = if_openxla(["kernel.h"]),
+#     compatible_with = [],
+#     deps = [
+#         ":hal",
+#         ":vm",
+#         "@com_google_absl//absl/container:inlined_vector",
+#         "@com_google_absl//absl/log",
+#         "//tensorflow/compiler/xla:status",
+#         "//tensorflow/compiler/xla:statusor",
+#         "//tensorflow/compiler/xla/service:executable",
+#         "//tensorflow/compiler/xla/service/gpu:launch_dimensions",
+#         "//tensorflow/compiler/xla/service/gpu:stream_executor_util",
+#         "//tensorflow/compiler/xla/stream_executor:device_memory",
+#         "//tensorflow/tsl/profiler/lib:scoped_annotation",
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/hal",
+#         "//third_party/iree/runtime/src/iree/vm",
+#     ]),
+# )
+#
+# cc_library(
+#     name = "module",
+#     srcs = if_openxla(["module.cc"]),
+#     hdrs = if_openxla(["module.h"]),
+#     compatible_with = [],
+#     deps = [
+#         ":gemm",
+#         ":hal",
+#         ":kernel",
+#         ":vm",
+#         "@com_google_absl//absl/log",
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/base",
+#         "//third_party/iree/runtime/src/iree/hal",
+#         "//third_party/iree/runtime/src/iree/modules/hal:types",
+#         "//third_party/iree/runtime/src/iree/vm",
+#         "//third_party/iree/runtime/src/iree/vm:cc",
+#     ]),
+# )
+#
+# cc_library(
+#     name = "hal",
+#     srcs = if_openxla(["hal.cc"]),
+#     hdrs = if_openxla(["hal.h"]),
+#     compatible_with = [],
+#     deps = [
+#         "@com_google_absl//absl/container:inlined_vector",
+#         "@com_google_absl//absl/types:span",
+#         "//tensorflow/compiler/xla:shape_util",
+#         "//tensorflow/compiler/xla/stream_executor:device_memory",
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/hal",
+#     ]),
+# )
+#
+# cc_library(
+#     name = "vm",
+#     srcs = if_openxla(["vm.cc"]),
+#     hdrs = if_openxla(["vm.h"]),
+#     compatible_with = [],
+#     deps = [
+#         "@com_google_absl//absl/container:inlined_vector",
+#         "@com_google_absl//absl/strings:str_format",
+#     ] + if_openxla([
+#         "//third_party/iree/runtime/src/iree/vm",
+#         "//third_party/iree/runtime/src/iree/vm:cc",
+#         "//third_party/iree/runtime/src/iree/hal",
+#         "//third_party/iree/runtime/src/iree/modules/hal:types",
+#     ]),
 # )
 #
 # copybara:uncomment_end_and_comment_begin

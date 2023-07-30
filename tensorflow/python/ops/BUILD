@@ -2864,8 +2864,17 @@ py_strict_library(
         "//tensorflow/python/ops/linalg:matmul_registrations",
         "//tensorflow/python/ops/linalg:solve_registrations",
         "//tensorflow/python/ops/parallel_for:control_flow_ops",
+        "//tensorflow/python/ops/ragged:ragged_batch_gather_ops",
+        "//tensorflow/python/ops/ragged:ragged_batch_gather_with_default_op",
+        "//tensorflow/python/ops/ragged:ragged_bincount_ops",
+        "//tensorflow/python/ops/ragged:ragged_check_ops",
+        "//tensorflow/python/ops/ragged:ragged_conversion_ops",
         "//tensorflow/python/ops/ragged:ragged_dispatch",
+        "//tensorflow/python/ops/ragged:ragged_embedding_ops",
+        "//tensorflow/python/ops/ragged:ragged_image_ops",
         "//tensorflow/python/ops/ragged:ragged_operators",
+        "//tensorflow/python/ops/ragged:ragged_squeeze_op",
+        "//tensorflow/python/ops/ragged:ragged_string_ops",
     ],
 )
 
@@ -4465,6 +4474,7 @@ py_strict_library(
         ":math_ops_gen",
         ":nn_impl",
         ":nn_ops",
+        ":resource_variable_ops",
         ":special_math_ops",
         "//tensorflow/python/framework:flexible_dtypes",
         "//tensorflow/python/framework:ops",
@@ -4481,6 +4491,7 @@ py_strict_library(
 py_strict_test(
     name = "weak_tensor_ops_test",
     srcs = ["weak_tensor_ops_test.py"],
+    tags = ["noasan"],  # TODO(b/293304945): Reenable.
     deps = [
         ":array_ops",
         ":array_ops_gen",

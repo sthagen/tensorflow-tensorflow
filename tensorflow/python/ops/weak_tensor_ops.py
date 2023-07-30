@@ -29,6 +29,7 @@ from tensorflow.python.ops import image_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn_impl
 from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import special_math_ops
 from tensorflow.python.ops.numpy_ops import np_array_ops
 from tensorflow.python.ops.numpy_ops import np_math_ops
@@ -37,6 +38,7 @@ from tensorflow.python.util import dispatch
 from tensorflow.python.util import tf_decorator
 
 
+ResourceVariable = resource_variable_ops.ResourceVariable
 # List of unary ops that have support for WeakTensor.
 _TF_UNARY_APIS = []
 _TF_BINARY_APIS = []
@@ -97,7 +99,9 @@ def weak_tensor_unary_op_wrapper(op, x_arg_name=None):
     # Only return WeakTensor when dtype is NOT specified.
     if bound_kwargs.get("dtype", None) is not None:
       is_weak = False
-    return weak_tensor.maybe_convert_to_weak_tensor(op(**bound_kwargs), is_weak)
+    return weak_tensor.convert_to_weak_tensor_or_tensor(
+        op(**bound_kwargs), is_weak
+    )
 
   wrapper = tf_decorator.make_decorator(op, wrapper)
 
@@ -109,7 +113,7 @@ def weak_tensor_unary_op_wrapper(op, x_arg_name=None):
   return wrapper
 
 
-def weak_tensor_binary_op_wrapper(op):
+def weak_tensor_binary_op_wrapper(op, is_variable_method=False):
   """Determines result promotion type and adds WeakTensor support to binary ops.
 
   This wrapper first infers dtype of any Tensor, WeakTensor, python/numpy
@@ -142,9 +146,24 @@ def weak_tensor_binary_op_wrapper(op):
       )
       return op(**bound_kwargs)
 
+    if is_variable_method:
+      # Variable dtypes cannot be mutated. Hence we only allow the conversion
+      # of `y` and disallow the conversion of `x`.
+      if target_type != x.dtype:
+        raise TypeError(f"Variable dtype is immutable. Calling {op.__name__} "
+                        f"of Variable (with dtype {x.dtype}) on {y} requires "
+                        f"converting {y} to {x.dtype}. This is disabled in the "
+                        f"current promotion semantics. Please convert {y} "
+                        f"manually before calling {op.__name__}.")
+
+      bound_kwargs[y_arg_name] = _convert_or_cast(y, target_type, "y")
+      return op(**bound_kwargs)
+
     bound_kwargs[x_arg_name] = _convert_or_cast(x, target_type, "x")
     bound_kwargs[y_arg_name] = _convert_or_cast(y, target_type, "y")
-    return weak_tensor.maybe_convert_to_weak_tensor(op(**bound_kwargs), is_weak)
+    return weak_tensor.convert_to_weak_tensor_or_tensor(
+        op(**bound_kwargs), is_weak
+    )
 
   wrapper = tf_decorator.make_decorator(op, wrapper)
 
@@ -474,7 +493,12 @@ gen_math_ops.truncate_mod = weak_tensor_binary_op_wrapper(
 )
 gen_math_ops.floor_mod = weak_tensor_binary_op_wrapper(gen_math_ops.floor_mod)
 gen_math_ops._pow = weak_tensor_binary_op_wrapper(gen_math_ops._pow)
-
+ResourceVariable.assign = weak_tensor_binary_op_wrapper(
+    ResourceVariable.assign, is_variable_method=True)
+ResourceVariable.assign_add = weak_tensor_binary_op_wrapper(
+    ResourceVariable.assign_add, is_variable_method=True)
+ResourceVariable.assign_sub = weak_tensor_binary_op_wrapper(
+    ResourceVariable.assign_sub, is_variable_method=True)
 
 # ==============================================================================
 # Update old op references.

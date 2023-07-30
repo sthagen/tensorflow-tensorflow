@@ -120,6 +120,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/reduction_dimension_grouper.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_layout_normalizer.h"
 #include "tensorflow/compiler/xla/service/gpu/reduction_splitter.h"
+#include "tensorflow/compiler/xla/service/gpu/reduction_utils.h"
 #include "tensorflow/compiler/xla/service/gpu/runtime_intrinsics.h"
 #include "tensorflow/compiler/xla/service/gpu/scatter_slice_simplifier.h"
 #include "tensorflow/compiler/xla/service/gpu/softmax_rewriter_triton.h"
@@ -878,7 +879,10 @@ Status GpuCompiler::PrepareHloModuleForIrEmitting(HloModule* hlo_module) {
     pipeline.AddPass<AliasPassthroughParams>();
   }
   pipeline.AddPass<LoopScheduleLinearizer>(GetCanShareBuffer());
-  pipeline.AddPass<CopyInsertion>(GetCanShareBuffer());
+
+  constexpr int64_t kNoRegionBasedLiveRangeAnalysisLimit = -1;
+  pipeline.AddPass<CopyInsertion>(GetCanShareBuffer(),
+                                  kNoRegionBasedLiveRangeAnalysisLimit);
   // We are using a sub-pipeline here, so that the verifier only runs after both
   // GpuHorizontalLoopFusion and HloDCE.
   auto& sub_pipeline =
