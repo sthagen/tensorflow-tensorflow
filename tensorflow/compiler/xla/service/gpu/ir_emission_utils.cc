@@ -36,8 +36,10 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/llvm_ir/buffer_assignment_util.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_type_conversion_util.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
+#include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/location_exporter.h"
 #include "tensorflow/compiler/xla/translate/mhlo_to_hlo/type_to_shape.h"
+#include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
@@ -114,7 +116,6 @@ bool IsCustomCallToCusolver(const HloInstruction& hlo) {
   return hlo.custom_call_target() == kCusolverCholeskyCallTarget;
 }
 
-
 bool IsInputFusibleSlices(mlir::Operation* unnested_hlo,
                           bool verify_no_strides) {
   auto fusion = mlir::dyn_cast<mlir::lmhlo::FusionOp>(unnested_hlo);
@@ -139,7 +140,6 @@ bool IsInputFusibleSlices(mlir::Operation* unnested_hlo,
   }
   return true;
 }
-
 
 // This emits a device-side call to
 // "i32 vprintf(i8* fmt, arguments_type* arguments)" in the driver; see
@@ -444,31 +444,17 @@ StatusOr<BufferAllocation::Slice> GetAllocationSlice(
 }
 
 std::vector<HloInstruction*> GetOutputDefiningDynamicUpdateSlices(
-    const HloComputation* fusion) {
+    const std::vector<HloInstruction*>& roots) {
   // Same as GetOutputDefiningDynamicUpdateSliceOps but on a HLO fusion
   // computation instead of a LMHLO FusionOp.
-  HloInstruction* root = fusion->root_instruction();
-
-  if (root->opcode() == HloOpcode::kDynamicUpdateSlice) {
-    return {root};
-  }
-
-  if (root->opcode() == HloOpcode::kBitcast &&
-      root->operand(0)->opcode() == HloOpcode::kDynamicUpdateSlice) {
-    return {root->mutable_operand(0)};
-  }
-
   std::vector<HloInstruction*> dus_ops;
+  for (HloInstruction* root : roots) {
+    while (root->opcode() == HloOpcode::kBitcast) {
+      root = root->mutable_operand(0);
+    }
 
-  if (root->opcode() == HloOpcode::kTuple) {
-    for (HloInstruction* operand : root->operands()) {
-      while (operand->opcode() == HloOpcode::kBitcast) {
-        operand = operand->mutable_operand(0);
-      }
-
-      if (operand->opcode() == HloOpcode::kDynamicUpdateSlice) {
-        dus_ops.push_back(operand);
-      }
+    if (root->opcode() == HloOpcode::kDynamicUpdateSlice) {
+      dus_ops.push_back(root);
     }
   }
 
@@ -655,7 +641,8 @@ std::optional<TransposeDescription> FindTiledTranspose(
         (tr->at(1) >= kMinDimensionToTransposeTiled2 &&
          tr->at(2) >= kMinDimensionToTransposeTiled2 &&
          tr->at(1) * tr->at(2) >= kMinTotalDimensionsToTransposeTiled)) {
-      return TransposeDescription{*tr, /*permutation=*/Vector3{0, 2, 1}};
+      return TransposeDescription{&instr, *tr,
+                                  /*permutation=*/Vector3{0, 2, 1}};
     }
   }
   if (std::optional<Vector3> tr = ShapeUtil::GetNormalizedTransposeShape(
@@ -665,7 +652,8 @@ std::optional<TransposeDescription> FindTiledTranspose(
         (tr->at(0) >= kMinDimensionToTransposeTiled2 &&
          tr->at(2) >= kMinDimensionToTransposeTiled2 &&
          tr->at(0) * tr->at(2) >= kMinTotalDimensionsToTransposeTiled)) {
-      return TransposeDescription{*tr, /*permutation=*/Vector3{2, 1, 0}};
+      return TransposeDescription{&instr, *tr,
+                                  /*permutation=*/Vector3{2, 1, 0}};
     }
   }
   return std::nullopt;
@@ -687,7 +675,8 @@ std::optional<TransposeDescription> FindTiledLogicalTranspose(
         (tr->at(1) >= kMinDimensionToTransposeTiled2 &&
          tr->at(2) >= kMinDimensionToTransposeTiled2 &&
          tr->at(1) * tr->at(2) >= kMinTotalDimensionsToTransposeTiled)) {
-      return TransposeDescription{*tr, /*permutation=*/Vector3{0, 2, 1}};
+      return TransposeDescription{&instr, *tr,
+                                  /*permutation=*/Vector3{0, 2, 1}};
     }
   }
   if (std::optional<Vector3> tr = ShapeUtil::GetNormalizedLogicalTransposeShape(
@@ -698,19 +687,18 @@ std::optional<TransposeDescription> FindTiledLogicalTranspose(
         (tr->at(0) >= kMinDimensionToTransposeTiled2 &&
          tr->at(2) >= kMinDimensionToTransposeTiled2 &&
          tr->at(0) * tr->at(2) >= kMinTotalDimensionsToTransposeTiled)) {
-      return TransposeDescription{*tr, /*permutation=*/Vector3{2, 1, 0}};
+      return TransposeDescription{&instr, *tr,
+                                  /*permutation=*/Vector3{2, 1, 0}};
     }
   }
   return std::nullopt;
 }
 
-std::optional<TransposeDescription> FindAnyTiledTranspose(
-    const HloInstruction& instr) {
-  const HloInstruction& hero = FindNonTrivialHero(instr);
+std::optional<TransposeDescription> GetDescriptionForTiledTransposeEmitter(
+    const HloInstruction& root, const HloInstruction& hero) {
   // TODO(b/284431534): Figure out how to make the shared memory transpose
   // emitter faster for this case.
-  if (hero.shape().element_type() == F32 &&
-      instr.shape().element_type() == S8) {
+  if (hero.shape().element_type() == F32 && root.shape().element_type() == S8) {
     return std::nullopt;
   }
 
@@ -724,30 +712,57 @@ std::optional<TransposeDescription> FindAnyTiledTranspose(
 }
 
 bool IsIntermediate(const HloInstruction* instr, int allowed_operand_count) {
-  return (
-      instr->operand_count() > 0 &&
-      instr->operand_count() <= allowed_operand_count &&
-      instr->user_count() <= 1 &&
-      ((instr->IsElementwise() &&
-        (instr->opcode() != HloOpcode::kCopy ||
-         instr->shape() == instr->operand(0)->shape())) ||
-       instr->opcode() == HloOpcode::kBitcast ||
-       (instr->opcode() == HloOpcode::kReshape &&
-        ShapeUtil::ReshapeIsBitcast(instr->operand(0)->shape(),
-                                    instr->shape())) ||
-       (instr->opcode() == HloOpcode::kTranspose &&
-        ShapeUtil::TransposeIsBitcast(instr->operand(0)->shape(),
-                                      instr->shape(), instr->dimensions()))));
+  // Number of operands should be in range [1, allowed_operand_count].
+  if (instr->operand_count() == 0 ||
+      instr->operand_count() > allowed_operand_count) {
+    return false;
+  }
+
+  // Intermediate `instr` can't have multiple users.
+  if (instr->user_count() > 1) {
+    return false;
+  }
+
+  if (instr->IsElementwise()) {
+    // All elementwise ops are considered intermediate, except for copies that
+    // modify the layout. Copies that do not modify the layout are used in
+    // CopyFusion.
+    if (instr->opcode() == HloOpcode::kCopy) {
+      return instr->shape() == instr->operand(0)->shape();
+    }
+    return true;
+  }
+
+  // `instr` is a bitcast or a bitcast-like operation.
+  switch (instr->opcode()) {
+    case HloOpcode::kBitcast:
+      return true;
+    case HloOpcode::kReshape:
+      return ShapeUtil::ReshapeIsBitcast(instr->operand(0)->shape(),
+                                         instr->shape());
+    case HloOpcode::kTranspose:
+      return ShapeUtil::TransposeIsBitcast(instr->operand(0)->shape(),
+                                           instr->shape(), instr->dimensions());
+    default:
+      return false;
+  }
 }
 
-const HloInstruction& FindNonTrivialHero(const HloInstruction& instr) {
+static bool IsParameter(const HloInstruction& instr) {
+  return instr.opcode() == HloOpcode::kParameter;
+}
+
+const HloInstruction& FindNonTrivialHero(
+    const HloInstruction& instr,
+    const std::function<bool(const HloInstruction& producer,
+                             const HloInstruction& consumer)>& is_boundary) {
   const HloInstruction* idx = &instr;
 
-  // Go up the chain of trivial elementwise(+bitcast, -copy) operations. Such
+  // Go up the chain of trivial element-wise(+bitcast, -copy) operations. Such
   // chains are bound to be quite small, as we restrict the number of users as
   // well. Note that no memoization is needed due to user number constraints: we
   // never have to revisit same nodes.
-  while (IsIntermediate(idx)) {
+  while (IsIntermediate(idx) && !is_boundary(*idx->operand(0), *idx)) {
     idx = idx->operand(0);
   }
   if (!IsIntermediate(idx, /*allowed_operand_count=*/3)) {
@@ -760,8 +775,33 @@ const HloInstruction& FindNonTrivialHero(const HloInstruction& instr) {
   absl::flat_hash_set<const HloInstruction*> visited;
   std::queue<const HloInstruction*> q;
   auto enqueue_operands = [&](const HloInstruction* idx) {
+    if (idx->opcode() == HloOpcode::kParameter) {
+      auto* fusion = idx->parent()->FusionInstruction();
+      // ir_emitter_unnested creates fusion instructions without parameters. We
+      // can't (and don't want to) follow edges outside of the fusion in this
+      // case.
+      if (fusion != nullptr &&
+          fusion->operand_count() > idx->parameter_number()) {
+        auto* operand = fusion->operand(idx->parameter_number());
+        if (!is_boundary(*operand, *idx) && visited.insert(operand).second) {
+          q.push(operand);
+        }
+      }
+      return;
+    }
+
+    if (idx->opcode() == HloOpcode::kFusion) {
+      if (!is_boundary(*idx->fused_expression_root(), *idx) &&
+          visited.insert(idx->fused_expression_root()).second) {
+        q.push(idx->fused_expression_root());
+      }
+      return;
+    }
+
+    if (!IsIntermediate(idx, /*allowed_operand_count=*/3)) return;
+
     for (HloInstruction* hlo : idx->operands()) {
-      if (visited.insert(hlo).second) {
+      if (!is_boundary(*hlo, *idx) && visited.insert(hlo).second) {
         q.push(hlo);
       }
     }
@@ -778,7 +818,7 @@ const HloInstruction& FindNonTrivialHero(const HloInstruction& instr) {
         return *idx;
       }
       non_trivial_hero = hlo;
-    } else if (IsIntermediate(hlo, /*allowed_operand_count=*/3)) {
+    } else {
       enqueue_operands(hlo);
     }
   }
@@ -786,6 +826,13 @@ const HloInstruction& FindNonTrivialHero(const HloInstruction& instr) {
     return *idx;
   }
   return *non_trivial_hero;
+}
+
+const HloInstruction& FindNonTrivialHero(const HloInstruction& instr) {
+  return FindNonTrivialHero(instr, [](const HloInstruction& producer,
+                                      const HloInstruction& consumer) {
+    return consumer.opcode() == HloOpcode::kParameter;
+  });
 }
 
 void LogAndVerify(const llvm::Module* m) {

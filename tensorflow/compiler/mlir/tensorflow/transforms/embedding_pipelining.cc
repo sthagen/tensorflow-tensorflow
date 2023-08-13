@@ -1221,8 +1221,12 @@ int FindReturnIndex(Value val) {
   return not_found;
 }
 
+// Skip the assertions because they currently create problematic dependencies.
+constexpr bool kDoAssertions = false;
+
 void AddAssertion(OpBuilder& builder, Location& loc, Value cond,
                   const std::string& message) {
+  if (!kDoAssertions) return;
   auto shape_type =
       RankedTensorType::get({1}, builder.getType<TF::StringType>());
   auto msg = builder.create<TF::ConstOp>(
@@ -2136,10 +2140,18 @@ void EmbeddingPipeliningPass::runOnOperation() {
 
   // Finally, create the new tf.WhileOp.
   builder.setInsertionPoint(orig_while_op);
+  // Use the same parallel_iterations as the original WhileOp unless there's a
+  // flag override.
+  int parallel_iterations_flag = tensorflow::GetBuildXlaOpsPassFlags()
+                                     ->tf_xla_embedding_parallel_iterations;
+  int parallel_iterations = parallel_iterations_flag > 0
+                                ? parallel_iterations_flag
+                                : orig_while_op.getParallelIterations();
+  VLOG(1) << "Setting parallel_iterations_flag to " << parallel_iterations_flag;
   auto new_while_op = builder.create<TF::WhileOp>(
       orig_while_op->getLoc(), new_body_return_types,
       new_while_operands.getArrayRef(), cond.getSymName(), body.getSymName(),
-      /*parallel_iterations=*/10,
+      /*parallel_iterations=*/parallel_iterations,
       /*is_stateless=*/false,
       /*shape_invariant=*/false);
   SetBasicBlockAttributes(builder, new_while_op);

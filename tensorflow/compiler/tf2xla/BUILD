@@ -611,7 +611,9 @@ cc_library(
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:session_options",
         "//tensorflow/core/common_runtime:core_cpu_internal",
+        "//tensorflow/core/common_runtime/next_pluggable_device:next_pluggable_device_factory_hdrs",
         "//tensorflow/core/platform:stream_executor_no_cuda",
+        "//tensorflow/core/tfrt/common:pjrt_util",
     ],
     alwayslink = 1,
 )
@@ -790,6 +792,7 @@ cc_library(
     hdrs = ["sharding_util.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//tensorflow/compiler/mlir/tensorflow:xla_sharding_util",
         "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/compiler/xla/client:sharding_builder",
         "//tensorflow/core:core_cpu",

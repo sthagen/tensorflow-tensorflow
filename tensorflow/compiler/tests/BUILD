@@ -594,6 +594,7 @@ tf_xla_py_strict_test(
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:math_ops",
         "//tensorflow/python/ops:nn_ops",
+        "//tensorflow/python/platform:sysconfig",
         "//tensorflow/python/platform:test",
     ],
 )
@@ -2623,7 +2624,6 @@ tf_xla_py_strict_test(
     srcs = ["where_op_test.py"],
     args = [
         "--tpu_use_tfrt=true",
-        # TODO(b/274633087): Set tf_use_pjrt=true after fixing bug.
     ],
     disabled_backends = [
         "cpu",
@@ -2773,6 +2773,7 @@ tf_xla_py_strict_test(
         "//tensorflow/compiler/mlir/stablehlo",
         "//tensorflow/compiler/tf2xla/ops:gen_xla_ops",
         "//tensorflow/compiler/tf2xla/python:xla",
+        "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
@@ -2804,6 +2805,7 @@ tf_xla_py_strict_test(
         "//tensorflow/compiler/mlir/stablehlo",
         "//tensorflow/compiler/tf2xla/ops:gen_xla_ops",
         "//tensorflow/compiler/tf2xla/python:xla",
+        "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
@@ -2834,6 +2836,7 @@ tf_xla_py_strict_test(
         "//tensorflow/compiler/mlir/stablehlo",
         "//tensorflow/compiler/tf2xla/ops:gen_xla_ops",
         "//tensorflow/compiler/tf2xla/python:xla",
+        "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",

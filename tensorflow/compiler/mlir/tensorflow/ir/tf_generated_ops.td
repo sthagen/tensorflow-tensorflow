@@ -11258,6 +11258,9 @@ underlying graph, and executes each of the partitioned subgraphs as a function.
   let extraClassDeclaration = [{
     // Gets the argument operands to the called function.
     operand_range getArgOperands() { return getArgs(); }
+    MutableOperandRange getArgOperandsMutable() {
+      return getArgsMutable();
+    }
 
     // Returns the callee of this operation.
     CallInterfaceCallable getCallableForCallee() { return getFAttr(); }
@@ -12275,7 +12278,7 @@ The generated values will have mean 0 and standard deviation 1.
   TF_DerivedResultTypeAttr dtype = TF_DerivedResultTypeAttr<0>;
 }
 
-def TF_RandomUniformOp : TF_Op<"RandomUniform", [TF_CannotDuplicate, TF_RandomGeneratorSideEffect]> {
+def TF_RandomUniformOp : TF_Op<"RandomUniform", [DeclareOpInterfaceMethods<TF_GetResourceInstanceInterface>, TF_CannotDuplicate, TF_RandomGeneratorSideEffect]> {
   let summary = "Outputs random values from a uniform distribution.";
 
   let description = [{

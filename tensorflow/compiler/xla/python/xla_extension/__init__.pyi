@@ -18,8 +18,8 @@ import inspect
 import types
 import typing
 from typing import (
-    Any, Callable, ClassVar, Dict, List, Optional, Sequence, Tuple, Type,
-    TypeVar, Union, overload)
+    Any, Callable, ClassVar, Dict, Iterator, List, Optional, Sequence, Tuple,
+    Type, TypeVar, Union, overload)
 
 import numpy as np
 
@@ -369,19 +369,16 @@ class Memory:
   def __str__(self) -> str: ...
   def attached_devices(self) -> List[Device]: ...
 
-class _GpuAllocatorKind(enum.IntEnum):
-    DEFAULT: int
-    PLATFORM: int
-    BFC: int
-    CUDA_ASYNC: int
-
 class GpuAllocatorConfig:
-  # TODO(b/194673104): Remove once pytype correctly resolves a nested enum.
-  Kind = _GpuAllocatorKind
+  class Kind(enum.IntEnum):
+      DEFAULT: int
+      PLATFORM: int
+      BFC: int
+      CUDA_ASYNC: int
 
   def __init__(
       self,
-      kind: _GpuAllocatorKind = ...,
+      kind: Kind = ...,
       memory_fraction: float = ...,
       preallocate: bool = ...) -> None: ...
 
@@ -457,13 +454,14 @@ def get_gpu_client(
     node_id: int = ...,
     allowed_devices: Optional[Any] = ...,
     platform_name: Optional[str] = ...) -> Client:...
-def get_tpu_client(max_inflight_computations: int = ...) -> Client: ...
 def get_c_api_client(platform_name: str, options: Dict[str, Union[str, int, List[int], float]]) -> Client: ...
 def get_default_c_api_topology(
     platform_name: str,
     topology_name: str,
     options: Dict[str, Union[str, int, List[int], float]],
 ) -> DeviceTopology:
+  ...
+def get_topology_for_devices(devices: List[Device]) -> DeviceTopology:
   ...
 
 
@@ -511,6 +509,8 @@ def batched_device_put(
 ) -> ArrayImpl:
   ...
 
+def canonicalize_memory_kind(
+    memory_kind: Optional[str], device: Device) -> Optional[str]: ...
 
 def array_result_handler(
                aval: Any,
@@ -627,7 +627,6 @@ class DistributedRuntimeClient:
 def get_distributed_runtime_service(
     address: str,
     num_nodes: int,
-    use_coordination_service: bool = ...,
     heartbeat_interval: Optional[int] = ...,
     max_missing_heartbeats: Optional[int] = ...,
     enumerate_devices_timeout: Optional[int] = ...,
@@ -635,7 +634,6 @@ def get_distributed_runtime_service(
 def get_distributed_runtime_client(
     address: str,
     node_id: int,
-    use_coordination_service: bool = ...,
     rpc_timeout: Optional[int] = ...,
     init_timeout: Optional[int] = ...,
     shutdown_timeout: Optional[int] = ...,
@@ -671,6 +669,24 @@ class PmapFunction:
 def weakref_lru_cache(cache_context_fn: Callable, call: Callable, maxsize=...):
   ...
 
+
+class DeviceList:
+  def __init__(self, device_assignment: Tuple[Device, ...]): ...
+  def __hash__(self) -> int: ...
+  def __eq__(self, other: Any) -> bool: ...
+  def __ne__(self, other: Any) -> bool: ...
+  def __len__(self) -> int: ...
+  def __getitem__(self, index: Any) -> Any: ...
+  def __iter__(self) -> Iterator[Device]: ...
+  def __str__(self) -> str: ...
+  def __getstate__(self) -> Any: ...
+  def __setstate__(self, state: Any): ...
+  @property
+  def is_fully_addressable(self) -> bool: ...
+  @property
+  def addressable_device_list(self) -> DeviceList: ...
+
+
 class Sharding: ...
 
 class XLACompatibleSharding(Sharding): ...
@@ -680,7 +696,7 @@ class NamedSharding(XLACompatibleSharding):
                _parsed_pspec: Any = None): ...
   mesh: Any
   spec: Any
-  memory_kind: Optional[str]
+  _memory_kind: Optional[str]
   _parsed_pspec: Any
 
 class SingleDeviceSharding(XLACompatibleSharding):

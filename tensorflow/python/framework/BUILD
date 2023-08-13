@@ -1,5 +1,6 @@
 # python/framework package
 
+# Placeholder: load py_proto_library
 load("//tensorflow:strict.default.bzl", "py_strict_library", "py_strict_test")
 load(
     "//tensorflow:tensorflow.bzl",
@@ -1165,7 +1166,7 @@ tf_py_strict_test(
     ],
 )
 
-py_strict_library(
+pytype_strict_library(
     name = "ops",  # "ops" is already the name of a deprecated target
     srcs = ["ops.py"],
     srcs_version = "PY3",
@@ -1302,12 +1303,13 @@ tf_py_strict_test(
     ],
 )
 
-py_strict_library(
+pytype_strict_library(
     name = "tensor_conversion",
     srcs = ["tensor_conversion.py"],
     srcs_version = "PY3",
     deps = [
         ":tensor_conversion_registry",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:dispatch",
         "//tensorflow/python/util:tf_export",
@@ -1843,10 +1845,13 @@ pytype_strict_library(
     name = "flexible_dtypes",
     srcs = ["flexible_dtypes.py"],
     deps = [
+        ":composite_tensor",
         ":dtypes",
-        ":extension_type",
+        ":indexed_slices",
         ":ops",
+        ":tensor_shape",
         ":weak_tensor",
+        "//tensorflow/python/ops:variables",
         "//tensorflow/python/util:nest",
         "//third_party/py/numpy",
     ],
@@ -2432,6 +2437,10 @@ tf_py_strict_test(
 tf_gen_op_wrapper_py(
     name = "test_ops",
     out = "test_ops.py",
+    api_def_srcs = [
+        "//tensorflow/core/api_def:base_api_def",
+        "//tensorflow/core/api_def:python_api_def",
+    ],
     extra_py_deps = [
         "//tensorflow/python:pywrap_tfe",
         "//tensorflow/python/util:deprecation",
@@ -2456,29 +2465,6 @@ tf_kernel_library(
     alwayslink = 1,
 )
 
-tf_gen_op_wrapper_py(
-    name = "test_ops_2",
-    out = "test_ops_2.py",
-    extra_py_deps = [
-        "//tensorflow/python:pywrap_tfe",
-        "//tensorflow/python/util:deprecation",
-        "//tensorflow/python/util:dispatch",
-        "//tensorflow/python/util:tf_export",
-    ],
-    py_lib_rule = py_strict_library,
-    deps = [
-        ":test_ops_2_kernels",
-    ],
-)
-
-cc_library(
-    name = "test_ops_2_kernels",
-    srcs = ["test_ops_2.cc"],
-    linkstatic = 1,
-    deps = ["//tensorflow/core:framework"],
-    alwayslink = 1,
-)
-
 tf_py_strict_test(
     name = "common_shapes_test",
     size = "small",
@@ -2499,7 +2485,7 @@ tf_py_strict_test(
     srcs = ["ops_test.py"],
     main = "ops_test.py",
     python_version = "PY3",
-    tags = ["no_pip"],  # test_ops_2 is not available in pip.
+    tags = ["no_pip"],
     deps = [
         ":composite_tensor",
         ":config",

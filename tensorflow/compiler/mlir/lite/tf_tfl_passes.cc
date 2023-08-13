@@ -169,7 +169,7 @@ void AddConvertHloToTfPass(std::string entry_function_name,
       mlir::mhlo::createFlattenTuplePass());
 
   // TF dialect passes
-  pass_manager->addPass(mlir::TF::CreateLegalizeHloToTfPass());
+  pass_manager->addPass(mlir::odml::CreateLegalizeHloToTfPass());
 
   // folds tf.BroadcastTo ops with subsequent ops if they have built in
   // broadcasting support. This needs to be run immediately after HLO->TF
@@ -182,6 +182,9 @@ void AddConvertHloToTfPass(std::string entry_function_name,
   // Canonicalization after TF legalization.
   pass_manager->addNestedPass<mlir::func::FuncOp>(
       mlir::createCanonicalizerPass());
+
+  // Legalize all remaining mhlo ops to stableHLO
+  pass_manager->addPass(mlir::mhlo::createHloLegalizeToStablehloPass());
 }
 
 // This is the early part of the conversion in isolation. This enables a caller

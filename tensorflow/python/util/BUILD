@@ -1,5 +1,6 @@
 # Tensorflow util package
 
+load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
 load("//tensorflow:strict.default.bzl", "py_strict_library")
 load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "tf_py_strict_test", "tf_python_pybind_extension")
 load("//tensorflow/core/platform:build_config.bzl", "tf_proto_library")  # @unused
@@ -304,7 +305,7 @@ tf_py_strict_test(
     ],
 )
 
-py_strict_library(
+pytype_strict_library(
     name = "tf_export",
     srcs = ["tf_export.py"],
     compatible_with = get_compatible_with_portable(),
@@ -528,15 +529,17 @@ py_strict_library(
     srcs_version = "PY3",
     deps = [
         ":nest",
+        ":nest_util",
         "//tensorflow/python/framework:constant_op",
-        "//tensorflow/python/framework:for_generated_wrappers",
+        "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:math_ops",
         "//tensorflow/python/ops:resource_variable_ops",
         "//tensorflow/python/ops/ragged:ragged_tensor",
         "//tensorflow/python/platform:client_testlib",
-        "//tensorflow/python/util:nest_util",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -1152,5 +1155,14 @@ tf_python_pybind_extension(
         "@pybind11",
         "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@pybind11_abseil//pybind11_abseil:status_casters",
+    ],
+)
+
+py_strict_library(
+    name = "tf_decorator_export",
+    srcs = ["tf_decorator_export.py"],
+    deps = [
+        ":tf_decorator",
+        ":tf_export",
     ],
 )

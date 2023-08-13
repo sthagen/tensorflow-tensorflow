@@ -11,6 +11,7 @@ package_group(
     name = "friends",
     packages = [
         # copybara:uncomment "//learning/brain/experimental/tfrt/...",
+        "//learning/brain/google/xla/kernels/...",
         # copybara:uncomment "//learning/brain/research/pjrt/...",
         # copybara:uncomment "//learning/brain/tfrt/...",
         # copybara:uncomment "//learning/infra/mira/distributed/...",
@@ -320,12 +321,4 @@ cc_library(
 cc_library(
     name = "any_ptr",
     hdrs = ["any_ptr.h"],
-)
-
-cc_library(
-    name = "export_error",
-    hdrs = ["export_error.h"],
-    deps = [
-        "@com_google_absl//absl/strings",
-    ],
 )
