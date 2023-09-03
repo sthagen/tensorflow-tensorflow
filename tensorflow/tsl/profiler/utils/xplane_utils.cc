@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/tsl/platform/fingerprint.h"
@@ -60,7 +61,7 @@ template <typename T, typename Pred>
 int Find(const protobuf::RepeatedPtrField<T>& array, const Pred& pred) {
   std::vector<int> indices = FindAll(array, pred);
   if (indices.size() > 1) {
-    LOG(WARNING) << "Found multiple " << T::descriptor()->name()
+    LOG(WARNING) << "Found multiple " << T().GetTypeName()
                  << " when only one was expected.";
   }
   return indices.empty() ? -1 : indices.front();
@@ -531,6 +532,7 @@ void AggregateXPlane(const XPlane& full_trace, XPlane& aggregated_trace) {
 
   const XPlaneVisitor& plane = CreateTfXPlaneVisitor(&full_trace);
   XPlaneBuilder aggregated_plane(&aggregated_trace);
+  aggregated_plane.SetName(plane.Name());
 
   uint64_t first_op_start_ps = kint64max;
   uint64_t last_op_end_ps = 0;

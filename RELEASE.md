@@ -20,11 +20,37 @@
 *   <INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
 *   <IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
 
+* Making the tf.function type system fully available:
+    * `tf.types.experimental.TraceType` now allows custom tf.function inputs to
+       declare Tensor decomposition and type casting support.
+    * Introducing `tf.types.experimental.FunctionType` as the comprehensive
+      representation of the signature of `tf.function` callables. It can be
+      accessed through the `function_type` property of `tf.function`s and
+      `ConcreteFunction`s. See the `tf.types.experimental.FunctionType`
+      documentation for more details.
+* Introducing `tf.types.experimental.AtomicFunction` as the fastest way to
+  perform TF computations in Python.
+    * Can be accessed through `inference_fn` property of `ConcreteFunction`s
+    * Does not support gradients.
+    * See `tf.types.experimental.AtomicFunction` documentation for how to call
+      and use it.
+
+*   `tf.data`:
+
+    *   Moved option `warm_start` from
+        `tf.data.experimental.OptimizationOptions` to `tf.data.Options`.
+
+*   `tf.lite`:
+
+    *   `mul_op` supports broadcasting up to 6 dimensions.
+
 ### Bug Fixes and Other Changes
 
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
 * <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
 * <NOTES SHOULD BE GROUPED PER AREA>
+
+* Add TensorFlow Quantizer to TensorFlow pip package.
 
 ## Keras
 
@@ -53,6 +79,17 @@
 * <NOTES SHOULD BE GROUPED PER AREA>
 
 * Add ops to tensorflow.raw_ops that were missing.
+* `tf.CheckpointOptions`
+    * It now takes in a new argument called `experimental_write_callbacks`.
+    These are callbacks that will be executed after a saving event finishes
+    writing the checkpoint file.
+* Add an option `disable_eager_executer_streaming_enqueue` to
+  `tensorflow.ConfigProto.Experimental` to control the eager runtime's behavior
+  around parallel remote function invocations; when set to `True`, the eager
+  runtime will be allowed to execute multiple function invocations in parallel.
+
+* `tf.lite`
+    * Added support for `stablehlo.scatter`.
 
 ## Thanks to our Contributors
 
@@ -103,10 +140,23 @@ This release contains contributions from many people at Google, as well as:
 
 *   <INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
 *   <IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
+
+*   The `tensorflow` pip package has a new, optional installation method for
+    Linux that installs necessary Nvidia CUDA libraries through pip. As long as
+    the Nvidia driver is already installed on the system, you may now run `pip
+    install tensorflow[and-cuda]` to install TensorFlow's Nvidia CUDA library
+    dependencies in the Python environment. Aside from the Nvidia driver, no
+    other pre-existing Nvidia CUDA packages are necessary.
+
 * `tf.keras`
     * `Model.compile` now support `steps_per_execution='auto'` as a parameter,
     allowing automatic tuning of steps per execution during `Model.fit`,
     `Model.predict`, and `Model.evaluate` for a significant performance boost.
+    * New `StepsPerExecutionTuner` class allows for `steps_per_execution` tuning
+    for custom training loops enabling performance boosts in custom workflows.
+    * Model now has two more settable parameters, `steps_per_execution` to set
+    this value to a manual heuristic, and `autotune_steps_per_execution` to
+    enable and disable tuning.
 
 *   Enable JIT-compiled i64-indexed kernels on GPU for large tensors with more
     than 2**32 elements.
@@ -132,6 +182,7 @@ This release contains contributions from many people at Google, as well as:
 
 * `tf.lite`
     * Strided_Slice now supports `UINT32`.
+    * Add int8 and int16x8 support for LOG operator
 
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
 * <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
@@ -168,6 +219,10 @@ This release contains contributions from many people at Google, as well as:
 
 * `tf.ones`, `tf.zeros`, `tf.fill`, `tf.ones_like`, `tf.zeros_like` now take an
     additional Layout argument that controls the output layout of their results.
+
+*  Limited support of unified n-d FFT Ops: `tf.signal.fftn`,
+   `tf.signal.ifftn`, `tf.signal.rfftn`, `tf.signal.irfftn`.
+   Note that they only support up to 3d and gradients are unsupported.
 
 * `tf.nest` and `tf.data` now support user defined classes implementing
   `__tf_flatten__` and `__tf_unflatten__` methods. See [

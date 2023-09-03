@@ -111,6 +111,7 @@ cc_library(
         "@llvm-project//mlir:ControlFlowInterfaces",
         "@llvm-project//mlir:Dialect",
         "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:FunctionInterfaces",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:InferTypeOpInterface",
         "@llvm-project//mlir:QuantOps",
@@ -388,7 +389,7 @@ py_strict_library(
 
 tf_py_strict_test(
     name = "tfr_gen_test",
-    size = "small",
+    size = "medium",
     srcs = ["python/tfr_gen_test.py"],
     python_version = "PY3",
     srcs_version = "PY3",

@@ -309,8 +309,13 @@ else_branch: A function that takes 'inputs' and returns a list of
 }
 
 def TF_YieldOp : TF_Op<"Yield",
-      [Pure, ReturnLike, Terminator,
-       ParentOneOf<["CaseRegionOp", "IfRegionOp", "WhileRegionOp"]>]> {
+      [Terminator,
+       Pure,
+       NativeOpTrait<"ReturnLike", [], "", "">,
+       ParentOneOf<["CaseRegionOp", "IfRegionOp", "WhileRegionOp"]>,
+       DeclareOpInterfaceMethods<RegionBranchTerminatorOpInterface,
+           ["getMutableSuccessorOperands"]>,
+      ]> {
   let summary = "Yield operation";
 
   let description = [{
@@ -328,8 +333,8 @@ def TF_IfRegionOp : TF_Op<"IfRegion",
       [SingleBlockImplicitTerminator<"YieldOp">, NoRegionArguments,
        DeclareOpInterfaceMethods<RegionBranchOpInterface, [
            "areTypesCompatible",
+           "getEntrySuccessorOperands",
            "getRegionInvocationBounds",
-           "getSuccessorEntryOperands",
            "getSuccessorRegions"
        ]>
       ]> {
@@ -451,8 +456,8 @@ def TF_ParseExampleOp : TF_Op<"ParseExample",
     Variadic<TensorOf<[TF_Float32, TF_Int64, TF_Str]>>:$dense_defaults,
 
     TF_ShapeAttrArray:$dense_shapes,
-    DenseI32ArrayAttr:$result_segment_sizes,
-    DenseI32ArrayAttr:$operand_segment_sizes
+    DenseI32ArrayAttr:$resultSegmentSizes,
+    DenseI32ArrayAttr:$operandSegmentSizes
   );
 
   let results = (outs
@@ -487,7 +492,7 @@ def TF_ParseExampleV2Op : TF_Op<"ParseExampleV2",
 
     ConfinedAttr<I64Attr, [IntMinValue<0>]>:$num_sparse,
     TF_ShapeAttrArray:$dense_shapes,
-    DenseI32ArrayAttr:$result_segment_sizes
+    DenseI32ArrayAttr:$resultSegmentSizes
   );
 
   let results = (outs
@@ -682,6 +687,9 @@ body: A function that takes a list of tensors and returns another
 
 def TF_WhileRegionOp : TF_Op<"WhileRegion",
       [DeclareOpInterfaceMethods<LoopLikeOpInterface>,
+       DeclareOpInterfaceMethods<RegionBranchOpInterface, [
+           "getRegionInvocationBounds", "getEntrySuccessorOperands",
+           "areTypesCompatible"]>,
        SingleBlockImplicitTerminator<"YieldOp">]> {
   let summary = "while operation";
   let description = [{
@@ -1972,6 +1980,22 @@ format which contains three 1D tensors.
     TF_Int32Tensor:$row_ids,
     TF_Int32Tensor:$col_ids,
     TF_Float32Tensor:$gains
+  );
+}
+
+def TF_GlobalIterIdOp : TF_Op<"GlobalIterId", [DeclareOpInterfaceMethods<TF_GetResourceInstanceInterface>, TF_GlobalIterIdEffect]> {
+  let summary = [{
+Op that gets the global step id.
+  }];
+
+  let description = [{
+This op gets the step id for each loop iteration.
+  }];
+
+  let arguments = (ins);
+
+  let results = (outs
+    TF_Int64Tensor:$iter_id
   );
 }
 

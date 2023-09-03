@@ -297,9 +297,10 @@ class DefaultTypesTest(test.TestCase):
     )
 
     value = dict_type.placeholder_value(None)
-    casted_value = dict_type._cast(value, None)
+    casted_value = dict_type.cast(value, None)
 
     self.assertIs(value, casted_value)
+
 
 if __name__ == '__main__':
   test.main()

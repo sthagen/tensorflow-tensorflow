@@ -955,8 +955,11 @@ xla_test(
         ":hlo_test_base",
         ":test_macros_header",
         ":xla_internal_test_main",
+        "//tensorflow/compiler/xla:error_spec",
+        "//tensorflow/compiler/xla:literal",
         "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/compiler/xla:test",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -1189,7 +1192,6 @@ xla_test(
     backends = ["gpu"],
     shard_count = 50,
     tags = [
-        "no_rocm",
         "nozapfhahn",
         "optonly",
     ],
@@ -1271,7 +1273,6 @@ xla_test(
         "interpreter",
     ],
     shard_count = 40,
-    tags = ["no_rocm"],
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",

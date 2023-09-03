@@ -112,6 +112,7 @@ cc_library(
     deps = [
         ":numeric_types",
         ":type_traits",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
     ] + if_static(
@@ -172,6 +173,7 @@ cc_library(
         "//tensorflow/tsl/platform:types",
         "//tensorflow/tsl/profiler/lib:scoped_memory_debug_annotation",
         "//tensorflow/tsl/profiler/lib:traceme",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
     ],
@@ -251,7 +253,10 @@ cc_library(
         "//tensorflow/tsl/platform:macros",
         "//tensorflow/tsl/platform:mutex",
         "//tensorflow/tsl/platform:status",
+        "//tensorflow/tsl/platform:statusor",
         "//tensorflow/tsl/platform:types",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 

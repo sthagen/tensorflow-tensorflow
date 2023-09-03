@@ -22,8 +22,6 @@ limitations under the License.
 
 #include "absl/cleanup/cleanup.h"
 #include "absl/functional/any_invocable.h"
-#include "absl/log/check.h"
-#include "absl/log/log.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/status.h"
 #include "tensorflow/compiler/xla/stream_executor/allocator_stats.h"
@@ -41,6 +39,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/tpu/tpu_topology.h"
 #include "tensorflow/tsl/c/tsl_status.h"
 #include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/logging.h"  // IWYU pragma: keep
 
 namespace stream_executor {
 namespace tpu {
@@ -62,14 +61,6 @@ Status TpuExecutor::Init(int device_ordinal,
   return status.status();
 }
 
-int TpuExecutor::PlatformDeviceCount() {
-  return ExecutorApiFn()->TpuExecutor_PlatformDeviceCountFn(executor_);
-}
-
-void TpuExecutor::SyncAndForgetFailedStreams() {
-  ExecutorApiFn()->TpuExecutor_SyncAndForgetFailedStreamsFn(executor_);
-}
-
 bool TpuExecutor::SynchronizeAllActivity() {
   return ExecutorApiFn()->TpuExecutor_SynchronizeAllActivityFn(executor_);
 }
@@ -78,13 +69,6 @@ Status TpuExecutor::BlockHostUntilDone(Stream* stream) {
   StatusHelper status;
   ExecutorApiFn()->TpuExecutor_BlockHostUntilDoneFn(
       executor_, get_stream(stream->implementation()), status.c_status);
-  return status.status();
-}
-
-Status TpuExecutor::BlockUntilDoneOrFailed() {
-  StatusHelper status;
-  ExecutorApiFn()->TpuExecutor_BlockUntilDoneOrFailedFn(executor_,
-                                                        status.c_status);
   return status.status();
 }
 
@@ -229,20 +213,6 @@ TpuExecutor::GetAllocatorStats() {
     return stats;
   }
   return {};
-}
-
-Status TpuExecutor::WaitForInfeedReady(int32_t infeed_queue_index) {
-  StatusHelper status;
-  ExecutorApiFn()->TpuExecutor_WaitForInfeedReadyFn(
-      executor_, infeed_queue_index, status.c_status);
-  return status.status();
-}
-
-Status TpuExecutor::WaitForOutfeedReady(int32_t outfeed_queue_index) {
-  StatusHelper status;
-  ExecutorApiFn()->TpuExecutor_WaitForOutfeedReadyFn(
-      executor_, outfeed_queue_index, status.c_status);
-  return status.status();
 }
 
 void TpuExecutor::DequeueOutfeed(int32_t outfeed_queue_index,

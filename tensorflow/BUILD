@@ -1052,6 +1052,7 @@ package_group(
         "//third_party/py/envlogger/...",
         "//third_party/py/gldm/...",
         "//third_party/py/keras/...",
+        "//third_party/py/tf_keras/...",
         "//third_party/yggdrasil_decision_forests/...",
         "//waymo/ml/cn/...",
     ],
@@ -1368,9 +1369,9 @@ tf_cc_shared_library(
         "//tensorflow/compiler/mlir/tensorflow:export_graphdef",
         "//tensorflow/compiler/mlir/tensorflow:mlir_import_options",
         "//tensorflow/compiler/mlir/tensorflow:mlir_roundtrip_flags",
-        "//tensorflow/compiler/mlir/tensorflow:tensorflow_passes",
-        "//tensorflow/compiler/mlir/tensorflow:tf_dialect_passes",
-        "//tensorflow/compiler/mlir/tensorflow:tf_saved_model_passes",
+        "//tensorflow/compiler/mlir/tensorflow/transforms:tensorflow_passes",
+        "//tensorflow/compiler/mlir/tensorflow/transforms:tf_dialect_passes",
+        "//tensorflow/compiler/mlir/tensorflow/transforms:tf_saved_model_passes",
         "//tensorflow/compiler/mlir/tensorflow:translate_lib",
         "//tensorflow/compiler/xla/service:computation_placer",
         "//tensorflow/core",
@@ -1674,6 +1675,7 @@ gen_api_init_files(
         "compat_template.__init__.py",
         "compat_template_v1.__init__.py",
     ],
+    api_packages_file_name = "api_packages.txt",
     api_version = 2,
     compat_api_versions = [
         1,
@@ -1688,6 +1690,7 @@ gen_api_init_files(
     output_package = "tensorflow._api.v2",
     root_file_name = "v2.py",
     root_init_template = "$(location api_template.__init__.py)",
+    visibility = ["//visibility:public"],
 )
 
 py_library(

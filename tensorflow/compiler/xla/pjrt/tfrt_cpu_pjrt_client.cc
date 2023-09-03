@@ -825,7 +825,13 @@ StatusOr<std::unique_ptr<PjRtLoadedExecutable>> TfrtCpuClient::Compile(
 
 StatusOr<std::unique_ptr<PjRtBuffer>> TfrtCpuClient::CreateViewOfDeviceBuffer(
     void* device_ptr, const Shape& shape, PjRtDevice* device,
-    std::function<void()> on_delete_callback) {
+    std::function<void()> on_delete_callback,
+    std::optional<std::intptr_t> stream) {
+  if (stream) {
+    return Unimplemented(
+        "TfrtCpuClient::CreateViewOfDeviceBuffer does not support `stream` "
+        "argument.");
+  }
   absl::InlinedVector<std::shared_ptr<MaybeOwningCpuMemory>, 4> buffers;
   size_t byte_size = ShapeUtil::ByteSizeOf(shape);
   auto non_owning_buffer =
@@ -1177,6 +1183,9 @@ StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
 
   auto donate_it = parameters_that_must_be_donated_.begin();
 
+  // State for `TestBufferDonationClashes`.
+  absl::flat_hash_map<const void*, std::pair<bool, int>> donation_clashes;
+  donation_clashes.reserve(argument_handles.size());
   for (int i = 0; i < argument_handles.size(); ++i) {
     PjRtBuffer* handle = argument_handles[i];
     auto* tfrt_buffer = tensorflow::down_cast<TfrtCpuBuffer*>(handle);
@@ -1192,6 +1201,8 @@ StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
     auto get_buffer = [&](int i) -> Status {
       bool must_donate = donate_it != parameters_that_must_be_donated_.end() &&
                          *donate_it == i;
+      TF_RETURN_IF_ERROR(TestBufferDonationClashes(
+          tfrt_buffer, donation_clashes, must_donate, i, replica, partition));
       if (must_donate) {
         ++donate_it;
         StatusOr<TfrtCpuBuffer::DonationTransaction> donation_transaction =

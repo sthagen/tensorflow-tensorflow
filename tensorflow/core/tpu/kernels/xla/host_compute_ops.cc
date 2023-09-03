@@ -18,7 +18,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "tensorflow/compiler/tf2xla/shape_util.h"
 #include "tensorflow/compiler/tf2xla/side_effect_util.h"
@@ -56,6 +55,7 @@ limitations under the License.
 #include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/logging.h"  // IWYU pragma: keep
 #include "tensorflow/tsl/platform/macros.h"
 
 namespace tensorflow {
@@ -190,9 +190,6 @@ class HostComputeOp : public XlaOpKernel {
           channel_name;
       (*attrs.mutable_map())[xla::kXlaHostTransferHandlerNameAttr] =
           xla::kXlaHostTransferTfRendezvousHandlerName;
-      (*attrs.mutable_map())[xla::kXlaHostTransferOriginalTypeAttr] =
-          xla::primitive_util::LowercasePrimitiveTypeName(
-              xla_shape.element_type());
       b->SetFrontendAttributes(attrs);
       xla::ChannelHandle channel;
       OP_REQUIRES_OK(
@@ -252,9 +249,6 @@ class HostComputeOp : public XlaOpKernel {
           channel_name;
       (*attrs.mutable_map())[xla::kXlaHostTransferHandlerNameAttr] =
           xla::kXlaHostTransferTfRendezvousHandlerName;
-      (*attrs.mutable_map())[xla::kXlaHostTransferOriginalTypeAttr] =
-          xla::primitive_util::LowercasePrimitiveTypeName(
-              xla_output_shapes->at(i).element_type());
       b->SetFrontendAttributes(attrs);
       xla::ChannelHandle channel;
       OP_REQUIRES_OK(
@@ -464,9 +458,6 @@ class SendToHostOp : public XlaOpKernel {
     (*attrs.mutable_map())[xla::kXlaHostTransferRendezvousNameAttr] = key_;
     (*attrs.mutable_map())[xla::kXlaHostTransferHandlerNameAttr] =
         xla::kXlaHostTransferTfRendezvousHandlerName;
-    (*attrs.mutable_map())[xla::kXlaHostTransferOriginalTypeAttr] =
-        xla::primitive_util::LowercasePrimitiveTypeName(
-            xla_shape.element_type());
     b->SetFrontendAttributes(attrs);
     xla::ChannelHandle channel;
     OP_REQUIRES_OK(ctx, compiler->GetDeviceToHostChannelHandle(key_, &channel));
@@ -522,9 +513,6 @@ class RecvFromHostOp : public XlaOpKernel {
     (*attrs.mutable_map())[xla::kXlaHostTransferRendezvousNameAttr] = key_;
     (*attrs.mutable_map())[xla::kXlaHostTransferHandlerNameAttr] =
         xla::kXlaHostTransferTfRendezvousHandlerName;
-    (*attrs.mutable_map())[xla::kXlaHostTransferOriginalTypeAttr] =
-        xla::primitive_util::LowercasePrimitiveTypeName(
-            xla_shape.element_type());
     b->SetFrontendAttributes(attrs);
     xla::ChannelHandle channel;
     OP_REQUIRES_OK(ctx, compiler->GetHostToDeviceChannelHandle(key_, &channel));

@@ -150,7 +150,7 @@ class NcclCollectiveThunk : public Thunk {
  private:
   bool IsAsync() const { return async_ != nullptr; }
   int64_t GetStreamId() const {
-    return IsAsync() ? 1 + GetAsyncStreamKind() : 0;
+    return xla::gpu::GetStreamId(IsAsync(), GetAsyncStreamKind());
   }
 
 #if XLA_ENABLE_XCCL
@@ -195,7 +195,8 @@ Status AddOpDescription(Status status, OpT op, int64_t replica_count,
 StatusOr<NcclComm::Lock> LockNcclComm(
     const NcclExecuteParams& params,
     const std::vector<ReplicaGroup>& replica_groups,
-    CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id);
+    CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id,
+    bool enable_clique_optimization);
 #endif  // XLA_ENABLE_XCCL
 
 struct DeviceBufferPair {

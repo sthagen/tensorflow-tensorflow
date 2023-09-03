@@ -13,6 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
+from __future__ import annotations
+
 import enum
 import inspect
 import types
@@ -253,6 +255,23 @@ class DebugOptions:
   xla_test_all_input_layouts: bool
   xla_disable_hlo_passes: str
   xla_enable_hlo_passes_only: str
+  xla_force_host_platform_device_count: int
+  xla_dump_to: str
+  xla_dump_hlo_module_re: str
+  xla_dump_hlo_pass_re: str
+  xla_dump_hlo_as_text: bool
+  xla_dump_hlo_as_proto: bool
+  xla_dump_hlo_as_dot: bool
+  xla_dump_hlo_as_url: bool
+  xla_dump_hlo_as_html: bool
+  xla_dump_fusion_visualization: bool
+  xla_dump_hlo_snapshots: bool
+  xla_dump_max_hlo_modules: bool
+  xla_dump_module_metadata: bool
+  xla_dump_compress_protos: bool
+  xla_dump_hlo_as_long_text: bool
+  xla_dump_disable_metadata: bool
+  xla_dump_hlo_pipeline_re: str
 
 class CompiledMemoryStats:
   generated_code_size_in_bytes: int
@@ -290,6 +309,10 @@ class OpSharding_Type(enum.IntEnum):
   OTHER: int
   MANUAL: int
 
+class OpSharding_ShardGroupType(enum.IntEnum):
+  AS: int
+  LIKE: int
+
 class OpSharding:
   Type: typing.Type[OpSharding_Type]
   type: OpSharding_Type
@@ -300,6 +323,10 @@ class OpSharding:
   iota_reshape_dims: Sequence[int]
   iota_transpose_perm: Sequence[int]
   tuple_shardings: Sequence[OpSharding]
+  is_shard_group: bool
+  shard_group_id: int
+  ShardGroupType: typing.Type[OpSharding_ShardGroupType]
+  shard_group_type: OpSharding_ShardGroupType
   def ParseFromString(self, s: bytes) -> None: ...
   def SerializeToString(self) -> bytes: ...
   def clone(self) -> OpSharding: ...
@@ -350,6 +377,7 @@ class Device:
   platform: str
   device_kind: str
   client: Client
+  local_hardware_id: int | None
   def __repr__(self) -> str: ...
   def __str__(self) -> str: ...
   def transfer_to_infeed(self, literal: _LiteralSlice): ...
@@ -359,6 +387,7 @@ class Device:
   def addressable_memories(self) -> List[Memory]: ...
   def live_buffers(self) -> List[Any]: ...
   def memory_stats(self) -> Optional[Dict[str, int]]: ...
+  def get_stream_for_external_ready_events(self) -> int: ...
   def __getattr__(self, name: str) -> Any: ...
 
 class Memory:
@@ -367,7 +396,7 @@ class Memory:
   kind: str
   def __repr__(self) -> str: ...
   def __str__(self) -> str: ...
-  def attached_devices(self) -> List[Device]: ...
+  def addressable_by_devices(self) -> List[Device]: ...
 
 class GpuAllocatorConfig:
   class Kind(enum.IntEnum):
@@ -395,6 +424,7 @@ class Client:
   def local_device_count(self) -> int: ...
   def devices(self) -> List[Device]: ...
   def local_devices(self) -> List[Device]: ...
+  def device_from_local_hardware_id(self, int) -> Device: ...
   def live_buffers(self) -> List[Any]: ...
   def live_arrays(self) -> List[ArrayImpl]: ...
   def live_executables(self) -> List[LoadedExecutable]: ...
@@ -432,22 +462,22 @@ class Client:
   def get_emit_python_callback_descriptor(
       self, callable: Callable, operand_shapes: Sequence[Shape],
       results_shapes: Sequence[Shape]) -> Tuple[Any, Any]: ...
-  def emit_python_callback(
-      self, callable: Callable, builder: XlaBuilder, operands: Sequence[XlaOp],
-      results_shapes: Sequence[Shape],
-      operand_layouts: Optional[Sequence[Shape]] = ...,
-      has_side_effects: bool = ...) -> Tuple[XlaOp, Any]: ...
   def make_python_callback_from_host_send_and_recv(
       self, callable: Callable, operand_shapes: Sequence[Shape],
       result_shapes: Sequence[Shape], send_channel_ids: Sequence[int],
       recv_channel_ids: Sequence[int], serializer: Optional[Callable] = ...) -> Any: ...
-  def get_python_callback_from_host_send(callable: Any,
-                                         operand_shapes: Any, send_channel_ids: Any, recv_channel_ids: Any) -> Any: ...
 
 
 def get_tfrt_cpu_client(asynchronous: bool = ...) -> Client: ...
 def get_interpreter_client() -> Client: ...
 def get_gpu_client(
+    asynchronous: bool = ...,
+    allocator_config: GpuAllocatorConfig = ...,
+    distributed_client: Optional[DistributedRuntimeClient] = ...,
+    node_id: int = ...,
+    allowed_devices: Optional[Any] = ...,
+    platform_name: Optional[str] = ...) -> Client:...
+def get_mock_gpu_client(
     asynchronous: bool = ...,
     allocator_config: GpuAllocatorConfig = ...,
     distributed_client: Optional[DistributedRuntimeClient] = ...,
@@ -467,6 +497,8 @@ def get_topology_for_devices(devices: List[Device]) -> DeviceTopology:
 
 def load_pjrt_plugin(platform_name: str, library_path: str) -> _Status: ...
 def pjrt_plugin_loaded(plugin_name: str) -> bool: ...
+def pjrt_plugin_initialized(plugin_name: str) -> bool: ...
+def initialize_pjrt_plugin(platform_name: str) -> _Status: ...
 
 ArrayImpl = Any
 
@@ -509,8 +541,8 @@ def batched_device_put(
 ) -> ArrayImpl:
   ...
 
-def canonicalize_memory_kind(
-    memory_kind: Optional[str], device: Device) -> Optional[str]: ...
+def check_and_canonicalize_memory_kind(
+    memory_kind: Optional[str], device_list: DeviceList) -> Optional[str]: ...
 
 def array_result_handler(
                aval: Any,
@@ -575,11 +607,17 @@ class DeviceTopology:
   platform: str
   platform_version: str
   def _make_compile_only_devices(self) -> List[Device]: ...
+  def serialize(self) -> bytes: ...
+  def __getattr__(self, name: str) -> Any: ...
 
 
 def buffer_to_dlpack_managed_tensor(
     buffer: ArrayImpl,
-    take_ownership: bool = ...) -> Any: ...
+    take_ownership: bool = ...,
+    stream: int | None = None) -> Any: ...
+def dlpack_managed_tensor_to_buffer(
+    tensor: Any, device: Device, stream: int | None) -> ArrayImpl: ...
+# Legacy overload
 def dlpack_managed_tensor_to_buffer(
     tensor: Any, cpu_backend: Optional[Client] = ...,
     gpu_backend: Optional[Client] = ...) -> ArrayImpl: ...
@@ -685,6 +723,10 @@ class DeviceList:
   def is_fully_addressable(self) -> bool: ...
   @property
   def addressable_device_list(self) -> DeviceList: ...
+  @property
+  def default_memory_kind(self) -> Optional[str]: ...
+  @property
+  def memory_kinds(self) -> Tuple[str, ...]: ...
 
 
 class Sharding: ...
@@ -693,21 +735,26 @@ class XLACompatibleSharding(Sharding): ...
 
 class NamedSharding(XLACompatibleSharding):
   def __init__(self, mesh: Any, spec: Any, *, memory_kind: Optional[str] = None,
-               _parsed_pspec: Any = None): ...
+               _parsed_pspec: Any = None,
+               _manual_axes: frozenset[Any] = frozenset()): ...
   mesh: Any
   spec: Any
   _memory_kind: Optional[str]
   _parsed_pspec: Any
+  _internal_device_list: DeviceList
+  _manual_axes: frozenset[Any]
 
 class SingleDeviceSharding(XLACompatibleSharding):
   def __init__(self, device: Device, *, memory_kind: Optional[str] = None): ...
   _device: Device
   _memory_kind: Optional[str]
+  _internal_device_list: DeviceList
 
 class PmapSharding(XLACompatibleSharding):
   def __init__(self, devices: Sequence[Any], sharding_spec: pmap_lib.ShardingSpec): ...
   devices: List[Any]
   sharding_spec: pmap_lib.ShardingSpec
+  _internal_device_list: DeviceList
 
 class GSPMDSharding(XLACompatibleSharding):
   def __init__(self, devices: Sequence[Device],
@@ -716,6 +763,7 @@ class GSPMDSharding(XLACompatibleSharding):
   _devices: Tuple[Device, ...]
   _hlo_sharding: HloSharding
   _memory_kind: Optional[str]
+  _internal_device_list: DeviceList
 
 class PjitFunction:
   def __call__(self, *args, **kwargs) -> Any: ...

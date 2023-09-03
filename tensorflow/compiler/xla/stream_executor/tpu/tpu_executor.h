@@ -23,7 +23,6 @@ limitations under the License.
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
-#include "absl/log/log.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/stream_executor/allocator_stats.h"
@@ -40,6 +39,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/tpu/tpu_platform_interface.h"
 #include "tensorflow/compiler/xla/stream_executor/tpu/tpu_topology.h"
 #include "tensorflow/tsl/platform/casts.h"
+#include "tensorflow/tsl/platform/logging.h"  // IWYU pragma: keep
 #include "tensorflow/tsl/platform/status.h"
 #include "tensorflow/tsl/platform/statusor.h"
 #include "tensorflow/tsl/platform/types.h"
@@ -75,8 +75,6 @@ class TpuExecutor : public tensorflow::tpu::TpuExecutorInterface {
   bool AllocateStream(Stream* stream) override;
 
   tsl::Status BlockHostUntilDone(::stream_executor::Stream* stream) override;
-
-  tsl::Status BlockUntilDoneOrFailed();
 
   StatusOr<std::unique_ptr<::stream_executor::DeviceDescription>>
   CreateDeviceDescription() const override;
@@ -127,7 +125,6 @@ class TpuExecutor : public tensorflow::tpu::TpuExecutorInterface {
                             const ::stream_executor::DeviceMemoryBase& host_src,
                             uint64_t size) override;
 
-  void SyncAndForgetFailedStreams();
   bool SynchronizeAllActivity() override;
 
   tsl::Status SynchronousMemcpy(::stream_executor::DeviceMemoryBase* device_dst,
@@ -140,17 +137,11 @@ class TpuExecutor : public tensorflow::tpu::TpuExecutorInterface {
       const ::stream_executor::DeviceMemoryBase& device_src,
       uint64_t size) override;
 
-  int PlatformDeviceCount() override;
-
   Event::Status PollForEventStatus(Event* event) override;
   tsl::Status RecordEvent(Stream* stream,
                           ::stream_executor::Event* event) override;
   tsl::Status WaitForEvent(Stream* stream,
                            ::stream_executor::Event* event) override;
-
-  tsl::Status WaitForInfeedReady(int32_t infeed_queue_index);
-
-  tsl::Status WaitForOutfeedReady(int32_t outfeed_queue_index);
 
   tsl::Status UnloadAllPrograms() override;
 

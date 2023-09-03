@@ -22,7 +22,6 @@ limitations under the License.
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/log/log.h"
 #include "absl/synchronization/mutex.h"
 #include "tensorflow/compiler/xla/stream_executor/executor_cache.h"
 #include "tensorflow/compiler/xla/stream_executor/platform.h"
@@ -33,6 +32,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/tpu/tpu_platform_interface.h"
 #include "tensorflow/compiler/xla/stream_executor/tpu/tpu_topology.h"
 #include "tensorflow/compiler/xla/stream_executor/trace_listener.h"
+#include "tensorflow/tsl/platform/logging.h"  // IWYU pragma: keep
 #include "tensorflow/tsl/platform/status.h"
 #include "tensorflow/tsl/platform/statusor.h"
 
@@ -65,8 +65,6 @@ class TpuPlatform : public ::tensorflow::tpu::TpuPlatformInterface {
 
   int VisibleDeviceCount() const override;
 
-  int64_t TpuMemoryLimit() override;
-
   bool ShouldRegisterTpuDeviceToDeviceCopy() override;
 
   const tensorflow::tpu::TpuTopologyPtr GetTopologyPtr() override;
@@ -97,32 +95,12 @@ class TpuPlatform : public ::tensorflow::tpu::TpuPlatformInterface {
     return GetExecutor(config);
   }
 
-  StatusOr<::stream_executor::StreamExecutor*>
-  ExecutorForDeviceWithPluginConfig(
-      int ordinal,
-      const ::stream_executor::PluginConfig& plugin_config) override {
-    stream_executor::StreamExecutorConfig config;
-    config.ordinal = ordinal;
-    config.plugin_config = plugin_config;
-    return GetExecutor(config);
-  }
-
   StatusOr<::stream_executor::StreamExecutor*> GetExecutor(
       const ::stream_executor::StreamExecutorConfig& config) override;
 
   StatusOr<std::unique_ptr<::stream_executor::StreamExecutor>>
   GetUncachedExecutor(
       const ::stream_executor::StreamExecutorConfig& config) override;
-
-  void RegisterTraceListener(
-      std::unique_ptr<stream_executor::TraceListener> listener) override {
-    LOG(FATAL) << "Not yet implemented";
-  }
-
-  void UnregisterTraceListener(
-      stream_executor::TraceListener* listener) override {
-    LOG(FATAL) << "Not yet implemented";
-  }
 
   StreamMap* stream_map() { return &stream_map_; }
 

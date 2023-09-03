@@ -541,13 +541,18 @@ NoFragmentationStatsHeap<BufferType>::Finish() {
 
 template <typename BufferType>
 GlobalDecreasingSizeBestFitHeap<BufferType>::GlobalDecreasingSizeBestFitHeap(
-    int64_t alignment, Type type)
+    int64_t alignment, Type type, BufferIntervalCompare buffer_interval_compare)
     : alignment_(alignment) {
   if (type == kTemporal) {
     buffer_interval_compare_ = GetTemporalBufferIntervalCompare();
-  } else {
-    CHECK(type == kSpatial);
+    CHECK(buffer_interval_compare == nullptr);
+  } else if (type == kSpatial) {
     buffer_interval_compare_ = GetSpatialBufferIntervalCompare();
+    CHECK(buffer_interval_compare == nullptr);
+  } else {
+    CHECK(type == kCustom);
+    CHECK(buffer_interval_compare != nullptr);
+    buffer_interval_compare_ = buffer_interval_compare;
   }
 }
 
@@ -838,8 +843,8 @@ template <typename BufferType>
 std::string
 GlobalDecreasingSizeBestFitHeap<BufferType>::BufferInterval::ToString() const {
   return absl::StrCat("{ ",  //
-                      "buffer: ", (buffer ? buffer->ToString() : "null"),
-                      ", ",                                           //
+                      "buffer: {", (buffer ? buffer->ToString() : "null"),
+                      "}, ",                                          //
                       "size: ", size, ", ",                           //
                       "start: ", start, ", ",                         //
                       "end: ", end, ", ",                             //
@@ -865,7 +870,7 @@ GlobalDecreasingSizeBestFitHeap<BufferType>::SlicedBufferInterval::
 
 template <typename BufferType>
 void GlobalDecreasingSizeBestFitHeap<BufferType>::SlicedBufferInterval::Slice(
-    absl::Span<int64_t> slice_sizes_sorted_by_offset) {
+    absl::Span<const int64_t> slice_sizes_sorted_by_offset) {
   if (slice_sizes_sorted_by_offset.empty()) {
     slice_sizes_sorted_by_offset_ = {full_buffer_interval_.size};
     make_free_chunks_intervals_ = {full_buffer_interval_};

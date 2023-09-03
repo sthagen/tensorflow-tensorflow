@@ -349,12 +349,6 @@ class ConvertUniformQuantizedAddOp : public OpConversionPattern<mhlo::AddOp> {
       return failure();
     }
 
-    Value result_quantization_min = rewriter.create<mhlo::ConstantOp>(
-        op->getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(
-                          result_element_type.getStorageTypeMin())));
-    Value result_quantization_max = rewriter.create<mhlo::ConstantOp>(
-        op->getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(
-                          result_element_type.getStorageTypeMax())));
     Value zero_point = rewriter.create<mhlo::ConstantOp>(
         op->getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(
                           result_element_type.getZeroPoint())));
@@ -374,16 +368,28 @@ class ConvertUniformQuantizedAddOp : public OpConversionPattern<mhlo::AddOp> {
     Value res_int32 = rewriter.create<chlo::BroadcastSubOp>(
         op->getLoc(), res_int32_tensor_type, add_result, zero_point, nullptr);
 
-    // Clamp results by [quantization_min, quantization_max].
-    res_int32 = rewriter.create<mhlo::ClampOp>(
-        op->getLoc(), res_int32_tensor_type, result_quantization_min, res_int32,
-        result_quantization_max);
+    if (result_element_type.getStorageType().isInteger(32)) {
+      // For i32, clamping is not needed.
+      rewriter.replaceOp(op, res_int32);
+    } else {
+      // Clamp results by [quantization_min, quantization_max] when storage type
+      // is not i32.
+      Value result_quantization_min = rewriter.create<mhlo::ConstantOp>(
+          op->getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(
+                            result_element_type.getStorageTypeMin())));
+      Value result_quantization_max = rewriter.create<mhlo::ConstantOp>(
+          op->getLoc(), rewriter.getI32IntegerAttr(static_cast<int32_t>(
+                            result_element_type.getStorageTypeMax())));
+      res_int32 = rewriter.create<mhlo::ClampOp>(
+          op->getLoc(), res_int32_tensor_type, result_quantization_min,
+          res_int32, result_quantization_max);
+      // Convert results back to result storage type.
+      auto res_final_tensor_type =
+          res_int32_tensor_type.clone(result_element_type.getStorageType());
+      rewriter.replaceOpWithNewOp<mhlo::ConvertOp>(op, res_final_tensor_type,
+                                                   res_int32);
+    }
 
-    // Convert results back to result storage type.
-    auto res_final_tensor_type =
-        res_int32_tensor_type.clone(result_element_type.getStorageType());
-    rewriter.replaceOpWithNewOp<mhlo::ConvertOp>(op, res_final_tensor_type,
-                                                 res_int32);
     return success();
   }
 };
@@ -484,6 +490,10 @@ LogicalResult matchAndRewriteDotLikeOp(OpType &op, OpAdaptorType &adaptor,
     return rewriter.notifyMatchFailure(op, "Unsupported input element type.");
   }
 
+  auto lhs_float32_tensor_type =
+      op.getLhs().getType().clone(rewriter.getF32Type());
+  auto rhs_float32_tensor_type =
+      op.getRhs().getType().clone(rewriter.getF32Type());
   auto res_float32_tensor_type =
       op.getResult().getType().clone(rewriter.getF32Type());
 
@@ -508,14 +518,14 @@ LogicalResult matchAndRewriteDotLikeOp(OpType &op, OpAdaptorType &adaptor,
 
   // Offset xxx_int32_tensor according to zero points.
   Value lhs_float32_tensor = rewriter.create<mhlo::ConvertOp>(
-      op->getLoc(), res_float32_tensor_type, lhs);
+      op->getLoc(), lhs_float32_tensor_type, lhs);
   lhs_float32_tensor = rewriter.create<chlo::BroadcastSubOp>(
-      op->getLoc(), res_float32_tensor_type, lhs_float32_tensor, lhs_zero_point,
+      op->getLoc(), lhs_float32_tensor_type, lhs_float32_tensor, lhs_zero_point,
       nullptr);
   Value rhs_float32_tensor = rewriter.create<mhlo::ConvertOp>(
-      op->getLoc(), res_float32_tensor_type, rhs);
+      op->getLoc(), rhs_float32_tensor_type, rhs);
   rhs_float32_tensor = rewriter.create<chlo::BroadcastSubOp>(
-      op->getLoc(), res_float32_tensor_type, rhs_float32_tensor, rhs_zero_point,
+      op->getLoc(), rhs_float32_tensor_type, rhs_float32_tensor, rhs_zero_point,
       nullptr);
 
   // Execute the conversion target op.

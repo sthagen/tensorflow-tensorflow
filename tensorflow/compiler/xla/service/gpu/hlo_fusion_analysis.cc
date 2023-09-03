@@ -16,14 +16,17 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/hlo_fusion_analysis.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/types/span.h"
 #include "tensorflow/compiler/xla/hlo/ir/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
 #include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
@@ -34,6 +37,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/backend_configs.pb.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_device_info.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_fusible.h"
+#include "tensorflow/compiler/xla/service/gpu/hlo_traversal.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/gpu/kernel_mapping_scheme.h"
 #include "tensorflow/compiler/xla/service/gpu/launch_dimensions.h"
@@ -42,6 +46,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/stream_executor/device_description.h"
 #include "tensorflow/compiler/xla/union_find.h"
+#include "tensorflow/tsl/platform/macros.h"
 
 namespace xla {
 namespace gpu {
@@ -107,24 +112,24 @@ bool MayPreventVectorization(const HloComputation* fusion) {
   return false;
 }
 
-// Determine if we enable the row optimized codegen.  When we have a
-// fusion with only point-wise operations, scalar broadcasting and row
-// broadcasting, we can trigger a kernel that vectorize the row loads.
-// This speed up the kernel, in particular on A100.
-// Returns a pair<bool, int>. The bool mean should we try to enable
-// row vectorization.  The int is the number of inputs with the higher
-// rank.
-std::pair<bool, int> RowVectorizationEnabled(const HloInstruction* fusion,
-                                             int64_t out_rank) {
+// Determines if we enable the row optimized codegen. When we have a fusion with
+// only point-wise operations, scalar broadcasting and row broadcasting, we can
+// trigger a kernel that vectorizes the row loads. This speeds up the kernel, in
+// particular on A100. The int is the number of inputs with rank `out_rank`. Its
+// value is only defined if row vectorization is enabled.
+std::pair<bool /*enabled*/, int> RowVectorizationEnabled(
+    const std::vector<HloInstruction*>& fusion_roots, int64_t out_rank) {
   const auto is_row_major = [](const HloInstruction* instr) {
-    // Only tested when the inputs are row-major. So only
-    // enable that case. Maybe it would works if only the
-    // inner dimensions is contiguous.
+    // Only tested when the inputs are row-major. So only enable that case.
+    // Maybe it would work if only the inner dimensions is contiguous.
     return LayoutUtil::IsMonotonicWithDim0Major(instr->shape().layout());
   };
-  bool row_vectorized =
-      !fusion->shape().IsTuple() && is_row_major(fusion) &&
-      absl::c_all_of(fusion->fused_parameters(), is_row_major);
+  bool row_vectorized = fusion_roots.size() == 1 &&
+                        !fusion_roots[0]->shape().IsTuple() &&
+                        is_row_major(fusion_roots[0]);
+  if (!row_vectorized) {
+    return {false, 0};
+  }
 
   // Check that the operations in the fusion are supported.  Each
   // supported operation (or category) must be manually vetted as XLA
@@ -134,32 +139,50 @@ std::pair<bool, int> RowVectorizationEnabled(const HloInstruction* fusion,
   //
   // We also detect at the same time if there is a row broadcasting
   // operation.
-  bool some_row_broadcasting = false;
   int num_big_inputs = 0;
-  for (const HloInstruction* instr : fusion->fused_instructions()) {
-    if (instr->opcode() == HloOpcode::kParameter) {
-      auto rank = instr->shape().rank();
-      num_big_inputs += static_cast<int>(rank == out_rank);
-      continue;
-    }
-    if (instr->opcode() == HloOpcode::kConstant ||
-        HloInstruction::IsOpElementwise(instr->opcode())) {
-      continue;
-    }
-    if (auto broadcast = DynCast<HloBroadcastInstruction>(instr)) {
-      if (broadcast->dimensions().empty()) {
-        continue;
-      }
-      auto rank = broadcast->shape().rank();
-      if (broadcast->dimensions().size() == 1 &&
-          broadcast->dimensions().back() == rank - 1) {
-        some_row_broadcasting = true;
-        continue;
-      }
-    }
-    VLOG(2) << "Row vectorization not enabled due to: " << instr->ToString();
-    return std::make_pair(false, 0);
-  }
+  bool some_row_broadcasting = false;
+  HloBfsConsumersFirstTraversal(
+      {fusion_roots.front()},
+      [&](const HloInstruction& producer, const HloInstruction& consumer) {
+        return consumer.opcode() == HloOpcode::kParameter;
+      },
+      [&](const HloInstruction& node) -> TraversalResult {
+        if (node.IsElementwise()) {
+          return TraversalResult::kVisitOperands;
+        }
+
+        switch (node.opcode()) {
+          case HloOpcode::kConstant:
+            return TraversalResult::kDoNotVisitOperands;
+          case HloOpcode::kParameter:
+            if (node.shape().rank() == out_rank) {
+              ++num_big_inputs;
+            }
+            // TODO(jreiffers): When extending this to work with unfused HLO,
+            // move this check to the boundary function.
+            if (!is_row_major(&node)) {
+              row_vectorized = false;
+              return TraversalResult::kAbortTraversal;
+            }
+            return TraversalResult::kVisitOperands;
+          case HloOpcode::kBroadcast:
+            if (node.dimensions().empty()) {
+              return TraversalResult::kVisitOperands;
+            }
+
+            if (node.dimensions().size() == 1 &&
+                node.dimensions().front() == node.shape().rank() - 1) {
+              some_row_broadcasting = true;
+              return TraversalResult::kVisitOperands;
+            }
+            TF_FALLTHROUGH_INTENDED;
+          default:
+            VLOG(2) << "Row vectorization not enabled due to: "
+                    << node.ToString();
+            row_vectorized = false;
+            return TraversalResult::kAbortTraversal;
+        }
+      });
   // Trigger only when there is a row broadcasting.
   return std::make_pair(row_vectorized && some_row_broadcasting,
                         num_big_inputs);
@@ -194,18 +217,6 @@ int64_t ProjectedShmemUsageBytes(
     out = std::max(out, sum);
   }
   return out;
-}
-
-// Returns true if all the transitive users of hlo before hitting users in
-// use_chain_endings are elementwise operations.
-bool AreUsersElementwise(
-    const HloInstruction* instruction,
-    const absl::flat_hash_set<HloInstruction*>& use_chain_endings) {
-  return absl::c_all_of(instruction->users(), [&](const HloInstruction* user) {
-    return use_chain_endings.count(user) ||
-           (HloInstruction::IsOpElementwise(user->opcode()) &&
-            AreUsersElementwise(user, use_chain_endings));
-  });
 }
 
 // For a row reduction, returns the number of rows we can process in parallel
@@ -271,8 +282,8 @@ std::optional<TransposeDescription> FindConsistentTransposeHero(
 
 // static
 StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
-    const HloFusionInstruction* fusion, const GpuDeviceInfo* device_info,
-    se::CudaComputeCapability compute_capability) {
+    const HloFusionInstruction* fusion, const GpuDeviceInfo* device_info) {
+  CHECK(device_info != nullptr);
   TF_ASSIGN_OR_RETURN(auto backend_config,
                       fusion->backend_config<FusionBackendConfig>());
 
@@ -283,12 +294,19 @@ StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
     heroes.push_back(&FindNonTrivialHero(*root));
   }
 
+  std::vector<const HloInstruction*> fusion_parameter_inputs;
+  FindFusionParameters(hlo_roots, DefaultFusionBoundaryFn,
+                       [&](const HloInstruction& parameter) {
+                         fusion_parameter_inputs.push_back(&parameter);
+                       });
+
   std::optional<TransposeDescription> tiled_transpose_hero =
       FindConsistentTransposeHero(hlo_roots, heroes);
 
-  return HloFusionAnalysis(fusion, std::move(backend_config),
-                           std::move(hlo_roots), std::move(heroes), device_info,
-                           compute_capability, tiled_transpose_hero);
+  return HloFusionAnalysis(
+      fusion, std::move(backend_config), std::move(hlo_roots),
+      std::move(fusion_parameter_inputs), std::move(heroes), device_info,
+      tiled_transpose_hero);
 }
 
 // Returns true if the fusion has consistent transpose heros.
@@ -358,24 +376,13 @@ StatusOr<LaunchDimensions> HloFusionAnalysis::GetLaunchDimensions() {
                               tiling_scheme->GetNumThreadsPerBlockPhysical());
     }
     case EmitterFusionKind::kInputSlices: {
-      auto* root =
-          fusion_->fused_instructions_computation()->root_instruction();
-      xla::Shape shape;
-      if (root->opcode() == HloOpcode::kSlice) {
-        shape = root->operands()[0]->shape();
-      } else {
-        CHECK_EQ(root->opcode(), HloOpcode::kTuple);
-        // We already verified that the shapes are compatible in
-        // `GetEmitterFusionKind`.
-        shape = root->operands()[0]->operands()[0]->shape();
-      }
+      auto* root = fusion_roots().front();
+      const auto& shape = root->operands()[0]->shape();
       constexpr int kUnrollFactor = 1;
       return CalculateLaunchDimensions(shape, *device_info_, {kUnrollFactor});
     }
     case EmitterFusionKind::kScatter: {
-      const auto& root_shape = fusion_->fused_instructions_computation()
-                                   ->root_instruction()
-                                   ->shape();
+      const auto& root_shape = fusion_roots().front()->shape();
       int64_t num_elements = ShapeUtil::ElementsIn(root_shape);
       int unroll_factor = num_elements % 4 == 0   ? 4
                           : num_elements % 2 == 0 ? 2
@@ -483,7 +490,7 @@ const LaunchDimensionsConfig* HloFusionAnalysis::GetLoopFusionConfig() {
   bool row_vectorized;
   int num_big_inputs;
   std::tie(row_vectorized, num_big_inputs) =
-      RowVectorizationEnabled(fusion_, GetElementShape().rank());
+      RowVectorizationEnabled(fusion_roots(), GetElementShape().rank());
   bool few_waves = [this, row_vectorized, num_big_inputs]() {
     for (const HloInstruction* instr : fused_computation_->instructions()) {
       if (instr->opcode() == HloOpcode::kParameter ||
@@ -528,7 +535,7 @@ const Shape& HloFusionAnalysis::GetElementShape() const {
 
 int HloFusionAnalysis::SmallestInputDtypeBits() const {
   int bits = std::numeric_limits<int>::max();
-  for (const HloInstruction* operand : fusion_->fused_parameters()) {
+  for (const HloInstruction* operand : fusion_parameter_inputs_) {
     bits = std::min(bits,
                     primitive_util::BitWidth(operand->shape().element_type()));
   }
@@ -665,13 +672,34 @@ bool HloFusionAnalysis::IsUnrollingColumnReductionBeneficial(
     }
     use_chain_endings.insert(fusion_root);
   }
+
   // Fusion inputs that have the same dimension as the reduce input and
-  // only involve in elementwise operations can be vectorized.
-  can_be_vectorized += absl::c_count_if(
-      fusion_->fused_parameters(), [&](HloInstruction* parameter) {
-        return ShapeUtil::SameDimensions(input_shape, parameter->shape()) &&
-               AreUsersElementwise(parameter, use_chain_endings);
+  // only involve in element-wise operations can be vectorized.
+  absl::flat_hash_set<const HloInstruction*> reachable_through_non_elementwise;
+  HloBfsConsumersFirstTraversal(
+      fusion_roots_,
+      [&](const HloInstruction& producer, const HloInstruction& consumer) {
+        if (reachable_through_non_elementwise.contains(&consumer) ||
+            (consumer.opcode() != HloOpcode::kParameter &&
+             consumer.opcode() != HloOpcode::kFusion &&
+             !use_chain_endings.contains(&consumer) &&
+             !consumer.IsElementwise())) {
+          reachable_through_non_elementwise.insert(&producer);
+        }
+
+        return DefaultFusionBoundaryFn(producer, consumer);
+      },
+      [&](const HloInstruction& node) {
+        return TraversalResult::kVisitOperands;
       });
+
+  for (auto* param : fusion_parameter_inputs_) {
+    if (!reachable_through_non_elementwise.contains(param) &&
+        ShapeUtil::SameDimensions(input_shape, param->shape())) {
+      ++can_be_vectorized;
+    }
+  }
+
   // Fusion inputs with more elements than the reduce op input must participate
   // in non-elementwise operations and we assume that they are not vectorizable
   // for the purpose of estimating the benefit of unrolling. If the kernel is
@@ -679,7 +707,7 @@ bool HloFusionAnalysis::IsUnrollingColumnReductionBeneficial(
   // turn out to be vectorizable, the compiler will still vectorize them.
   int64_t num_elements = ShapeUtil::ElementsIn(input_shape);
   cannot_be_vectorized += absl::c_count_if(
-      fusion_->fused_parameters(), [&](HloInstruction* parameter) {
+      fusion_parameter_inputs_, [&](const HloInstruction* parameter) {
         return ShapeUtil::ElementsIn(parameter->shape()) > num_elements;
       });
   if (can_be_vectorized < cannot_be_vectorized) {
@@ -710,11 +738,11 @@ bool HloFusionAnalysis::CanVectorizeReduction(
     return false;
   }
 
-  if (compute_capability_.IsAtLeast(se::CudaComputeCapability::VOLTA)) {
-    return true;
-  }
-
-  if (compute_capability_.IsAtLeast(se::CudaComputeCapability::PASCAL_)) {
+  const auto* cuda_cc =
+      std::get_if<se::CudaComputeCapability>(&device_info_->compute_capability);
+  if (cuda_cc == nullptr) return false;
+  if (cuda_cc->IsAtLeast(se::CudaComputeCapability::VOLTA)) return true;
+  if (cuda_cc->IsAtLeast(se::CudaComputeCapability::PASCAL_)) {
     return SmallestInputDtypeBits() <= 32 &&
            reduction_dimensions.dimensions[kDimX] %
                    (reduction_tiling[2] * num_threads_x) ==
@@ -728,7 +756,10 @@ int HloFusionAnalysis::CalculateVirtualThreadScalingFactorForReduction(
   int64_t dimx = reduction_dimensions.dimensions[kDimX];
   if (reduction_dimensions.is_row_reduction && dimx <= 128) {
     int rows_per_warp = RowReductionGetRowsPerWarp(dimx);
-    if (compute_capability_.IsAtLeast(se::CudaComputeCapability::AMPERE)) {
+    const auto* cuda_cc = std::get_if<se::CudaComputeCapability>(
+        &device_info_->compute_capability);
+    if (cuda_cc != nullptr &&
+        cuda_cc->IsAtLeast(se::CudaComputeCapability::AMPERE)) {
       return rows_per_warp * 3;
     }
     return rows_per_warp * 5;

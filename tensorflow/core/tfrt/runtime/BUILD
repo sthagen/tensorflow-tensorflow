@@ -29,6 +29,7 @@ cc_library(
     name = "runtime",
     srcs = ["runtime.cc"],
     hdrs = ["runtime.h"],
+    visibility = ["//visibility:public"],
     deps = [
         ":work_queue_interface",
         "//tensorflow/core:core_cpu_base",
@@ -51,6 +52,7 @@ tf_cc_shared_test(
     tags = ["no_oss"],
     deps = [
         ":runtime",
+        "//tensorflow/c:tf_tensor",
         "//tensorflow/core:test",
         "@com_google_googletest//:gtest_main",
         "@tf_runtime//cpp_tests:common",
@@ -121,6 +123,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
@@ -145,10 +148,16 @@ tf_cc_shared_test(
     tags = ["no_oss"],
     deps = [
         ":stream",
+        "//tensorflow/core/framework:tensor",
         "//tensorflow/core/framework:tensor_testutil",
         "//tensorflow/core/tfrt/saved_model:saved_model_testutil",
         "//tensorflow/tsl/platform:env",
         "//tensorflow/tsl/platform:statusor",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
 )

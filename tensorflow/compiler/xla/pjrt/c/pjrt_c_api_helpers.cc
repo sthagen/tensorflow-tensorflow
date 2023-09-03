@@ -528,19 +528,6 @@ xla::Status ValidateCreateOptions(
   return tsl::OkStatus();
 }
 
-PJRT_SerializedExecutableDeleter MakeSerializedExecutableDeleter(
-    const PJRT_Api* api) {
-  return [api](PJRT_SerializedExecutable* serialized_executable) -> void {
-    PJRT_SerializedExecutable_Destroy_Args destroy_args;
-    destroy_args.struct_size =
-        PJRT_SerializedExecutable_Destroy_Args_STRUCT_SIZE;
-    destroy_args.priv = nullptr;
-    destroy_args.serialized_executable = serialized_executable;
-    pjrt::LogFatalIfPjrtError(
-        api->PJRT_SerializedExecutable_Destroy(&destroy_args), api);
-  };
-}
-
 static std::string StructSizeErrorMsg(absl::string_view struct_name,
                                       size_t expected_size,
                                       size_t actual_size) {
@@ -759,6 +746,35 @@ xla::StatusOr<xla::Layout> ConvertToLayout(
   xla::Layout layout = xla::Layout(minor_to_major);
   layout.mutable_tiles()->assign(tiles.begin(), tiles.end());
   return layout;
+}
+
+PJRT_Buffer_Type GetElementType(const PJRT_Api* api, PJRT_Buffer* buffer) {
+  PJRT_Buffer_ElementType_Args args;
+  args.struct_size = PJRT_Buffer_ElementType_Args_STRUCT_SIZE;
+  args.priv = nullptr;
+  args.buffer = buffer;
+  LogFatalIfPjrtError(api->PJRT_Buffer_ElementType(&args), api);
+  return args.type;
+}
+
+absl::Span<const int64_t> GetDimensions(const PJRT_Api* api,
+                                        PJRT_Buffer* buffer) {
+  PJRT_Buffer_Dimensions_Args args;
+  args.struct_size = PJRT_Buffer_Dimensions_Args_STRUCT_SIZE;
+  args.priv = nullptr;
+  args.buffer = buffer;
+  LogFatalIfPjrtError(api->PJRT_Buffer_Dimensions(&args), api);
+  return {args.dims, args.num_dims};
+}
+
+PJRT_Buffer_MemoryLayout GetMemoryLayout(const PJRT_Api* api,
+                                         PJRT_Buffer* buffer) {
+  PJRT_Buffer_GetMemoryLayout_Args args;
+  args.struct_size = PJRT_Buffer_GetMemoryLayout_Args_STRUCT_SIZE;
+  args.priv = nullptr;
+  args.buffer = buffer;
+  LogFatalIfPjrtError(api->PJRT_Buffer_GetMemoryLayout(&args), api);
+  return args.layout;
 }
 
 }  // namespace pjrt

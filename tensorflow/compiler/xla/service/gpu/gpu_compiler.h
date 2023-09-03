@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/autotune_results.pb.h"
 #include "tensorflow/compiler/xla/hlo/ir/hlo_module.h"
 #include "tensorflow/compiler/xla/service/executable.h"
+#include "tensorflow/compiler/xla/service/gpu/autotuner_util.h"
 #include "tensorflow/compiler/xla/service/gpu/executable.pb.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_device_info.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_executable.h"
@@ -102,7 +103,6 @@ struct GpuTargetConfig {
   se::GpuTargetConfigProto ToProto() const;
 
   GpuDeviceInfo gpu_device_info;
-  GpuVersion gpu_version;
   std::string platform_name;
   se::dnn::VersionInfo dnn_version_info;
   std::string device_description_str;
@@ -137,7 +137,6 @@ class GpuCompiler : public LLVMCompiler {
   GpuTargetConfig GetGpuTargetConfig(se::StreamExecutor* stream_exec) {
     GpuTargetConfig gpu_target_config;
     gpu_target_config.gpu_device_info = GetGpuDeviceInfo(stream_exec);
-    gpu_target_config.gpu_version = GetGpuVersion(stream_exec);
     gpu_target_config.platform_name = stream_exec->platform()->Name();
 
     return gpu_target_config;
@@ -200,11 +199,7 @@ class GpuCompiler : public LLVMCompiler {
   // Add autotuning passes for convolution, gemm and triton.
   virtual Status AddAutotuningPasses(HloPassPipeline* pipeline,
                                      HloModule* hlo_module,
-                                     se::StreamExecutor* stream_exec,
-                                     const DebugOptions& debug_options,
-                                     const CompileOptions& options,
-                                     const GpuTargetConfig& gpu_target_config,
-                                     const AutotuneResults* autotune_results,
+                                     AutotuneConfig& autotune_config,
                                      tsl::thread::ThreadPool* thread_pool) {
     return OkStatus();
   }
