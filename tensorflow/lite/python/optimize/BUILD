@@ -12,8 +12,10 @@ cc_library(
     srcs = ["calibration_wrapper.cc"],
     hdrs = ["calibration_wrapper.h"],
     deps = [
+        "//tensorflow/compiler/mlir/lite:offset_buffer",
         "//tensorflow/lite:framework",
         "//tensorflow/lite:shared_library",
+        "//tensorflow/lite:string_util",
         "//tensorflow/lite/core:framework",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/core/kernels:builtin_ops",

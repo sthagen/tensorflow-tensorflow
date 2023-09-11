@@ -46,8 +46,8 @@ limitations under the License.
 #include "tensorflow/core/platform/statusor.h"
 #include "tensorflow/core/platform/strcat.h"
 #include "tensorflow/core/platform/stringprintf.h"
-#include "tensorflow/tsl/platform/mutex.h"
-#include "tensorflow/tsl/platform/thread_annotations.h"
+#include "tsl/platform/mutex.h"
+#include "tsl/platform/thread_annotations.h"
 
 namespace tensorflow {
 namespace data {
@@ -152,9 +152,9 @@ class RamBudgetManager {
  public:
   explicit RamBudgetManager(int64_t budget) : budget_(budget) {
     if (budget <= 0) {
-      LOG(ERROR) << "RAM budget is " << budget
-                 << " which could prevent autotuner from properly adjusting "
-                    "buffer sizes.";
+      LOG(WARNING) << "RAM budget is " << budget
+                   << " which could prevent autotuner from properly adjusting "
+                      "buffer sizes.";
     }
   }
 

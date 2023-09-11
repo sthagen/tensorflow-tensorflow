@@ -44,6 +44,34 @@
 
     *   `mul_op` supports broadcasting up to 6 dimensions.
 
+    *  The `tflite::SignatureRunner` class, which provides support for named
+       parameters and for multiple named computations within a single TF Lite
+       model, is no longer considered experimental. Likewise for the following
+       signature-related methods of `tflite::Interpreter`:
+
+       *   `tflite::Interpreter::GetSignatureRunner`
+       *   `tflite::Interpreter::signature_keys`
+       *   `tflite::Interpreter::signature_inputs`
+       *   `tflite::Interpreter::signature_outputs`
+       *   `tflite::Interpreter::input_tensor_by_signature`
+       *   `tflite::Interpreter::output_tensor_by_signature`
+
+    *  Similarly, the following signature runner functions in the TF Lite C API
+       are no longer considered experimental:
+
+       *    `TfLiteInterpreterGetSignatureCount`
+       *    `TfLiteInterpreterGetSignatureKey`
+       *    `TfLiteInterpreterGetSignatureRunner`
+       *    `TfLiteSignatureRunnerAllocateTensors`
+       *    `TfLiteSignatureRunnerGetInputCount`
+       *    `TfLiteSignatureRunnerGetInputName`
+       *    `TfLiteSignatureRunnerGetInputTensor`
+       *    `TfLiteSignatureRunnerGetOutputCount`
+       *    `TfLiteSignatureRunnerGetOutputName`
+       *    `TfLiteSignatureRunnerGetOutputTensor`
+       *    `TfLiteSignatureRunnerInvoke`
+       *    `TfLiteSignatureRunnerResizeInputTensor`
+
 ### Bug Fixes and Other Changes
 
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
@@ -87,6 +115,10 @@
   `tensorflow.ConfigProto.Experimental` to control the eager runtime's behavior
   around parallel remote function invocations; when set to `True`, the eager
   runtime will be allowed to execute multiple function invocations in parallel.
+* `tf.constant_initializer`
+    * It now takes a new argument called `support_partition`.
+    If True, constant_initializers can create sharded variables.
+    This is disabled by default, similar to existing behavior.
 
 * `tf.lite`
     * Added support for `stablehlo.scatter`.

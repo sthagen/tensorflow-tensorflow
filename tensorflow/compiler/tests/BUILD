@@ -2355,7 +2355,6 @@ tf_xla_py_strict_test(
         ":xla_test",
         "//tensorflow/compiler/tf2xla/ops:gen_xla_ops",
         "//tensorflow/compiler/tf2xla/python:xla",
-        "//tensorflow/compiler/xla:xla_data_proto_py",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
@@ -2369,6 +2368,7 @@ tf_xla_py_strict_test(
         "//tensorflow/python/platform:test",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
+        "@local_xla//xla:xla_data_proto_py",
     ],
 )
 
@@ -2392,6 +2392,7 @@ tf_xla_py_strict_test(
         "//tensorflow/compiler/tf2xla/python:xla",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:tensor_spec",
         "//tensorflow/python/ops:random_ops",
@@ -2703,6 +2704,7 @@ tpu_py_strict_test(
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/eager:remote",
         "//tensorflow/python/eager:test",
+        "//tensorflow/python/framework:config",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/platform:flags",
