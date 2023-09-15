@@ -1,15 +1,11 @@
 # TPU Kernel Implementations
 
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
-load(
-    "//tensorflow/core/platform:build_config.bzl",
-    "tf_proto_library",
-)
 load(
     "//tensorflow:tensorflow.bzl",
     "if_libtpu",
     "tf_cc_test",
     "tf_copts",
+    "tf_gen_op_wrapper_py",
 )
 load(
     "//tensorflow:tensorflow.default.bzl",
@@ -17,9 +13,14 @@ load(
     "tf_kernel_library",
 )
 load(
+    "//tensorflow/core/platform:build_config.bzl",
+    "tf_proto_library",
+)
+load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "if_static",
 )
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow/core/tpu:build_defs.bzl",
     "if_libtpu_tf_status",
@@ -131,6 +132,35 @@ cc_library(
     name = "tpu_compile_op_options",
     srcs = ["tpu_compile_op_options.cc"],
     hdrs = ["tpu_compile_op_options.h"],
+)
+
+cc_library(
+    name = "sparse_core_preprocess_ops",
+    srcs = ["sparse_core_preprocess_ops.cc"],
+    hdrs = ["sparse_core_preprocess_ops.h"],
+    deps = [
+        ":sparse_core_ops_stats_handler",
+        ":sparse_core_ops_utils",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_proto_parsing",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/platform:errors",
+        "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@local_xla//xla:util",
+        "@local_xla//xla/stream_executor/tpu:tpu_api",
+        "@local_xla//xla/stream_executor/tpu:tpu_ops_c_api_hdrs",
+    ],
+)
+
+cc_library(
+    name = "sparse_core_ops_stats_handler",
+    hdrs = ["sparse_core_ops_stats_handler.h"],
 )
 
 tf_kernel_library(
@@ -1270,6 +1300,24 @@ cc_library(
     alwayslink = 1,
 )
 
+tf_kernel_library(
+    name = "global_iter_id_op",
+    srcs = ["global_iter_id.cc"],
+    deps = [
+        "//tensorflow/core:framework",
+        "//tensorflow/core/kernels:partitioned_function_ops",
+    ],
+)
+
+tf_gen_op_wrapper_py(
+    name = "gen_global_iter_id_op",
+    out = "gen_global_iter_id_op.py",
+    op_allowlist = [
+        "GlobalIterId",
+    ],
+    deps = [":global_iter_id_op"],
+)
+
 tf_cc_test(
     name = "sharding_util_ops_test",
     srcs = ["sharding_util_ops_test.cc"],
@@ -1293,5 +1341,32 @@ tf_cc_test(
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
+    ],
+)
+
+cc_library(
+    name = "sparse_core_ops_utils",
+    srcs = ["sparse_core_ops_utils.cc"],
+    hdrs = ["sparse_core_ops_utils.h"],
+    deps = [
+        "//tensorflow/core:lib",
+        "//tensorflow/core/platform:errors",
+        "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+tf_cc_test(
+    name = "sparse_core_ops_utils_test",
+    srcs = ["sparse_core_ops_utils_test.cc"],
+    deps = [
+        ":sparse_core_ops_utils",
+        "//tensorflow/core:portable_gif_internal",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
     ],
 )

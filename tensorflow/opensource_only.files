@@ -108,6 +108,7 @@ tf_staging/tensorflow/lite/kernels/register.h:
 tf_staging/tensorflow/lite/lib_package/BUILD:
 tf_staging/tensorflow/lite/model.h:
 tf_staging/tensorflow/lite/model_builder.h:
+tf_staging/tensorflow/lite/namespace.h:
 tf_staging/tensorflow/lite/schema/conversion_metadata_generated.h:
 tf_staging/tensorflow/lite/schema/schema_generated.h:
 tf_staging/tensorflow/lite/signature_runner.h:
@@ -134,7 +135,6 @@ tf_staging/tensorflow/tools/ci_build/release/common_win.bat:
 tf_staging/tensorflow/tools/ci_build/release/mac_build_utils.sh:
 tf_staging/tensorflow/tools/ci_build/release/ubuntu_16/custom_op/nightly.sh:
 tf_staging/tensorflow/tools/ci_build/release/ubuntu_16/custom_op/release.sh:
-tf_staging/tensorflow/tools/ci_build/release/ubuntu_16/tpu_py37_full/nonpip.sh:
 tf_staging/tensorflow/tools/ci_build/release/windows/cpu_py310_full/release_pip_rename.sh:
 tf_staging/tensorflow/tools/ci_build/release/windows/cpu_py37_full/release_pip_rename.sh:
 tf_staging/tensorflow/tools/ci_build/release/windows/cpu_py38_full/release_pip_rename.sh:

@@ -9,6 +9,9 @@
 * <DOCUMENT BREAKING CHANGES HERE>
 * <THIS SECTION SHOULD CONTAIN API, ABI AND BEHAVIORAL BREAKING CHANGES>
 
+* `tf.types.experimental.GenericFunction` has been renamed to
+  `tf.types.experimental.PolymorphicFunction`.
+
 ### Known Caveats
 
 * <CAVEATS REGARDING THE RELEASE (BUT NOT BREAKING CHANGES).>
@@ -20,7 +23,7 @@
 *   <INSERT MAJOR FEATURE HERE, USING MARKDOWN SYNTAX>
 *   <IF RELEASE CONTAINS MULTIPLE FEATURES FROM SAME AREA, GROUP THEM TOGETHER>
 
-* Making the tf.function type system fully available:
+* Making the `tf.function` type system fully available:
     * `tf.types.experimental.TraceType` now allows custom tf.function inputs to
        declare Tensor decomposition and type casting support.
     * Introducing `tf.types.experimental.FunctionType` as the comprehensive
@@ -72,13 +75,26 @@
        *    `TfLiteSignatureRunnerInvoke`
        *    `TfLiteSignatureRunnerResizeInputTensor`
 
+* Android NDK r25 is supported.
+
 ### Bug Fixes and Other Changes
 
-* <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
-* <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
-* <NOTES SHOULD BE GROUPED PER AREA>
+*   <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
+*   <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
+*   <NOTES SHOULD BE GROUPED PER AREA>
 
-* Add TensorFlow Quantizer to TensorFlow pip package.
+*   Add TensorFlow Quantizer to TensorFlow pip package.
+
+*   `tf.sparse.segment_sum` `tf.sparse.segment_mean` `tf.sparse.segment_sqrt_n`
+    `SparseSegmentSum/Mean/SqrtN[WithNumSegments]`
+
+    *   Added `sparse_gradient` option (default=false) that makes the gradient
+        of these functions/ops sparse (`IndexedSlices`) instead of dense
+        (`Tensor`), using new `SparseSegmentSum/Mean/SqrtNGradV2` ops.
+
+*   `tf.nn.embedding_lookup_sparse`
+
+    *   Optimized this function for some cases by fusing internal operations.
 
 ## Keras
 
@@ -106,7 +122,7 @@
 * <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
 * <NOTES SHOULD BE GROUPED PER AREA>
 
-* Add ops to tensorflow.raw_ops that were missing.
+* Add ops to `tensorflow.raw_ops` that were missing.
 * `tf.CheckpointOptions`
     * It now takes in a new argument called `experimental_write_callbacks`.
     These are callbacks that will be executed after a saving event finishes
@@ -213,7 +229,7 @@ This release contains contributions from many people at Google, as well as:
    ```
 
 * `tf.lite`
-    * Strided_Slice now supports `UINT32`.
+    * `Strided_Slice` now supports `UINT32`.
     * Add int8 and int16x8 support for LOG operator
 
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>

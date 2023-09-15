@@ -23,6 +23,7 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
+#include "absl/strings/string_view.h"
 #include "llvm/IR/LLVMContext.h"
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "xla/autotuning.pb.h"
@@ -33,7 +34,6 @@ limitations under the License.
 #include "xla/service/gpu/gpu_device_info.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/ir_emission_utils.h"
-#include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/tests/gpu_codegen_test.h"
 #include "xla/service/pattern_matcher.h"
 #include "xla/service/pattern_matcher_gmock.h"
@@ -212,10 +212,11 @@ ENTRY entry {
   config.set_num_stages(4);
   config.set_num_warps(8);
   EXPECT_THAT(
-      TritonWrapper("test_fn", triton_dot_computation, kTritonGemmFusionKind,
+      TritonWrapper(*TritonFusionAnalysis::Execute(*triton_dot_computation),
+                    "test_fn", triton_dot_computation, kTritonGemmFusionKind,
                     se::CudaComputeCapability{se::CudaComputeCapability::AMPERE,
                                               /*minor=*/0},
-                    dev_info, config, &llvm_module, &MatMul, mlir_context),
+                    dev_info, config, &llvm_module, &EmitMatMul, mlir_context),
       tsl::testing::StatusIs(tsl::error::RESOURCE_EXHAUSTED,
                              "Shared memory size limit exceeded."));
 
@@ -224,14 +225,14 @@ ENTRY entry {
   config.set_block_k(128);
   config.set_num_stages(1);
   TF_ASSERT_OK_AND_ASSIGN(
-      const LaunchDimensions launch_dimensions,
-      TritonWrapper("test_fn", triton_dot_computation, kTritonGemmFusionKind,
+      const auto result,
+      TritonWrapper(*TritonFusionAnalysis::Execute(*triton_dot_computation),
+                    "test_fn", triton_dot_computation, kTritonGemmFusionKind,
                     se::CudaComputeCapability{se::CudaComputeCapability::AMPERE,
                                               /*minor=*/0},
-                    dev_info, config, &llvm_module, &MatMul, mlir_context));
+                    dev_info, config, &llvm_module, &EmitMatMul, mlir_context));
   // Use optin shared memory which is > shared_memory_per_block.
-  EXPECT_GT(launch_dimensions.SharedMemBytes(),
-            dev_info.shared_memory_per_block);
+  EXPECT_GT(result.shmem_bytes, dev_info.shared_memory_per_block);
 }
 
 TEST_F(TritonGemmTest, MultipleDims) {
@@ -639,10 +640,11 @@ ENTRY entry {
   config.set_num_stages(1);
   config.set_num_warps(2);
   EXPECT_THAT(
-      TritonWrapper("test_fn", triton_dot_computation, kTritonGemmFusionKind,
+      TritonWrapper(*TritonFusionAnalysis::Execute(*triton_dot_computation),
+                    "test_fn", triton_dot_computation, kTritonGemmFusionKind,
                     se::CudaComputeCapability{se::CudaComputeCapability::AMPERE,
                                               /*minor=*/0},
-                    dev_info, config, &llvm_module, &MatMul, mlir_context),
+                    dev_info, config, &llvm_module, &EmitMatMul, mlir_context),
       tsl::testing::StatusIs(
           tsl::error::RESOURCE_EXHAUSTED,
           "Tiling complexity heuristic exceeded: 147456 > 9000"));
@@ -652,10 +654,11 @@ ENTRY entry {
   config.set_block_n(32);
   config.set_block_k(32);
   TF_CHECK_OK(
-      TritonWrapper("test_fn", triton_dot_computation, kTritonGemmFusionKind,
+      TritonWrapper(*TritonFusionAnalysis::Execute(*triton_dot_computation),
+                    "test_fn", triton_dot_computation, kTritonGemmFusionKind,
                     se::CudaComputeCapability{se::CudaComputeCapability::AMPERE,
                                               /*minor=*/0},
-                    dev_info, config, &llvm_module, &MatMul, mlir_context)
+                    dev_info, config, &llvm_module, &EmitMatMul, mlir_context)
           .status());
 }
 
@@ -683,6 +686,36 @@ ENTRY e {
                                           "num_stages":"3","num_warps":"2"}}
 })")
                   .status());
+}
+
+// Normally optimized HLO should contain `copy` instead of `transpose` but
+// it's also possible to get transposes by modifying the compiler's pipeline.
+// The emitter just has to skip through the transpose - it's handled by the
+// tiled fusion analysis.
+TEST_F(TritonGemmTest, TritonEmitterCanHandleTransposes) {
+  MatchOptimizedHlo(R"(
+t {
+  p0 = f16[55,77,111]{2,1,0} parameter(0)
+  p1 = f16[111,77,99]{2,1,0} parameter(1)
+  t = f16[77,99,111]{2,1,0} transpose(p1), dimensions={1,2,0}
+  ROOT d = f16[77,55,99]{2,1,0} dot(p0, t),
+    lhs_batch_dims={1}, lhs_contracting_dims={2},
+    rhs_batch_dims={0}, rhs_contracting_dims={2}
+}
+
+ENTRY e {
+  p0 = f16[55,77,111]{2,1,0} parameter(0)
+  p1 = f16[111,77,99]{2,1,0} parameter(1)
+  ROOT r = f16[77,55,99]{2,1,0} fusion(p0, p1), kind=kCustom,
+    calls=t, backend_config={"kind":"__triton_gemm"}
+})",
+                    // This partially optimized HLO will go through the
+                    // autotuner which will run the fusion through the emitter
+                    // multiple times and assign block sizes on success.
+                    R"(
+; CHECK: f16[77,99,111]{2,1,0} transpose
+; CHECK: block_m
+)");
 }
 
 class TritonGemmTestAny : public TritonGemmTest {
@@ -1435,18 +1468,18 @@ ENTRY e {
                               ->root_instruction()
                               ->backend_config<FusionBackendConfig>());
   TF_ASSERT_OK_AND_ASSIGN(
-      const LaunchDimensions launch_dimensions,
-      TritonWrapper("test_fn", triton_dot_computation, kTritonGemmFusionKind,
+      const auto result,
+      TritonWrapper(*TritonFusionAnalysis::Execute(*triton_dot_computation),
+                    "test_fn", triton_dot_computation, kTritonGemmFusionKind,
                     GetCudaComputeCapability(), dev_info,
-                    config.triton_gemm_config(), &llvm_module, &MatMul,
+                    config.triton_gemm_config(), &llvm_module, &EmitMatMul,
                     mlir_context));
   // The config is chosen so that the used memory size is slightly above the
   // 48 kB boundary of standard / optin shared memory so that any GPU that
   // has the optin one should be able to execute the test.
-  EXPECT_EQ(launch_dimensions.SharedMemBytes(), kBytesOfSharedMemoryTested);
+  EXPECT_EQ(result.shmem_bytes, kBytesOfSharedMemoryTested);
   // Make sure the written config indeed has to use optin shared memory.
-  EXPECT_GT(launch_dimensions.SharedMemBytes(),
-            dev_info.shared_memory_per_block);
+  EXPECT_GT(result.shmem_bytes, dev_info.shared_memory_per_block);
 
   const std::string kHloTextLowShmem = R"(
 HloModule t
@@ -1791,6 +1824,229 @@ ENTRY entry {
 
   EXPECT_TRUE(RunAndCompareTwoModules(kHloTextRef, kHloTextSplitK,
                                       ErrorSpec{/*aabs=*/2, /*arel=*/1e-2},
+                                      /*run_hlo_passes=*/false));
+}
+
+// This is based on gemm_rewriter_triton_test.cc/SplitKTest.SupportsIndivisible.
+//
+// There were relatively large numeric errors with an f16 temporary buffer, so I
+// ended up using --xla_gpu_triton_gemm_disable_reduced_precision_reduction=true
+// when generating this test case.
+TEST_F(CompareTest, SupportsSplitKWithIndivisibleKComplexExample) {
+  constexpr absl::string_view kHloTextRef = R"(
+HloModule extracted, entry_computation_layout={(s8[3,129,5,32]{3,2,1,0}, f16[16,129]{1,0})->f16[480,16]{1,0}}
+
+triton_gemm_dot.clone {
+  parameter_0 = s8[3,129,5,32]{3,2,1,0} parameter(0)
+  bitcast.1 = s8[3,5,32,129]{2,1,3,0} bitcast(parameter_0)
+  copy.1 = s8[3,5,32,129]{3,2,1,0} copy(bitcast.1)
+  reshape.5 = s8[480,129]{1,0} reshape(copy.1)
+  convert.8 = f16[480,129]{1,0} convert(reshape.5)
+  parameter_1 = f16[16,129]{1,0} parameter(1)
+  ROOT dot.0 = f16[480,16]{1,0} dot(convert.8, parameter_1), lhs_contracting_dims={1}, rhs_contracting_dims={1}
+}
+
+ENTRY entry_computation {
+  p0 = s8[3,129,5,32]{3,2,1,0} parameter(0)
+  p1 = f16[16,129]{1,0} parameter(1)
+  ROOT fusion = f16[480,16]{1,0} fusion(p0, p1), kind=kCustom, calls=triton_gemm_dot.clone, backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"32","block_n":"32","block_k":"256","split_k":"1","num_stages":"1","num_warps":"4"}}
+}
+)";
+
+  constexpr absl::string_view kHloTextSplitK = R"(
+HloModule extracted, entry_computation_layout={(s8[3,129,5,32]{3,2,1,0}, f16[16,129]{1,0})->f16[480,16]{1,0}}
+
+triton_gemm_dot.clone {
+  parameter_0 = s8[3,129,5,32]{3,2,1,0} parameter(0)
+  bitcast.1 = s8[3,5,32,129]{2,1,3,0} bitcast(parameter_0)
+  copy.1 = s8[3,5,32,129]{3,2,1,0} copy(bitcast.1)
+  reshape.5 = s8[480,129]{1,0} reshape(copy.1)
+  convert.8 = f16[480,129]{1,0} convert(reshape.5)
+  constant = f16[] constant(0)
+  pad = f16[480,130]{1,0} pad(convert.8, constant), padding=0_0x0_1
+  bitcast = f16[480,2,65]{2,1,0} bitcast(pad)
+  convert.1 = f32[480,2,65]{2,1,0} convert(bitcast)
+  parameter_1 = f16[16,129]{1,0} parameter(1)
+  constant.1 = f16[] constant(0)
+  pad.1 = f16[16,130]{1,0} pad(parameter_1, constant.1), padding=0_0x0_1
+  bitcast.2 = f16[16,2,65]{2,1,0} bitcast(pad.1)
+  convert.2 = f32[16,2,65]{2,1,0} convert(bitcast.2)
+  ROOT dot.2 = f32[2,480,16]{2,1,0} dot(convert.1, convert.2), lhs_batch_dims={1}, lhs_contracting_dims={2}, rhs_batch_dims={1}, rhs_contracting_dims={2}
+}
+
+fusion.reduce_sub_computation {
+  lhs = f32[] parameter(0)
+  rhs = f32[] parameter(1)
+  ROOT add = f32[] add(lhs, rhs)
+}
+
+fused_computation {
+  param_0.1 = f32[2,480,16]{2,1,0} parameter(0)
+  constant.3 = f32[] constant(0)
+  reduce.1 = f32[480,16]{1,0} reduce(param_0.1, constant.3), dimensions={0}, to_apply=fusion.reduce_sub_computation
+  ROOT convert.3 = f16[480,16]{1,0} convert(reduce.1)
+}
+
+ENTRY entry_computation {
+  p0 = s8[3,129,5,32]{3,2,1,0} parameter(0)
+  p1 = f16[16,129]{1,0} parameter(1)
+  fusion = f32[2,480,16]{2,1,0} fusion(p0, p1), kind=kCustom, calls=triton_gemm_dot.clone, backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"128","block_n":"128","block_k":"64","split_k":"2","num_stages":"1","num_warps":"8"}}
+  ROOT fusion.1 = f16[480,16]{1,0} fusion(fusion), kind=kLoop, calls=fused_computation
+}
+)";
+
+  EXPECT_TRUE(RunAndCompareTwoModules(kHloTextRef, kHloTextSplitK,
+                                      ErrorSpec{/*aabs=*/1e-2, /*arel=*/1e-2},
+                                      /*run_hlo_passes=*/false));
+}
+
+TEST_F(CompareTest, SupportsSplitKWithIndivisibleKUsingPaddingEqual1) {
+  constexpr absl::string_view kHloTextRef = R"(
+HloModule extracted, entry_computation_layout={(f16[1,8,4,1023]{3,2,1,0}, f16[1,1023,128]{2,1,0})->f16[1,8,4,128]{3,2,1,0}}
+
+triton_gemm_dot.7103_computation.clone {
+  parameter_0.499 = f16[1,8,4,1023]{3,2,1,0} parameter(0)
+  bitcast.7923 = f16[32,1023]{1,0} bitcast(parameter_0.499)
+  parameter_1.499 = f16[1,1023,128]{2,1,0} parameter(1)
+  bitcast.7924 = f16[1023,128]{1,0} bitcast(parameter_1.499)
+  dot.9350 = f16[32,128]{1,0} dot(bitcast.7923, bitcast.7924), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  ROOT bitcast.7925 = f16[1,8,4,128]{3,2,1,0} bitcast(dot.9350)
+}
+
+ENTRY entry_computation {
+  p0 = f16[1,8,4,1023]{3,2,1,0} parameter(0)
+  p1 = f16[1,1023,128]{2,1,0} parameter(1)
+  ROOT triton_gemm_dot.7103 = f16[1,8,4,128]{3,2,1,0} fusion(p0, p1),
+    kind=kCustom, calls=triton_gemm_dot.7103_computation.clone,
+    backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"128","block_n":"128","block_k":"32","split_k":"1","num_stages":"4","num_warps":"4"}}
+}
+)";
+
+  constexpr absl::string_view kHloTextSplitK = R"(
+HloModule extracted, entry_computation_layout={(f16[1,8,4,1023]{3,2,1,0}, f16[1,1023,128]{2,1,0})->f16[1,8,4,128]{3,2,1,0}}
+
+triton_gemm_dot.7103_computation.clone {
+  parameter_0.499 = f16[1,8,4,1023]{3,2,1,0} parameter(0)
+  bitcast.7923 = f16[32,1023]{1,0} bitcast(parameter_0.499)
+  constant = f16[] constant(0)
+  pad = f16[32,1024]{1,0} pad(bitcast.7923, constant), padding=0_0x0_1
+  bitcast = f16[32,8,128]{2,1,0} bitcast(pad)
+  parameter_1.499 = f16[1,1023,128]{2,1,0} parameter(1)
+  bitcast.7924 = f16[1023,128]{1,0} bitcast(parameter_1.499)
+  constant.1 = f16[] constant(0)
+  pad.1 = f16[1024,128]{1,0} pad(bitcast.7924, constant.1), padding=0_1x0_0
+  bitcast.1 = f16[8,128,128]{2,1,0} bitcast(pad.1)
+  dot.1 = f16[8,32,128]{2,1,0} dot(bitcast, bitcast.1), lhs_batch_dims={1}, lhs_contracting_dims={2}, rhs_batch_dims={0}, rhs_contracting_dims={1}
+  ROOT bitcast.7925.clone = f16[8,1,8,4,128]{4,3,2,1,0} bitcast(dot.1)
+}
+
+fused_computation {
+  param_0.2 = f32[] parameter(0)
+  param_1 = f32[] parameter(1)
+  add.2 = f32[] add(param_0.2, param_1)
+  convert.13 = f16[] convert(add.2)
+  ROOT convert.12 = f32[] convert(convert.13)
+}
+
+triton_gemm_dot.7103.reduce_sub_computation.clone {
+  lhs.1 = f32[] parameter(0)
+  rhs.1 = f32[] parameter(1)
+  ROOT fusion = f32[] fusion(lhs.1, rhs.1), kind=kLoop, calls=fused_computation
+}
+
+fused_computation.1 {
+  param_0.5 = f16[8,1,8,4,128]{4,3,2,1,0} parameter(0)
+  convert.16 = f32[8,1,8,4,128]{4,3,2,1,0} convert(param_0.5)
+  constant.3 = f16[] constant(0)
+  convert.15 = f32[] convert(constant.3)
+  reduce.1 = f32[1,8,4,128]{3,2,1,0} reduce(convert.16, convert.15), dimensions={0}, to_apply=triton_gemm_dot.7103.reduce_sub_computation.clone
+  ROOT convert.14 = f16[1,8,4,128]{3,2,1,0} convert(reduce.1)
+}
+
+ENTRY entry_computation {
+  p0 = f16[1,8,4,1023]{3,2,1,0} parameter(0)
+  p1 = f16[1,1023,128]{2,1,0} parameter(1)
+  triton_gemm_dot.7103 = f16[8,1,8,4,128]{4,3,2,1,0} fusion(p0, p1), kind=kCustom, calls=triton_gemm_dot.7103_computation.clone, backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"16","block_n":"128","block_k":"32","split_k":"8","num_stages":"1","num_warps":"4"}}
+  ROOT fusion.1 = f16[1,8,4,128]{3,2,1,0} fusion(triton_gemm_dot.7103), kind=kLoop, calls=fused_computation.1
+}
+)";
+
+  EXPECT_TRUE(RunAndCompareTwoModules(kHloTextRef, kHloTextSplitK,
+                                      ErrorSpec{/*aabs=*/4e-2, /*arel=*/2e-2},
+                                      /*run_hlo_passes=*/false));
+}
+
+TEST_F(CompareTest, SupportsSplitKWithIndivisibleKUsingPaddingEqual5) {
+  constexpr absl::string_view kHloTextRef = R"(
+HloModule extracted, entry_computation_layout={(f16[1,8,4,1019]{3,2,1,0}, f16[1,1019,128]{2,1,0})->f16[1,8,4,128]{3,2,1,0}}
+
+triton_gemm_dot.7103_computation.clone {
+  parameter_0.499 = f16[1,8,4,1019]{3,2,1,0} parameter(0)
+  bitcast.7923 = f16[32,1019]{1,0} bitcast(parameter_0.499)
+  parameter_1.499 = f16[1,1019,128]{2,1,0} parameter(1)
+  bitcast.7924 = f16[1019,128]{1,0} bitcast(parameter_1.499)
+  dot.9350 = f16[32,128]{1,0} dot(bitcast.7923, bitcast.7924), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  ROOT bitcast.7925 = f16[1,8,4,128]{3,2,1,0} bitcast(dot.9350)
+}
+
+ENTRY entry_computation {
+  p0 = f16[1,8,4,1019]{3,2,1,0} parameter(0)
+  p1 = f16[1,1019,128]{2,1,0} parameter(1)
+  ROOT triton_gemm_dot.7103 = f16[1,8,4,128]{3,2,1,0} fusion(p0, p1), kind=kCustom, calls=triton_gemm_dot.7103_computation.clone, backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"32","block_n":"32","block_k":"256","split_k":"1","num_stages":"1","num_warps":"4"}}
+}
+)";
+
+  constexpr absl::string_view kHloTextSplitK = R"(
+HloModule extracted, entry_computation_layout={(f16[1,8,4,1019]{3,2,1,0}, f16[1,1019,128]{2,1,0})->f16[1,8,4,128]{3,2,1,0}}
+
+triton_gemm_dot.7103_computation.clone {
+  parameter_0.499 = f16[1,8,4,1019]{3,2,1,0} parameter(0)
+  bitcast.7923 = f16[32,1019]{1,0} bitcast(parameter_0.499)
+  constant = f16[] constant(0)
+  pad = f16[32,1024]{1,0} pad(bitcast.7923, constant), padding=0_0x0_5
+  bitcast = f16[32,16,64]{2,1,0} bitcast(pad)
+  parameter_1.499 = f16[1,1019,128]{2,1,0} parameter(1)
+  bitcast.7924 = f16[1019,128]{1,0} bitcast(parameter_1.499)
+  constant.1 = f16[] constant(0)
+  pad.1 = f16[1024,128]{1,0} pad(bitcast.7924, constant.1), padding=0_5x0_0
+  bitcast.1 = f16[16,64,128]{2,1,0} bitcast(pad.1)
+  dot.1 = f16[16,32,128]{2,1,0} dot(bitcast, bitcast.1), lhs_batch_dims={1}, lhs_contracting_dims={2}, rhs_batch_dims={0}, rhs_contracting_dims={1}
+  ROOT bitcast.7925.clone = f16[16,1,8,4,128]{4,3,2,1,0} bitcast(dot.1)
+}
+
+fused_computation {
+  param_0.2 = f32[] parameter(0)
+  param_1 = f32[] parameter(1)
+  add.2 = f32[] add(param_0.2, param_1)
+  convert.13 = f16[] convert(add.2)
+  ROOT convert.12 = f32[] convert(convert.13)
+}
+
+triton_gemm_dot.7103.reduce_sub_computation.clone {
+  lhs.1 = f32[] parameter(0)
+  rhs.1 = f32[] parameter(1)
+  ROOT fusion = f32[] fusion(lhs.1, rhs.1), kind=kLoop, calls=fused_computation
+}
+
+fused_computation.1 {
+  param_0.5 = f16[16,1,8,4,128]{4,3,2,1,0} parameter(0)
+  convert.16 = f32[16,1,8,4,128]{4,3,2,1,0} convert(param_0.5)
+  constant.3 = f16[] constant(0)
+  convert.15 = f32[] convert(constant.3)
+  reduce.1 = f32[1,8,4,128]{3,2,1,0} reduce(convert.16, convert.15), dimensions={0}, to_apply=triton_gemm_dot.7103.reduce_sub_computation.clone
+  ROOT convert.14 = f16[1,8,4,128]{3,2,1,0} convert(reduce.1)
+}
+
+ENTRY entry_computation {
+  p0 = f16[1,8,4,1019]{3,2,1,0} parameter(0)
+  p1 = f16[1,1019,128]{2,1,0} parameter(1)
+  triton_gemm_dot.7103 = f16[16,1,8,4,128]{4,3,2,1,0} fusion(p0, p1), kind=kCustom, calls=triton_gemm_dot.7103_computation.clone, backend_config={"kind":"__triton_gemm","triton_gemm_config":{"block_m":"64","block_n":"32","block_k":"32","split_k":"16","num_stages":"1","num_warps":"4"}}
+  ROOT fusion.1 = f16[1,8,4,128]{3,2,1,0} fusion(triton_gemm_dot.7103), kind=kLoop, calls=fused_computation.1
+}
+)";
+
+  EXPECT_TRUE(RunAndCompareTwoModules(kHloTextRef, kHloTextSplitK,
+                                      ErrorSpec{/*aabs=*/4e-2, /*arel=*/2e-2},
                                       /*run_hlo_passes=*/false));
 }
 

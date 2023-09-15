@@ -473,6 +473,7 @@ cc_library(
     deps = [
         ":gemm_rewriter_triton",
         ":gpu_device_info",
+        ":hlo_traversal",
         ":ir_emission_utils",
         ":launch_dimensions",
         ":matmul_utils",
@@ -569,6 +570,7 @@ xla_test(
         "//xla/tests:verified_hlo_module",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:IR",
@@ -597,13 +599,14 @@ xla_test(
         "large",
         "no_oss",
         "nomac",
-        "notap",
         "requires-mem:16g",
     ],
     deps = [
         "//xla:error_spec",
+        "//xla:xla_proto_cc",
         "//xla/service/gpu/tests:gpu_codegen_test",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -629,8 +632,8 @@ xla_test(
         "//xla/stream_executor/cuda:cublas_plugin",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:tensor_float_32_hdr_lib",
     ],
 )
@@ -1475,6 +1478,7 @@ cc_library(
         ":autotuner_util",
         ":gpu_executable_run_options",
         ":ir_emission_utils",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -2993,8 +2997,11 @@ xla_cc_test(
     srcs = ["all_reduce_blueconnect_test.cc"],
     deps = [
         ":all_reduce_blueconnect",
+        "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_matchers",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
         "//xla/tests:test_utils",
         "@local_tsl//tsl/platform:status_matchers",
@@ -3112,12 +3119,13 @@ cc_library(
         "//xla/service:hlo_memory_scheduler",
         "//xla/service:hlo_pass_pipeline",
         "//xla/service:latency_hiding_scheduler",
-        "//xla/service:latency_hiding_scheduler_preparation",
+        "//xla/service:p2p_schedule_preparation",
         "//xla/service:profile_guided_latency_estimator",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:protobuf",
     ],
 )
@@ -4431,6 +4439,7 @@ xla_cc_test(
     name = "hlo_traversal_test",
     srcs = ["hlo_traversal_test.cc"],
     deps = [
+        ":gpu_fusible",
         ":hlo_traversal",
         "//xla/hlo/ir:hlo",
         "//xla/tests:hlo_test_base",

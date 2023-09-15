@@ -660,7 +660,6 @@ cc_library(
         ":dot_as_convolution_util",
         ":hlo_graph_dumper",
         ":hlo_pass",
-        ":pattern_matcher",
         "//xla:protobuf_util",
         "//xla:shape_util",
         "//xla:sharding_op_util",
@@ -673,6 +672,7 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:errors",
@@ -1234,28 +1234,25 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "latency_hiding_scheduler_preparation",
-    srcs = ["latency_hiding_scheduler_preparation.cc"],
-    hdrs = ["latency_hiding_scheduler_preparation.h"],
+    name = "p2p_schedule_preparation",
+    srcs = ["p2p_schedule_preparation.cc"],
+    hdrs = ["p2p_schedule_preparation.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":collective_ops_utils",
         ":hlo_pass",
+        "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:hlo_reachability",
-        "//xla/service/gpu:backend_configs_cc",
-        "//xla/service/graphcycles",
         "@com_google_absl//absl/log",
-        "@com_google_absl//absl/strings",
     ],
 )
 
 xla_cc_test(
-    name = "latency_hiding_scheduler_preparation_test",
-    srcs = ["latency_hiding_scheduler_preparation_test.cc"],
+    name = "p2p_schedule_preparation_test",
+    srcs = ["p2p_schedule_preparation_test.cc"],
     deps = [
         ":hlo_parser",
-        ":latency_hiding_scheduler_preparation",
+        ":p2p_schedule_preparation",
         "//xla:test",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_matchers",
@@ -1761,9 +1758,12 @@ xla_cc_test(
     name = "heap_simulator_test",
     srcs = ["heap_simulator_test.cc"],
     deps = [
+        ":async_op_canonicalizer",
         ":buffer_value",
         ":heap_simulator",
+        ":hlo_dce",
         ":hlo_ordering",
+        ":hlo_parser",
         ":hlo_value",
         ":tuple_points_to_analysis",
         "//xla:literal",
