@@ -12,27 +12,19 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_CORE_TPU_KERNELS_SPARSE_CORE_OPS_STATS_HANDLER_H_
-#define TENSORFLOW_CORE_TPU_KERNELS_SPARSE_CORE_OPS_STATS_HANDLER_H_
 
-#include <cstdint>
-#include <string>
+#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_
+#define TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_
 
-enum class StatsType {
-  NUM_MINIBATCHES_PER_SC,
-  MAX_IDS_PER_PARTITION,
-  MAX_UNIQUE_IDS_PER_PARTITION,
-  IDS_PER_PARTITION,
-  UNIQUE_IDS_PER_PARTITION,
-};
+#include "tensorflow/core/common_runtime/optimization_registry.h"
 
-class SparseCoreOpsStatsHandler {
+namespace tensorflow {
+
+class ReplicateConstantsPass : public GraphOptimizationPass {
  public:
-  virtual ~SparseCoreOpsStatsHandler() = default;
-  virtual void Record(
-      StatsType type, int64_t value, std::string device_name,
-      std::string table_name) { /* Default implementation does nothing */
-  }
+  Status Run(const GraphOptimizationPassOptions& options) override;
 };
 
-#endif  // TENSORFLOW_CORE_TPU_KERNELS_SPARSE_CORE_OPS_STATS_HANDLER_H_
+}  // namespace tensorflow
+
+#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_
