@@ -2422,6 +2422,20 @@ cc_library(
 )
 
 cc_library(
+    name = "gpu_all_gather_optimizer",
+    srcs = ["gpu_all_gather_optimizer.cc"],
+    hdrs = ["gpu_all_gather_optimizer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/service:collective_ops_utils",
+        "//xla/service:hlo_pass",
+        "//xla/service:reduce_scatter_utils",
+    ],
+)
+
+cc_library(
     name = "gpu_float_support",
     srcs = ["gpu_float_support.cc"],
     hdrs = ["gpu_float_support.h"],
@@ -2582,6 +2596,7 @@ cc_library(
         ":gpu_hlo_schedule",
         ":gpu_layout_assignment",
         ":gpu_reduce_scatter_creator",
+        ":gpu_all_gather_optimizer",
         ":gpu_sanitize_constant_names",
         ":gpu_scatter_expander",
         ":gpu_shape_verifier",
@@ -3335,8 +3350,10 @@ cc_library(
     deps = [
         ":gpu_device_info",
         ":hlo_op_profile_proto_cc",
+        "//xla:debug_options_flags",
         "//xla:literal",
         "//xla:shape_util",
+        "//xla:statusor",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/backends/profiler/gpu:cupti_collector",
@@ -3349,6 +3366,7 @@ cc_library(
         "//xla/service:interpreter_plugin",
         "//xla/tests:test_utils",
         "@com_google_absl//absl/time",
+        "@local_tsl//tsl/platform:errors",
     ],
 )
 
@@ -3372,15 +3390,18 @@ xla_cc_test(
         ":hlo_op_profile_proto_cc",
         ":hlo_op_profiler_lib",
         "//xla:debug_options_flags",
+        "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_runner",
         "//xla/service:platform_util",
+        "//xla/stream_executor:stream_executor_headers",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:platform_port",
-        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/util:command_line_flags",
     ],
 )
@@ -4000,6 +4021,7 @@ test_suite(
         "//xla/service/gpu/tests:gemm_broadcast_folding_rewrite_test",
         "//xla/service/gpu/tests:gemm_rewrite_test",
         "//xla/service/gpu/tests:gpu_alignment_test",
+        "//xla/service/gpu/tests:gpu_all_gather_optimizer_test",
         "//xla/service/gpu/tests:gpu_atomic_test",
         "//xla/service/gpu/tests:gpu_compilation_parallelism_test",
         "//xla/service/gpu/tests:gpu_convolution_regression_test",
