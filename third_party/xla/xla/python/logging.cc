@@ -13,15 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "Eigen/Core"  // from @eigen_archive
-#include "xla/service/gpu/runtime/topk_kernel.cu.h"
+#include "xla/python/logging.h"
 
-namespace xla::gpu {
+#include "absl/log/initialize.h"
 
-template void* GetTopKKernelForK<Eigen::bfloat16, 1>(int n);
-template void* GetTopKKernelForK<Eigen::bfloat16, 2>(int n);
-template void* GetTopKKernelForK<Eigen::bfloat16, 4>(int n);
-template void* GetTopKKernelForK<Eigen::bfloat16, 8>(int n);
-template void* GetTopKKernelForK<Eigen::bfloat16, 16>(int n);
+namespace xla {
 
-}  // namespace xla::gpu
+// TODO(phawkins): We can't import absl logging in the same file as TSL logging
+// because of conflicting definitions. We should fix this by using ABSL logging
+// everywhere.
+void InitializeAbslLogging() { absl::InitializeLog(); }
+
+}  // namespace xla

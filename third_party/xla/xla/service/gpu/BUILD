@@ -1,7 +1,21 @@
 # Description:
 #   GPU-specific components in XLA service implementation.
 
+load("//xla/tests:build_defs.bzl", "xla_test")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
+load("//xla:xla.bzl", "xla_cc_test")
+load(
+    "//xla/stream_executor:build_defs.bzl",
+    "if_gpu_is_configured",
+)
+load(
+    "@local_config_rocm//rocm:build_defs.bzl",
+    "if_rocm_hipblaslt",
+    "if_rocm_is_configured",
+)
+load("@local_tsl//tsl:tsl.bzl", "if_google", "if_nccl", "tsl_copts", "tsl_gpu_library")
+load("@local_tsl//tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
 load(
     "@local_tsl//tsl/platform:build_config.bzl",
     "tf_proto_library",
@@ -11,24 +25,10 @@ load(
     "if_static",
     "tf_cuda_tests_tags",
 )
-load("@local_tsl//tsl:tsl.bzl", "if_google", "if_nccl", "tsl_copts", "tsl_gpu_library")
-load(
-    "@local_config_rocm//rocm:build_defs.bzl",
-    "if_rocm_hipblaslt",
-    "if_rocm_is_configured",
-)
-load("//xla:xla.bzl", "xla_cc_test")
-load("//xla/tests:build_defs.bzl", "xla_test")
-load(
-    "//xla/stream_executor:build_defs.bzl",
-    "if_gpu_is_configured",
-)
 load(
     "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
     "if_cuda_is_configured",
 )
-load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
-load("@local_tsl//tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -183,7 +183,7 @@ xla_cc_test(
     srcs = if_gpu_is_configured(["gpu_copy_insertion_test.cc"]),
     tags = tf_cuda_tests_tags(),
     deps = if_gpu_is_configured([
-        ":gpu_compiler",
+        ":buffer_sharing",
         "//xla:test",
         "//xla/hlo/ir:hlo",
         "//xla/service:copy_insertion",
@@ -548,7 +548,7 @@ xla_test(
     backends = [
         "gpu",
     ],
-    shard_count = 10,
+    shard_count = 20,
     tags = ["nomac"],
     deps = [
         ":backend_configs_cc",
@@ -2422,20 +2422,6 @@ cc_library(
 )
 
 cc_library(
-    name = "gpu_all_gather_optimizer",
-    srcs = ["gpu_all_gather_optimizer.cc"],
-    hdrs = ["gpu_all_gather_optimizer.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/utils:hlo_query",
-        "//xla/service:collective_ops_utils",
-        "//xla/service:hlo_pass",
-        "//xla/service:reduce_scatter_utils",
-    ],
-)
-
-cc_library(
     name = "gpu_float_support",
     srcs = ["gpu_float_support.cc"],
     hdrs = ["gpu_float_support.h"],
@@ -2455,6 +2441,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":buffer_sharing",
         ":executable_proto_cc",
         ":fusion_wrapper",
         ":gpu_constants",
@@ -2576,6 +2563,7 @@ cc_library(
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
         ":autotuner_util",
+        ":buffer_sharing",
         ":compile_module_to_llvm_ir",
         ":conv_layout_normalization",
         ":copy_fusion",
@@ -2596,7 +2584,6 @@ cc_library(
         ":gpu_hlo_schedule",
         ":gpu_layout_assignment",
         ":gpu_reduce_scatter_creator",
-        ":gpu_all_gather_optimizer",
         ":gpu_sanitize_constant_names",
         ":gpu_scatter_expander",
         ":gpu_shape_verifier",
@@ -2816,6 +2803,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured([
         ":autotuner_util",
+        ":buffer_sharing",
         ":cublas_cudnn",
         ":cublas_pad_for_gemms",
         ":cublas_padding_requirements",
@@ -3458,6 +3446,21 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "buffer_sharing",
+    srcs = ["buffer_sharing.cc"],
+    hdrs = ["buffer_sharing.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":backend_configs_cc",
+        ":cublas_cudnn",
+        ":ir_emission_utils",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+cc_library(
     name = "gpu_fusible",
     srcs = ["gpu_fusible.cc"],
     hdrs = ["gpu_fusible.h"],
@@ -4021,7 +4024,6 @@ test_suite(
         "//xla/service/gpu/tests:gemm_broadcast_folding_rewrite_test",
         "//xla/service/gpu/tests:gemm_rewrite_test",
         "//xla/service/gpu/tests:gpu_alignment_test",
-        "//xla/service/gpu/tests:gpu_all_gather_optimizer_test",
         "//xla/service/gpu/tests:gpu_atomic_test",
         "//xla/service/gpu/tests:gpu_compilation_parallelism_test",
         "//xla/service/gpu/tests:gpu_convolution_regression_test",

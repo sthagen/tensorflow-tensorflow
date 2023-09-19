@@ -13,14 +13,4 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/runtime/topk_kernel.cu.h"
-
-namespace xla::gpu {
-
-template void* GetTopKKernelForK<float, 1>(int n);
-template void* GetTopKKernelForK<float, 2>(int n);
-template void* GetTopKKernelForK<float, 4>(int n);
-template void* GetTopKKernelForK<float, 8>(int n);
-template void* GetTopKKernelForK<float, 16>(int n);
-
-}  // namespace xla::gpu
+#include "xla/stream_executor/gpu/gpu_command_buffer.h"

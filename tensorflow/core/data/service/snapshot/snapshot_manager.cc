@@ -55,6 +55,7 @@ const absl::Duration kProgressLoggingInterval = absl::Minutes(1);
 absl::StatusOr<bool> SnapshotAssignmentManager::TryAddAssignment(
     absl::string_view snapshot_path, absl::string_view worker_address,
     int64_t stream_index) {
+  tsl::mutex_lock l(mu_);
   if (assignments_[worker_address].size() >=
       worker_max_concurrent_snapshots()) {
     return false;
@@ -72,6 +73,7 @@ absl::StatusOr<bool> SnapshotAssignmentManager::TryAddAssignment(
 void SnapshotAssignmentManager::RemoveAssignment(
     absl::string_view snapshot_path, absl::string_view worker_address,
     int64_t stream_index) {
+  tsl::mutex_lock l(mu_);
   assignments_[worker_address].erase(
       {std::string(snapshot_path), stream_index});
 }
@@ -79,10 +81,10 @@ void SnapshotAssignmentManager::RemoveAssignment(
 absl::StatusOr<std::unique_ptr<SnapshotManager>> SnapshotManager::Start(
     const SnapshotRequest& request,
     SnapshotAssignmentManager& assignment_manager, Env* env) {
-  SnapshotManager* snapshot_manager =
-      new SnapshotManager(request.path(), assignment_manager, env);
+  std::unique_ptr<SnapshotManager> snapshot_manager{
+      new SnapshotManager{request.path(), assignment_manager, env}};
   TF_RETURN_IF_ERROR(snapshot_manager->Start(request));
-  return absl::WrapUnique(snapshot_manager);
+  return snapshot_manager;
 }
 
 absl::Status SnapshotManager::Start(const SnapshotRequest& request)

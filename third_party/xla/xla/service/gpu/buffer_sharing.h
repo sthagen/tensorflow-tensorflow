@@ -13,30 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_GPU_ALL_GATHER_OPTIMIZER_H_
-#define XLA_SERVICE_GPU_GPU_ALL_GATHER_OPTIMIZER_H_
+#ifndef XLA_SERVICE_GPU_BUFFER_SHARING_H_
+#define XLA_SERVICE_GPU_BUFFER_SHARING_H_
 
-#include "xla/service/hlo_pass_interface.h"
+#include <optional>
+
+#include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/shape_util.h"
 
 namespace xla {
 namespace gpu {
+std::optional<bool> FusionCanShareBufferHint(const HloInstruction* user,
+                                             const HloInstruction* operand,
+                                             const ShapeIndex& user_index);
 
-// Transforms binary_op(all-gather(reduce_scatter(a)),
-// all-gather(reduce_scatter(b))) to allgather(binary_op(reduce_scatter(a),
-// reduce_scatter(b)))
-
-class AllGatherOptimizer : public HloModulePass {
- public:
-  AllGatherOptimizer() = default;
-  absl::string_view name() const override { return "all-gather-optimizer"; }
-
-  using HloPassInterface::Run;
-  StatusOr<bool> Run(
-      HloModule* module,
-      const absl::flat_hash_set<absl::string_view>& execution_threads) override;
-};
-
+std::optional<bool> CanShareBufferHint(const HloInstruction* user,
+                                       const HloInstruction* operand,
+                                       const ShapeIndex& user_index);
 }  // namespace gpu
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_GPU_ALL_GATHER_OPTIMIZER_H_
+#endif  // XLA_SERVICE_GPU_BUFFER_SHARING_H_
