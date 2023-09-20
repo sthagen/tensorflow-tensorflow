@@ -1,5 +1,5 @@
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -141,5 +141,28 @@ tf_cc_test(
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/lib/monitoring:test_utils",
         "@local_xla//xla/client:client_library",
+    ],
+)
+
+cc_library(
+    name = "cluster_tf",
+    srcs = ["cluster_tf.cc"],
+    hdrs = ["cluster_tf.h"],
+    deps = [
+        "//tensorflow/core:lib_proto_parsing",
+        "//tensorflow/core/platform:status",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:status",
+    ],
+)
+
+tf_cc_test(
+    name = "cluster_tf_test",
+    srcs = ["cluster_tf_test.cc"],
+    deps = [
+        ":cluster_tf",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/lib/core:status_test_util",
     ],
 )

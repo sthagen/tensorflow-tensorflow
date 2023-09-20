@@ -6,7 +6,7 @@
 
 load("//xla:xla.bzl", "xla_cc_test")
 load("//xla/stream_executor:build_defs.bzl", "stream_executor_friends")
-load("@local_tsl//tsl:tsl.bzl", "set_external_visibility", "transitive_hdrs", "tsl_gpu_library")
+load("@local_tsl//tsl:tsl.bzl", "set_external_visibility", "transitive_hdrs")
 load("@local_tsl//tsl:tsl.default.bzl", "filegroup")
 load("@local_tsl//tsl/platform:build_config.bzl", "tf_proto_library")
 load("@local_tsl//tsl/platform:build_config_root.bzl", "if_static")
@@ -387,8 +387,8 @@ cc_library(
         ":kernel_cache_config",
         ":kernel_spec",
         ":launch_dim",
+        ":module_spec",
         ":plugin_registry",
-        ":stream_executor_headers",
         "//xla/stream_executor/platform",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
@@ -433,7 +433,7 @@ cc_library(
 )
 
 # It implements :stream_executor_pimpl_header
-tsl_gpu_library(
+cc_library(
     name = "stream_executor_pimpl",
     srcs = [
         "stream.cc",
@@ -617,62 +617,14 @@ cc_library(
 
 cc_library(
     name = "event",
-    srcs = [
-        "blas.h",
-        "device_description.h",
-        "device_options.h",
-        "event.cc",
-        "fft.h",
-        "kernel_cache_config.h",
-        "launch_dim.h",
-        "plugin.h",
-        "plugin_registry.h",
-        "stream_executor_pimpl.h",
-        "temporary_device_memory.h",
-        "temporary_memory_manager.h",
-        "trace_listener.h",
-    ],
-    hdrs = [
-        "device_memory.h",
-        "event.h",
-        "kernel.h",
-        "kernel_spec.h",
-        "platform.h",
-        "stream.h",
-        "stream_executor_internal.h",
-    ],
+    srcs = ["event.cc"],
+    hdrs = ["event.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":allocator_stats",
-        ":blas",
-        ":data_type",
-        ":device_description",
-        ":device_description_proto_cc",
-        ":device_memory",
-        ":device_options",
-        ":fft",
-        ":kernel_cache_config",
-        ":kernel_spec",
-        ":launch_dim",
-        ":platform",
-        ":plugin",
-        ":stream_executor_headers",
+        ":stream_executor_internal",
+        ":stream_executor_pimpl_header",
         "//xla/stream_executor/platform",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/types:optional",
-        "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/protobuf:dnn_proto_cc",
     ],
 )
 

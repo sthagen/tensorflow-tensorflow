@@ -13,18 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_
-#define TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_
+#include "tensorflow/compiler/mlir/tf2xla/api/v1/cluster_tf.h"
 
-#include "tensorflow/core/common_runtime/optimization_registry.h"
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "tensorflow/core/platform/status.h"
+#include "tsl/platform/status.h"
 
 namespace tensorflow {
+namespace tf2xla {
+namespace v1 {
 
-class ReplicateConstantsPass : public GraphOptimizationPass {
- public:
-  Status Run(const GraphOptimizationPassOptions& options) override;
-};
+using mlir::ModuleOp;
 
+tensorflow::Status RunSessionTf2xlaClusteringBridge(ModuleOp module) {
+  return tsl::OkStatus();
+}
+
+}  // namespace v1
+}  // namespace tf2xla
 }  // namespace tensorflow
-
-#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_REPLICATE_CONSTANTS_PASS_H_

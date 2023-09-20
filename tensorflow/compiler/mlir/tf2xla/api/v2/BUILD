@@ -31,7 +31,7 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow/transforms:set_tpu_infeed_layout",
         "//tensorflow/compiler/mlir/tensorflow/transforms:tensorflow_passes",
         "//tensorflow/compiler/mlir/tf2xla:compile_mlir_util",
-        "//tensorflow/compiler/mlir/tf2xla/api/v0:compile_tf_graph",
+        "//tensorflow/compiler/mlir/tf2xla/api/v1:compile_tf_graph",
         "//tensorflow/compiler/mlir/tf2xla/internal:legalize_tf_mlir",
         "//tensorflow/compiler/mlir/tf2xla/internal:legalize_tf_to_hlo",
         "//tensorflow/compiler/tf2xla:layout_util",
@@ -88,4 +88,28 @@ tf_proto_library(
     name = "device_type_proto",
     srcs = ["device_type.proto"],
     cc_api_version = 2,
+)
+
+cc_library(
+    name = "cluster_tf",
+    srcs = ["cluster_tf.cc"],
+    hdrs = ["cluster_tf.h"],
+    deps = [
+        ":device_type_proto_cc",
+        "//tensorflow/core:lib_proto_parsing",
+        "//tensorflow/core/platform:status",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:status",
+    ],
+)
+
+tf_cc_test(
+    name = "cluster_tf_test",
+    srcs = ["cluster_tf_test.cc"],
+    deps = [
+        ":cluster_tf",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/lib/core:status_test_util",
+    ],
 )

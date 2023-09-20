@@ -4621,6 +4621,8 @@ cc_library(
     deps = [
         "//xla:statusor",
         "//xla:types",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -4691,6 +4693,7 @@ xla_cc_test(
         ":instruction_hoister",
         ":memory_space_assignment",
         ":memory_space_assignment_proto_cc",
+        ":memory_space_assignment_repacking",
         "//xla:shape_util",
         "//xla:status",
         "//xla:util",
@@ -6493,6 +6496,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/stream_executor:device_memory",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/strings",

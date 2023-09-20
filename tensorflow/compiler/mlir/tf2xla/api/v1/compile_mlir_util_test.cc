@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/compiler/mlir/tf2xla/api/v0/compile_mlir_util.h"
+#include "tensorflow/compiler/mlir/tf2xla/api/v1/compile_mlir_util.h"
 
 #include <string>
 #include <vector>
@@ -70,7 +70,7 @@ TEST(LegalizeMlirTest, FailsLegalizesModule) {
     }
   })";
   CellReader<int64_t> count(
-      "/tensorflow/core/tf2xla/v0/mlir_failed_xla_legalize_tf_pass_count");
+      "/tensorflow/core/tf2xla/v1/mlir_failed_xla_legalize_tf_pass_count");
 
   std::vector<tensorflow::TensorShape> arg_shapes;
   XlaCompilationResult compilation_result;
