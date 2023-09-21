@@ -673,6 +673,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
         "//xla/service:dump",
         "//xla/service:executable",
         "//xla/service:float_normalization",
@@ -710,7 +711,9 @@ xla_test(
         ":gemm_rewriter_triton",
         ":triton_autotuner",
         "//xla:autotuning_proto_cc",
+        "//xla:error_spec",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_pass_pipeline",
@@ -721,10 +724,15 @@ xla_test(
         "//xla/tests:test_utils",
         "//xla/tests:verified_hlo_module",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:platform_port",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -2661,7 +2669,6 @@ cc_library(
         "//xla/service:convolution_pred_expander",
         "//xla/service:copy_insertion",
         "//xla/service:dot_decomposer",
-        "//xla/service:dot_dimension_merger",
         "//xla/service:dot_merger",
         "//xla/service:dump",
         "//xla/service:dynamic_dimension_simplifier",
@@ -2774,6 +2781,8 @@ xla_cc_test(
     deps = [
         "//xla/hlo/utils:hlo_matchers",
         "//xla/service:gpu_plugin",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
     ],
@@ -2845,6 +2854,7 @@ cc_library(
         "//xla/service:convert_mover",
         "//xla/service:dump",
         "//xla/hlo/ir:hlo",
+        "//xla/service:dot_dimension_merger",
         "//xla/service:float_normalization",
         "//xla/service:float_support",
         "//xla/service:hlo_constant_folding",
@@ -2882,21 +2892,23 @@ xla_cc_test(
     srcs = if_gpu_is_configured([
         "nvptx_compiler_test.cc",
     ]),
-    tags = tf_cuda_tests_tags() + [
-        "no_rocm",
-        "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false
-        # positives in msan.
+    tags = [
+        "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
+        "requires-gpu-sm70",
     ],
     deps = [
         ":nvptx_compiler_impl",
-        "//xla:status_macros",
+        "//xla:statusor",
         "//xla:util",
         "//xla/hlo/ir:hlo",
+        "//xla/service:backend",
         "//xla/service:buffer_assignment",
         "//xla/service:gpu_plugin",
-        "//xla/service:hlo_parser",
         "//xla/tests:hlo_test_base",
-        "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -3003,7 +3015,6 @@ xla_cc_test(
         ":all_reduce_blueconnect",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/utils:hlo_matchers",
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
@@ -4304,7 +4315,9 @@ xla_cc_test(
     srcs = ["scatter_slice_simplifier_test.cc"],
     deps = [
         ":scatter_slice_simplifier",
-        "//xla/hlo/utils:hlo_matchers",
+        "//xla:shape_util",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
     ],
