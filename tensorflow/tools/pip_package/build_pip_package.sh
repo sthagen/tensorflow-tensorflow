@@ -210,6 +210,23 @@ function prepare_src() {
     cp -L \
       bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/org_tensorflow/LICENSE \
       "${TMPDIR}"
+    # Check if it is a tpu build
+    if [[ ${TPU_BUILD} == "1" ]]; then
+      # Check if libtpu.so exists
+      if [[ -f "./tensorflow/lib/libtpu.so" ]]; then
+        if [[ ! -L "${RUNFILES}/tensorflow/lib/libtpu.so" ]]; then
+          mkdir "$(real_path ${RUNFILES}/tensorflow/lib)"
+          ln -s $(real_path ./tensorflow/lib/libtpu.so) $(real_path ${RUNFILES}/tensorflow/lib/libtpu.so)
+          echo "Created symlink: $(real_path ./tensorflow/lib/libtpu.so) -> \
+            $(real_path ${RUNFILES}/tensorflow/lib/libtpu.so)"
+        else
+          echo "Symlink already exists: ${RUNFILES}/tensorflow/lib/libtpu.so"
+        fi
+      else
+        echo "Libtpu.so is not found in $(real_path ./tensorflow/lib/)"
+        exit 1
+      fi
+    fi
     cp -LR \
       bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/org_tensorflow/tensorflow \
       "${TMPDIR}"
@@ -259,8 +276,13 @@ function prepare_src() {
   # We copy from bazel-bin/tensorflow instead of bazel-bin/internal to copy
   # headers from TSL/XLA into tensorflow so that InstallHeaders can move
   # them back into tensorflow/include
-  cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/local_tsl/tsl/ ${TMPDIR}/tensorflow
-  cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/local_xla/xla/ ${TMPDIR}/tensorflow/compiler
+  if is_windows; then
+    cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.exe.runfiles/local_tsl/tsl/ ${TMPDIR}/tensorflow
+    cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.exe.runfiles/local_xla/xla/ ${TMPDIR}/tensorflow/compiler
+  else
+    cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/local_tsl/tsl/ ${TMPDIR}/tensorflow
+    cp -RLn bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/local_xla/xla/ ${TMPDIR}/tensorflow/compiler
+  fi
   # Fix the proto stubs
   if is_macos; then
     find ${TMPDIR}/tensorflow/ -name "*.py" -type f -exec sed -i '' 's/from tsl\./from tensorflow.tsl./' {} \;

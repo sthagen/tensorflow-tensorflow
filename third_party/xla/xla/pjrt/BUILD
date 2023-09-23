@@ -169,6 +169,7 @@ cc_library(
     hdrs = ["pjrt_client.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":pjrt_common",
         ":pjrt_compiler",
         ":pjrt_device_description",
         ":pjrt_executable",
@@ -182,13 +183,19 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/client:xla_computation",
         "//xla/hlo/ir:hlo",
+        "//xla/service:computation_placer_hdr",
         "//xla/service:hlo_cost_analysis",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/framework:allocator",
@@ -373,6 +380,20 @@ cc_library(
 )
 
 cc_library(
+    name = "stream_executor_unloaded_executable",
+    srcs = ["stream_executor_unloaded_executable.cc"],
+    hdrs = ["stream_executor_unloaded_executable.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pjrt_executable",
+        "//xla:statusor",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:compiler",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_library(
     name = "pjrt_stream_executor_client",
     srcs = ["pjrt_stream_executor_client.cc"],
     hdrs = ["pjrt_stream_executor_client.h"],
@@ -383,6 +404,7 @@ cc_library(
         ":metrics",
         ":mlir_to_hlo",
         ":pjrt_client",
+        ":pjrt_executable",
         ":pjrt_future",
         ":tracked_device_buffer",
         ":transpose",
@@ -417,6 +439,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",

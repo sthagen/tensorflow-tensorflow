@@ -1977,7 +1977,7 @@ tf_cuda_library(
         ":threadpool_device_factory",
     ] + if_zendnn([":zen_layout_pass"]) + if_macos(
         [],
-        [":replicate_constants_pass"],
+        [":replicate_constants_pass"],  # TODO(b/301469885): Remove.
     ),
 )
 
@@ -2342,7 +2342,6 @@ tf_cc_tests(
         "optimization_registry_test.cc",
         "pending_counts_test.cc",
         "placer_inspection_required_ops_utils_test.cc",
-        "replicate_constants_pass_test.cc",
         "session_test.cc",
         "threadpool_device_test.cc",
     ],
@@ -2383,6 +2382,48 @@ tf_cc_tests(
         "@com_google_absl//absl/strings",
         "@eigen_archive//:eigen3",
     ],
+)
+
+tf_cc_tests(
+    name = "replicate_constants_pass_test",
+    size = "small",
+    srcs = [
+        "replicate_constants_pass_test.cc",
+    ],
+    deps = [
+        ":core",
+        ":core_cpu",
+        ":core_cpu_internal",
+        ":direct_session_internal",
+        ":pending_counts",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
+        "//tensorflow/cc:function_ops",
+        "//tensorflow/cc:ops",
+        "//tensorflow/cc:scope",
+        "//tensorflow/cc:sendrecv_ops",
+        "//tensorflow/cc:while_loop",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:ops",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/config:flag_defs",
+        "//tensorflow/core/kernels:ops_util",
+        "//tensorflow/core/nccl:collective_communicator",
+        "//tensorflow/core/platform:regexp",
+        "//tensorflow/core/util:protos_test_cc",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@eigen_archive//:eigen3",
+    ] + if_macos([
+        ":replicate_constants_pass",  # TODO(b/301469885): Remove.
+    ]),
 )
 
 tf_cc_tests(
