@@ -5274,6 +5274,7 @@ cc_library(
         "//xla/service/gpu:backend_configs_cc",
         "//xla/service/gpu:cublas_cudnn",
         "//xla/stream_executor",
+        "//xla/stream_executor:dnn",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
@@ -6967,11 +6968,13 @@ xla_cc_binary(
         "//xla/service:cpu_plugin",
         "//xla/service/cpu:cpu_compiler",
         "//xla/service/cpu:cpu_executable",
+        "//xla/tools:hlo_module_loader",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:platform_port",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/util:command_line_flags",
@@ -7007,6 +7010,13 @@ xla_aot_compile_gpu(
     autotune_results = "xla_aot_compile_test_autotune_results.prototxt",
     gpu_target_config = "xla_aot_compile_test_gpu_target_config.prototxt",
     module = "xla_aot_compile_test.mlir",
+)
+
+xla_aot_compile_gpu(
+    name = "xla_aot_compile_test_gpu_executable_hlo",
+    autotune_results = "xla_aot_compile_test_autotune_results.prototxt",
+    gpu_target_config = "xla_aot_compile_test_gpu_target_config.prototxt",
+    module = "xla_aot_compile_test.hlo",
 )
 
 xla_aot_compile_gpu(
@@ -7091,6 +7101,7 @@ xla_cc_test(
     srcs = if_cuda_is_configured(["xla_aot_compile_gpu_test.cc"]),
     data = if_cuda_is_configured([
         ":xla_aot_compile_test_gpu_executable",
+        ":xla_aot_compile_test_gpu_executable_hlo",
         ":xla_aot_compile_test_gpu_executable_constant",
         ":xla_aot_compile_test_gpu_executable_gemm",
         ":xla_aot_compile_test_gpu_executable_gemm_runtime_autotuning",
