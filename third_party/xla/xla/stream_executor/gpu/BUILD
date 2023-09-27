@@ -90,8 +90,13 @@ cc_library(
     deps = [
         ":gpu_driver_header",
         ":gpu_executor_header",
+        ":gpu_kernel_header",
         ":gpu_stream",
+        ":gpu_types_header",
         "//xla/stream_executor:stream_executor_headers",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -104,7 +109,7 @@ cc_library(
     deps = if_gpu_is_configured([
         ":gpu_driver_header",
         ":gpu_stream_header",
-        "//xla/stream_executor:event",
+        "//xla/stream_executor:stream_executor_headers",
         "@local_tsl//tsl/platform:status",
     ]),
 )
@@ -130,10 +135,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":gpu_kernel_header",
-        "//xla/stream_executor:event",
         "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream_executor_headers",
         "//xla/stream_executor:stream_executor_internal",
-        "//xla/stream_executor:stream_executor_pimpl_header",
         "//xla/stream_executor/platform",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -195,9 +199,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":gpu_driver_header",
-        "//xla/stream_executor:event",
-        "//xla/stream_executor:stream_executor_internal",
-        "//xla/stream_executor:stream_executor_pimpl_header",
+        "//xla/stream_executor:stream_executor_headers",
         "//xla/stream_executor/platform",
         "@local_tsl//tsl/platform:logging",
     ],
@@ -209,7 +211,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":gpu_types_header",
-        "//xla/stream_executor:stream_executor_internal",
+        "//xla/stream_executor:stream_executor_headers",
         "@com_google_absl//absl/base:core_headers",
     ],
 )
@@ -234,7 +236,7 @@ cc_library(
     deps = [
         ":gpu_driver_header",
         ":gpu_executor_header",
-        "//xla/stream_executor:stream_executor_internal",
+        "//xla/stream_executor:stream_executor_headers",
     ],
 )
 
