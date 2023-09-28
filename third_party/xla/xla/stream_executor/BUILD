@@ -66,6 +66,7 @@ filegroup(
         "platform.h",
         "plugin.h",
         "plugin_registry.h",
+        "scratch_allocator.h",
         "stream.h",
         "stream_executor.h",
         "stream_executor_internal.h",
@@ -131,6 +132,23 @@ cc_library(
     hdrs = ["device_memory.h"],
     visibility = ["//visibility:public"],
     deps = ["//xla/stream_executor/platform"],
+)
+
+cc_library(
+    name = "device_memory_allocator",
+    hdrs = ["device_memory_allocator.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":device_memory",
+        ":platform",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:types",
+    ],
 )
 
 cc_library(
@@ -217,6 +235,7 @@ cc_library(
         "//xla/stream_executor/platform",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -253,9 +272,12 @@ cc_library(
     hdrs = ["command_buffer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":stream_executor_headers",
         ":stream_executor_internal",
         "//xla/stream_executor/platform",
         "@com_google_absl//absl/status:statusor",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -329,6 +351,55 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "scratch_allocator",
+    srcs = ["scratch_allocator.cc"],
+    hdrs = ["scratch_allocator.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stream_executor_headers",
+        ":temporary_device_memory",
+        "//xla/stream_executor/platform",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:check",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "temporary_device_memory",
+    srcs = ["temporary_device_memory.cc"],
+    hdrs = ["temporary_device_memory.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stream_executor_headers",
+        "//xla/stream_executor/platform",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "temporary_memory_manager",
+    srcs = ["temporary_memory_manager.cc"],
+    hdrs = ["temporary_memory_manager.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stream_executor_headers",
+        ":temporary_device_memory",
+        "//xla/stream_executor/platform",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
 #===--------------------------------------------------------------------------------------------===#
 
 # The stream_executor_headers target does not prescribe an implementation.
@@ -350,6 +421,7 @@ cc_library(
         "kernel.h",
         "kernel_cache_config.h",
         "kernel_spec.h",
+        "scratch_allocator.h",
         "data_type.h",
         "launch_dim.h",
         "numeric_options.h",
@@ -521,6 +593,7 @@ cc_library(
         ":launch_dim",
         ":platform",
         ":plugin_registry",
+        ":scratch_allocator",
         ":stream_executor_headers",
         ":stream_executor_internal",
         ":temporary_device_memory",
@@ -611,46 +684,6 @@ cc_library(
 )
 
 cc_library(
-    name = "temporary_memory_manager",
-    srcs = ["temporary_memory_manager.cc"],
-    hdrs = ["temporary_memory_manager.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":device_memory",
-        ":stream_executor_headers",
-        ":temporary_device_memory",
-        "//xla/stream_executor/platform",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-    ],
-)
-
-cc_library(
-    name = "temporary_device_memory",
-    srcs = [
-        "event.h",
-        "temporary_device_memory.cc",
-        "temporary_memory_manager.h",
-    ],
-    hdrs = ["temporary_device_memory.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":device_memory",
-        ":stream_executor_headers",
-        "//xla/stream_executor/platform",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-    ],
-)
-
-cc_library(
     name = "stream_executor",
     textual_hdrs = [
         "allocator_stats.h",
@@ -671,6 +704,7 @@ cc_library(
         "launch_dim.h",
         "module_spec.h",
         "multi_platform_manager.h",
+        "scratch_allocator.h",
         "platform.h",
         "plugin.h",
         "plugin_registry.h",
@@ -712,43 +746,13 @@ cc_library(
         ":launch_dim",
         ":multi_platform_manager",
         ":platform",
+        ":scratch_allocator",
         ":stream_executor_headers",
         ":stream_executor_pimpl",
+        ":temporary_device_memory",
+        ":temporary_memory_manager",
         "//xla/stream_executor:dnn_proto_cc_impl",
         "@local_tsl//tsl/protobuf:dnn_proto_cc_impl",
-    ],
-)
-
-cc_library(
-    name = "device_memory_allocator",
-    hdrs = ["device_memory_allocator.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":device_memory",
-        ":platform",
-        ":stream_executor",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:types",
-    ],
-)
-
-cc_library(
-    name = "scratch_allocator",
-    srcs = ["scratch_allocator.cc"],
-    hdrs = ["scratch_allocator.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":device_memory",
-        ":stream_executor_headers",
-        "//xla/stream_executor/platform",
-        "@com_google_absl//absl/container:inlined_vector",
-        "@com_google_absl//absl/log:check",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
