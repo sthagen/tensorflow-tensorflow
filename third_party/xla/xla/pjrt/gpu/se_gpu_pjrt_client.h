@@ -32,6 +32,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/pjrt_stream_executor_client.h"
 #include "xla/statusor.h"
+#include "tsl/platform/fingerprint.h"
 
 namespace stream_executor {
 
@@ -169,7 +170,7 @@ class StreamExecutorGpuClient : public xla::PjRtStreamExecutorClient {
             std::move(allocator), std::move(host_memory_allocator),
             should_stage_host_to_device_transfers, std::move(gpu_run_options)),
         topology_(xla::StreamExecutorGpuTopologyDescription::Create(
-            xla::GpuId(), std::move(platform_name),
+            tsl::Fingerprint64(platform_name), platform_name,
             devices_.back()->device_kind(), devices_)) {}
 
   xla::StatusOr<xla::DeviceAssignment> GetDefaultDeviceAssignment(
@@ -190,24 +191,13 @@ class StreamExecutorGpuClient : public xla::PjRtStreamExecutorClient {
     return &topology_;
   }
 
-  // TODO(b/285385306): Enable loading a non-loaded PjRtExecutable.
   StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Load(
       std::unique_ptr<PjRtExecutable> executable,
-      const LoadOptions& load_options) override {
-    return absl::WrapUnique<PjRtLoadedExecutable>(
-        tensorflow::down_cast<PjRtLoadedExecutable*>(executable.release()));
-  }
+      const LoadOptions& load_options) override;
 
-  // TODO(b/296466237): Unify `Load` method after (de)serialization and tests on
-  // existing use cases are done.
-  StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Load(
-      std::unique_ptr<PjRtExecutable> executable);
-
-  // TODO(b/296466237): Unify `LoadSerializedExecutable` after fixing existing
-  // tests.
-  StatusOr<std::unique_ptr<PjRtLoadedExecutable>> LoadSerialized(
+  StatusOr<std::unique_ptr<PjRtLoadedExecutable>> LoadSerializedExecutable(
       absl::string_view serialized, std::optional<CompileOptions> options,
-      const LoadOptions& load_options);
+      const LoadOptions& load_options) override;
 
  private:
   xla::StreamExecutorGpuTopologyDescription topology_;
