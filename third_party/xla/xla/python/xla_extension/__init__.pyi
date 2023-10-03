@@ -277,6 +277,8 @@ class DebugOptions:
   xla_gpu_enable_async_collective_permute: bool
   xla_gpu_enable_async_all_to_all: bool
   xla_gpu_enable_async_reduce_scatter: bool
+  xla_detailed_logging: bool
+  xla_enable_dumping: bool
 
 class CompiledMemoryStats:
   generated_code_size_in_bytes: int
@@ -475,7 +477,8 @@ def get_gpu_client(
     distributed_client: Optional[DistributedRuntimeClient] = ...,
     node_id: int = ...,
     allowed_devices: Optional[Any] = ...,
-    platform_name: Optional[str] = ...) -> Client:...
+    platform_name: Optional[str] = ...,
+    mock:Optional[bool]=...) -> Client:...
 def get_mock_gpu_client(
     asynchronous: bool = ...,
     allocator_config: GpuAllocatorConfig = ...,

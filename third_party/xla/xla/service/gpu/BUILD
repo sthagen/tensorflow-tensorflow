@@ -2373,8 +2373,8 @@ cc_library(
     deps = [
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",
+        "//xla/service:collective_opt_utils",
         "//xla/service:hlo_pass",
-        "//xla/service:reduce_scatter_utils",
     ],
 )
 
@@ -4195,6 +4195,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@local_tsl//tsl/lib/monitoring:counter",
+        "@local_tsl//tsl/lib/monitoring:gauge",
         "@local_tsl//tsl/lib/monitoring:sampler",
     ],
 )

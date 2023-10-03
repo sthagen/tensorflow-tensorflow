@@ -100,12 +100,13 @@ filegroup(
 )
 
 cc_library(
-    name = "reduce_scatter_utils",
-    srcs = ["reduce_scatter_utils.cc"],
-    hdrs = ["reduce_scatter_utils.h"],
+    name = "collective_opt_utils",
+    srcs = ["collective_opt_utils.cc"],
+    hdrs = ["collective_opt_utils.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/algorithm:container",
     ],
 )
 
@@ -661,6 +662,7 @@ cc_library(
         ":hlo_graph_dumper",
         ":hlo_pass",
         "//xla:protobuf_util",
+        "//xla:shape_tree",
         "//xla:shape_util",
         "//xla:sharding_op_util",
         "//xla:status_macros",
