@@ -19,6 +19,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/tf2xla/mlir_bridge_rollout_policy.h"
 #include "absl/base/call_once.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_structs.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/bridge.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/device_util.h"
@@ -108,6 +110,17 @@ bool HasQualifiedNonTPUOp(const Graph& graph) {
     }
   }
   return false;
+}
+
+bool HasTPUPartitionedCallOpInModule(mlir::ModuleOp module) {
+  bool has_tpu_partitioned_call = false;
+  for (auto func_op : module.getOps<mlir::func::FuncOp>()) {
+    func_op->walk([&](mlir::TF::TPUPartitionedCallOp op) {
+      has_tpu_partitioned_call = true;
+    });
+    if (has_tpu_partitioned_call) break;
+  }
+  return has_tpu_partitioned_call;
 }
 
 }  // namespace
@@ -230,6 +243,16 @@ Status MlirBridgePass::Run(const std::string& function_name,
     return OkStatus();
   }
 
+  // 1) If the MLIR module contains a TPUPartitionedCall, we skip here
+  // 2) When TPUPartitionedCall starts executing, it calls MLIR bridge as a
+  // part of PRE_PLACEMENT optimization
+  // 3) This MLIR bridge version is V1 Compat.
+  if (HasTPUPartitionedCallOpInModule(module)) {
+    VLOG(1) << "Skipping MLIR TF2XLA Bridge. This is an inference graph, V1 "
+               "Compat should be used during execution of TPUPartitionedCall.";
+    return OkStatus();
+  }
+
   // TODO(b/241853328): Add caching of pass state and call logging/metrics
   // related to graph analysis from here.
   auto pass_state =
@@ -320,6 +343,17 @@ Status MlirBridgeV1CompatPass::Run(const GraphOptimizationPassOptions& options,
   if (!HasTPUDevicesAndOps(module)) {
     VLOG(1) << "Skipping MLIR TPU Bridge V1 Compat, no TPU devices or TPU ops "
                "found";
+    return OkStatus();
+  }
+
+  // 1) If the MLIR module contains a TPUPartitionedCall, we skip here
+  // 2) When TPUPartitionedCall starts executing, it calls MLIR bridge as a
+  // part of PRE_PLACEMENT optimization
+  // 3) This MLIR bridge version is V1 Compat
+  if (HasTPUPartitionedCallOpInModule(module)) {
+    VLOG(1)
+        << "Skipping MLIR TPU Bridge V1 Compat. This is an inference graph, V1 "
+           "Compat should be used during execution of TPUPartitionedCall.";
     return OkStatus();
   }
 
