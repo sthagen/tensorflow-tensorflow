@@ -1151,13 +1151,15 @@ StatusOr<std::unique_ptr<StrategyVector>> CreateAllStrategiesVector(
                             call_graph);
     // Split 2 dims
     if (cluster_env.IsDeviceMesh2D()) {
-      // NOTE(zhuohan): In full alpa, we only include 2D partition strategy
-      //                for operators with batch dimension. We didn't include
-      //                this logic here since this pass might be used for
-      //                more general cases.
       EnumerateAllPartition(ins, shape, cluster_env.device_mesh_, cluster_env,
                             strategy_map, strategies, batch_dim_map,
                             only_allow_divisible, call_graph, /*partitions*/ 2);
+    }
+    // Split 3 dims
+    if (cluster_env.IsDeviceMesh3D()) {
+      EnumerateAllPartition(ins, shape, cluster_env.device_mesh_, cluster_env,
+                            strategy_map, strategies, batch_dim_map,
+                            only_allow_divisible, call_graph, /*partitions*/ 3);
     }
 
     if (solver_option.allow_mixed_mesh_shape && cluster_env.IsDeviceMesh2D()) {
@@ -1396,19 +1398,30 @@ void CheckMemoryCosts(StrategyVector* strategies, const Shape& shape) {
 }
 
 void RemoveInvalidShardingsWithShapes(const Shape& shape,
-                                      StrategyVector* strategies) {
+                                      StrategyVector* strategies,
+                                      bool instruction_has_user_sharding) {
   if (strategies->is_tuple) {
     for (size_t i = 0; i < strategies->childs.size(); i++) {
       RemoveInvalidShardingsWithShapes(shape.tuple_shapes().at(i),
-                                       strategies->childs[i].get());
+                                       strategies->childs[i].get(),
+                                       instruction_has_user_sharding);
     }
   } else {
+    if (instruction_has_user_sharding && strategies->leaf_vector.size() == 1) {
+      // If an instruction has a specified user sharding, and there is only a
+      // single strategy, removing that strategy would mean we won't have any
+      // strategy for that instruction. Further, given that the user has
+      // specified this sharding strategy, we should respect it, and hence not
+      // remove it anyway.
+      return;
+    }
     std::vector<ShardingStrategy> new_vector;
     for (const auto& strategy : strategies->leaf_vector) {
       if (strategy.output_sharding.IsReplicated()) {
         new_vector.push_back(strategy);
         continue;
       }
+
       const auto& tile_assignment = strategy.output_sharding.tile_assignment();
       bool is_strategy_valid = true;
       for (int64_t i = 0; i < shape.rank(); ++i) {
@@ -1770,6 +1783,12 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                       strategy_map, batch_dim_map, strategies,
                                       only_allow_divisible, /*partitions*/ 2);
           }
+          if (cluster_env.IsDeviceMesh3D()) {
+            // Split 3 dim, one is always the batch dim
+            EnumeratePartitionReshape(ins, device_mesh, cluster_env,
+                                      strategy_map, batch_dim_map, strategies,
+                                      only_allow_divisible, /*partitions*/ 3);
+          }
 
           // Replicate
           AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
@@ -2097,6 +2116,12 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                 strategy_map, strategies, batch_dim_map,
                                 only_allow_divisible, call_graph, /*parts*/ 2);
         }
+        if (cluster_env.IsDeviceMesh3D()) {
+          // Split 3 dims
+          EnumerateAllPartition(ins, ins->shape(), device_mesh, cluster_env,
+                                strategy_map, strategies, batch_dim_map,
+                                only_allow_divisible, call_graph, /*parts*/ 3);
+        }
         if (cluster_env.IsDeviceMesh2D() &&
             solver_option.allow_mixed_mesh_shape) {
           // Split 1 dim, but for 1d flattened version of the 2d mesh
@@ -2293,7 +2318,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         }
       }
     }
-    RemoveInvalidShardingsWithShapes(ins->shape(), strategies.get());
+    RemoveInvalidShardingsWithShapes(
+        ins->shape(), strategies.get(),
+        /* instruction_has_user_sharding */ ins->has_sharding());
 
     if (instruction_execution_counts.contains(ins)) {
       ScaleCostsWithExecutionCounts(strategies.get(),
