@@ -82,10 +82,11 @@ tensorflow::Status RunTFXLABridge(
         module, llvm::StringRef(), &bridge);
   }
 
-  if (VLOG_IS_ON(2) || DEBUG_DATA_DUMPER()->ShouldDump(
-                           module_name.str(), kDebugGroupBridgePhase1)) {
+  if (VLOG_IS_ON(2) ||
+      DEBUG_DATA_DUMPER()->ShouldDump(module_name.str(),
+                                      kDebugGroupBridgePhase1Clustering)) {
     ::tensorflow::tf2xla::internal::EnablePassIRPrinting(
-        bridge, kBridgeComponent, module_name);
+        bridge, kDebugGroupBridgePhase1Clustering, module_name);
   }
 
   LogicalResult result = bridge.run(module);
@@ -110,36 +111,6 @@ void CreateTPUBridgePipeline(OpPassManager &pm, llvm::StringRef module_name) {
       TF::CreateCanonicalizeCompileAndReplicateAttributesPass());
   tensorflow::tf2xla::internal::AddBridgeClusteringPipelinePasses(pm,
                                                                   module_name);
-}
-
-void CreateTPUBridgePipelineV1(OpPassManager &pm) {
-  pm.addPass(tf2xla::internal::CreateInferenceMetricsPass());
-
-  // Convert to unified compilation and replication attributes.
-  pm.addNestedPass<func::FuncOp>(
-      TF::CreateCanonicalizeCompileAndReplicateAttributesPass());
-  // Guarantee all functions have one use, which enables more exact shape
-  // inference.
-  pm.addPass(mlir::TF::CreateGuaranteeAllFuncsOneUsePass());
-  pm.addPass(TF::CreateTFShapeInferencePass());
-  // For V1 compatibility, we process a module where the graph does not have
-  // feeds and fetched. We extract first the TPU computation in a submodule,
-  // where it'll be in a function with args and returned values, much more like
-  // a TF v2 module. We can then run the usual pipeline on this nested module.
-  // Afterward we inline back in the parent module and delete the nested one.
-  pm.addPass(tf_executor::CreateTFExecutorTPUV1IslandCoarseningPass());
-  pm.addPass(tf_executor::CreateTFExecutorTPUV1IslandOutliningPass());
-  OpPassManager &nested_module = pm.nest<ModuleOp>();
-  tensorflow::tf2xla::internal::AddBridgeClusteringPipelinePasses(
-      nested_module);
-
-  pm.addPass(tf_executor::CreateTFExecutorTPUV1IslandInliningPass());
-  // There are cases where we don't consume all compilation and replication
-  // attributes like we do for the V2 pipeline, so we need to convert them from
-  // unified to legacy attributes before they get exposed to outside of the
-  // bridge.
-  pm.addNestedPass<func::FuncOp>(
-      CreateConvertToLegacyCompileAndReplicateAttributesPass());
 }
 
 tensorflow::Status TPUBridge(ModuleOp module, bool fallback_enabled,
@@ -180,56 +151,12 @@ tensorflow::Status TPUBridge(ModuleOp module, bool fallback_enabled,
 
   return export_status;
 }
-tensorflow::Status TPUBridgeV1Compat(ModuleOp module, bool fallback_enabled) {
-  VLOG(2)
-      << "TPU V1 Compat Bridge called stack trace is "
-      << "(NOTE: this is not an error; rather the stack trace for debugging) : "
-      << tensorflow::CurrentStackTrace();
-  Status bridge_status = RunTFXLABridge(
-      module, [](OpPassManager &pm) { CreateTPUBridgePipelineV1(pm); });
-  tensorflow::metrics::UpdateTfMlirBridgeFirstPhaseCounter(
-      "tpu", "v1", fallback_enabled,
-      bridge_status.ok() ? "success" : "failure");
-  if (!bridge_status.ok()) {
-    tsl::error_logging::Log(TFTPU::kBridgeComponent,
-                            "TFXLA_PHASE_ONE_MLIR_TPU_V1_COMPAT_BRIDGE",
-                            bridge_status.ToString())
-        .IgnoreError();
-    return bridge_status;
-  }
-
-  return tensorflow::tf2xla::v1::ExportFromTensorflowDialectToExecutor(module);
-}
 
 }  // namespace TFTPU
 
 namespace TF {
 
 void NoCanonicalization(OpPassManager &pm) {}
-
-void AddGraphExportLoweringPasses(OpPassManager &pm) {
-  auto add_pass = [&](std::unique_ptr<Pass> pass) {
-    pm.addNestedPass<func::FuncOp>(std::move(pass));
-    pm.addPass(CreateBreakUpIslandsPass());
-  };
-
-  pm.addPass(TF::CreateTFRegionControlFlowToFunctional());
-  add_pass(CreateFunctionalToExecutorDialectConversionPass());
-  add_pass(TFDevice::CreateReplicateToIslandPass(/*legacy_graph_export=*/true));
-  add_pass(TFDevice::CreateReplicaIDToDeviceOrdinalPass());
-  add_pass(TFDevice::CreateParallelExecuteToIslandsPass(
-      /*legacy_graph_export=*/true));
-  add_pass(TFDevice::CreateLaunchToDeviceAttributePass(
-      /*legacy_graph_export=*/true));
-  pm.addNestedPass<func::FuncOp>(TFTPU::CreateTPUDevicePropagationPass());
-  pm.addNestedPass<func::FuncOp>(TFTPU::CreateTPUColocateSplitsPass());
-  pm.addPass(createSymbolDCEPass());
-  if (tensorflow::GetMlirCommonFlags()
-          ->tf_mlir_enable_convert_control_to_data_outputs_pass) {
-    pm.addPass(tf_executor::CreateTFExecutorConvertControlToDataOutputsPass());
-  }
-  pm.addPass(CreateVerifySuitableForExportPass());
-}
 
 tensorflow::Status RunBridgeWithStandardPipeline(ModuleOp module,
                                                  bool enable_logging,

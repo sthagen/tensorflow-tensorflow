@@ -406,9 +406,9 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
     spmd_simplify.AddPass<ReshapeMover>(reshape_mover_options);
     spmd_simplify.AddPass<HloConstantFolding>();
     spmd_simplify.AddPass<ConditionalSimplifier>();
-    spmd_simplify.AddPass<HloDCE>();
 
     spmd_pipeline.AddPass<HloConstantSplitter>();
+    spmd_simplify.AddPass<HloDCE>();
 
 #ifdef PLATFORM_GOOGLE
     if (auto_sharding) {
@@ -774,7 +774,8 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
     HloPassPipeline pipeline("post-fusion optimization");
     pipeline.AddPass<AllGatherCombiner>(
         debug_options.xla_gpu_all_gather_combine_threshold_bytes(),
-        /*combine_threshold_count=*/256);
+        /*combine_threshold_count=*/256,
+        debug_options.xla_gpu_enable_all_gather_combine_by_dim());
     pipeline.AddPass<AllReduceCombiner>(
         debug_options.xla_gpu_all_reduce_combine_threshold_bytes(),
         /*combine_threshold_count=*/256);

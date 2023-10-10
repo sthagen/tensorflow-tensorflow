@@ -73,11 +73,11 @@ class ConcretePerOpGpuDevice : public PerOpGpuDevice {
  public:
   ConcretePerOpGpuDevice();
 
-  void Reinitialize(OpKernelContext* context, const void* gpu_stream,
+  void Reinitialize(OpKernelContext* context, void* gpu_stream,
                     tsl::TfDeviceId tf_device_id, Allocator* base_allocator,
                     char* scratch);
 
-  void Reinitialize(OpKernelContext* context, const void* gpu_stream,
+  void Reinitialize(OpKernelContext* context, void* gpu_stream,
                     tsl::PlatformDeviceId platform_device_id,
                     Allocator* base_allocator, char* scratch);
 
@@ -174,10 +174,6 @@ class BaseGPUDevice : public LocalDevice {
 
   // Helper method for unit tests to reset the streams. Never use in production.
   static void TestOnlyReset();
-
-  void* GetStream() {
-    return stream_->compute->implementation()->GpuStreamMemberHack();
-  }
 
   se::Stream* compute_stream() { return stream_->compute; }
 
