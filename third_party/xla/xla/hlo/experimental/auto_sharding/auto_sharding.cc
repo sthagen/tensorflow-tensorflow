@@ -1153,13 +1153,15 @@ StatusOr<std::unique_ptr<StrategyVector>> CreateAllStrategiesVector(
     strategies = CreateTupleStrategyVector(instruction_id);
     strategies->childs.reserve(shape.tuple_shapes_size());
     for (size_t i = 0; i < shape.tuple_shapes_size(); ++i) {
-      strategies->childs.push_back(
+      auto child_strategies =
           CreateAllStrategiesVector(
-              ins, shape.tuple_shapes().at(i), instruction_id, leaf_strategies,
+              ins, shape.tuple_shapes(i), instruction_id, leaf_strategies,
               cluster_env, strategy_map, solver_option, replicated_penalty,
               batch_dim_map, call_graph, only_allow_divisible,
               create_replicated_strategies)
-              .value());
+              .value();
+      child_strategies->tuple_element_idx = i;
+      strategies->childs.push_back(std::move(child_strategies));
     }
   } else if (shape.IsArray()) {
     strategies = CreateLeafStrategyVector(instruction_id, ins, strategy_map,
@@ -2176,10 +2178,12 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         for (size_t i = 0; i < ins->operand_count(); ++i) {
           const HloInstruction* operand = ins->operand(i);
           const StrategyVector* src_strategies = strategy_map.at(operand).get();
-          strategies->childs.push_back(MaybeFollowInsStrategyVector(
+          auto child_strategies = MaybeFollowInsStrategyVector(
               src_strategies, operand->shape(), instruction_id,
               /* have_memory_cost= */ true, leaf_strategies, cluster_env,
-              pretrimmed_strategy_map));
+              pretrimmed_strategy_map);
+          child_strategies->tuple_element_idx = i;
+          strategies->childs.push_back(std::move(child_strategies));
         }
         break;
       }
@@ -2474,6 +2478,11 @@ AutoShardingSolverResult CallSolver(
     if (iter != sharding_propagation_solution.end()) {
       CHECK(iter->second->has_sharding()) << iter->second->ToString();
       default_strategy = iter->second->sharding();
+      if (strategies->tuple_element_idx) {
+        const auto& tuple_elements = default_strategy.tuple_elements();
+        CHECK_LT(*strategies->tuple_element_idx, tuple_elements.size());
+        default_strategy = tuple_elements.at(*strategies->tuple_element_idx);
+      }
     }
     for (NodeStrategyIdx j = 0; j < strategies->leaf_vector.size(); ++j) {
       const ShardingStrategy& strategy = strategies->leaf_vector[j];

@@ -147,6 +147,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_latency_hiding_schedule(false);
   opts.set_xla_gpu_enable_latency_hiding_scheduler(false);
   opts.set_xla_gpu_lhs_enable_gpu_async_tracker(true);
+  opts.set_xla_gpu_enable_analytical_latency_estimator(false);
   opts.set_xla_gpu_pgle_profile_file_or_directory_path("");
   opts.set_xla_gpu_enable_highest_priority_async_stream(true);
 
@@ -200,6 +201,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_while_loop_double_buffering(false);
   opts.set_xla_gpu_ensure_minor_dot_contraction_dims(false);
   opts.set_xla_gpu_filter_kernels_spilling_registers_on_autotuning(true);
+  opts.set_xla_gpu_llvm_verification_level(0);
 
   return opts;
 }
@@ -1104,6 +1106,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 debug_options->xla_gpu_enable_latency_hiding_scheduler(),
                 "Enable latency-hiding scheduler for XLA:GPU"));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_analytical_latency_estimator",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_enable_analytical_latency_estimator),
+      debug_options->xla_gpu_enable_analytical_latency_estimator(),
+      "Enable analytical latency estimator for latency-hiding scheduler for "
+      "XLA:GPU"));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_pgle_profile_file_or_directory_path",
       string_setter_for(
           &DebugOptions::set_xla_gpu_pgle_profile_file_or_directory_path),
@@ -1317,6 +1326,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       int64_setter_for(&DebugOptions::set_xla_debug_buffer_assignment_show_max),
       debug_options->xla_debug_buffer_assignment_show_max(),
       "Number of buffers to display when debugging the buffer assignment"));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_llvm_verification_level",
+      int32_setter_for(&DebugOptions::set_xla_gpu_llvm_verification_level),
+      debug_options->xla_gpu_llvm_verification_level(),
+      "Sets how often we verify the generated llvm modules. Higher "
+      "levels mean more frequent verification. Currently supported: 0, 1."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
