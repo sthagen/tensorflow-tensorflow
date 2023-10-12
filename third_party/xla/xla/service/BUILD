@@ -2899,6 +2899,7 @@ cc_library(
         "//xla/hlo/utils:hlo_query",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:errors",
     ],
 )
@@ -6057,11 +6058,18 @@ cc_library(
     deps = [
         ":computation_layout",
         ":hlo_lexer",
+        ":hlo_module_config",
+        ":hlo_proto_cc",
+        ":name_uniquer",
         ":shape_inference",
+        "//xla:comparison_util",
         "//xla:literal",
         "//xla:literal_util",
+        "//xla:shape_layout",
         "//xla:shape_util",
+        "//xla:status",
         "//xla:statusor",
+        "//xla:types",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -6074,8 +6082,10 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
+        "@eigen_archive//:eigen3",
         "@local_tsl//tsl/lib/gtl:map_util",
-        "@local_tsl//tsl/platform:float8",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -7281,6 +7291,7 @@ cc_library(
     deps = [
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:device_description_proto_cc",
+        "@com_google_absl//absl/strings",
     ],
 )
 

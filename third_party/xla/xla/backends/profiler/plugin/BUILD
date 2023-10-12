@@ -24,13 +24,26 @@ cc_library(
     deps = [
         ":profiler_c_api_hdrs",
         "//xla:status",
-        "//xla/pjrt/c:pjrt_c_api_helpers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/profiler/lib:profiler_interface",
         "@local_tsl//tsl/profiler/protobuf:profiler_options_proto_cc",
         "@local_tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "profiler_error",
+    srcs = ["profiler_error.cc"],
+    hdrs = ["profiler_error.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":profiler_c_api_hdrs",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:logging",
     ],
     alwayslink = True,
 )

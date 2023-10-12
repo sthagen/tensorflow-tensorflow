@@ -470,6 +470,8 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
       }
       return !gpu::IsMatrixMultiplication(*instr);
     };
+    pipeline.AddPass<DotDimensionSorter>();
+    pipeline.AddPass<DotDecomposer>();
 
     pipeline.AddPass<OperandUpcaster>(upcaster_filter);
     pipeline.AddPass<ResultCaster>(upcaster_filter);
@@ -503,9 +505,6 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
 
     // TODO(b/64094172): make Call work on GPU instead of inlining.
     pipeline.AddPass<CallInliner>();
-
-    pipeline.AddPass<DotDimensionSorter>();
-    pipeline.AddPass<DotDecomposer>();
 
     pipeline.AddPass<StochasticConvertDecomposer>();
 
@@ -781,7 +780,8 @@ Status GpuCompiler::OptimizeHloModule(HloModule* hlo_module,
         /*combine_threshold_count=*/256);
     pipeline.AddPass<ReduceScatterCombiner>(
         debug_options.xla_gpu_reduce_scatter_combine_threshold_bytes(),
-        /*combine_threshold_count=*/256);
+        /*combine_threshold_count=*/256,
+        debug_options.xla_gpu_enable_reduce_scatter_combine_by_dim());
 
     if (debug_options.xla_gpu_all_reduce_contiguous()) {
       pipeline.AddPass<AllReduceContiguous>();
@@ -1059,8 +1059,9 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   const DebugOptions& debug_options = module->config().debug_options();
   TF_RETURN_IF_ERROR(LoadAutotuneResultsFromFile(debug_options));
 
-  MaybeUploadUnoptimizedGpuSymbolsToXSymbol(
-      module.get(), GetGpuTargetConfig(stream_exec).ToProto());
+  const std::optional<std::string> unoptimized_fingerprint =
+      MaybeUploadUnoptimizedGpuSymbols(
+          module.get(), GetGpuTargetConfig(stream_exec).ToProto());
 
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER_IF(
@@ -1084,6 +1085,13 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   // out we have no way of telling how far through the process we got).
   RecordHloPassesDuration(end_usecs - start_usecs);
 
+  const std::optional<std::string> optimized_fingerprint =
+      MaybeUploadOptimizedGpuSymbols(module.get());
+  if (unoptimized_fingerprint.has_value() &&
+      optimized_fingerprint.has_value()) {
+    MaybeUploadGpuSymbolMapping(*unoptimized_fingerprint,
+                                *optimized_fingerprint);
+  }
   TF_RETURN_IF_ERROR(SerializeAutotuneResultsToFile(debug_options));
 
   return std::move(module);
@@ -1093,8 +1101,9 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPassesWithoutDevice(
     std::unique_ptr<HloModule> module, const CompileOptions& options,
     const GpuTargetConfig& gpu_target_config,
     const AutotuneResults& autotune_results) {
-  MaybeUploadUnoptimizedGpuSymbolsToXSymbol(module.get(),
-                                            gpu_target_config.ToProto());
+  const std::optional<std::string> unoptimized_fingerprint =
+      MaybeUploadUnoptimizedGpuSymbols(module.get(),
+                                       gpu_target_config.ToProto());
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER_IF(
       absl::StrCat("GpuCompiler::RunHloPasses for ", module->name()),
@@ -1113,6 +1122,15 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPassesWithoutDevice(
   // This won't record values for calls that error out (because if they error
   // out we have no way of telling how far through the process we got).
   RecordHloPassesDuration(end_usecs - start_usecs);
+
+  const std::optional<std::string> optimized_fingerprint =
+      MaybeUploadOptimizedGpuSymbols(module.get());
+
+  if (unoptimized_fingerprint.has_value() &&
+      optimized_fingerprint.has_value()) {
+    MaybeUploadGpuSymbolMapping(*unoptimized_fingerprint,
+                                *optimized_fingerprint);
+  }
 
   return std::move(module);
 }

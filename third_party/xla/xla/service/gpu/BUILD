@@ -484,8 +484,10 @@ cc_library(
         "@triton//:TritonDialects",
         "@triton//:TritonTransforms",
     ] + if_cuda_is_configured([
+        "@triton//:NVGPUToLLVM",
         "@triton//:TritonGPUToLLVM",
         "@triton//:TritonGPUTransforms",
+        "@triton//:TritonNvidiaGPUTransforms",
         "@triton//:TritonLLVMIR",
         "@triton//:TritonToTritonGPU",
     ]),
@@ -510,6 +512,8 @@ xla_test(
         ":ir_emitter_triton",
         "//xla:autotuning_proto_cc",
         "//xla:error_spec",
+        "//xla:status_macros",
+        "//xla:statusor",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
@@ -518,10 +522,8 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor/cuda:cublas_plugin",
         "//xla/tests:filecheck",
-        "//xla/tests:hlo_test_base",
         "//xla/tests:verified_hlo_module",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
-        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:Support",
@@ -1925,12 +1927,21 @@ xla_cc_test(
     ],
 )
 
+tf_proto_library(
+    name = "fusion_process_dump_proto",
+    srcs = ["fusion_process_dump.proto"],
+    cc_api_version = 2,
+    protodeps = [],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "priority_fusion",
     srcs = ["priority_fusion.cc"],
     hdrs = ["priority_fusion.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":fusion_process_dump_proto_cc",
         ":gpu_fusible",
         ":gpu_hlo_cost_analysis",
         ":gpu_performance_model",
@@ -1938,6 +1949,7 @@ cc_library(
         "//xla:statusor",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/service:dump",
         "//xla/service:fusion_node_indexing_evaluation",
         "//xla/service:fusion_queue",
         "//xla/service:hlo_cost_analysis",
@@ -1964,6 +1976,7 @@ xla_cc_test(
     deps = [
         ":gpu_device_info_for_tests",
         ":gpu_hlo_cost_analysis",
+        ":hlo_fusion_analysis",
         ":priority_fusion",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
@@ -4741,6 +4754,27 @@ xla_cc_test(
         "//xla:xla_proto_cc",
         "//xla/service:hlo_dce",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "determinism_test",
+    srcs = ["determinism_test.cc"],
+    tags = tf_cuda_tests_tags(),
+    deps = [
+        ":autotuner_util",
+        "//xla:literal",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/service/gpu/tests:gpu_codegen_test",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/gpu:gpu_timer_header",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:literal_test_util",
+        "//xla/tests:test_utils",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:statusor",
     ],
 )

@@ -137,27 +137,6 @@ std::unique_ptr<StrategyVector> CreateTupleStrategyVector(
   return strategies;
 }
 
-std::optional<HloSharding> GetInputSharding(const HloInstruction* ins,
-                                            const HloInstruction* operand,
-                                            int64_t op_index,
-                                            const HloSharding& output_sharding,
-                                            const CallGraph& call_graph,
-                                            int64_t num_devices) {
-  auto ins_clone = ins->Clone();
-  ins_clone->set_sharding(output_sharding);
-  auto operand_clone = operand->Clone();
-  if (operand_clone->has_sharding() &&
-      !operand_clone->sharding()
-           .Validate(operand_clone->shape(), num_devices)
-           .ok()) {
-    operand_clone->clear_sharding();
-  }
-  auto s = ins_clone->ReplaceOperandWith(op_index, operand_clone.get());
-  CHECK_OK(s);
-  return ShardingPropagation::GetShardingFromUser(*operand_clone, *ins_clone,
-                                                  10, true, call_graph);
-}
-
 // ShardingPropagation::GetShardingFromUser does not handle TopK custom
 // calls. Mirroring that function's handling of kSort, we handle TopK below.
 HloSharding InferInputShardingForTopK(const HloInstruction* ins,
@@ -264,10 +243,12 @@ std::unique_ptr<StrategyVector> MaybeFollowInsStrategyVector(
     strategies = CreateTupleStrategyVector(instruction_id);
     strategies->childs.reserve(src_strategies->childs.size());
     for (size_t i = 0; i < src_strategies->childs.size(); ++i) {
-      strategies->childs.push_back(MaybeFollowInsStrategyVector(
+      auto child_strategies = MaybeFollowInsStrategyVector(
           src_strategies->childs[i].get(), shape.tuple_shapes(i),
           instruction_id, have_memory_cost, leaf_strategies, cluster_env,
-          pretrimmed_strategy_map));
+          pretrimmed_strategy_map);
+      child_strategies->tuple_element_idx = i;
+      strategies->childs.push_back(std::move(child_strategies));
     }
   } else {
     CHECK(shape.IsArray() || shape.IsToken());
@@ -335,6 +316,7 @@ StatusOr<std::unique_ptr<StrategyVector>> FollowReduceStrategy(
       if (!child_strategy_status.ok()) {
         return child_strategy_status;
       }
+      child_strategy_status.value()->tuple_element_idx = i;
       strategies->childs.push_back(std::move(child_strategy_status.value()));
     }
   } else if (output_shape.IsArray()) {
@@ -2110,7 +2092,7 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
       case HloOpcode::kDot: {
         TF_RETURN_IF_ERROR(HandleDot(strategies, leaf_strategies, strategy_map,
                                      ins, instruction_id, cluster_env,
-                                     batch_dim_map, solver_option));
+                                     batch_dim_map, solver_option, call_graph));
         if (solver_option.allow_replicated_strategy_for_dot_and_conv) {
           AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
                                 strategies, 0);
@@ -2118,9 +2100,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         break;
       }
       case HloOpcode::kConvolution: {
-        TF_RETURN_IF_ERROR(HandleConv(strategies, leaf_strategies, strategy_map,
-                                      ins, instruction_id, cluster_env,
-                                      batch_dim_map, solver_option));
+        TF_RETURN_IF_ERROR(HandleConv(
+            strategies, leaf_strategies, strategy_map, ins, instruction_id,
+            cluster_env, batch_dim_map, solver_option, call_graph));
         if (solver_option.allow_replicated_strategy_for_dot_and_conv) {
           AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
                                 strategies, 0);
@@ -2164,11 +2146,9 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
                                   only_allow_divisible, " 1d", call_graph);
         }
 
-        if (strategies->leaf_vector.empty() || IsFollowedByBroadcast(ins)) {
-          // Replicate
-          AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
-                                strategies, replicated_penalty * 5);
-        }
+        // Replicate
+        AddReplicatedStrategy(ins, ins->shape(), cluster_env, strategy_map,
+                              strategies, replicated_penalty * 5);
 
         break;
       }
@@ -2283,11 +2263,13 @@ BuildStrategyAndCost(const HloInstructionSequence& sequence,
         const StrategyVector* src_strategies =
             strategy_map.at(ins->operand(0)).get();
         for (size_t i = 0; i < ins->shape().tuple_shapes_size(); ++i) {
-          strategies->childs.push_back(MaybeFollowInsStrategyVector(
+          auto child_strategies = MaybeFollowInsStrategyVector(
               src_strategies->childs[i].get(),
               ins->shape().tuple_shapes().at(i), instruction_id,
               /* have_memory_cost= */ true, leaf_strategies, cluster_env,
-              pretrimmed_strategy_map));
+              pretrimmed_strategy_map);
+          child_strategies->tuple_element_idx = i;
+          strategies->childs.push_back(std::move(child_strategies));
         }
 
         break;
@@ -4102,7 +4084,7 @@ Status AutoShardingImplementation::CanonicalizeLayouts(HloModule* module) {
     TF_RETURN_IF_ERROR(entry_computation_layout.mutable_parameter_layout(i)
                            ->CopyLayoutFromShape(argument_shapes.at(i)));
   }
-  *module->config().mutable_entry_computation_layout() =
+  *module->mutable_config().mutable_entry_computation_layout() =
       entry_computation_layout;
   return OkStatus();
 }
@@ -4669,7 +4651,7 @@ StatusOr<bool> AutoSharding::Run(
         module->ReplaceComputations(computation_replacements);
         module->MoveComputationsFrom(modules[min_mesh_shape_index].get());
 
-        *module->config().mutable_entry_computation_layout() =
+        *module->mutable_config().mutable_entry_computation_layout() =
             modules[min_mesh_shape_index]->entry_computation_layout();
 
         module_is_changed = true;

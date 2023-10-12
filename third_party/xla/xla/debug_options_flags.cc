@@ -93,8 +93,9 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   // flag.
   opts.set_xla_gpu_enable_cublaslt(false);
 
-  // TODO(b/258036887): Enable gpu_graph_level=3.
-  opts.set_xla_gpu_graph_level(2);
+  // TODO(b/258036887): Create separate flags for enabling cuBLAS, cuDNN, and
+  // NCCL in GPU graphs.
+  opts.set_xla_gpu_graph_level(1);
   opts.set_xla_gpu_graph_num_runs_to_instantiate(-1);
   opts.set_xla_gpu_enable_persistent_temp_buffers(false);
   opts.set_xla_gpu_graph_min_graph_size(5);
@@ -112,8 +113,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_all_reduce_combine_threshold_bytes(kDefaultThreshold);
   opts.set_xla_gpu_all_gather_combine_threshold_bytes(kDefaultThreshold);
   opts.set_xla_gpu_reduce_scatter_combine_threshold_bytes(kDefaultThreshold);
-
   opts.set_xla_gpu_enable_all_gather_combine_by_dim(true);
+  opts.set_xla_gpu_enable_reduce_scatter_combine_by_dim(true);
 
   opts.set_xla_gpu_enable_async_collectives(false);
   opts.set_xla_gpu_enable_async_all_reduce(true);
@@ -869,6 +870,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_enable_all_gather_combine_by_dim(),
       "Combine all-gather ops with the same gather dimension or irrespective "
       "of their dimension."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_reduce_scatter_combine_by_dim",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_enable_reduce_scatter_combine_by_dim),
+      debug_options->xla_gpu_enable_reduce_scatter_combine_by_dim(),
+      "Combine reduce-scatter ops with the same dimension or irrespective of "
+      "their dimension."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_all_reduce_contiguous",
       bool_setter_for(&DebugOptions::set_xla_gpu_all_reduce_contiguous),
