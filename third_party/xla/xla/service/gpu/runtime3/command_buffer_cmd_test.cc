@@ -20,11 +20,13 @@ limitations under the License.
 
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/buffer_allocations.h"
+#include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/multi_platform_manager.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_pimpl.h"
 #include "xla/types.h"  // IWYU pragma: keep
+#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/test.h"
 
 namespace xla::gpu {
@@ -58,15 +60,17 @@ TEST(CommandBufferCmdTest, MemcpyCmd) {
   BufferAllocation::Slice slice_a(&alloc_a, 0, byte_length);
   BufferAllocation::Slice slice_b(&alloc_b, 0, byte_length);
 
-  // Record commands into the command buffer.
-  auto commands = CommandBufferCmdSequence::Create(executor).value();
+  // Prepare commands sequence for constructing command buffer.
+  CommandBufferCmdSequence commands;
   commands.Emplace<MemcpyDeviceToDeviceCmd>(slice_b, slice_a, byte_length);
 
   BufferAllocations allocations({a, b}, 0, executor->GetAllocator());
-  ASSERT_TRUE(commands.Record({&allocations}).ok());
+
+  auto command_buffer = se::CommandBuffer::Create(executor).value();
+  TF_ASSERT_OK(commands.Record({&allocations}, &command_buffer));
 
   // Execute command buffer and verify that it copied the memory.
-  ASSERT_TRUE(executor->Submit(&stream, commands.command_buffer()).ok());
+  TF_ASSERT_OK(executor->Submit(&stream, command_buffer));
 
   // Copy `b` data back to host.
   std::vector<int32_t> dst(4, 0);

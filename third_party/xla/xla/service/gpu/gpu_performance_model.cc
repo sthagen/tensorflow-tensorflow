@@ -39,7 +39,7 @@ limitations under the License.
 #include "xla/stream_executor/device_description.h"
 
 #if GOOGLE_CUDA
-#include "third_party/gpus/cuda/nvml/include/nvml.h"
+#include "third_party/nvml/nvml.h"
 #endif  // GOOGLE_CUDA
 namespace xla {
 namespace gpu {

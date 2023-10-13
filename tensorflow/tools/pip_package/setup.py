@@ -47,7 +47,7 @@ from setuptools.dist import Distribution
 # result for pip.
 # Also update tensorflow/tensorflow.bzl and
 # tensorflow/core/public/version.h
-_VERSION = '2.15.0'
+_VERSION = '2.16.0'
 
 
 # We use the same setup.py for all tensorflow_* packages and for the nightly
@@ -405,7 +405,7 @@ setup(
     classifiers=sorted([
         'Development Status :: 5 - Production/Stable',
         # TODO(angerson) Add IFTTT when possible
-        'Environment :: GPU :: NVIDIA CUDA :: 11.8',
+        'Environment :: GPU :: NVIDIA CUDA :: 12.2',
         'Intended Audience :: Developers',
         'Intended Audience :: Education',
         'Intended Audience :: Science/Research',

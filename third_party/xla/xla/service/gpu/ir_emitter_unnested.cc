@@ -176,8 +176,7 @@ class UnreachableThunk : public Thunk {
   UnreachableThunk(const UnreachableThunk&) = delete;
   UnreachableThunk& operator=(const UnreachableThunk&) = delete;
 
-  Status Initialize(const GpuExecutable& executable,
-                    se::StreamExecutor* executor) final {
+  Status Initialize(se::StreamExecutor*, ExecutableSource) final {
     return tsl::errors::Internal(error_message_);
   }
 
@@ -912,8 +911,8 @@ Status IrEmitterUnnested::EmitCublasLtMatmulThunk(mlir::Operation* op) {
   }
 
   TF_ASSIGN_OR_RETURN(GemmConfig gemm_config, GemmConfig::For(matmul));
-  TF_ASSIGN_OR_RETURN(se::gpu::BlasLt::Epilogue epilogue,
-                      cublas_lt::AsBlasLtEpilogue(matmul.getEpilogue()));
+  TF_ASSIGN_OR_RETURN(auto epilogue,
+                      gpublas_lt::AsBlasLtEpilogue(matmul.getEpilogue()));
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(op), std::move(gemm_config),
       epilogue, matmul.getAlgorithm(), a, b, c, d, bias, aux, a_scale, b_scale,
@@ -956,8 +955,8 @@ Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(mlir::Operation* op) {
   BufferAllocation::Slice aux;  // Not used.
 
   TF_ASSIGN_OR_RETURN(GemmConfig gemm_config, GemmConfig::For(matmul));
-  TF_ASSIGN_OR_RETURN(se::cuda::BlasLt::Epilogue epilogue,
-                      cublas_lt::AsBlasLtEpilogue(matmul.getEpilogue()));
+  TF_ASSIGN_OR_RETURN(auto epilogue,
+                      gpublas_lt::AsBlasLtEpilogue(matmul.getEpilogue()));
   auto thunk = std::make_unique<CublasLtMatmulThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(op), std::move(gemm_config),
       epilogue, matmul.getAlgorithm(), a, b, c, d, bias, aux, a_scale, b_scale,
