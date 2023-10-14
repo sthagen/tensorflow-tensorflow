@@ -120,9 +120,14 @@ class CommandBuffer {
   // Returns command buffer execution mode.
   Mode mode() const;
 
+  // Returns command buffer state.
+  State state() const;
+
   internal::CommandBufferInterface* implementation() {
     return implementation_.get();
   }
+
+  StreamExecutor* executor() const { return executor_; }
 
   const internal::CommandBufferInterface* implementation() const {
     return implementation_.get();
@@ -132,9 +137,11 @@ class CommandBuffer {
   CommandBuffer& operator=(CommandBuffer&&) = default;
 
  private:
-  explicit CommandBuffer(
+  CommandBuffer(
+      StreamExecutor* executor,
       std::unique_ptr<internal::CommandBufferInterface> implementation);
 
+  StreamExecutor* executor_;
   std::unique_ptr<internal::CommandBufferInterface> implementation_;
 
   CommandBuffer(const CommandBuffer&) = delete;

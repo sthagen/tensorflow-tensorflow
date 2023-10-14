@@ -117,27 +117,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "custom_call_thunk",
-    srcs = ["custom_call_thunk.cc"],
-    hdrs = ["custom_call_thunk.h"],
-    local_defines = if_cuda_is_configured([
-        "GOOGLE_CUDA=1",
-    ]),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":buffer_allocations",
-        ":thunk",
-        "//xla:util",
-        "//xla/service:buffer_assignment",
-        "//xla/service:custom_call_status_internal",
-        "//xla/stream_executor/gpu:gpu_stream_header",
-        "//xla/stream_executor/gpu:gpu_types_header",
-        "@com_google_absl//absl/strings:str_format",
-        "@local_tsl//tsl/platform:errors",
-    ],
-)
-
 xla_cc_test(
     name = "custom_call_test",
     srcs = if_gpu_is_configured(["custom_call_test.cc"]),
@@ -149,12 +128,19 @@ xla_cc_test(
         "//xla:test_helpers",
         "//xla/client:xla_builder",
         "//xla/client/lib:constants",
+        "//xla/runtime:custom_call",
+        "//xla/runtime:custom_call_registry",
+        "//xla/runtime:executable",
+        "//xla/runtime:memref_view",
         "//xla/runtime:module",
         "//xla/runtime:module_registry",
         "//xla/runtime/ffi:ffi_api",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_target_registry",
+        "//xla/service:executable",
         "//xla/service:gpu_plugin",
+        "//xla/service/gpu/runtime:custom_call_registry",
+        "//xla/service/gpu/runtime:support",
         "//xla/stream_executor/gpu:gpu_types_header",
         "//xla/tests:client_library_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
@@ -275,7 +261,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":backend_configs_cc",
-        ":custom_call_thunk",
         ":fft_thunk",
         ":gemm_thunk",
         ":gpu_asm_opts_util",
@@ -317,6 +302,7 @@ cc_library(
         "//xla/service/gpu/fusions",
         "//xla/service/gpu/fusions:thunk_util",
         "//xla/service/gpu/fusions:tiling_util",
+        "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/service/llvm_ir:buffer_assignment_util",
         "//xla/service/llvm_ir:dynamic_update_slice_util",
         "//xla/service/llvm_ir:fused_ir_emitter",
@@ -359,10 +345,10 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/protobuf:dnn_proto_cc",
     ] + if_gpu_is_configured([
-        ":triangular_solve_thunk",
         ":cublas_lt_matmul_thunk",
         ":ir_emitter_triton",
         "//xla/service/gpu/runtime3:cholesky_thunk",
+        "//xla/service/gpu/runtime3:triangular_solve_thunk",
     ]),
 )
 
@@ -917,7 +903,6 @@ cc_library(
         "conditional_thunk.h",
         "convolution_thunk.h",
         "copy_thunk.h",
-        "custom_call_thunk.h",
         "for_thunk.h",
         "fused_mha_thunk.h",
         "gemm_thunk.h",
@@ -938,7 +923,6 @@ cc_library(
         ":backend_configs_cc",
         ":buffer_allocations",
         ":cusolver_context",
-        ":custom_call_thunk",
         ":fft_thunk",
         ":gemm_thunk",
         ":gpu_asm_opts_util",
@@ -984,6 +968,7 @@ cc_library(
         "//xla/service/gpu/runtime:executable",
         "//xla/service/gpu/runtime:support",
         "//xla/service/gpu/runtime2:executable",
+        "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/stream_executor",
         "//xla/stream_executor:blas",
         "//xla/stream_executor:device_description",
@@ -1023,7 +1008,7 @@ cc_library(
     ] + if_gpu_is_configured([
         ":precompiled_kernels",
         "//xla/service/gpu/runtime3:cholesky_thunk",
-        ":triangular_solve_thunk",
+        "//xla/service/gpu/runtime3:triangular_solve_thunk",
     ]) + if_cuda_is_configured([
         "//xla/stream_executor/cuda:cublas_plugin",
         "//xla/stream_executor/cuda:cuda_stream",
@@ -1116,33 +1101,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:statusor",
     ],
-)
-
-# TODO(ezhulenev): Extract `RunTriangularSolve` into a separate library.
-cc_library(
-    name = "triangular_solve_thunk",
-    srcs = if_gpu_is_configured(["triangular_solve_thunk.cc"]),
-    hdrs = if_gpu_is_configured(["triangular_solve_thunk.h"]),
-    visibility = ["//visibility:public"],
-    deps = if_gpu_is_configured([
-        ":buffer_allocations",
-        ":cusolver_context",
-        ":precompiled_kernels",
-        ":thunk",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/types:optional",
-        "//xla:types",
-        "//xla:util",
-        "//xla:xla_data_proto_cc",
-        "//xla/service:buffer_assignment",
-        "//xla/hlo/ir:hlo",
-        "@local_tsl//tsl/platform:logging",
-        "//xla/stream_executor",
-        "//xla/stream_executor:device_memory",
-        "//xla/stream_executor/gpu:gpu_asm_opts",
-    ]) + ["@local_tsl//tsl/platform:status"],
 )
 
 cc_library(

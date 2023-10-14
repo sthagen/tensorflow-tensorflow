@@ -212,6 +212,14 @@ cc_library(
 )
 
 cc_library(
+    name = "custom_call_registry",
+    srcs = ["custom_call_registry.cc"],
+    hdrs = ["custom_call_registry.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//xla/runtime:custom_call_registry"],
+)
+
+cc_library(
     name = "executable",
     srcs = ["executable.cc"],
     hdrs = ["executable.h"],
@@ -225,6 +233,7 @@ cc_library(
         ":conv_reorder",
         ":cublas_lt_matmul",
         ":custom_call",
+        ":custom_call_registry",
         ":fft",
         ":fused_attention",
         ":gemm",
@@ -671,7 +680,7 @@ cc_library(
         "//xla/runtime:executable",
         "//xla/service:executable",
         "//xla/service/gpu:gpu_asm_opts_util",
-        "//xla/service/gpu:triangular_solve_thunk",
+        "//xla/service/gpu/runtime3:triangular_solve_thunk",
         "@local_tsl//tsl/platform:human_readable_json",
     ],
 )

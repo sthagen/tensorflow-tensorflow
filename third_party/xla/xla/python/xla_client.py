@@ -14,6 +14,8 @@
 # ==============================================================================
 """An XLA client in Python."""
 
+from __future__ import annotations
+
 import atexit
 import contextlib
 import enum  # pylint: disable=g-bad-import-order
@@ -45,7 +47,7 @@ profiler = _xla.profiler
 
 # Just an internal arbitrary increasing number to help with backward-compatible
 # changes. In JAX, reference this via jax._src.lib.xla_extension_version.
-_version = 205
+_version = 206
 
 # Version number for MLIR:Python components.
 mlir_api_version = 54
@@ -338,14 +340,17 @@ class ShapeIndex:
 """
 
 
-def shape_from_pyval(pyval):
+def shape_from_pyval(pyval, layout: Sequence[int] | None = None):
   """Returns a Shape that describes a tuple-tree of Numpy arrays."""
 
   def convert(pyval):
     if isinstance(pyval, tuple):
+      if layout is not None:
+        raise NotImplementedError(
+            'shape_from_pyval does not support layouts for tuple shapes')
       return Shape.tuple_shape(tuple(convert(elt) for elt in pyval))
     else:
-      return Shape.array_shape(pyval.dtype, np.shape(pyval))
+      return Shape.array_shape(pyval.dtype, np.shape(pyval), layout)
 
   return convert(pyval)
 
