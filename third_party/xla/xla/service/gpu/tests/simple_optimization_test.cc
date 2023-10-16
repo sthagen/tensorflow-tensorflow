@@ -13,23 +13,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_MLIR_BACKENDS_GPU2_CONVERSION_CONVERT_CASE_OP_H_
-#define XLA_MLIR_BACKENDS_GPU2_CONVERSION_CONVERT_CASE_OP_H_
-
-#include "mlir/IR/PatternMatch.h"  // from @llvm-project
-#include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
-#include "xla/mlir/backends/gpu2/conversion/de_bufferization.h"
+#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
+#include "xla/tests/hlo_test_base.h"
+#include "tsl/lib/core/status_test_util.h"
 
 namespace xla {
 namespace gpu {
+namespace {
 
-// Appends patterns to convert case ops to scf.if or scf.index_switch operations
-// and IREE HAL to load predicate from device buffer.
-void populateCaseOpConversionPatterns(mlir::RewritePatternSet &patterns,
-                                      mlir::TypeConverter &converter,
-                                      DeBufferization &state);
+class SimpleOptimizationTest : public HloTestBase {};
 
+TEST_F(SimpleOptimizationTest, OptimizeModule) {
+  constexpr absl::string_view kHloText = R"(
+HloModule t
+
+ENTRY e {
+  p0 = f16[1,16,17,3] parameter(0)
+  p1 = s8[16,17,3] parameter(1)
+  cp1 = f16[16,17,3] convert(p1)
+  ROOT _ = f16[1,16,16] dot(p0, cp1),
+    lhs_contracting_dims={2,3}, rhs_contracting_dims={1,2}
+})";
+
+  TF_EXPECT_OK(GetOptimizedModule(kHloText).status());
+}
+
+}  // namespace
 }  // namespace gpu
 }  // namespace xla
-
-#endif  // XLA_MLIR_BACKENDS_GPU2_CONVERSION_CONVERT_CASE_OP_H_

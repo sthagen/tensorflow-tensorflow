@@ -13,16 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_MLIR_BACKENDS_GPU2_IR_XLA_GPU_DIALECT_H_
-#define XLA_MLIR_BACKENDS_GPU2_IR_XLA_GPU_DIALECT_H_
+#ifndef XLA_SERVICE_GPU_RUNTIME_CUB_SORT_H_
+#define XLA_SERVICE_GPU_RUNTIME_CUB_SORT_H_
 
-#include "mlir/IR/Dialect.h"  // from @llvm-project  // IWYU pragma: keep
-#include "mlir/IR/OpImplementation.h"  // from @llvm-project  // IWYU pragma: keep
+#include "xla/runtime/custom_call_registry.h"
 
-// XLA GPU dialect definition.
-#include "xla/mlir/backends/gpu2/ir/xla_gpu_dialect.h.inc"
+namespace xla {
+namespace gpu {
 
-#define GET_TYPEDEF_CLASSES
-#include "xla/mlir/backends/gpu2/ir/xla_gpu_types.h.inc"
+// Registers XLA Gpu runtime CUB sort custom calls.
+void RegisterCubSortCustomCalls(runtime::DirectCustomCallRegistry& registry);
 
-#endif  // XLA_MLIR_BACKENDS_GPU2_IR_XLA_GPU_DIALECT_H_
+}  // namespace gpu
+}  // namespace xla
+
+#endif  // XLA_SERVICE_GPU_RUNTIME_CUB_SORT_H_

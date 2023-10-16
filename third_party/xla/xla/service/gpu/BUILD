@@ -5,6 +5,11 @@ load("//xla/tests:build_defs.bzl", "xla_test")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//xla:xla.bzl", "xla_cc_test", "xla_export_hlo_deps")
 load(
+    "//xla/service/gpu:build_defs.bzl",
+    "build_cub_sort_kernels",
+    "get_cub_sort_kernel_types",
+)
+load(
     "//xla/stream_executor:build_defs.bzl",
     "if_gpu_is_configured",
 )
@@ -345,6 +350,7 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/protobuf:dnn_proto_cc",
     ] + if_gpu_is_configured([
+        ":cub_sort_thunk",
         ":cublas_lt_matmul_thunk",
         ":ir_emitter_triton",
         "//xla/service/gpu/runtime3:cholesky_thunk",
@@ -967,7 +973,6 @@ cc_library(
         "//xla/service:xla_debug_info_manager",
         "//xla/service/gpu/runtime:executable",
         "//xla/service/gpu/runtime:support",
-        "//xla/service/gpu/runtime2:executable",
         "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/stream_executor",
         "//xla/stream_executor:blas",
@@ -1101,6 +1106,36 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:statusor",
     ],
+)
+
+cc_library(
+    name = "cub_sort_thunk",
+    srcs = if_gpu_is_configured(["cub_sort_thunk.cc"]),
+    hdrs = if_gpu_is_configured(["cub_sort_thunk.h"]),
+    visibility = ["//visibility:public"],
+    deps = if_gpu_is_configured([
+        ":buffer_allocations",
+        ":thunk",
+        "@com_google_absl//absl/log:check",
+        "@local_config_cuda//cuda:cuda_headers",
+        "//xla/service:buffer_assignment",
+        "//xla:shape_util",
+        "//xla/stream_executor:device_memory",
+        "//xla:status",
+        "//xla:xla_data_proto_cc",
+    ] + [":cub_sort_kernel_" + suffix for suffix in get_cub_sort_kernel_types()]),
+)
+
+build_cub_sort_kernels(
+    name = "cub_sort_kernel",
+    srcs = if_gpu_is_configured(["cub_sort_kernel.cu.cc"]),
+    hdrs = if_gpu_is_configured(["cub_sort_kernel.h"]),
+    types = get_cub_sort_kernel_types(),
+    deps = if_gpu_is_configured([
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@local_config_cuda//cuda:cuda_headers",  #cub
+    ]),
 )
 
 cc_library(
@@ -1397,20 +1432,26 @@ cc_library(
         ":gpu_asm_opts_util",
         ":stream_executor_util",
         "@com_google_absl//absl/base",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "//xla:autotune_results_proto_cc",
         "//xla:autotuning_proto_cc",
+        "//xla:status_macros",
         "//xla:status",
         "//xla:types",
+        "//xla:util",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:redzone_allocator",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/platform:statusor",
     ]),
 )
 
@@ -2436,7 +2477,6 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/mlir/backends/gpu/transforms:passes",
-        "//xla/mlir/backends/gpu2/transforms:passes",
         "//xla/mlir/runtime/transforms:compilation_pipeline_gpu",
         "//xla/mlir_hlo:transforms_gpu_passes",
         "//xla/service:buffer_assignment",
