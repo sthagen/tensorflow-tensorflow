@@ -1,4 +1,4 @@
-/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The StableHLO Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,19 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_PLUGIN_H_
-#define XLA_STREAM_EXECUTOR_PLUGIN_H_
+//===----------------------------------------------------------------------===//
+// Helper functions.
+//===----------------------------------------------------------------------===//
 
-namespace stream_executor {
+// Checks whether the value of a constant equals the given float, regardless
+// of the tensor dimension.
+class FloatValueEquals<string val> : Constraint<CPred<
+  "FloatValueEquals($0, " # val # ")">>;
 
-// Enumeration to list the supported types of plugins / support libraries.
-enum class PluginKind {
-  kInvalid,
-  kBlas,
-  kDnn,
-  kFft,
-};
-
-}  // namespace stream_executor
-
-#endif  // XLA_STREAM_EXECUTOR_PLUGIN_H_
+// Fetches the default or null attribute, used for pattern matching.
+def DefaultOrNullAttr : NativeCodeCall<"DefaultOrNullAttr($_builder, $0)">;
