@@ -13,11 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMPILER_MLIR_TFRT_TRANSFORMS_LOWER_CLUSTER_TO_RUNTIME_OPS_H_
-#define TENSORFLOW_COMPILER_MLIR_TFRT_TRANSFORMS_LOWER_CLUSTER_TO_RUNTIME_OPS_H_
+#ifndef TENSORFLOW_COMPILER_MLIR_TENSORFLOW_TRANSFORMS_HOST_RUNTIME_LOWER_CLUSTER_TO_RUNTIME_OPS_H_
+#define TENSORFLOW_COMPILER_MLIR_TENSORFLOW_TRANSFORMS_HOST_RUNTIME_LOWER_CLUSTER_TO_RUNTIME_OPS_H_
 
+#include "absl/base/attributes.h"
 #include "llvm/ADT/StringRef.h"
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "tensorflow/core/lib/core/status.h"
 #include "tsl/framework/device_type.h"
 
@@ -40,6 +42,19 @@ tensorflow::Status RunLowerClusterToRuntimeOpsPassPipeline(
     mlir::ModuleOp module, tsl::DeviceType xla_device_type,
     llvm::StringRef module_name = llvm::StringRef());
 
+// TODO(b/305738491): Remove these exposed runtime passes.
+ABSL_DEPRECATED(
+    "Temporary placeholder that will be deleted. Used as a temporary migration "
+    "hack.")
+void AddTPULowerClusterToRuntimeOpsPassPipeline(
+    mlir::OpPassManager& pm, llvm::StringRef module_name = llvm::StringRef());
+
+ABSL_DEPRECATED(
+    "Temporary placeholder that will be deleted. Used as a temporary migration "
+    "hack.")
+void AddNonTPULowerClusterToRuntimeOpsPassPipeline(
+    mlir::OpPassManager& pm, llvm::StringRef module_name = llvm::StringRef());
+
 // The same API as RunLowerClusterToRuntimeOpsPassPipeline but as an MLIR pass
 // pipeline.
 void RegisterTPULowerClusterToRuntimeOpsPassPipeline();
@@ -48,4 +63,4 @@ void RegisterNonTPULowerClusterToRuntimeOpsPassPipeline();
 }  // namespace tfrt_compiler
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_COMPILER_MLIR_TFRT_TRANSFORMS_LOWER_CLUSTER_TO_RUNTIME_OPS_H_
+#endif  // TENSORFLOW_COMPILER_MLIR_TENSORFLOW_TRANSFORMS_HOST_RUNTIME_LOWER_CLUSTER_TO_RUNTIME_OPS_H_

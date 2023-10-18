@@ -25,7 +25,7 @@ cc_library(
         "//xla/client:local_client",
         "//xla/service:platform_util",
         "//xla/stream_executor",
-        "//xla/stream_executor:device_mem_allocator",
+        "//xla/stream_executor/integrations:device_mem_allocator",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/framework:bfc_allocator",
         "@local_tsl//tsl/framework:device_id_impl",
@@ -65,9 +65,9 @@ cc_library(
         "//xla/service:executable",
         "//xla/service:platform_util",
         "//xla/service/gpu:gpu_executable_run_options",
-        "//xla/stream_executor:device_mem_allocator",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:stream_executor_internal",
+        "//xla/stream_executor/integrations:device_mem_allocator",
         "//xla/stream_executor/integrations:tf_allocator_adapter",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -89,7 +89,6 @@ cc_library(
         "@local_tsl//tsl/platform:fingerprint",
         "@local_tsl//tsl/profiler/lib:connected_traceme",
         "@local_tsl//tsl/util:env_var",
-        "@tf_runtime//:hostcontext",
     ] + if_cuda_or_rocm([
         "//xla/service/gpu:gpu_compiler",
     ]) + if_cuda([
@@ -133,7 +132,6 @@ xla_cc_test(
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test_main",
-        "@tf_runtime//:hostcontext",
     ],
 )
 

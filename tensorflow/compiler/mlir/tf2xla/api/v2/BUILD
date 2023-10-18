@@ -15,6 +15,9 @@ package_group(
     name = "tf2xla_users",
     packages = [
         "//tensorflow/compiler/mlir/quantization/stablehlo/...",
+        "//learning/serving/contrib/tfrt/mlir/saved_model_analysis",
+        "//tensorflow/compiler/mlir/tfrt",
+        "//tensorflow/compiler/tf2xla",
         # Legacy due to where the bridge currently runs. This should go away.
         "//tensorflow/compiler/mlir/tensorflow/transforms",
     ],
@@ -109,6 +112,7 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow:error_util",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
         "//tensorflow/compiler/mlir/tensorflow/transforms:verify_no_outside_compilation_markers_pass",
+        "//tensorflow/compiler/mlir/tensorflow/transforms/host_runtime:lower_cluster_to_runtime_ops",
         "//tensorflow/compiler/mlir/tf2xla/internal:clustering_bridge_passes",
         "//tensorflow/compiler/mlir/tf2xla/internal:logging_hooks",
         "//tensorflow/core:framework",
