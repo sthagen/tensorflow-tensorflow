@@ -3,7 +3,7 @@
 
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("//xla:xla.bzl", "xla_cc_test", "xla_export_hlo_deps")
+load("//xla:xla.bzl", "xla_cc_test", "xla_cub_deps", "xla_export_hlo_deps")
 load(
     "//xla/service/gpu:build_defs.bzl",
     "build_cub_sort_kernels",
@@ -743,6 +743,7 @@ cc_library(
     deps = [
         ":buffer_allocations",
         ":gpu_executable_run_options",
+        "//xla/hlo/ir:hlo",
         "//xla/service:executable",
         "//xla/stream_executor",
         "//xla/translate/mhlo_to_hlo:location_exporter",
@@ -1135,8 +1136,7 @@ build_cub_sort_kernels(
     deps = if_gpu_is_configured([
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@local_config_cuda//cuda:cuda_headers",  #cub
-    ]),
+    ] + xla_cub_deps()),
 )
 
 cc_library(
@@ -2597,20 +2597,6 @@ cc_library(
 )
 
 cc_library(
-    name = "gpu_target_config",
-    srcs = ["gpu_target_config.cc"],
-    hdrs = ["gpu_target_config.h"],
-    compatible_with = get_compatible_with_portable(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/stream_executor",
-        "//xla/stream_executor:device_description",
-        "//xla/stream_executor:device_description_proto_cc",
-        "//xla/stream_executor:dnn",
-    ],
-)
-
-cc_library(
     name = "gpu_compiler",
     srcs = if_gpu_is_configured([
         "gpu_compiler.cc",
@@ -2649,7 +2635,6 @@ cc_library(
         ":gpu_reduce_scatter_creator",
         ":gpu_sanitize_constant_names",
         ":gpu_scatter_expander",
-        ":gpu_target_config",
         ":hlo_fusion_stats",
         ":horizontal_input_fusion",
         ":horizontal_loop_fusion",

@@ -121,7 +121,7 @@ REQUIRED_PACKAGES = [
     # 'keras >= 2.14.0rc0, < 2.15' on the release branch after the branch cut.
     'tb-nightly ~= 2.15.0.a',
     'tf-estimator-nightly ~= 2.14.0.dev',
-    'keras-nightly ~= 2.15.0.dev',
+    'keras-nightly ~= 3.0.0.dev',
 ]
 REQUIRED_PACKAGES = [p for p in REQUIRED_PACKAGES if p is not None]
 
@@ -349,7 +349,6 @@ headers = (
     list(find_files('*.h', 'tensorflow/tsl')) +
     list(find_files('*.h', 'google/com_google_protobuf/src')) +
     list(find_files('*.inc', 'google/com_google_protobuf/src')) +
-    list(find_files('*', 'third_party/eigen3')) +
     list(find_files('*', 'third_party/gpus')) +
     list(find_files('*.h', 'tensorflow/include/external/com_google_absl')) +
     list(find_files('*.inc', 'tensorflow/include/external/com_google_absl')) +
