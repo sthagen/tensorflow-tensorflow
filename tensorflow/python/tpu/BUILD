@@ -37,12 +37,19 @@ bzl_library(
     srcs = ["tpu_test_wrapper.bzl"],
 )
 
+py_strict_library(
+    name = "tpu_test_wrapper",
+    srcs = ["tpu_test_wrapper.py"],
+    srcs_version = "PY3",
+    deps = [
+        "//tensorflow/python/platform:flags",
+        "//tensorflow/python/util:tf_decorator",
+    ],
+)
+
 py_strict_test(
     name = "tpu_test_wrapper_test",
-    srcs = [
-        "tpu_test_wrapper.py",
-        "tpu_test_wrapper_test.py",
-    ],
+    srcs = ["tpu_test_wrapper_test.py"],
     main = "tpu_test_wrapper_test.py",
     python_version = "PY3",
     srcs_version = "PY3",
@@ -51,9 +58,9 @@ py_strict_test(
         "no_pip",
     ],
     deps = [
+        ":tpu_test_wrapper",
         "//tensorflow/python/platform:client_testlib",
         "//tensorflow/python/platform:flags",
-        "//tensorflow/python/util:tf_decorator",
         "@absl_py//absl/testing:flagsaver",
     ],
 )
@@ -259,11 +266,11 @@ pytype_strict_library(
         ":tpu_replication",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:monitoring",
-        "//tensorflow/python/framework",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:func_graph",
         "//tensorflow/python/framework:function",
+        "//tensorflow/python/framework:graph_io",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:tensor_util",
@@ -512,9 +519,9 @@ tf_py_strict_test(
         ":tpu_py",
         ":tpu_replication",
         "//tensorflow/python/eager:def_function",
-        "//tensorflow/python/framework",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:importer",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/layers",
         "//tensorflow/python/ops:array_ops",
