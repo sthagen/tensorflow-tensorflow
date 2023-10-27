@@ -13,7 +13,12 @@
 # limitations under the License.
 # ==============================================================================
 
-class AotOptions:
-    def __init__(self) -> None: ...
+"""Gradient registrations for parsing ops."""
+from tensorflow.python.framework import ops
 
-def AotCompileSavedModel(input_model_dir: str = ..., aot_options: AotOptions = ..., output_model_dir: str = ...) -> None: ...
+
+ops.NotDifferentiable("DecodeRaw")
+ops.NotDifferentiable("DecodePaddedRaw")
+ops.NotDifferentiable("ParseTensor")
+ops.NotDifferentiable("SerializeTensor")
+ops.NotDifferentiable("StringToNumber")
