@@ -640,6 +640,7 @@ cc_library(
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:redzone_allocator",
+        "@local_tsl//tsl/lib/core:bits",
         "@local_tsl//tsl/platform:blocking_counter",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
@@ -1171,10 +1172,14 @@ build_cub_sort_kernels(
         "TENSORFLOW_USE_ROCM=1",
     ]),
     types = get_cub_sort_kernel_types(),
-    deps = if_cuda_is_configured([
+    deps = if_gpu_is_configured([
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-    ]) + if_cuda_is_configured([":gpu_prim_cuda"]) + if_rocm_is_configured([":gpu_prim_rocm"]),
+    ]) + if_cuda_is_configured([
+        ":gpu_prim_cuda",
+    ]) + if_rocm_is_configured([
+        ":gpu_prim_rocm",
+    ]),
 )
 
 cc_library(
@@ -1189,6 +1194,7 @@ cc_library(
         ":ir_emission_utils",
         ":matmul_utils",
         "//xla:shape_util",
+        "//xla:status",
         "//xla:status_macros",
         "//xla:statusor",
         "//xla:xla_data_proto_cc",
@@ -1202,6 +1208,7 @@ cc_library(
         "//xla/stream_executor/gpu:gpu_blas_lt",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
@@ -1538,6 +1545,7 @@ cc_library(
         ":ir_emission_utils",
         "//xla:autotuning_proto_cc",
         "//xla:shape_util",
+        "//xla:status",
         "//xla:status_macros",
         "//xla:statusor",
         "//xla:types",
