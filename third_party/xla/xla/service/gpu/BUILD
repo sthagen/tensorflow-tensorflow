@@ -315,8 +315,12 @@ cc_library(
         "//xla/service:custom_call_target_registry",
         "//xla/service:name_uniquer",
         "//xla/service/gpu/fusions",
+        "//xla/service/gpu/fusions:fusion_emitter",
+        "//xla/service/gpu/fusions:input_slices",
+        "//xla/service/gpu/fusions:loop",
         "//xla/service/gpu/fusions:thunk_util",
         "//xla/service/gpu/fusions:tiling_util",
+        "//xla/service/gpu/fusions:transpose",
         "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/service/gpu/runtime3:fft_thunk",
         "//xla/service/llvm_ir:buffer_assignment_util",
@@ -1180,10 +1184,7 @@ build_cub_sort_kernels(
         "TENSORFLOW_USE_ROCM=1",
     ]),
     types = get_cub_sort_kernel_types(),
-    deps = if_gpu_is_configured([
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-    ]) + if_cuda_is_configured([
+    deps = if_cuda_is_configured([
         ":gpu_prim_cuda",
     ]) + if_rocm_is_configured([
         ":gpu_prim_rocm",
