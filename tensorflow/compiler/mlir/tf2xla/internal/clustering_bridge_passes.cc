@@ -70,7 +70,8 @@ void AddBridgeClusteringPipelinePasses(OpPassManager& pm,
   // preserved and the sequencing rewrite will trigger.
   pm.addPass(mlir::TFDevice::CreateEmbeddingPipeliningPass());
   pm.addPass(mlir::TFDevice::CreateEmbeddingSequencingPass());
-  pm.addPass(mlir::TFTPU::CreateTPUClusterFormationPass(strict_clusters));
+  pm.addPass(tensorflow::tf2xla::internal::CreateTPUClusterFormationPass(
+      strict_clusters));
   // CreateEmbeddingPipeliningPass may have created more functions, but
   // TPUClusterCleanup and OutsideCompiledToHostLaunch need every function to be
   // only called from one cluster. Here, we choose to fix the all-funcs-one-use
@@ -143,7 +144,8 @@ void AddBridgeClusteringPipelinePasses(OpPassManager& pm,
   pm.addPass(mlir::TFDevice::CreateHostLaunchToOutsideCompiledPass());
 
   pm.addPass(mlir::TFDevice::CreateMarkOpsForOutsideCompilationPass());
-  pm.addPass(mlir::TFDevice::CreateExtractHeadTailOutsideCompilationPass());
+  pm.addPass(tensorflow::tf2xla::internal::
+                 CreateExtractHeadTailOutsideCompilationPass());
   pm.addPass(mlir::TFDevice::CreateExtractOutsideCompilationPass());
   pm.addNestedPass<FuncOp>(
       mlir::TFDevice::CreateVerifyNoOutsideCompilationMarkersPass());
@@ -222,7 +224,8 @@ void AddNonTPUBridgeClusteringPipelinePasses(OpPassManager& pm) {
   if (tensorflow::GetMlirCommonFlags()
           ->tf_mlir_enable_generic_outside_compilation) {
     pm.addPass(mlir::TFDevice::CreateMarkOpsForOutsideCompilationPass());
-    pm.addPass(mlir::TFDevice::CreateExtractHeadTailOutsideCompilationPass());
+    pm.addPass(tensorflow::tf2xla::internal::
+                   CreateExtractHeadTailOutsideCompilationPass());
     pm.addPass(mlir::TFDevice::CreateExtractOutsideCompilationPass());
   }
   // Outline clusters into cluster functions.
