@@ -73,6 +73,7 @@ limitations under the License.
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -81,7 +82,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/stream_executor/device_memory.h"
-#include "xla/stream_executor/platform/port.h"
 
 namespace stream_executor {
 
@@ -93,6 +93,10 @@ class StreamExecutor;
 namespace internal {
 class KernelInterface;
 }  // namespace internal
+
+//===----------------------------------------------------------------------===//
+// Kernel cache config
+//===----------------------------------------------------------------------===//
 
 // This enum represents potential configurations of L1/shared memory when
 // running a particular kernel. These values represent user preference, and
@@ -111,6 +115,10 @@ enum class KernelCacheConfig {
   kPreferEqual,
 };
 
+//===----------------------------------------------------------------------===//
+// Kernel metadata
+//===----------------------------------------------------------------------===//
+
 // KernelMetadata holds runtime-queryable attributes of a loaded kernel, such as
 // registers allocated, shared memory used, etc.
 // Not all platforms support reporting of all information, so each accessor
@@ -118,33 +126,27 @@ enum class KernelCacheConfig {
 // platform.
 class KernelMetadata {
  public:
-  KernelMetadata()
-      : has_registers_per_thread_(false), has_shared_memory_bytes_(false) {}
+  KernelMetadata() = default;
 
   // Returns the number of registers used per thread executing this kernel.
-  bool registers_per_thread(int *registers_per_thread) const;
-
-  // Sets the number of registers used per thread executing this kernel.
-  void set_registers_per_thread(int registers_per_thread);
+  std::optional<int64_t> registers_per_thread() const;
 
   // Returns the amount of [static] shared memory used per block executing this
   // kernel. Note that dynamic shared memory allocations are not (and can not)
   // be reported here (since they're not specified until kernel launch time).
-  bool shared_memory_bytes(int *shared_memory_bytes) const;
+  std::optional<int64_t> shared_memory_bytes() const;
 
-  // Sets the amount of [static] shared memory used per block executing this
-  // kernel.
+  void set_registers_per_thread(int registers_per_thread);
   void set_shared_memory_bytes(int shared_memory_bytes);
 
  private:
-  // Holds the value returned by registers_per_thread above.
-  bool has_registers_per_thread_;
-  int registers_per_thread_;
-
-  // Holds the value returned by shared_memory_bytes above.
-  bool has_shared_memory_bytes_;
-  int64_t shared_memory_bytes_;
+  std::optional<int64_t> registers_per_thread_;
+  std::optional<int64_t> shared_memory_bytes_;
 };
+
+//===----------------------------------------------------------------------===//
+// Kernel
+//===----------------------------------------------------------------------===//
 
 // A data-parallel kernel (code entity) for launching via the StreamExecutor,
 // analogous to a void* device function pointer. See TypedKernel for the typed
@@ -216,139 +218,47 @@ class KernelBase {
   void operator=(const KernelBase &) = delete;
 };
 
-// Whether T is a DeviceMemory-family pointer.
+//===----------------------------------------------------------------------===//
+// Device memory pointer traits
+//===----------------------------------------------------------------------===//
+
+namespace internal {
 template <typename T>
-struct IsDeviceMemoryPointer {
-  static constexpr bool value = false;
-};
+struct IsDeviceMemory : public std::false_type {};
+template <typename U>
+struct IsDeviceMemory<DeviceMemory<U>> : public std::true_type {};
+template <>
+struct IsDeviceMemory<DeviceMemoryBase> : public std::true_type {};
 
 template <typename U>
-struct IsDeviceMemoryPointer<DeviceMemory<U> *> {
-  static constexpr bool value = true;
-};
+struct IsSharedDeviceMemory : public std::false_type {};
+template <typename U>
+struct IsSharedDeviceMemory<SharedDeviceMemory<U>> : public std::true_type {};
+}  // namespace internal
 
-template <>
-struct IsDeviceMemoryPointer<DeviceMemoryBase *> {
-  static constexpr bool value = true;
-};
-
-// Whether T is a DeviceMemory-family value-like thing (which includes a
-// reference). This trait is useful because we pack values in the same manner as
-// references.
 template <typename T>
-struct IsDeviceMemoryValueLike {
-  static constexpr bool value = false;
-};
+static constexpr bool is_device_memory_pointer_v =
+    std::is_pointer_v<T> &&
+    internal::IsDeviceMemory<std::remove_pointer_t<T>>::value;
 
-template <typename U>
-struct IsDeviceMemoryValueLike<DeviceMemory<U> &> {
-  static constexpr bool value = true;
-};
+template <typename T>
+static constexpr bool is_device_memory_value_like_v =
+    !std::is_pointer_v<T> &&
+    internal::IsDeviceMemory<std::remove_reference_t<T>>::value;
 
-// We need to treat SharedDeviceMemory types differently than other DeviceMemory
-// types (since they maintain no allocations), hence these specializations.
-template <typename U>
-struct IsDeviceMemoryValueLike<SharedDeviceMemory<U> &> {
-  static constexpr bool value = false;
-};
+template <typename T>
+static constexpr bool is_shared_device_memory_v =
+    internal::IsSharedDeviceMemory<std::remove_reference_t<T>>::value;
 
-template <>
-struct IsDeviceMemoryValueLike<DeviceMemoryBase &> {
-  static constexpr bool value = true;
-};
-
-template <typename U>
-struct IsDeviceMemoryValueLike<DeviceMemory<U>> {
-  static constexpr bool value = true;
-};
-
-template <typename U>
-struct IsDeviceMemoryValueLike<SharedDeviceMemory<U>> {
-  static constexpr bool value = false;
-};
-
-template <>
-struct IsDeviceMemoryValueLike<DeviceMemoryBase> {
-  static constexpr bool value = true;
-};
-
-template <typename U>
-struct IsSharedDeviceMemory {
-  static constexpr bool value = false;
-};
-
-template <typename U>
-struct IsSharedDeviceMemory<SharedDeviceMemory<U> &> {
-  static constexpr bool value = true;
-};
-
-template <typename U>
-struct IsSharedDeviceMemory<SharedDeviceMemory<U>> {
-  static constexpr bool value = true;
-};
+//===----------------------------------------------------------------------===//
+// Kernel arguments
+//===----------------------------------------------------------------------===//
 
 // Basic data about a kernel argument.
 struct KernelArg {
   bool is_shared;
   const void *address;
   size_t size;
-};
-
-// An iterator for traversing all the arguments of a KernelArgsArray.
-class KernelArgIterator {
- public:
-  KernelArgIterator(int number_of_argument_addresses,
-                    int number_of_shared_memory_arguments,
-                    const void *const *arg_addresses_data,
-                    const size_t *arg_sizes_data,
-                    const size_t *shmem_bytes_data,
-                    const size_t *shmem_indices_data)
-      : arg_index_(0),
-        number_of_arguments_(number_of_argument_addresses +
-                             number_of_shared_memory_arguments),
-        arg_address_iter_(arg_addresses_data),
-        arg_size_iter_(arg_sizes_data),
-        shmem_bytes_iter_(shmem_bytes_data),
-        shmem_indices_iter_(shmem_indices_data),
-        shmem_indices_end_(shmem_indices_data +
-                           number_of_shared_memory_arguments) {}
-
-  // Returns true if another argument is present in the iterator.
-  bool has_next() { return arg_index_ < number_of_arguments_; }
-
-  // Returns the next argument in the iterator.
-  //
-  // Returns a default-constructed KernelArg if there is no next argument.
-  KernelArg next() {
-    KernelArg result = {};
-    if (!has_next()) {
-      return result;
-    } else if ((shmem_indices_iter_ != shmem_indices_end_) &&
-               (arg_index_ == *shmem_indices_iter_)) {
-      result.is_shared = true;
-      result.address = nullptr;
-      result.size = *shmem_bytes_iter_;
-      ++shmem_indices_iter_;
-      ++shmem_bytes_iter_;
-    } else {
-      result.is_shared = false;
-      result.address = *arg_address_iter_;
-      result.size = *arg_size_iter_;
-      ++arg_address_iter_;
-      ++arg_size_iter_;
-    }
-    ++arg_index_;
-    return result;
-  }
-
- private:
-  size_t arg_index_;
-  size_t number_of_arguments_;
-  const void *const *arg_address_iter_;
-  const size_t *arg_size_iter_;
-  const size_t *shmem_bytes_iter_;
-  const size_t *shmem_indices_iter_;
-  const size_t *const shmem_indices_end_;
 };
 
 // Base class for KernelArgsArray.
@@ -381,9 +291,6 @@ class KernelArgsArrayBase {
 
   // Gets the list of argument addresses.
   virtual absl::Span<const void *const> argument_addresses() const = 0;
-
-  // Gets an iterator to the arguments in the array.
-  virtual KernelArgIterator arg_iterator() const = 0;
 };
 
 // A list of arguments for a kernel call.
@@ -419,7 +326,7 @@ class KernelArgsArray : public KernelArgsArrayBase {
   void add_argument(const T &arg) {
     static_assert(sizeof(T) <= kMaxGenericArgSize,
                   "Please adjust kMaxGenericArgSize");
-    static_assert(std::is_pod<T>::value, "Only pod types supported!");
+    static_assert(std::is_pod_v<T>, "Only pod types supported!");
     char *generic_arg_storage =
         &generic_arguments_[number_of_generic_arguments_++ *
                             kMaxGenericArgSize];
@@ -471,14 +378,6 @@ class KernelArgsArray : public KernelArgsArrayBase {
                                          number_of_argument_addresses_);
   }
 
-  // Gets an iterator to the arguments in the array.
-  KernelArgIterator arg_iterator() const override {
-    return KernelArgIterator(
-        number_of_argument_addresses_, number_of_shared_memory_arguments_,
-        argument_addresses_.data(), argument_sizes_.data(),
-        shared_memory_bytes_.data(), shared_memory_indices_.data());
-  }
-
  private:
   // A place to store copies of opaque pointers from device memory arguments.
   std::array<const void *, kNumArgs> device_memory_opaque_pointers_;
@@ -525,6 +424,10 @@ std::unique_ptr<KernelArgsArrayBase> MakeKernelArgs(
   }
   return kernel_args;
 }
+
+//===----------------------------------------------------------------------===//
+// Typed kernel
+//===----------------------------------------------------------------------===//
 
 // Typed variant of KernelBase, like a typed device function pointer. See the
 // file comment for details and example usage.
@@ -587,32 +490,29 @@ class TypedKernel : public KernelBase {
   template <typename T>
   void PackOneParam(
       KernelArgsArray<kNumberOfParameters> *args, const T &arg,
-      typename std::enable_if<!IsDeviceMemoryValueLike<T>::value &&
-                              !IsDeviceMemoryPointer<T>::value &&
-                              !IsSharedDeviceMemory<T>::value>::type * =
-          nullptr) const {
-    static_assert(!std::is_pointer<T>::value,
+      typename std::enable_if_t<
+          !is_device_memory_value_like_v<T> && !is_device_memory_pointer_v<T> &&
+          !is_shared_device_memory_v<T>> * = nullptr) const {
+    static_assert(!std::is_pointer_v<T>,
                   "cannot pass raw pointer to the device");
-    static_assert(!std::is_convertible<T, DeviceMemoryBase>::value,
+    static_assert(!std::is_convertible_v<T, DeviceMemoryBase>,
                   "cannot pass device memory as a normal value");
     args->add_argument(arg);
   }
 
   // DeviceMemoryBase family reference override.
   template <typename T>
-  void PackOneParam(
-      KernelArgsArray<kNumberOfParameters> *args, const T &arg,
-      typename std::enable_if<IsDeviceMemoryValueLike<T>::value>::type * =
-          nullptr) const {
+  void PackOneParam(KernelArgsArray<kNumberOfParameters> *args, const T &arg,
+                    typename std::enable_if_t<is_device_memory_value_like_v<T>>
+                        * = nullptr) const {
     args->add_device_memory_argument(arg);
   }
 
   // DeviceMemoryBase family pointer override.
   template <typename T>
-  void PackOneParam(
-      KernelArgsArray<kNumberOfParameters> *args, T arg,
-      typename std::enable_if<IsDeviceMemoryPointer<T>::value>::type * =
-          nullptr) const {
+  void PackOneParam(KernelArgsArray<kNumberOfParameters> *args, T arg,
+                    typename std::enable_if_t<is_device_memory_pointer_v<T>> * =
+                        nullptr) const {
     DeviceMemoryBase *ptr = static_cast<DeviceMemoryBase *>(arg);
     args->add_device_memory_argument(*ptr);
   }
@@ -620,10 +520,9 @@ class TypedKernel : public KernelBase {
   // Dynamic shared device memory has a size, but no associated allocation on
   // the host; internally, the device will allocate storage.
   template <typename T>
-  void PackOneParam(
-      KernelArgsArray<kNumberOfParameters> *args, T arg,
-      typename std::enable_if<IsSharedDeviceMemory<T>::value>::type * =
-          nullptr) const {
+  void PackOneParam(KernelArgsArray<kNumberOfParameters> *args, T arg,
+                    typename std::enable_if_t<is_shared_device_memory_v<T>> * =
+                        nullptr) const {
     args->add_shared_bytes(arg.size());
   }
 
@@ -638,40 +537,35 @@ template <typename ParamTuple, typename ArgTuple>
 struct KernelInvocationChecker {
   // Whether the parameter tuple and argument tuple match in length.
   static constexpr bool kLengthMatches =
-      std::tuple_size<ParamTuple>::value == std::tuple_size<ArgTuple>::value;
+      std::tuple_size_v<ParamTuple> == std::tuple_size_v<ArgTuple>;
 
   // The (matching) length of the parameters and arguments type lists.
   static constexpr int kTupleLength =
-      static_cast<int>(std::tuple_size<ArgTuple>::value);
+      static_cast<int>(std::tuple_size_v<ArgTuple>);
 
   // Helper trait to say whether the parameter wants a DeviceMemory-reference
   // compatible type. This is for inexact type matches, so that it doesn't have
   // to be precisely a const DeviceMemory<T>&, but can also be a value that
   // represents the same.
   template <typename ParamType, typename ArgType>
-  struct IsCompatibleDeviceMemoryRef {
-    static constexpr bool value = false;
-  };
+  struct IsCompatibleDeviceMemoryRef : public std::false_type {};
 
   // See type trait definition above.
   template <typename U>
-  struct IsCompatibleDeviceMemoryRef<const DeviceMemory<U> &, DeviceMemory<U>> {
-    static constexpr bool value = true;
-  };
+  struct IsCompatibleDeviceMemoryRef<const DeviceMemory<U> &, DeviceMemory<U>>
+      : public std::true_type {};
 
   // See type trait definition above.
   template <typename U>
   struct IsCompatibleDeviceMemoryRef<const SharedDeviceMemory<U> &,
-                                     SharedDeviceMemory<U>> {
-    static constexpr bool value = true;
-  };
+                                     SharedDeviceMemory<U>>
+      : public std::true_type {};
 
   // Returns whether ParamT and ArgT are compatible for data parallel kernel
   // parameter packing without any assert functionality.
   template <typename ParamT, typename ArgT>
   static constexpr bool CompatibleNoAssert() {
-    return std::is_same<typename std::remove_const<ParamT>::type,
-                        ArgT>::value ||
+    return std::is_same_v<typename std::remove_const_t<ParamT>, ArgT> ||
            IsCompatibleDeviceMemoryRef<ParamT, ArgT>::value;
   }
 
@@ -705,7 +599,7 @@ struct KernelInvocationChecker {
   // good.
   template <int kArgumentNumber, bool kShouldStaticAssert>
   static constexpr bool CheckParam(
-      typename std::enable_if<(kArgumentNumber < 0)>::type *dummy = nullptr) {
+      typename std::enable_if_t<(kArgumentNumber < 0)> *dummy = nullptr) {
     return true;
   }
 
@@ -714,10 +608,9 @@ struct KernelInvocationChecker {
   // yield the constexpr boolean value.
   template <int kArgumentNumber, bool kShouldStaticAssert>
   static constexpr bool CheckParam(
-      typename std::enable_if<kArgumentNumber >= 0>::type *dummy = nullptr) {
-    typedef
-        typename std::tuple_element<kArgumentNumber, ParamTuple>::type ParamT;
-    typedef typename std::tuple_element<kArgumentNumber, ArgTuple>::type ArgT;
+      typename std::enable_if_t<kArgumentNumber >= 0> *dummy = nullptr) {
+    typedef typename std::tuple_element_t<kArgumentNumber, ParamTuple> ParamT;
+    typedef typename std::tuple_element_t<kArgumentNumber, ArgTuple> ArgT;
     return Compatible<ParamT, ArgT, kShouldStaticAssert, kArgumentNumber>() &&
            CheckParam<kArgumentNumber - 1, kShouldStaticAssert>();
   }

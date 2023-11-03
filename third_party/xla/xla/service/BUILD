@@ -2934,6 +2934,8 @@ xla_cc_test(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_matchers",
         "//xla/tests:hlo_test_base",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log",
         "@local_tsl//tsl/platform:test_main",
     ],
 )
@@ -7211,6 +7213,7 @@ xla_cc_binary(
     deps = [
         ":compiler",
         ":executable",
+        ":export_hlo",
         ":hlo_module_config",
         ":symbol_repository",
         "//xla:autotune_results_proto_cc",
