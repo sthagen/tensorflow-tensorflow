@@ -19,7 +19,6 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -30,6 +29,8 @@ limitations under the License.
 #include "mlir/InitAllDialects.h"  // from @llvm-project
 #include "mlir/Parser/Parser.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
+#include "xla/python/ifrt/client.h"
+#include "xla/python/ifrt/test_util.h"
 #include "tensorflow/core/platform/resource_loader.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/tfrt/graph_executor/graph_execution_options.h"
@@ -37,10 +38,12 @@ limitations under the License.
 #include "tensorflow/core/tfrt/runtime/runtime.h"
 #include "tensorflow/core/tfrt/saved_model/saved_model_testutil.h"
 #include "tsl/lib/core/status_test_util.h"
+#include "tsl/platform/statusor.h"
 #include "tfrt/host_context/resource_context.h"  // from @tf_runtime
 
 namespace tensorflow {
 namespace ifrt_serving {
+namespace {
 
 TEST(IfrtBackendCompilerTest, Basic) {
   // Create test input module
@@ -62,7 +65,9 @@ TEST(IfrtBackendCompilerTest, Basic) {
   ASSERT_TRUE(mlir_module.get() != nullptr);
 
   // Create contexts required for the compiler execution.
-  IfrtModelContext model_context;
+  TF_ASSERT_OK_AND_ASSIGN(std::shared_ptr<xla::ifrt::Client> client,
+                          xla::ifrt::test_util::GetClient());
+  IfrtModelContext model_context(client);
 
   std::unique_ptr<tensorflow::tfrt_stub::Runtime> runtime =
       tensorflow::tfrt_stub::DefaultTfrtRuntime(/*num_threads=*/1);
@@ -79,5 +84,6 @@ TEST(IfrtBackendCompilerTest, Basic) {
   TF_ASSERT_OK(compiler.CompileTensorflow(runtime_context, mlir_module.get()));
 }
 
+}  // namespace
 }  // namespace ifrt_serving
 }  // namespace tensorflow

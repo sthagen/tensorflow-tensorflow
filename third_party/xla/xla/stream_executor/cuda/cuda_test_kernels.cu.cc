@@ -1,4 +1,3 @@
-
 /* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,25 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/compiler/mlir/tfrt/transforms/ifrt/ifrt_serving_executable.h"
+#include "xla/stream_executor/cuda/cuda_test_kernels.h"
 
-#include <vector>
+namespace stream_executor::cuda::internal {
 
-#include "absl/log/check.h"
-#include "absl/log/log.h"
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
-#include "absl/types/span.h"
-#include "tensorflow/core/framework/tensor.h"
-
-namespace tensorflow {
-namespace ifrt_serving {
-
-// Executes the computation.
-absl::StatusOr<std::vector<tensorflow::Tensor>> IfrtServingExecutable::Execute(
-    absl::Span<const tensorflow::Tensor> inputs) {
-  return absl::UnimplementedError("Not implemented");
+__global__ void AddI32(int32_t* a, int32_t* b, int32_t* c) {
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
+  c[index] = a[index] + b[index];
 }
 
-}  // namespace ifrt_serving
-}  // namespace tensorflow
+void* GetAddI32CudaKernel() { return reinterpret_cast<void*>(&AddI32); }
+
+}  // namespace stream_executor::cuda::internal
