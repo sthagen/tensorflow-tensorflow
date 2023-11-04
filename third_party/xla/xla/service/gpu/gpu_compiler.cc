@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/service/gpu/gpu_compiler.h"
 
 #include <algorithm>
-#include <any>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -262,10 +261,61 @@ se::GpuComputeCapability GetGpuVersion(se::StreamExecutor* stream_exec) {
   return stream_exec->GetDeviceDescription().gpu_compute_capability();
 }
 
+// TODO(b/232263665): It should be shared between GPU and CPU.
+class GpuAotCompilationResult : public AotCompilationResult {
+ public:
+  GpuAotCompilationResult(
+      HloModuleProto hlo, std::string_view obj_file,
+      std::string_view mlir_module, EntryFunctionAttributes entry_func_attrs,
+      std::string_view gpu_asm_text, absl::Span<const uint8_t> gpu_binary,
+      absl::Span<const GpuExecutable::ConstantInfo> constants = {}) {
+    XlaRuntimeExecutableProto xla_runtime_executable;
+    *xla_runtime_executable.mutable_hlo_module_proto() = hlo;
+    xla_runtime_executable.set_obj_file(std::string(obj_file));
+    xla_runtime_executable.set_mlir_module(std::string(mlir_module));
+    *xla_runtime_gpu_executable_.mutable_xla_runtime_executable() =
+        xla_runtime_executable;
+
+    *xla_runtime_gpu_executable_.mutable_entry_func_attrs() = entry_func_attrs;
+    xla_runtime_gpu_executable_.set_gpu_asm_text(std::string(gpu_asm_text));
+    xla_runtime_gpu_executable_.set_gpu_binary(gpu_binary.data(),
+                                               gpu_binary.size());
+
+    for (const GpuExecutable::ConstantInfo& cst : constants) {
+      auto* cst_proto = xla_runtime_gpu_executable_.add_constants();
+      cst_proto->set_symbol_name(cst.symbol_name);
+      cst_proto->set_allocation_index(cst.allocation_index);
+      cst_proto->set_content(cst.content.data(), cst.content.size());
+    }
+  }
+
+  explicit GpuAotCompilationResult(XlaRuntimeGpuExecutableProto executable)
+      : xla_runtime_gpu_executable_(executable) {}
+
+  StatusOr<std::string> SerializeAsString() const override {
+    return xla_runtime_gpu_executable_.SerializeAsString();
+  }
+
+  static StatusOr<std::unique_ptr<GpuAotCompilationResult>> FromString(
+      const std::string& serialized) {
+    XlaRuntimeGpuExecutableProto xla_runtime_gpu_executable;
+    if (!xla_runtime_gpu_executable.ParseFromString(serialized)) {
+      return InternalError("Failed to parse serialized JitRtExecutableProto.");
+    }
+    return std::make_unique<GpuAotCompilationResult>(
+        xla_runtime_gpu_executable);
+  }
+
+  StatusOr<std::unique_ptr<Executable>> LoadExecutable(
+      Compiler* compiler, se::StreamExecutor* executor) const override;
+
+ private:
+  XlaRuntimeGpuExecutableProto xla_runtime_gpu_executable_;
+};
+
 }  // end anonymous namespace
 
-StatusOr<std::unique_ptr<Executable>>
-GpuXlaRuntimeAotCompilationResult::LoadExecutable(
+StatusOr<std::unique_ptr<Executable>> GpuAotCompilationResult::LoadExecutable(
     Compiler* compiler, se::StreamExecutor* executor) const {
   XlaRuntimeExecutableProto xla_runtime_executable =
       xla_runtime_gpu_executable_.xla_runtime_executable();
@@ -1707,12 +1757,12 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
       module_group->ConsumeModules();
   std::vector<std::unique_ptr<AotCompilationResult>> results;
 
-  std::any target_config = options.target_config();
-  auto* gpu_target_config = std::any_cast<TargetConfig>(&target_config);
-  CHECK(gpu_target_config != nullptr || options.executor() != nullptr);
+  const std::optional<Compiler::TargetConfig>& target_config =
+      options.target_config();
+  CHECK(target_config.has_value() || options.executor() != nullptr);
   const se::DeviceDescription& gpu_device_info =
-      gpu_target_config != nullptr ? gpu_target_config->device_description
-                                   : options.executor()->GetDeviceDescription();
+      target_config.has_value() ? target_config->device_description
+                                : options.executor()->GetDeviceDescription();
   for (const auto& module : modules) {
     llvm::LLVMContext llvm_context;
 
@@ -1726,11 +1776,11 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     // Compile the module
     CompileModuleResults compile_module_results;
 
-    if (gpu_target_config) {
+    if (target_config.has_value()) {
       TF_RETURN_IF_ERROR(CompileModuleToLlvmIrImpl(
           module.get(), &llvm_context, target_triple_, data_layout_,
-          gpu_target_config->platform_name, options.PlatformId(),
-          gpu_target_config->device_description, GetCanShareBuffer(),
+          target_config->platform_name, options.PlatformId(),
+          target_config->device_description, GetCanShareBuffer(),
           BufferSizeBytesFunction(), &compile_module_results));
     } else {
       CHECK(options.executor() != nullptr);
@@ -1747,12 +1797,12 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
 
     using BackendCompileResult = std::pair<std::string, std::vector<uint8_t>>;
     BackendCompileResult backend_result;
-    if (gpu_target_config) {
+    if (target_config.has_value()) {
       TF_ASSIGN_OR_RETURN(
           backend_result,
           CompileToTargetBinary(
               module->config(), std::move(compile_module_results.llvm_module),
-              gpu_target_config->device_description.gpu_compute_capability(),
+              target_config->device_description.gpu_compute_capability(),
               options.executor(), {options.device_allocator()}, module.get()));
     } else {
       TF_ASSIGN_OR_RETURN(
@@ -1818,7 +1868,7 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     std::string data(obj_file->getBuffer().data(),
                      obj_file->getBuffer().size());
 
-    results.emplace_back(std::make_unique<GpuXlaRuntimeAotCompilationResult>(
+    results.emplace_back(std::make_unique<GpuAotCompilationResult>(
         module->ToProto(), data, program->module,
         compile_module_results.entry_func_attrs, backend_result.first,
         backend_result.second, compile_module_results.constants));
@@ -1846,7 +1896,7 @@ StatusOr<std::unique_ptr<AotCompilationResult>> GpuCompiler::Export(
   auto binary = gpu_executable->binary();
 
   std::unique_ptr<AotCompilationResult> result =
-      std::make_unique<xla::gpu::GpuXlaRuntimeAotCompilationResult>(
+      std::make_unique<xla::gpu::GpuAotCompilationResult>(
           module_proto, obj_file, mlir_module, entry_func_attrs, text, binary,
           gpu_executable->constants());
   return result;
@@ -1931,6 +1981,18 @@ Status GpuCompiler::SerializeAutotuneResultsToFile(
         AutotunerUtil::SerializeAutotuneResultsToFile(file_path));
   }
   return OkStatus();
+}
+
+StatusOr<std::unique_ptr<AotCompilationResult>>
+GpuCompiler::LoadAotCompilationResult(
+    const std::string& serialized_aot_result) {
+  return LoadAotCompilationResultStatic(serialized_aot_result);
+}
+
+StatusOr<std::unique_ptr<AotCompilationResult>>
+GpuCompiler::LoadAotCompilationResultStatic(
+    const std::string& serialized_aot_result) {
+  return GpuAotCompilationResult::FromString(serialized_aot_result);
 }
 
 }  // namespace gpu
