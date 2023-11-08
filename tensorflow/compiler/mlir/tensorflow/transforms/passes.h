@@ -463,10 +463,6 @@ CreateAnnotateParameterReplicationPass();
 std::unique_ptr<OperationPass<ModuleOp>>
 CreateMarkOpsForOutsideCompilationPass();
 
-// Creates a pass that extract outside compilation (Host ops inside cevice
-// cluster) ops to a separate parallel_execute region to run on CPU.
-std::unique_ptr<OperationPass<ModuleOp>> CreateExtractOutsideCompilationPass();
-
 // Creates a pass that merges control flow with similar predicates.
 std::unique_ptr<OperationPass<ModuleOp>> CreateMergeControlFlowPass();
 
@@ -495,9 +491,6 @@ CreateOutsideCompiledToHostLaunchPass();
 // tf_device.launch op no longer exist after Outside Compilation is complete.
 std::unique_ptr<OperationPass<func::FuncOp>>
 CreateVerifyNoOutsideCompilationMarkersPass();
-
-// Create a pass that encapsulates StatefulPartitionedCallOp within a cluster.
-std::unique_ptr<OperationPass<ModuleOp>> CreateXlaClusterFormationPass();
 
 // Create a pass that inlines the StatefulPartitionedCallOp op based in the
 // parent region.
@@ -706,7 +699,6 @@ enum MoveTransposeDirection { kBegin, kEnd };
 #define GEN_PASS_DECL_TPUCOLOCATECOMPOSITERESOURCEOPSPASS
 #define GEN_PASS_DECL_TPUDEVICEPROPAGATIONPASS
 #define GEN_PASS_DECL_TPUDYNAMICLAYOUTPASS
-#define GEN_PASS_DECL_TPUEXTRACTOUTSIDECOMPILATIONPASS
 #define GEN_PASS_DECL_TPUHOSTCOMPUTATIONEXPANSIONPASS
 #define GEN_PASS_DECL_TPUIDENTITYPRUNINGPASS
 #define GEN_PASS_DECL_TPUMERGEVARIABLESWITHEXECUTEPASS

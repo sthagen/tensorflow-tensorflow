@@ -319,6 +319,7 @@ cc_library(
         "//xla/service/gpu/fusions:fusion_emitter",
         "//xla/service/gpu/fusions:input_slices",
         "//xla/service/gpu/fusions:loop",
+        "//xla/service/gpu/fusions:reduction",
         "//xla/service/gpu/fusions:thunk_util",
         "//xla/service/gpu/fusions:tiling_util",
         "//xla/service/gpu/fusions:transpose",
@@ -350,6 +351,7 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:BufferizationDialect",
         "@llvm-project//mlir:BuiltinToLLVMIRTranslation",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
@@ -3471,16 +3473,14 @@ xla_cc_test(
     ],
 )
 
-cuda_library(
+cc_library(
     name = "buffer_comparator",
-    srcs = if_cuda_is_configured([
-        "buffer_comparator.cc",
-        "buffer_comparator.cu.cc",
-    ]),
+    srcs = if_cuda_is_configured(["buffer_comparator.cc"]),
     hdrs = if_cuda_is_configured(["buffer_comparator.h"]),
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured([
         ":launch_dimensions",
+        ":buffer_comparator_kernel",
         ":gpu_asm_opts_util",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/strings",
@@ -3494,6 +3494,13 @@ cuda_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:errors",
     ]),
+)
+
+cuda_library(
+    name = "buffer_comparator_kernel",
+    srcs = if_cuda_is_configured(["buffer_comparator.cu.cc"]),
+    visibility = ["//visibility:public"],
+    deps = ["@local_config_cuda//cuda:cuda_headers"],
 )
 
 xla_cc_test(

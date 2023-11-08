@@ -99,6 +99,7 @@ limitations under the License.
 #include "xla/service/gpu/fusions/fusions.h"
 #include "xla/service/gpu/fusions/input_slices.h"
 #include "xla/service/gpu/fusions/loop.h"
+#include "xla/service/gpu/fusions/reduction.h"
 #include "xla/service/gpu/fusions/thunk_util.h"
 #include "xla/service/gpu/fusions/transpose.h"
 #include "xla/service/gpu/gemm_thunk.h"
@@ -458,8 +459,7 @@ llvm::Value* IrEmitterUnnested::CreateLoad(llvm::Value* address,
   int data_bytes = data_type->getPrimitiveSizeInBits() /
                    primitive_util::BitWidth(PrimitiveType::U8);
   if (alignment_bytes == 0) {
-    return b_.CreateLoad(data_type,
-                         b_.CreateBitCast(address, data_type->getPointerTo()));
+    return b_.CreateLoad(data_type, address);
   }
 
   int alignment_bitwidth =
@@ -488,8 +488,7 @@ void IrEmitterUnnested::CreateStore(llvm::Value* data, llvm::Value* address,
                    primitive_util::BitWidth(PrimitiveType::U8);
   CHECK_GE(data_bytes, alignment_bytes);
   if (alignment_bytes == 0) {
-    b_.CreateStore(data,
-                   b_.CreateBitCast(address, data->getType()->getPointerTo()));
+    b_.CreateStore(data, address);
     return;
   }
 
@@ -504,10 +503,7 @@ void IrEmitterUnnested::CreateStore(llvm::Value* data, llvm::Value* address,
         b_.CreateLShr(data,
                       llvm::ConstantInt::get(b_.getInt32Ty(), offset_bytes)),
         b_.getIntNTy(alignment_bitwidth), "truncated_value");
-    b_.CreateStore(
-        shifted_partial,
-        b_.CreateBitCast(offset_address,
-                         b_.getIntNTy(alignment_bitwidth)->getPointerTo()));
+    b_.CreateStore(shifted_partial, offset_address);
   }
 }
 
@@ -544,8 +540,6 @@ Status IrEmitterUnnested::EmitPadToStatic(mlir::Operation* op) {
   //   int* source_array = input[0];
   //   int* dest_array = output[0];
   llvm::Value* source_buffer = source_array.GetBasePointer();
-  llvm::Value* raw_buffer =
-      b_.CreateBitCast(source_buffer, b_.getInt8Ty()->getPointerTo());
 
   // TODO(jurahul): input_shape here is the static shape of the input (which has
   // a dynamic shape in XLA). Currently, we are mapping that to a static shaped
@@ -566,7 +560,7 @@ Status IrEmitterUnnested::EmitPadToStatic(mlir::Operation* op) {
 
     const int64_t dim_index = i - 1;
     llvm::Value* metadata = b_.CreateConstInBoundsGEP1_32(
-        b_.getInt8Ty(), raw_buffer,
+        b_.getInt8Ty(), source_buffer,
         raw_data_size + dim_index * sizeof(int32_t));
     llvm::Value* dyn_dim_size =
         CreateLoad(metadata, b_.getInt32Ty(), alignment);
@@ -679,8 +673,6 @@ Status IrEmitterUnnested::EmitSliceToDynamic(mlir::Operation* op) {
   //   int* dest_array = output[0];
   const llvm_ir::IrArray data_array = input_arrays.back();
   llvm::Value* dest_buffer = data_array.GetBasePointer();
-  llvm::Value* raw_buffer =
-      b_.CreateBitCast(dest_buffer, b_.getInt8Ty()->getPointerTo());
 
   // Load dynamic dimensions from memory.
   std::vector<llvm::Value*> dynamic_dims;
@@ -705,7 +697,7 @@ Status IrEmitterUnnested::EmitSliceToDynamic(mlir::Operation* op) {
     for (int64_t i = 1; i < slice_to_dynamic.getArgs().size(); ++i) {
       const int64_t dim_index = i - 1;
       llvm::Value* metadata = b_.CreateConstInBoundsGEP1_32(
-          b_.getInt8Ty(), raw_buffer,
+          b_.getInt8Ty(), dest_buffer,
           raw_data_size + dim_index * sizeof(int32_t));
       // output[i] stores dynamic_dim_(i-1)
       CreateStore(dynamic_dims[dim_index], metadata, alignment);
@@ -1865,7 +1857,7 @@ Status IrEmitterUnnested::EmitTriangularSolveCustomCall(mlir::Operation* op) {
 //     %0 = tensor_load %external_memref0
 //     %1 = tensor_load %external_memref1
 //     ...
-//     tensor_store %ret, %external_memref2
+//     materialize_in_destination %ret, %external_memref2
 //   }
 // to
 //   fusion(%external_memref0, %external_memref1) (^bb(%0, %1) {
@@ -1880,7 +1872,7 @@ static Status ProcessFusionForConversion(mlir::Region* region,
                                          std::vector<Shape>* operand_shapes,
                                          std::vector<Shape>* output_shapes) {
   std::vector<mlir::bufferization::ToTensorOp> loads;
-  std::vector<mlir::memref::TensorStoreOp> stores;
+  std::vector<mlir::bufferization::MaterializeInDestinationOp> stores;
 
   region->walk([&](mlir::bufferization::ToTensorOp load) {
     if (load.getMemref().getParentRegion() != region) {
@@ -1888,8 +1880,9 @@ static Status ProcessFusionForConversion(mlir::Region* region,
     }
   });
 
-  region->walk([&](mlir::memref::TensorStoreOp store) {
-    if (store.getMemref().getParentRegion() != region) {
+  region->walk([&](mlir::bufferization::MaterializeInDestinationOp store) {
+    if (!isa<mlir::TensorType>(store.getDest().getType())) return;
+    if (store.getDest().getParentRegion() != region) {
       stores.push_back(store);
     }
   });
@@ -1904,10 +1897,10 @@ static Status ProcessFusionForConversion(mlir::Region* region,
 
   std::vector<mlir::Value> returned_values;
   for (auto store : stores) {
-    Shape shape = GetShape(store.getMemref());
+    Shape shape = GetShape(store.getDest());
     output_shapes->push_back(shape);
 
-    returned_values.push_back(store.getTensor());
+    returned_values.push_back(store.getSource());
     store.erase();
   }
 
@@ -2051,7 +2044,7 @@ bool IsSpecializedLoopFusion(
 
 Status IrEmitterUnnested::EmitFusion(const HloFusionInstruction* instr,
                                      HloFusionAnalysis& fusion_analysis) {
-  // TODO(anlunx): Support kReduction, kTriton, and kScatter.
+  // TODO(anlunx): Support kTriton, and kScatter.
   std::unique_ptr<FusionInterface> emitter;
   switch (fusion_analysis.GetEmitterFusionKind()) {
     case HloFusionAnalysis::EmitterFusionKind::kInputSlices:
@@ -2064,13 +2057,16 @@ Status IrEmitterUnnested::EmitFusion(const HloFusionInstruction* instr,
     case HloFusionAnalysis::EmitterFusionKind::kTranspose:
       emitter = std::make_unique<TransposeFusion>(fusion_analysis);
       break;
+    case HloFusionAnalysis::EmitterFusionKind::kReduction:
+      emitter = std::make_unique<ReductionFusion>(fusion_analysis);
+      break;
     default:
       return FailedPrecondition(
           "Fusion type not supported by the HLO emitter.");
       break;
   }
 
-  TF_ASSIGN_OR_RETURN(auto emission_result,
+  TF_ASSIGN_OR_RETURN(FusionEmissionResult emission_result,
                       emitter->Emit(*ir_emitter_context_, elemental_emitter_,
                                     nullptr, *instr, kernel_reuse_cache_, &b_));
   for (auto& thunk : emission_result.thunks) {
@@ -2478,10 +2474,6 @@ Status IrEmitterUnnested::EmitRngGetAndUpdateState(mlir::Operation* op) {
       llvm_ir::IrArray::Index(
           /*linear=*/b_.getInt64(0), shape, &b_),
       &b_, "rng_state_address");
-  output_address = BitCast(
-      output_address, llvm::PointerType::get(
-                          old_state->getType(),
-                          output_address->getType()->getPointerAddressSpace()));
   Store(old_state, output_address);
 
   return OkStatus();
@@ -3275,11 +3267,10 @@ Status IrEmitterUnnested::EmitOp(
                           HloFusionAnalysis::Create(instr, &device_info));
       HloFusionAnalysis::EmitterFusionKind kind =
           fusion_analysis.GetEmitterFusionKind();
-      // TODO(anlunx): Add support for emitting kTriton, kScatter, kReduction,
-      // and specialized kLoops.
+      // TODO(anlunx): Add support for emitting kTriton, kScatter, and
+      // specialized kLoops.
       if (kind != HloFusionAnalysis::EmitterFusionKind::kTriton &&
           kind != HloFusionAnalysis::EmitterFusionKind::kScatter &&
-          kind != HloFusionAnalysis::EmitterFusionKind::kReduction &&
           !IsSpecializedLoopFusion(op, ir_emitter_context_->allocations(),
                                    fusion_analysis)) {
         return EmitFusion(instr, fusion_analysis);
