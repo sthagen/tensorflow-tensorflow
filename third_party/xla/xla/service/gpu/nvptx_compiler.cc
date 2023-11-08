@@ -227,11 +227,11 @@ Status NVPTXCompiler::OptimizeHloPostLayoutAssignment(
       mha_fusion_pipeline.AddPass<ReshapeDecomposer>();
       mha_fusion_pipeline.AddPass<LayoutNormalization>();
     }
+
     mha_fusion_pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
     mha_fusion_pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(
         alg_sim_options);
     mha_fusion_pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
-
     // Rewrite Multi-Headed Attention modules to Fused MHA custom-calls.
     if (stream_exec) {
       mha_fusion_pipeline.AddPass<CudnnFusedMHARewriter>(
@@ -450,13 +450,10 @@ HloDataflowAnalysis::CanShareBuffer NVPTXCompiler::GetCanShareBuffer() const {
   return &CanShareBufferHint;
 }
 
-StatusOr<std::pair<std::string, std::vector<uint8_t>>>
-NVPTXCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
-                                   llvm::Module* llvm_module,
-                                   se::GpuComputeCapability gpu_version,
-                                   bool relocatable,
-                                   const HloModule* debug_module,
-                                   const CompileOptions& options) {
+StatusOr<GpuCompiler::BackendCompileResult> NVPTXCompiler::CompileTargetBinary(
+    const HloModuleConfig& module_config, llvm::Module* llvm_module,
+    se::GpuComputeCapability gpu_version, bool relocatable,
+    const HloModule* debug_module, const CompileOptions& options) {
   std::unique_ptr<llvm::Module> loaded_module =
       MaybeLoadLLVMFromFile(debug_module, llvm_module);
   llvm::Module* selected_module = nullptr;
@@ -495,8 +492,7 @@ NVPTXCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
   if (maybe_cubin.status().code() == absl::StatusCode::kCancelled) {
     return maybe_cubin.status();
   }
-  return std::pair<std::string, std::vector<uint8_t>>(
-      std::move(ptx), std::move(maybe_cubin.value()));
+  return BackendCompileResult{std::move(ptx), std::move(maybe_cubin.value())};
 }
 
 StatusOr<std::vector<uint8_t>> NVPTXCompiler::CompileGpuAsmOrGetCachedResult(

@@ -70,6 +70,7 @@ limitations under the License.
 #define XLA_STREAM_EXECUTOR_KERNEL_H_
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -78,8 +79,10 @@ limitations under the License.
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include "absl/log/check.h"
+#include "absl/meta/type_traits.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -89,9 +92,6 @@ limitations under the License.
 
 namespace stream_executor {
 
-class DeviceMemoryBase;
-template <typename ElemT>
-class DeviceMemory;
 class StreamExecutor;
 
 namespace internal {
@@ -223,36 +223,17 @@ class KernelBase {
 };
 
 //===----------------------------------------------------------------------===//
-// Device memory pointer traits
+// Typed kernel
 //===----------------------------------------------------------------------===//
 
-namespace internal {
-template <typename T>
-struct IsDeviceMemory : public std::false_type {};
-template <typename U>
-struct IsDeviceMemory<DeviceMemory<U>> : public std::true_type {};
-template <>
-struct IsDeviceMemory<DeviceMemoryBase> : public std::true_type {};
+// Typed variant of KernelBase, like a typed device function pointer.
+template <typename... Params>
+class TypedKernel : public KernelBase {
+ public:
+  static constexpr size_t kNumberOfParameters = sizeof...(Params);
 
-template <typename U>
-struct IsSharedDeviceMemory : public std::false_type {};
-template <typename U>
-struct IsSharedDeviceMemory<SharedDeviceMemory<U>> : public std::true_type {};
-}  // namespace internal
-
-template <typename T>
-static constexpr bool is_device_memory_pointer_v =
-    std::is_pointer_v<T> &&
-    internal::IsDeviceMemory<std::remove_pointer_t<T>>::value;
-
-template <typename T>
-static constexpr bool is_device_memory_value_like_v =
-    !std::is_pointer_v<T> &&
-    internal::IsDeviceMemory<std::remove_reference_t<T>>::value;
-
-template <typename T>
-static constexpr bool is_shared_device_memory_v =
-    internal::IsSharedDeviceMemory<std::remove_reference_t<T>>::value;
+  explicit TypedKernel(StreamExecutor *parent) : KernelBase(parent) {}
+};
 
 //===----------------------------------------------------------------------===//
 // Kernel arguments
@@ -325,34 +306,63 @@ class KernelArgsPackedArrayBase : public KernelArgsArrayBase {
   Kind kind() const final { return Kind::kPackedArray; }
 };
 
-// A list of arguments for a kernel call.
-//
-// The template parameter kNumArgs is the maximum number of arguments which can
-// be stored in the list.
-//
-// Contains a list of addresses for non-shared-memory arguments and a list of
-// sizes for shared-memory arguments. Since the shared-memory arguments may be
-// interspersed with the non-shared-memory arguments, it also stores a list of
-// the indices at which the shared-memory arguments appeared.
-//
-// For example, if the argument address list contains {a, b, c, d, e}, the
-// shared-memory arguments list contains the sizes of {A, B, C}, and the
-// shared-memory indices list contains {0, 3, 5}, then the original list of
-// arguments was {A, a, b, B, c, C, d, e}.
-//
-// This way of storing the arguments makes CUDA kernel calls efficient because
-// they only require the argument address list and the total number of shared
-// bytes, but it also makes it possible for OpenCL kernel calls because they
-// depend on the location of each shared-memory argument and its size.
-//
-// Note that the code for adding arguments has been identified as a performance
-// hotspot in some real-world applications so this structure has been optimized
-// for the performance of argument adding.
-template <size_t kNumArgs>
-class KernelArgsPackedArray : public KernelArgsPackedArrayBase {
- public:
-  static constexpr int kMaxGenericArgSize = 8;
+//===----------------------------------------------------------------------===//
+// Kernel arguments packing for device memory and POD args
+//===----------------------------------------------------------------------===//
 
+// KernelArgsPackedArray is optimized for packing DeviceMemoryBase pointers
+// and POD arguments (i.e. scalars) when the number and type of arguments are
+// not known at compile time.
+
+namespace internal {
+
+// An empty storage for packing just the device memory arguments, that are
+// stored directly in the `KernelArgsPackedArray`.
+class EmptyArgs {};
+
+// A storage for POD generic arguments that are smaller than `size` and require
+// alignment smaller or equal to `alignment`.
+template <size_t capacity, size_t size = 8,
+          size_t alignment = alignof(std::max_align_t)>
+class PodArgs {
+ protected:
+  template <typename T>
+  const std::byte *add_pod_argument(const T &arg) {
+    static_assert(
+        std::is_pod_v<T> && sizeof(T) <= size & alignof(T) <= alignment,
+        "Type is not compatible with POD arguments storage");
+
+    assert(num_args_ < capacity && "pod args overflow");
+    std::byte *arg_storage = args_storage_[num_args_++].storage;
+    std::memcpy(arg_storage, &arg, sizeof(T));
+
+    return arg_storage;
+  }
+
+ private:
+  struct Arg {
+    alignas(alignment) std::byte storage[size];
+  };
+
+  size_t num_args_ = 0;
+  std::array<Arg, capacity> args_storage_;
+};
+
+template <typename ArgsStorage>
+static constexpr bool is_pod_args_v = false;
+
+template <size_t capacity, size_t size, size_t alignment>
+static constexpr bool is_pod_args_v<PodArgs<capacity, size, alignment>> = true;
+
+}  // namespace internal
+
+// An array of arguments for a kernel call.
+//
+// The template parameter `num_args` is the maximum number of arguments which
+// can be stored in the array.
+template <size_t num_args, typename ArgsStorage = internal::PodArgs<num_args>>
+class KernelArgsPackedArray : public KernelArgsPackedArrayBase, ArgsStorage {
+ public:
   KernelArgsPackedArray() = default;
 
   // KernelArgsPackedArray is not copyable or movable because argument addresses
@@ -360,24 +370,16 @@ class KernelArgsPackedArray : public KernelArgsPackedArrayBase {
   KernelArgsPackedArray(const KernelArgsPackedArray &) = delete;
   KernelArgsPackedArray &operator=(const KernelArgsPackedArray &) = delete;
 
-  // Do not allow casting into concrete packed array type.
-  static bool classof(const KernelArgsArrayBase *args) { return false; }
-
   // Adds an argument to the list.
   template <typename T>
   void add_argument(const T &arg) {
-    static_assert(sizeof(T) <= kMaxGenericArgSize,
-                  "Please adjust kMaxGenericArgSize");
-    static_assert(std::is_pod_v<T>, "Only pod types supported!");
-    char *generic_arg_storage =
-        &generic_arguments_[number_of_generic_arguments_++ *
-                            kMaxGenericArgSize];
-
-    CHECK_EQ(reinterpret_cast<uintptr_t>(generic_arg_storage) % alignof(T), 0);
-    std::memcpy(generic_arg_storage, &arg, sizeof(T));
-
-    argument_addresses_[number_of_argument_addresses_] = generic_arg_storage;
-    ++number_of_argument_addresses_;
+    if constexpr (internal::is_pod_args_v<ArgsStorage>) {
+      argument_addresses_[number_of_argument_addresses_++] =
+          ArgsStorage::add_pod_argument(arg);
+    } else {
+      // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2022/p2593r0.html
+      static_assert(sizeof(T) == 0, "Arguments storage is not supported");
+    }
   }
 
   // Adds a device memory argument to the list.
@@ -399,54 +401,49 @@ class KernelArgsPackedArray : public KernelArgsPackedArrayBase {
 
   // Gets the number of arguments added so far, including shared memory
   // arguments.
-  size_t number_of_arguments() const override {
+  size_t number_of_arguments() const final {
     return number_of_argument_addresses_ + (total_shared_memory_bytes_ > 0);
   }
 
   // Gets the total number of shared memory bytes added so far.
-  uint64_t number_of_shared_bytes() const override {
+  uint64_t number_of_shared_bytes() const final {
     return total_shared_memory_bytes_;
   }
 
   // Gets the list of argument addresses.
-  absl::Span<const void *const> argument_addresses() const override {
+  absl::Span<const void *const> argument_addresses() const final {
     return absl::Span<const void *const>(argument_addresses_.data(),
                                          number_of_argument_addresses_);
   }
 
  private:
   // A place to store copies of opaque pointers from device memory arguments.
-  std::array<const void *, kNumArgs> device_memory_opaque_pointers_;
+  std::array<const void *, num_args> device_memory_opaque_pointers_;
 
   // Addresses for non-shared-memory arguments.
-  std::array<const void *, kNumArgs> argument_addresses_;
-
-  // Storage for arguments of templated type.
-  alignas(std::max_align_t)
-      std::array<char, kNumArgs * kMaxGenericArgSize> generic_arguments_;
+  std::array<const void *, num_args> argument_addresses_;
 
   // Total of all shared memory sizes.
   size_t total_shared_memory_bytes_ = 0;
 
-  // Number of significant entries in argument_addresses_ and argument_sizes_.
+  // Number of significant entries in argument_addresses_.
   size_t number_of_argument_addresses_ = 0;
-
-  // The number of generic arguments that have been added to generic_arguments_.
-  size_t number_of_generic_arguments_ = 0;
 };
 
+namespace internal {
 template <int n>
 std::unique_ptr<KernelArgsPackedArrayBase> PackKernelArgs(
     absl::Span<const DeviceMemoryBase> args, uint32_t shared_mem_bytes) {
-  auto kernel_args = std::make_unique<KernelArgsPackedArray<n>>();
+  auto packed = std::make_unique<KernelArgsPackedArray<n, EmptyArgs>>();
   for (const DeviceMemoryBase &buf : args) {
-    kernel_args->add_device_memory_argument(buf);
+    packed->add_device_memory_argument(buf);
   }
   if (shared_mem_bytes > 0) {
-    kernel_args->add_shared_bytes(shared_mem_bytes);
+    packed->add_shared_bytes(shared_mem_bytes);
   }
-  return kernel_args;
+  return packed;
 }
+}  // namespace internal
 
 inline tsl::StatusOr<std::unique_ptr<KernelArgsPackedArrayBase>> PackKernelArgs(
     absl::Span<const DeviceMemoryBase> args, uint32_t shared_mem_bytes) {
@@ -461,22 +458,22 @@ inline tsl::StatusOr<std::unique_ptr<KernelArgsPackedArrayBase>> PackKernelArgs(
   // Specialize kernel arguments array for small sizes to allocate a smaller
   // chunk of memory and hopefully hit a small allocations cache.
   if (args.size() <= 4) {
-    return PackKernelArgs<8>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<4>(args, shared_mem_bytes);
   } else if (args.size() <= 8) {
-    return PackKernelArgs<8>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<8>(args, shared_mem_bytes);
   } else if (args.size() <= 16) {
-    return PackKernelArgs<16>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<16>(args, shared_mem_bytes);
   } else if (args.size() <= 32) {
-    return PackKernelArgs<32>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<32>(args, shared_mem_bytes);
   } else if (args.size() <= 64) {
-    return PackKernelArgs<64>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<64>(args, shared_mem_bytes);
   } else if (args.size() <= 256) {
-    return PackKernelArgs<256>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<256>(args, shared_mem_bytes);
   } else if (args.size() <= 512) {
-    return PackKernelArgs<512>(args, shared_mem_bytes);
+    return internal::PackKernelArgs<512>(args, shared_mem_bytes);
   }
 
-  return PackKernelArgs<kKernelArgsLimit>(args, shared_mem_bytes);
+  return internal::PackKernelArgs<kKernelArgsLimit>(args, shared_mem_bytes);
 }
 
 inline tsl::StatusOr<std::unique_ptr<KernelArgsPackedArrayBase>> PackKernelArgs(
@@ -485,243 +482,153 @@ inline tsl::StatusOr<std::unique_ptr<KernelArgsPackedArrayBase>> PackKernelArgs(
 }
 
 //===----------------------------------------------------------------------===//
-// Typed kernel
+// Kernel arguments packing for statically know argument types
 //===----------------------------------------------------------------------===//
 
-// Typed variant of KernelBase, like a typed device function pointer. See the
-// file comment for details and example usage.
+// KernelArgsPackedTuple is optimized for packing arguments when their types are
+// known at compile time, and somewhat similar to `std::tuple` but with a few
+// special rules for passing device memory arguments.
+
+namespace internal {
+
+// PackedArgType template specialization defines what storage type we'll be
+// using for each kernel argument type:
 //
-// This class contains template metaprogramming magic to type check the
-// parameters passed to a kernel launch are acceptable, and subsequently pack
-// them into a form which can be used by the StreamExecutorInterface
-// implementation. (i.e.  CUDA and OpenCL both bind void*s with associated
-// sizes as kernel arguments.)
-//
-// Thread-compatible.
-template <typename... Params>
-class TypedKernel : public KernelBase {
+//   (1) We always strip references and store a copy of an argument.
+//   (2) We do not support pointer arguments, as we should not be passing a
+//       pointers to host memory to device kernels.
+//   (3) DeviceMemory passed as an opaque `void*` pointer.
+//   (4) We have a special case for passing pointers to DeviceMemory where we
+//       also pass it as an opaque device pointer.
+template <typename T>
+struct PackedArgType {
+  static_assert(!std::is_pointer_v<T>, "cannot pass raw pointer to the device");
+  using Type = T;
+};
+
+template <>
+struct PackedArgType<DeviceMemoryBase> {
+  using Type = const void *;
+};
+
+template <typename T>
+struct PackedArgType<DeviceMemory<T>> {
+  using Type = typename PackedArgType<DeviceMemoryBase>::Type;
+};
+
+template <>
+struct PackedArgType<DeviceMemoryBase *> {
+  using Type = typename PackedArgType<DeviceMemoryBase>::Type;
+};
+
+template <>
+struct PackedArgType<const DeviceMemoryBase *> {
+  using Type = typename PackedArgType<DeviceMemoryBase>::Type;
+};
+
+template <typename T>
+struct PackedArgType<DeviceMemory<T> *> {
+  using Type = typename PackedArgType<DeviceMemoryBase>::Type;
+};
+
+template <typename T>
+struct PackedArgType<const DeviceMemory<T> *> {
+  using Type = typename PackedArgType<DeviceMemoryBase>::Type;
+};
+
+// Overload set for packing kernel arguments. This overload set matches
+// supported kernel arguments types defined by `PackedArgType`.
+template <typename T>
+T PackArg(const T &arg) {
+  return arg;
+}
+
+inline const void *PackArg(const DeviceMemoryBase &arg) { return arg.opaque(); }
+inline const void *PackArg(const DeviceMemoryBase *arg) {
+  return PackArg(*arg);
+}
+
+template <typename T>
+const void *PackArg(const DeviceMemory<T> &arg) {
+  return arg.opaque();
+}
+
+template <typename T>
+const void *PackArg(const DeviceMemory<T> *arg) {
+  return PackArg(*arg);
+}
+
+}  // namespace internal
+
+template <typename... Args>
+class KernelArgsPackedTuple : public KernelArgsPackedArrayBase {
  public:
-  static constexpr size_t kNumberOfParameters = sizeof...(Params);
+  static constexpr size_t kSize = sizeof...(Args);
 
-  // Delegates to KernelBase::KernelBase(), see that constructor.
-  explicit TypedKernel(StreamExecutor *parent) : KernelBase(parent) {}
+  using Storage = std::tuple<
+      typename internal::PackedArgType<absl::remove_cvref_t<Args>>::Type...>;
 
-  // Test-only constructor that can take a mock KernelInterface implementation.
-  // Takes ownership of implementation, it should not be null.
-  TypedKernel(StreamExecutor *parent, internal::KernelInterface *implementation)
-      : KernelBase(parent, implementation) {}
+  explicit KernelArgsPackedTuple(size_t shared_memory_bytes, Args... args)
+      : shared_memory_bytes_(shared_memory_bytes),
+        storage_(internal::PackArg(std::forward<Args>(args))...) {
+    InitializeArgumentAddresses(std::make_index_sequence<kSize>{});
+  }
 
-  // This is the main entry point into the magic. Packs the parameters (which
-  // must type check against the class template) into the args and sizes
-  // arrays.
-  //
-  // Const refs are taken as parameters on all of the handlers to avoid
-  // implicit type promotion of integers.
-  //
-  // WARNING: as a performance optimization this method may store pointers to
-  // some of the input parameters in the kernel args structure, so any params
-  // passed into this method must live at least as long as the kernel args
-  // structure.
-  void PackParams(KernelArgsPackedArray<kNumberOfParameters> *args,
-                  const Params &...params) const {
-    PackOneParamFromList(args, params...);
+  // KernelArgsPackedTuple is not copyable or movable because argument addresses
+  // point to inline storage that can't be moved.
+  KernelArgsPackedTuple(const KernelArgsPackedTuple &) = delete;
+  KernelArgsPackedTuple &operator=(const KernelArgsPackedTuple &) = delete;
+
+  size_t number_of_arguments() const final {
+    return kSize + (shared_memory_bytes_ > 0);
+  }
+
+  uint64_t number_of_shared_bytes() const final { return shared_memory_bytes_; }
+
+  absl::Span<const void *const> argument_addresses() const final {
+    return absl::Span<const void *const>(argument_addresses_.data(), kSize);
+  }
+
+  // Compile time check that KernelArgsPackedTuple is compatible with
+  // `OtherArgs`: after stripping const and reference all types match.
+  template <typename... OtherArgs>
+  static void CheckCompatibleStaticAssert() {
+    static constexpr size_t kOtherSize = sizeof...(OtherArgs);
+    static_assert(kSize == kOtherSize, "length of arguments packs must match");
+
+    using StrippedArgs = std::tuple<absl::remove_cvref_t<Args>...>;
+    using StrippedOtherArgs = std::tuple<absl::remove_cvref_t<OtherArgs>...>;
+    static_assert(std::is_same_v<StrippedArgs, StrippedOtherArgs>,
+                  "arguments types do not match");
   }
 
  private:
-  // Stream needs access to the specific parameter-packing functionality that
-  // the TypedKernel provides for its corresponding type signature (and no other
-  // type signatures).
-  friend class Stream;
-
-  template <typename T, typename... RestOfParams>
-  void PackOneParamFromList(KernelArgsPackedArray<kNumberOfParameters> *args,
-                            const T &arg, const RestOfParams &...rest) const {
-    PackOneParam(args, arg);
-    PackOneParamFromList(args, rest...);
+  template <size_t... Is>
+  void InitializeArgumentAddresses(std::index_sequence<Is...>) {
+    ((argument_addresses_[Is] = &std::get<Is>(storage_)), ...);
   }
 
-  // Base case for variadic template expansion - nothing to do!
-  void PackOneParamFromList(
-      KernelArgsPackedArray<kNumberOfParameters> *args) const {}
+  size_t shared_memory_bytes_ = 0;
 
-  // Packs one (non-DeviceMemoryBase) parameter into the arg and sizes array.
-  // The enable_if<> is for excluding DeviceMemoryBase args, which have a
-  // separate implementation below.
-  template <typename T>
-  void PackOneParam(
-      KernelArgsPackedArray<kNumberOfParameters> *args, const T &arg,
-      typename std::enable_if_t<
-          !is_device_memory_value_like_v<T> && !is_device_memory_pointer_v<T> &&
-          !is_shared_device_memory_v<T>> * = nullptr) const {
-    static_assert(!std::is_pointer_v<T>,
-                  "cannot pass raw pointer to the device");
-    static_assert(!std::is_convertible_v<T, DeviceMemoryBase>,
-                  "cannot pass device memory as a normal value");
-    args->add_argument(arg);
-  }
+  // Storage for packed kernel arguments.
+  Storage storage_;
 
-  // DeviceMemoryBase family reference override.
-  template <typename T>
-  void PackOneParam(KernelArgsPackedArray<kNumberOfParameters> *args,
-                    const T &arg,
-                    typename std::enable_if_t<is_device_memory_value_like_v<T>>
-                        * = nullptr) const {
-    args->add_device_memory_argument(arg);
-  }
-
-  // DeviceMemoryBase family pointer override.
-  template <typename T>
-  void PackOneParam(KernelArgsPackedArray<kNumberOfParameters> *args, T arg,
-                    typename std::enable_if_t<is_device_memory_pointer_v<T>> * =
-                        nullptr) const {
-    DeviceMemoryBase *ptr = static_cast<DeviceMemoryBase *>(arg);
-    args->add_device_memory_argument(*ptr);
-  }
-
-  // Dynamic shared device memory has a size, but no associated allocation on
-  // the host; internally, the device will allocate storage.
-  template <typename T>
-  void PackOneParam(KernelArgsPackedArray<kNumberOfParameters> *args, T arg,
-                    typename std::enable_if_t<is_shared_device_memory_v<T>> * =
-                        nullptr) const {
-    args->add_shared_bytes(arg.size());
-  }
-
-  TypedKernel(const TypedKernel &) = delete;
-  void operator=(const TypedKernel &) = delete;
+  // Pointers into `storage_`.
+  std::array<const void *, kSize> argument_addresses_;
 };
 
-// Template metaprogramming helper type that helps us produce better error
-// messages at compile time when the are mismatches between the parameter
-// type list and the argument type list.
-template <typename ParamTuple, typename ArgTuple>
-struct KernelInvocationChecker {
-  // Whether the parameter tuple and argument tuple match in length.
-  static constexpr bool kLengthMatches =
-      std::tuple_size_v<ParamTuple> == std::tuple_size_v<ArgTuple>;
-
-  // The (matching) length of the parameters and arguments type lists.
-  static constexpr int kTupleLength =
-      static_cast<int>(std::tuple_size_v<ArgTuple>);
-
-  // Helper trait to say whether the parameter wants a DeviceMemory-reference
-  // compatible type. This is for inexact type matches, so that it doesn't have
-  // to be precisely a const DeviceMemory<T>&, but can also be a value that
-  // represents the same.
-  template <typename ParamType, typename ArgType>
-  struct IsCompatibleDeviceMemoryRef : public std::false_type {};
-
-  // See type trait definition above.
-  template <typename U>
-  struct IsCompatibleDeviceMemoryRef<const DeviceMemory<U> &, DeviceMemory<U>>
-      : public std::true_type {};
-
-  // See type trait definition above.
-  template <typename U>
-  struct IsCompatibleDeviceMemoryRef<const SharedDeviceMemory<U> &,
-                                     SharedDeviceMemory<U>>
-      : public std::true_type {};
-
-  // Returns whether ParamT and ArgT are compatible for data parallel kernel
-  // parameter packing without any assert functionality.
-  template <typename ParamT, typename ArgT>
-  static constexpr bool CompatibleNoAssert() {
-    return std::is_same_v<typename std::remove_const_t<ParamT>, ArgT> ||
-           IsCompatibleDeviceMemoryRef<ParamT, ArgT>::value;
-  }
-
-  // Checks whether ParamT and ArgT are compatible for data parallel kernel
-  // parameter packing. kArgumentNumber is unused, it just for error display.
-  //
-  // NOTE: if you encounter an error here, you can see the mismatch by looking
-  // at the end of the last error message, which will be of the form:
-  //
-  //    ...::Compatible<const stream_executor::DeviceMemory<OneThing> &,
-  //                    stream_executor::DeviceMemory<AnotherThing>, true,
-  //                    0>'
-  //    requested here
-  //
-  // This means that the 0th argument you passed to the kernel invocation should
-  // have been DeviceMemory<OneThing> but was observed to be
-  // DeviceMemory<AnotherThing>.
-  template <typename ParamT, typename ArgT, bool kShouldStaticAssert,
-            int kArgumentNumber>
-  static constexpr bool Compatible() {
-    static_assert(
-        kShouldStaticAssert ? CompatibleNoAssert<ParamT, ArgT>() : true,
-        "parameter type (LHS) is not compatible with argument type (RHS)");
-    return CompatibleNoAssert<ParamT, ArgT>();
-  }
-
-  // Checks the parameter/argument match at kArgumentNumber for an out of bounds
-  // argument number.
-  //
-  // This is the base case: we've run out of argument to check, so we're all
-  // good.
-  template <int kArgumentNumber, bool kShouldStaticAssert>
-  static constexpr bool CheckParam(
-      typename std::enable_if_t<(kArgumentNumber < 0)> *dummy = nullptr) {
-    return true;
-  }
-
-  // Checks the parameter/argument match at kArgumentNumber.
-  // kShouldStaticAssert determines whether to assert out on a mismatch, or just
-  // yield the constexpr boolean value.
-  template <int kArgumentNumber, bool kShouldStaticAssert>
-  static constexpr bool CheckParam(
-      typename std::enable_if_t<kArgumentNumber >= 0> *dummy = nullptr) {
-    typedef typename std::tuple_element_t<kArgumentNumber, ParamTuple> ParamT;
-    typedef typename std::tuple_element_t<kArgumentNumber, ArgTuple> ArgT;
-    return Compatible<ParamT, ArgT, kShouldStaticAssert, kArgumentNumber>() &&
-           CheckParam<kArgumentNumber - 1, kShouldStaticAssert>();
-  }
-
-  // Checks the parameters/arguments for match, but doesn't static assert out.
-  // This is useful for testing/inspecting whether a set of parameters match in
-  // things like tests.
-  static constexpr bool CheckAllNoStaticAssert() {
-    return kLengthMatches && CheckParam<kTupleLength - 1, false>();
-  }
-
-  // Checks the parameters and static asserts out with a helpful error message
-  // (and useful template parameters in the instantiation stack) if there is an
-  // error.
-  static constexpr bool CheckAllStaticAssert() {
-    static_assert(kLengthMatches,
-                  "argument length mismatched against typed kernel parameters");
-    return kLengthMatches && CheckParam<kTupleLength - 1, true>();
-  }
-};
-
-// This is a convenience type for checking whether a typed kernel matches
-// against a type list.
-template <typename KernelT, typename... Params>
-struct KernelParamsOk {
-  static constexpr bool kResult = false;
-};
-
-// See above.
-template <typename... Params, typename... Args>
-struct KernelParamsOk<TypedKernel<Params...>, Args...> {
-  static constexpr bool kResult =
-      KernelInvocationChecker<std::tuple<Params...>,
-                              std::tuple<Args...>>::CheckAllNoStaticAssert();
-};
-
-// Packs the given arguments into a KernelArgsArray with compile-time type
-// checks. se::Stream::ThenLaunch does this too except it ignores the shared
-// memory size in `kernel`.
+// Packs the given arguments into a KernelArgsPackedTuple with compile-time type
+// checks.
 template <typename... Params, typename... Args>
 std::unique_ptr<KernelArgsPackedArrayBase> PackKernelArgs(
     const TypedKernel<Params...> &kernel, const Args &...args) {
-  KernelInvocationChecker<std::tuple<Params...>,
-                          std::tuple<Args...>>::CheckAllStaticAssert();
-  auto kernel_args = std::make_unique<KernelArgsPackedArray<sizeof...(Args)>>();
-  kernel.PackParams(kernel_args.get(), args...);
+  using PackedParams = KernelArgsPackedTuple<Params...>;
+  using PackedArgs = KernelArgsPackedTuple<Args...>;
+
+  PackedParams::template CheckCompatibleStaticAssert<Args...>();
 
   int64_t shmem_bytes = kernel.metadata().shared_memory_bytes().value_or(0);
-  if (shmem_bytes > 0) kernel_args->add_shared_bytes(shmem_bytes);
-  return kernel_args;
+  return std::make_unique<PackedArgs>(shmem_bytes, args...);
 }
 
 }  // namespace stream_executor
