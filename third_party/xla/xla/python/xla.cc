@@ -480,7 +480,15 @@ static void Init(py::module_& m) {
                &PyClient::MakePythonCallbackUsingHostSendAndRecv),
            py::arg("callable"), py::arg("operand_shapes"),
            py::arg("result_shapes"), py::arg("send_channel_ids"),
-           py::arg("recv_channel_ids"), py::arg("serializer") = py::none());
+           py::arg("recv_channel_ids"), py::arg("serializer") = py::none())
+      .def("__getattr__", [](PyClient& client, std::string name) -> py::object {
+        const auto& attrs = client.attributes();
+        auto it = attrs.find(name);
+        if (it != attrs.end()) {
+          return std::visit([](auto&& v) { return py::cast(v); }, it->second);
+        }
+        throw py::attribute_error(absl::StrCat("Unknown attribute ", name));
+      });
 
   m.def(
       "get_tfrt_cpu_client",
@@ -1045,6 +1053,11 @@ static void Init(py::module_& m) {
       py::arg("committed") = true, py::arg("force_copy") = false,
       py::arg("host_buffer_semantics") =
           PjRtClient::HostBufferSemantics::kZeroCopy);
+
+  m.def("batched_block_until_ready", [](absl::Span<const py::object> objs) {
+    xla::ThrowIfError(PyArray::BatchedBlockUntilReady(objs));
+  });
+
   m.def(
       "check_and_canonicalize_memory_kind",
       [](py::object memory_kind, jax::PyDeviceList* device_list) -> py::object {

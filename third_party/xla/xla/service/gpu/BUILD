@@ -342,6 +342,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -3015,6 +3016,7 @@ cc_library(
         ":gpu_sort_rewriter",
         ":ir_emission_utils",
         ":metrics",
+        ":move_copy_to_users",
         ":target_constants",
         ":triangular_solve_rewriter",
         ":triton_autotuner",
@@ -4465,11 +4467,11 @@ cc_library(
 
 cc_library(
     name = "topk_specializer",
-    srcs = if_cuda_is_configured(
-        ["topk_specializer.cc"],
-        ["topk_specializer_nocuda.cc"],
-    ),
+    srcs = ["topk_specializer.cc"],
     hdrs = ["topk_specializer.h"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
+        "TENSORFLOW_USE_ROCM=1",
+    ]),
     visibility = ["//visibility:public"],
     deps = [
         "//xla:executable_run_options",

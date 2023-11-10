@@ -1,12 +1,12 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("//tensorflow/lite:special_rules.bzl", "tflite_extra_gles_deps", "tflite_portable_test_suite")
-load("//tensorflow/lite/delegates/gpu:build_defs.bzl", "gpu_delegate_linkopts")
-load("@build_bazel_rules_apple//apple:ios.bzl", "ios_static_framework")
-load("@build_bazel_rules_apple//apple:macos.bzl", "macos_dylib")
 load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "tf_gpu_tests_tags",
 )
+load("//tensorflow/lite:special_rules.bzl", "tflite_extra_gles_deps", "tflite_portable_test_suite")
+load("//tensorflow/lite/delegates/gpu:build_defs.bzl", "gpu_delegate_linkopts")
+load("@build_bazel_rules_apple//apple:ios.bzl", "ios_static_framework")
+load("@build_bazel_rules_apple//apple:macos.bzl", "macos_dylib")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -92,7 +92,6 @@ objc_library(
     srcs = ["metal_delegate.mm"],
     hdrs = ["metal_delegate.h"],
     copts = ["-std=c++17"],
-    features = ["-layering_check"],
     module_name = "TensorFlowLiteCMetal",
     sdk_frameworks = ["Metal"],
     deps = [
@@ -108,11 +107,13 @@ objc_library(
         "//tensorflow/lite/delegates/gpu/common:quantization_util",
         "//tensorflow/lite/delegates/gpu/common:shape",
         "//tensorflow/lite/delegates/gpu/common:status",
-        "//tensorflow/lite/delegates/gpu/common:tensor",
         "//tensorflow/lite/delegates/gpu/common:types",
         "//tensorflow/lite/delegates/gpu/metal:buffer_convert",
+        "//tensorflow/lite/delegates/gpu/metal:common",
         "//tensorflow/lite/delegates/gpu/metal:inference_context",
         "//tensorflow/lite/delegates/gpu/metal:metal_spatial_tensor",
+        "//tensorflow/lite/kernels:kernel_util",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -172,7 +173,7 @@ ios_static_framework(
         "metal_delegate.h",
         "metal_delegate_internal.h",
     ],
-    minimum_os_version = "11.4",
+    minimum_os_version = "12.0",
     deps = [":metal_delegate"],
 )
 
@@ -184,7 +185,7 @@ macos_dylib(
         "-all_load",
         "-dead_strip",
     ],
-    minimum_os_version = "10.13",
+    minimum_os_version = "12.0",
     tags = [
         "manual",
         "nobuilder",
