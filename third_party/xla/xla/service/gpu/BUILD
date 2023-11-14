@@ -323,6 +323,8 @@ cc_library(
         "//xla/service/gpu/fusions:thunk_util",
         "//xla/service/gpu/fusions:tiling_util",
         "//xla/service/gpu/fusions:transpose",
+        "//xla/service/gpu/kernels:custom_fusion",
+        "//xla/service/gpu/kernels:custom_kernel",
         "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/service/gpu/runtime3:fft_thunk",
         "//xla/service/llvm_ir:buffer_assignment_util",
@@ -999,6 +1001,7 @@ cc_library(
         "//xla/service:shaped_buffer",
         "//xla/service:stream_pool",
         "//xla/service:xla_debug_info_manager",
+        "//xla/service/gpu/kernels:custom_kernel",
         "//xla/service/gpu/runtime:executable",
         "//xla/service/gpu/runtime:support",
         "//xla/service/gpu/runtime3:custom_call_thunk",
@@ -1081,6 +1084,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithDialect",
@@ -2659,6 +2663,39 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "custom_fusion_rewriter",
+    srcs = ["custom_fusion_rewriter.cc"],
+    hdrs = ["custom_fusion_rewriter.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla:statusor",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_pass",
+        "//xla/service/gpu/kernels:custom_fusion_pattern",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "custom_fusion_rewriter_test",
+    srcs = ["custom_fusion_rewriter_test.cc"],
+    deps = [
+        ":custom_fusion_rewriter",
+        "//xla/hlo/ir:hlo",
+        "//xla/service/gpu/kernels:custom_fusion_pattern",
+        "//xla/tests:hlo_test_base",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+cc_library(
     name = "fusion_pipeline",
     srcs = ["fusion_pipeline.cc"],
     hdrs = ["fusion_pipeline.h"],
@@ -3016,7 +3053,6 @@ cc_library(
         ":gpu_sort_rewriter",
         ":ir_emission_utils",
         ":metrics",
-        ":move_copy_to_users",
         ":target_constants",
         ":triangular_solve_rewriter",
         ":triton_autotuner",
@@ -3456,6 +3492,7 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:ir_headers",
         "@local_tsl//tsl/platform:macros",

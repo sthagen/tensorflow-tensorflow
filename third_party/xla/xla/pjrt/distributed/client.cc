@@ -16,32 +16,22 @@ limitations under the License.
 #include "xla/pjrt/distributed/client.h"
 
 #include <algorithm>
-#include <chrono>  // NOLINT
 #include <memory>
-#include <optional>
-#include <random>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/synchronization/mutex.h"
-#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "grpcpp/channel.h"
-#include "xla/pjrt/distributed/protocol.h"
-#include "xla/pjrt/distributed/util.h"
-#include "xla/util.h"
 #include "tsl/distributed_runtime/coordination/coordination_client.h"
 #include "tsl/distributed_runtime/coordination/coordination_service_agent.h"
 #include "tsl/distributed_runtime/coordination/coordination_service_error_util.h"
 #include "tsl/distributed_runtime/rpc/coordination/grpc_coordination_client.h"
 #include "tsl/platform/errors.h"
-#include "tsl/platform/random.h"
 #include "tsl/protobuf/coordination_config.pb.h"
 #include "tsl/protobuf/coordination_service.pb.h"
 
 namespace xla {
-
 
 class DistributedRuntimeCoordinationServiceClient
     : public DistributedRuntimeClient {
@@ -55,8 +45,6 @@ class DistributedRuntimeCoordinationServiceClient
 
   xla::Status Connect() override;
   xla::Status Shutdown() override;
-  xla::Status EnumerateDevices(const LocalTopologyProto& local_topology,
-                               GlobalTopologyProto* global_topology) override;
   xla::StatusOr<std::string> BlockingKeyValueGet(
       std::string key, absl::Duration timeout) override;
   xla::StatusOr<std::vector<std::pair<std::string, std::string>>>
@@ -141,26 +129,6 @@ xla::Status DistributedRuntimeCoordinationServiceClient::Shutdown() {
   Status s = coord_agent_->Shutdown();
   LOG(INFO) << "Distributed task shutdown result: " << s;
   return s;
-}
-
-xla::Status DistributedRuntimeCoordinationServiceClient::EnumerateDevices(
-    const LocalTopologyProto& local_topology,
-    GlobalTopologyProto* global_topology) {
-  LocalTopologyProto local_device = local_topology;
-  local_device.set_node_id(task_id_);
-  tensorflow::DeviceInfo devices;
-  devices.mutable_device()->Add()->PackFrom(local_device);
-  // Client sends LocalTopologyProto.
-  Status s = coord_agent_->WaitForAllTasks(devices);
-  if (!s.ok()) return s;
-  // Server responds with GlobalTopologyProto (refer to service.cc for details).
-  tensorflow::DeviceInfo global_devices = coord_agent_->GetClusterDeviceInfo();
-  if (global_devices.device_size() != 1) {
-    return tsl::errors::Internal(
-        "Unexpected cluster device response from EnumerateDevices().");
-  }
-  global_devices.device().Get(0).UnpackTo(global_topology);
-  return OkStatus();
 }
 
 xla::StatusOr<std::string>
