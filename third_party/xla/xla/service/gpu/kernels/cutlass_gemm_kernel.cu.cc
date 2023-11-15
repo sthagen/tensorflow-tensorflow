@@ -54,7 +54,7 @@ StatusOr<CustomKernel> GetCutlassGemmKernel(PrimitiveType dtype, int32_t m,
   size_t shared_memory_bytes = sizeof(typename GemmKernel::SharedStorage);
 
   // Packs device memory arguments into CUTLASS kernel parameters struct.
-  auto pack = [problem_size, tiled_shape](const se::KernelArgsArrayBase &args) {
+  auto pack = [problem_size, tiled_shape](const se::KernelArgs &args) {
     auto *mem_args = Cast<se::KernelArgsDeviceMemoryArray>(&args);
 
     // Converts DeviceMemoryBase to an opaque `void *` device pointer.
@@ -99,8 +99,8 @@ StatusOr<CustomKernel> GetCutlassGemmKernel(PrimitiveType dtype, int32_t m,
   kernel_spec.AddInProcessSymbol(
       reinterpret_cast<void *>(cutlass::Kernel<GemmKernel>), "cutlass_gemm");
 
-  return CustomKernel(std::move(kernel_spec), block_dims, thread_dims,
-                      shared_memory_bytes);
+  return CustomKernel("cutlass_gemm:f32<-f32xf32", std::move(kernel_spec),
+                      block_dims, thread_dims, shared_memory_bytes);
 }
 
 }  // namespace xla::gpu::kernel

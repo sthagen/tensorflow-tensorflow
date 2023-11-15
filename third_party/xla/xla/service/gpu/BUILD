@@ -2081,7 +2081,10 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+        "@local_tsl//tsl/platform:blocking_counter",
+        "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:status",
     ],
@@ -2719,6 +2722,7 @@ cc_library(
         "//xla/service:layout_assignment",
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
         "//xla/stream_executor:device_description",
+        "@local_tsl//tsl/platform:env",
     ],
 )
 
@@ -3334,6 +3338,41 @@ xla_cc_test(
         "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:status_matchers",
+    ],
+)
+
+cc_library(
+    name = "gpu_schedule_postprocessing",
+    srcs = ["gpu_schedule_postprocessing.cc"],
+    hdrs = ["gpu_schedule_postprocessing.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":backend_configs_cc",
+        "//xla:statusor",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/service:hlo_pass",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "gpu_schedule_postprocessing_test",
+    srcs = ["gpu_schedule_postprocessing_test.cc"],
+    deps = [
+        ":gpu_schedule_postprocessing",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_parser",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -4170,9 +4209,10 @@ test_suite(
         ":cudnn_fused_conv_rewriter_test",
         ":cudnn_fused_mha_rewriter_test",
         ":custom_call_test",
-        # copybara:uncomment ":gpu_aot_compilation_test",
+        # TODO(anlunx): Re-enable when AOT is available in Thunk-based runtime.
+        # copybara:uncomment # ":gpu_aot_compilation_test",
         # copybara:uncomment "//platforms/xla/tests/internal:xfeed_test_gpu",
-        # TODO(anlunx): Re-enable when the FFI mechanism is avalable in Thunk-based runtime.
+        # TODO(anlunx): Re-enable when the FFI mechanism is available in Thunk-based runtime.
         # copybara:uncomment # "//third_party/py/jax/experimental/jax2tf/tests:primitives_test_gpu",
         # copybara:uncomment "//third_party/py/jax/tests:pmap_test_gpu",
         # copybara:uncomment "//tensorflow/compiler/tests:fft_test_gpu",

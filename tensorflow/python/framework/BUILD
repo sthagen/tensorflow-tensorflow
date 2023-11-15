@@ -24,7 +24,7 @@ load(
     "cuda_py_benchmark_test",
 )
 
-visibility = tf_python_framework_friends()
+visibility = tf_python_framework_friends()  # buildifier: disable=package-on-top
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -258,13 +258,14 @@ py_strict_library(
     ],
 )
 
-# What is needed for tf_gen_op_wrapper_py. This is the same as
-# "for_generated_wrappers" minus the "function" dep. This is to avoid
-# circular dependencies, as "function" uses generated op wrappers.
+# This rule should only be depended on by tf_gen_op_wrapper_py.
+# Do not depend on this rule! Depend on the fine-grained sub-targets instead.
+# This is the same as "for_generated_wrappers" minus the "function" dep.
+# This is to avoid circular dependencies, as "function" uses generated op wrappers.
 py_strict_library(
     name = "for_generated_wrappers_v2",
-    deprecation = "Depending on this target can cause build dependency cycles. Depend on the fine-grained sub-targets instead.",
     srcs_version = "PY3",
+    tags = ["avoid_dep"],
     visibility = ["//visibility:public"],
     deps = [
         ":byte_swap_tensor",
@@ -2004,7 +2005,9 @@ pytype_strict_library(
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:tf_export",
-    ],
+    ] + if_xla_available([
+        "//tensorflow/python:_pywrap_tfcompile",
+    ]),
 )
 
 pytype_strict_library(
@@ -2017,7 +2020,9 @@ pytype_strict_library(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:tf_export",
-    ],
+    ] + if_xla_available([
+        "//tensorflow/python:_pywrap_tfcompile",
+    ]),
 )
 
 py_strict_library(

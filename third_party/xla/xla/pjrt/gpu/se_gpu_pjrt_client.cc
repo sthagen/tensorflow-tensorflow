@@ -721,8 +721,6 @@ GetStreamExecutorGpuDeviceAllocator(
     case GpuAllocatorConfig::Kind::kDefault:
     case GpuAllocatorConfig::Kind::kBFC: {
       LOG(INFO) << "Using BFC allocator.";
-      std::vector<se::StreamExecutor*> executors;
-      executors.reserve(addressable_devices.size());
       std::vector<se::MultiDeviceAdapter::AllocatorWithStream>
           allocators_and_streams;
       for (const auto& ordinal_and_device : addressable_devices) {
@@ -903,7 +901,7 @@ StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
   absl::Mutex mu;
   if (enable_mock_nccl) {
     kv_get = [&device_maps, &mu, &num_nodes](
-                 const std::string& k,
+                 std::string_view k,
                  absl::Duration timeout) -> xla::StatusOr<std::string> {
       std::string result;
       {
@@ -929,8 +927,8 @@ StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
       }
       return result;
     };
-    kv_put = [&device_maps, &mu](const std::string& k,
-                                 const std::string& v) -> xla::Status {
+    kv_put = [&device_maps, &mu](std::string_view k,
+                                 std::string_view v) -> xla::Status {
       {
         absl::MutexLock lock(&mu);
         device_maps[k] = v;
