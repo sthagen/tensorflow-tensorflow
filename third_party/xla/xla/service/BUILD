@@ -5477,6 +5477,8 @@ cc_library(
     deps = [
         "//xla:printer",
         "//xla:shape_layout",
+        "//xla:shape_util",
+        "//xla:statusor",
         "//xla:types",
         "//xla:xla_data_proto_cc",
         "@com_google_absl//absl/algorithm:container",
@@ -6921,6 +6923,7 @@ cc_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",  # fixdeps: keep
         "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 

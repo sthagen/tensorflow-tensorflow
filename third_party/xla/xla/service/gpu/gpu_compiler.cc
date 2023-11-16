@@ -117,6 +117,7 @@ limitations under the License.
 #include "xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "xla/service/gpu/conv_layout_normalization.h"
 #include "xla/service/gpu/copy_fusion.h"
+#include "xla/service/gpu/custom_fusion_rewriter.h"
 #include "xla/service/gpu/dot_dimension_sorter.h"
 #include "xla/service/gpu/fusion_pipeline.h"
 #include "xla/service/gpu/fusion_wrapper.h"
@@ -1013,11 +1014,11 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
                                         gpu_target_config));
   // Lambdas and related constants:
   const GpuFloatSupport bf16_support(BF16);
-  const GpuFloatSupport f8e5m2_support(F8E5M2);
-  const GpuFloatSupport f8e4m3fn_support(F8E4M3FN);
-  const FloatSupport f8e4m3b11fnuz_support(F8E4M3B11FNUZ);
-  const FloatSupport f8e5m2fnuz_support(F8E5M2FNUZ);
-  const FloatSupport f8e4m3fnuz_support(F8E4M3FNUZ);
+  const GpuFloatSupport f8e5m2_support(F8E5M2, F16);
+  const GpuFloatSupport f8e4m3fn_support(F8E4M3FN, F16);
+  const FloatSupport f8e4m3b11fnuz_support(F8E4M3B11FNUZ, F16);
+  const FloatSupport f8e5m2fnuz_support(F8E5M2FNUZ, F16);
+  const FloatSupport f8e4m3fnuz_support(F8E4M3FNUZ, F16);
   auto add_float_normalization = [&](HloPassPipeline& pipeline) {
     auto& sub_pipeline =
         pipeline.AddPass<HloPassPipeline>("float_normalization");
@@ -1052,6 +1053,17 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
       return IsReductionFromOrToContiguousDimensions(*r);
     });
     pipeline.AddPass<HloPassFix<MoveCopyToUsers>>();
+
+    // Greedy pattern matching for custom fusions. We run it before Triton
+    // rewriter or a regular Gemm rewriter to be able to match compatible GEMMs
+    // before they matched into Triton gemm or a cuBLAS custom call.
+    //
+    // TODO(ezhulenev): This should be plugged into the cost model and fusion
+    // heuristic, so we can mix and match various Gemm implementations based
+    // on projected (measured) performance.
+    if (debug_options.xla_gpu_enable_custom_fusions()) {
+      pipeline.AddPass<CustomFusionRewriter>();
+    }
 
     // Rewrite GEMMs into custom calls.
     se::GpuComputeCapability gpu_version =
@@ -1500,19 +1512,19 @@ StatusOr<GpuCompiler::BackendCompileResult> GpuCompiler::CompileToTargetBinary(
       llvm_modules.size());
   tsl::BlockingCounter counter(llvm_modules.size());
   for (int i = 0; i < llvm_modules.size(); i++) {
-    thread_pool->Schedule(
-        [&compile_results, i, &llvm_modules, &counter, this, &module_config,
-         &gpu_version, &debug_module, &options] {
-          // Each thread has its own context to avoid race conditions.
-          llvm::LLVMContext new_context;
-          std::unique_ptr<llvm::Module> new_module =
-              CopyToContext(*llvm_modules.at(i), new_context);
-          compile_results.at(i) = CompileSingleModule(
-              module_config, gpu_version, debug_module, new_module.get(),
-              /*relocatable=*/true, options,
-              /*shard_number=*/i);
-          counter.DecrementCount();
-        });
+    thread_pool->Schedule([&compile_results, i, &llvm_modules, &counter, this,
+                           &module_config, &gpu_version, &debug_module,
+                           &options] {
+      // Each thread has its own context to avoid race conditions.
+      llvm::LLVMContext new_context;
+      std::unique_ptr<llvm::Module> new_module =
+          CopyToContext(*llvm_modules.at(i), new_context);
+      compile_results.at(i) = CompileSingleModule(
+          module_config, gpu_version, debug_module, new_module.get(),
+          /*relocatable=*/true, options,
+          /*shard_number=*/i);
+      counter.DecrementCount();
+    });
   }
   counter.Wait();
 
@@ -1770,7 +1782,6 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
 
     // TODO(ezhulenev): Unify AOT compilation with GpuRuntimeExecutable::Create
     // (see `gpu/runtime/executable.h`).
-
 
     // Options for the default XLA runtime compilation pipeline.
     runtime::CompilationPipelineOptions copts;

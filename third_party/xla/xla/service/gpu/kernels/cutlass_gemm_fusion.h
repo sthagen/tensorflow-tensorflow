@@ -13,34 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/kernels/custom_fusion_pattern.h"
+#ifndef XLA_SERVICE_GPU_KERNELS_CUTLASS_GEMM_FUSION_H_
+#define XLA_SERVICE_GPU_KERNELS_CUTLASS_GEMM_FUSION_H_
 
-#include <memory>
-#include <utility>
-#include <vector>
+#include <optional>
 
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/service/gpu/kernels/custom_fusion_pattern.h"
 
 namespace xla::gpu {
 
-CustomFusionPatternRegistry* CustomFusionPatternRegistry::Default() {
-  static auto* registry = new CustomFusionPatternRegistry();
-  return registry;
-}
+// Pattern matches simple row-major gemms to CUTLASS kernels.
+class CutlassGemmPattern : public CustomFusionPattern {
+ public:
+  std::optional<Match> TryMatch(HloInstruction* instr) const override;
+};
 
-std::vector<CustomFusionPattern::Match> CustomFusionPatternRegistry::Match(
-    HloInstruction* instr) const {
-  std::vector<CustomFusionPattern::Match> matches;
-  for (auto& pattern : patterns_) {
-    if (auto matched = pattern->TryMatch(instr); matched.has_value())
-      matches.push_back(std::move(*matched));
-  }
-  return matches;
-}
-
-void CustomFusionPatternRegistry::Add(
-    std::unique_ptr<CustomFusionPattern> pattern) {
-  patterns_.push_back(std::move(pattern));
-}
+// Pattern matches mixed dtype gemms when one of the operands is upcasted to an
+// accumulator (output) dtype, i.e. BF16 <= BF16 x S8.
+class CutlassGemmWithUpcastPattern : public CustomFusionPattern {
+ public:
+  std::optional<Match> TryMatch(HloInstruction* instr) const override;
+};
 
 }  // namespace xla::gpu
+
+#endif  // XLA_SERVICE_GPU_KERNELS_CUTLASS_GEMM_FUSION_H_
