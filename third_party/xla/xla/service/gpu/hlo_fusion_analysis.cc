@@ -58,35 +58,6 @@ const auto kDimX = TilingScheme::DimX;
 const auto kLinearIndexingX = TilingScheme::LinearIndexingX;
 const auto kStridedIndexingX = TilingScheme::StridedIndexingX;
 
-std::optional<TilingScheme> ComputeTransposeTilingScheme(
-    const std::optional<TransposeDescription>& tiled_transpose) {
-  if (!tiled_transpose) {
-    return std::nullopt;
-  }
-
-  constexpr int kNumRows = 4;
-  static_assert(WarpSize() % kNumRows == 0);
-
-  // 3D view over the input shape.
-  Vector3 dims = tiled_transpose->dimensions;
-  Vector3 order = tiled_transpose->permutation;
-
-  Vector3 permuted_dims = {dims[order[0]], dims[order[1]], dims[order[2]]};
-  Vector3 tile_sizes{1, 1, 1};
-  tile_sizes[order[2]] = WarpSize() / kNumRows;
-  Vector3 num_threads{1, 1, WarpSize()};
-  num_threads[order[2]] = kNumRows;
-
-  return TilingScheme(
-      /*permuted_dims*/ permuted_dims,
-      /*tile_sizes=*/tile_sizes,
-      /*num_threads=*/num_threads,
-      /*indexing_order=*/kLinearIndexingX,
-      /*vector_size=*/1,
-      /*scaling_factor=*/1,
-      /*tiling_dimensions=*/{order[2], 2});
-}
-
 // Returns true if `instr` is a non-strided slice.
 bool IsSliceWithUnitStrides(const HloInstruction* instr) {
   auto slice = DynCast<HloSliceInstruction>(instr);
@@ -284,29 +255,17 @@ std::optional<TransposeDescription> FindConsistentTransposeHero(
   return tiled_transpose_hero;
 }
 
-}  // namespace
+int SmallestInputDtypeBits(const std::vector<const HloInstruction*>& args) {
+  int bits = std::numeric_limits<int>::max();
+  for (const HloInstruction* operand : args) {
+    if (!operand->shape().IsArray()) continue;
+    bits = std::min(bits,
+                    primitive_util::BitWidth(operand->shape().element_type()));
+  }
+  return bits;
+}
 
-HloFusionAnalysis::HloFusionAnalysis(
-    FusionBackendConfig fusion_backend_config,
-    std::vector<const HloInstruction*> fusion_roots,
-    FusionBoundaryFn fusion_boundary_fn,
-    std::vector<const HloInstruction*> fusion_arguments,
-    std::vector<const HloInstruction*> fusion_heroes,
-    const se::DeviceDescription* device_info,
-    std::optional<TransposeDescription> tiled_transpose, bool has_4_bit_input,
-    bool has_4_bit_output)
-    : fusion_backend_config_(std::move(fusion_backend_config)),
-      fusion_roots_(std::move(fusion_roots)),
-      fusion_boundary_fn_(std::move(fusion_boundary_fn)),
-      fusion_arguments_(std::move(fusion_arguments)),
-      fusion_heroes_(std::move(fusion_heroes)),
-      device_info_(device_info),
-      tiled_transpose_(tiled_transpose),
-      has_4_bit_input_(has_4_bit_input),
-      has_4_bit_output_(has_4_bit_output),
-      reduction_codegen_info_(ComputeReductionCodegenInfo(FindHeroReduction())),
-      transpose_tiling_scheme_(ComputeTransposeTilingScheme(tiled_transpose_)),
-      loop_fusion_config_(ComputeLoopFusionConfig()) {}
+}  // namespace
 
 // static
 StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
@@ -328,16 +287,20 @@ StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
   auto is_4bit = [](const HloInstruction* arg) {
     return primitive_util::Is4BitType(arg->shape().element_type());
   };
-  bool has_4_bit_input = absl::c_any_of(fusion_arguments, is_4bit);
-  bool has_4_bit_output = absl::c_any_of(hlo_roots, is_4bit);
+
+  InputOutputInfo input_output_info{
+      .has_4_bit_input = absl::c_any_of(fusion_arguments, is_4bit),
+      .has_4_bit_output = absl::c_any_of(hlo_roots, is_4bit),
+      .smallest_input_dtype_bits = SmallestInputDtypeBits(fusion_arguments),
+  };
 
   std::optional<TransposeDescription> tiled_transpose_hero =
       FindConsistentTransposeHero(hlo_roots, heroes);
 
   return HloFusionAnalysis(std::move(backend_config), std::move(hlo_roots),
-                           std::move(boundary_fn), std::move(fusion_arguments),
-                           std::move(heroes), device_info, tiled_transpose_hero,
-                           has_4_bit_input, has_4_bit_output);
+                           std::move(boundary_fn), std::move(heroes),
+                           device_info, tiled_transpose_hero,
+                           std::move(input_output_info));
 }
 
 // static
@@ -371,7 +334,8 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
   }
 #endif
 
-  if (has_4_bit_input_ || has_4_bit_output_) {
+  if (input_output_info_.has_4_bit_input ||
+      input_output_info_.has_4_bit_output) {
     // Only loop fusions currently can handle int4 inputs/outputs, due to the
     // special handling with IrArray needed to deal with two values occupying a
     // single byte.
@@ -404,7 +368,7 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
   return EmitterFusionKind::kLoop;
 }
 
-StatusOr<LaunchDimensions> HloFusionAnalysis::GetLaunchDimensions() const {
+StatusOr<LaunchDimensions> HloFusionAnalysis::GetLaunchDimensions() {
   auto emitter_fusion_kind = GetEmitterFusionKind();
   switch (emitter_fusion_kind) {
     case EmitterFusionKind::kLoop: {
@@ -454,9 +418,7 @@ StatusOr<LaunchDimensions> HloFusionAnalysis::GetLaunchDimensions() const {
 }
 
 const HloInstruction* HloFusionAnalysis::FindHeroReduction() const {
-  if (GetEmitterFusionKind() != EmitterFusionKind::kReduction) {
-    return nullptr;
-  }
+  CHECK(GetEmitterFusionKind() == EmitterFusionKind::kReduction);
   auto roots = fusion_roots();
   CHECK(!roots.empty());
   // We always use the first reduce root that triggers unnested reduction
@@ -471,8 +433,57 @@ const HloInstruction* HloFusionAnalysis::FindHeroReduction() const {
   LOG(FATAL) << "Did not find a hero reduction";
 }
 
-std::optional<LaunchDimensionsConfig>
-HloFusionAnalysis::ComputeLoopFusionConfig() const {
+const ReductionCodegenInfo* HloFusionAnalysis::GetReductionCodegenInfo() {
+  if (reduction_codegen_info_.has_value()) {
+    return &reduction_codegen_info_.value();
+  }
+
+  const HloInstruction* hero_reduction = FindHeroReduction();
+
+  auto reduction_codegen_info = ComputeReductionCodegenInfo(hero_reduction);
+  reduction_codegen_info_.emplace(std::move(reduction_codegen_info));
+  return &reduction_codegen_info_.value();
+}
+
+const TilingScheme* HloFusionAnalysis::GetTransposeTilingScheme() {
+  if (transpose_tiling_scheme_.has_value()) {
+    return &transpose_tiling_scheme_.value();
+  }
+
+  if (!tiled_transpose_) {
+    return nullptr;
+  }
+
+  constexpr int kNumRows = 4;
+  static_assert(WarpSize() % kNumRows == 0);
+
+  // 3D view over the input shape.
+  Vector3 dims = tiled_transpose_->dimensions;
+  Vector3 order = tiled_transpose_->permutation;
+
+  Vector3 permuted_dims = {dims[order[0]], dims[order[1]], dims[order[2]]};
+  Vector3 tile_sizes{1, 1, 1};
+  tile_sizes[order[2]] = WarpSize() / kNumRows;
+  Vector3 num_threads{1, 1, WarpSize()};
+  num_threads[order[2]] = kNumRows;
+
+  TilingScheme tiling_scheme(
+      /*permuted_dims*/ permuted_dims,
+      /*tile_sizes=*/tile_sizes,
+      /*num_threads=*/num_threads,
+      /*indexing_order=*/kLinearIndexingX,
+      /*vector_size=*/1,
+      /*scaling_factor=*/1,
+      /*tiling_dimensions=*/{order[2], 2});
+  transpose_tiling_scheme_.emplace(std::move(tiling_scheme));
+  return &transpose_tiling_scheme_.value();
+}
+
+const LaunchDimensionsConfig* HloFusionAnalysis::GetLoopFusionConfig() {
+  if (loop_fusion_config_.has_value()) {
+    return &loop_fusion_config_.value();
+  }
+
   int unroll_factor = 1;
   // Unrolling is good to read large inputs with small elements
   // due to vector loads, but increases the register pressure when one
@@ -489,7 +500,7 @@ HloFusionAnalysis::ComputeLoopFusionConfig() const {
   }
   // CHECK that unroll_factor is a power-of-2, as needed by the logic below.
   CHECK(absl::has_single_bit(static_cast<uint64_t>(unroll_factor)));
-  if (has_4_bit_output_ && unroll_factor == 1) {
+  if (input_output_info_.has_4_bit_output && unroll_factor == 1) {
     // Ensure a single thread writes to a byte containing two int4 values by
     // setting unroll_factor to 2. unroll_factor is always a power of 2, so
     // setting it to 2 here ensures unroll_factor is even when there are 4-bit
@@ -505,7 +516,8 @@ HloFusionAnalysis::ComputeLoopFusionConfig() const {
 
   if (GetEmitterFusionKind() == EmitterFusionKind::kScatter) {
     // Only the unroll factor is used for scatter.
-    return LaunchDimensionsConfig{unroll_factor};
+    loop_fusion_config_.emplace(LaunchDimensionsConfig{unroll_factor});
+    return &loop_fusion_config_.value();
   }
 
   bool row_vectorized;
@@ -540,7 +552,8 @@ HloFusionAnalysis::ComputeLoopFusionConfig() const {
     launch_config.row_vectorized = false;
     launch_config.few_waves = false;
   }
-  return launch_config;
+  loop_fusion_config_.emplace(std::move(launch_config));
+  return &loop_fusion_config_.value();
 }
 
 const Shape& HloFusionAnalysis::GetElementShape() const {
@@ -549,15 +562,6 @@ const Shape& HloFusionAnalysis::GetElementShape() const {
     shape = &shape->tuple_shapes(0);
   }
   return *shape;
-}
-
-int HloFusionAnalysis::SmallestInputDtypeBits() const {
-  int bits = std::numeric_limits<int>::max();
-  for (const HloInstruction* operand : fusion_arguments_) {
-    bits = std::min(bits,
-                    primitive_util::BitWidth(operand->shape().element_type()));
-  }
-  return bits;
 }
 
 int64_t HloFusionAnalysis::MaxBeneficialColumnReductionUnrollBasedOnBlockSize()
@@ -737,23 +741,25 @@ bool HloFusionAnalysis::IsUnrollingColumnReductionBeneficial(
         return TraversalResult::kVisitOperands;
       });
 
-  for (auto* argument : fusion_arguments_) {
-    if (!reachable_through_non_elementwise.contains(argument) &&
-        ShapeUtil::SameDimensions(input_shape, argument->shape())) {
-      ++can_be_vectorized;
-    }
-  }
-
-  // Fusion inputs with more elements than the reduce op input must participate
-  // in non-elementwise operations and we assume that they are not vectorizable
-  // for the purpose of estimating the benefit of unrolling. If the kernel is
-  // unrolled even with such an assumption,  and the accesses to those inputs
-  // turn out to be vectorizable, the compiler will still vectorize them.
   int64_t num_elements = ShapeUtil::ElementsIn(input_shape);
-  cannot_be_vectorized +=
-      absl::c_count_if(fusion_arguments_, [&](const HloInstruction* parameter) {
-        return ShapeUtil::ElementsIn(parameter->shape()) > num_elements;
+  FindFusionArguments(
+      fusion_roots_, fusion_boundary_fn_, [&](const HloInstruction& arg) {
+        if (!reachable_through_non_elementwise.contains(&arg) &&
+            ShapeUtil::SameDimensions(input_shape, arg.shape())) {
+          ++can_be_vectorized;
+        }
+
+        // Fusion inputs with more elements than the reduce op input must
+        // participate in non-elementwise operations and we assume that they are
+        // not vectorizable for the purpose of estimating the benefit of
+        // unrolling. If the kernel is unrolled even with such an assumption,
+        // and the accesses to those inputs turn out to be vectorizable, the
+        // compiler will still vectorize them.
+        if (ShapeUtil::ElementsIn(arg.shape()) > num_elements) {
+          ++cannot_be_vectorized;
+        }
       });
+
   if (can_be_vectorized < cannot_be_vectorized) {
     return false;
   }
@@ -787,7 +793,7 @@ bool HloFusionAnalysis::CanVectorizeReduction(
   if (cuda_cc == nullptr) return false;
   if (cuda_cc->IsAtLeast(se::CudaComputeCapability::VOLTA)) return true;
   if (cuda_cc->IsAtLeast(se::CudaComputeCapability::PASCAL_)) {
-    return SmallestInputDtypeBits() <= 32 &&
+    return input_output_info_.smallest_input_dtype_bits <= 32 &&
            reduction_dimensions.dimensions[kDimX] %
                    (reduction_tiling[2] * num_threads_x) ==
                0;
@@ -811,13 +817,8 @@ int HloFusionAnalysis::CalculateVirtualThreadScalingFactorForReduction(
   return 1;
 }
 
-std::optional<ReductionCodegenInfo>
-HloFusionAnalysis::ComputeReductionCodegenInfo(
+ReductionCodegenInfo HloFusionAnalysis::ComputeReductionCodegenInfo(
     const HloInstruction* hero_reduction) const {
-  if (!hero_reduction) {
-    return std::nullopt;
-  }
-
   Shape input_shape = hero_reduction->operand(0)->shape();
   ReductionDimensions reduction_dimensions =
       GetReductionKindAndContiguousComponents(*hero_reduction);
@@ -870,7 +871,8 @@ HloFusionAnalysis::ComputeReductionCodegenInfo(
   // difference, e.g. by affecting register spilling.
   int num_partial_results = 1;
   if (!reduction_dimensions.is_row_reduction && vectorize) {
-    int smallest_input_dtype_bits = SmallestInputDtypeBits();
+    int smallest_input_dtype_bits =
+        input_output_info_.smallest_input_dtype_bits;
     if (smallest_input_dtype_bits <= 32) {
       // Make sure to use all the data read at once.
       // Instead of hardcoding the granularity, we can query the granularity we
