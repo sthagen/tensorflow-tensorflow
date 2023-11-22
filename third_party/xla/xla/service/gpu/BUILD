@@ -2102,6 +2102,7 @@ cc_library(
         "//xla/service:hlo_cost_analysis",
         "//xla/service:hlo_pass",
         "//xla/service:instruction_fusion",
+        "//xla/service/gpu/model:fusion_analysis_cache",
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
         "//xla/service/gpu/model:gpu_performance_model",
         "//xla/stream_executor:device_description",
@@ -2203,7 +2204,9 @@ xla_cc_test(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:status_matchers",
     ],
 )
 
@@ -3179,24 +3182,35 @@ xla_cc_test(
 
 xla_cc_test(
     name = "gpu_aot_compilation_test",
-    srcs = if_cuda_is_configured([
+    srcs = if_gpu_is_configured([
         "gpu_aot_compilation_test.cc",
     ]),
     env = {
         "XLA_FLAGS": "--xla_gpu_enable_xla_runtime_executable",
     },
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
+        "TENSORFLOW_USE_ROCM=1",
+    ]),
     tags = [
         "gpu",
         "no_oss",
-        "no_rocm",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
         "requires-gpu-nvidia",
     ],
     deps = if_cuda_is_configured([
         ":nvptx_compiler_impl",
+    ]) + if_rocm_is_configured([
+        ":amdgpu_compiler_impl",
+    ]) + [
+        ":gpu_transfer_manager",
+        "//xla/service:compiler",
+        "//xla/service:gpu_plugin",
+        "//xla/service:platform_util",
+        "//xla/stream_executor:multi_platform_manager",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
-    ]),
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 cc_library(
