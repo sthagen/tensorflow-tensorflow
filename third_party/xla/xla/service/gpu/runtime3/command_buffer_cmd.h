@@ -22,6 +22,8 @@ limitations under the License.
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/buffer_allocations.h"
@@ -30,6 +32,7 @@ limitations under the License.
 #include "xla/service/gpu/thunk.h"
 #include "xla/status.h"
 #include "xla/stream_executor/command_buffer.h"
+#include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_pimpl.h"
@@ -52,6 +55,7 @@ class CommandBufferCmd {
   // module, we only know the buffer slices required for HLO operations, but the
   // concrete device pointers become available only at run time.
   struct RecordParams {
+    se::StreamExecutor* executor;
     const BufferAllocations* buffer_allocations;
   };
 
@@ -85,6 +89,21 @@ class CommandBufferCmdSequence {
  public:
   CommandBufferCmdSequence() = default;
 
+  enum class RecordMode {
+    // In exclusive mode no one else is recording commands into the command
+    // buffer argument, and cmd sequence is responsible for updating command
+    // buffer state: finalizing after all commands recorded, and
+    // switching to update state before recording updates.
+    kExclusive,
+
+    // In conditional mode multiple cmd sequences can be recorded into the
+    // command buffer argument, and with command buffer state managed externally
+    // cmd sequence should not finalize or update it. This mode is used when
+    // command buffer cmd sequence is recorded into conditional command buffers
+    // owned by the parent command buffer.
+    kConditional
+  };
+
   void Append(std::unique_ptr<CommandBufferCmd> cmd);
 
   template <typename T, typename... Args>
@@ -98,20 +117,23 @@ class CommandBufferCmdSequence {
 
   // Records all commands added to a sequence into the given command buffer.
   Status Record(const CommandBufferCmd::RecordParams& params,
-                se::CommandBuffer* command_buffer);
+                se::CommandBuffer* command_buffer,
+                RecordMode mode = RecordMode::kExclusive);
+
+  // Returns buffer allocation slices referenced by commands in this sequence.
+  const absl::flat_hash_set<BufferAllocation::Slice>& slices() const;
+
+  // Returns buffer allocations indices referenced by commands in this sequence.
+  const absl::flat_hash_set<BufferAllocation::Index>& allocs_indices() const;
 
  private:
-  // Traverse the list of commands and figures out if any of them requires an
-  // update. Also updates `prev_allocs_` with new allocations from `params`.
-  bool ShouldUpdateCmd(const CommandBufferCmd::RecordParams& params);
-
   std::vector<std::unique_ptr<CommandBufferCmd>> commands_;
-  // Mapping from buffer slice index to device memory passed at that index via
-  // the `CommandBufferCmd::RecordParams` in previous invocation of `Record`.
-  // We can just use a vector instead of map because `BufferAllocation` has a
-  // unique identifier assigned contiguously and thus can be used as array
-  // index.
-  std::vector<se::DeviceMemoryBase> prev_allocs_;
+
+  // Buffer allocation slices referenced by commands in this sequence.
+  absl::flat_hash_set<BufferAllocation::Slice> slices_;
+
+  // Buffer allocations indices referenced by commands in this sequence.
+  absl::flat_hash_set<BufferAllocation::Index> allocs_indices_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -161,6 +183,27 @@ class MemcpyDeviceToDeviceCmd : public CommandBufferCmd {
   BufferAllocation::Slice dst_;
   BufferAllocation::Slice src_;
   int64_t num_bytes_;
+};
+
+//===----------------------------------------------------------------------===//
+// IfCmd
+//===----------------------------------------------------------------------===//
+
+class IfCmd : public CommandBufferCmd {
+ public:
+  IfCmd(BufferAllocation::Slice pred, CommandBufferCmdSequence then_cmds);
+
+  Status Initialize(se::StreamExecutor* executor,
+                    ExecutableSource source) override;
+
+  Status Record(const RecordParams& params,
+                se::CommandBuffer* command_buffer) override;
+
+  Slices slices() override;
+
+ private:
+  BufferAllocation::Slice pred_;
+  CommandBufferCmdSequence then_cmds_;
 };
 
 //===----------------------------------------------------------------------===//
