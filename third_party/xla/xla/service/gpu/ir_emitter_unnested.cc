@@ -2059,8 +2059,15 @@ StatusOr<FusionEmissionResult> IrEmitterUnnested::EmitTritonFusion(
   // because we only get the launch dimensions after code generation. So we
   // implement kernel reuse using lower level APIs, such as
   // `BuildKernelThunkImpl`.
-
-  VLOG(3) << llvm_ir::DumpToString(op);
+  CHECK_NE(fusion, nullptr);
+  if (!ir_emitter_context_->emit_ir_from_hlo()) {
+    CHECK_NE(op, nullptr);
+  }
+  if (ir_emitter_context_->emit_ir_from_hlo()) {
+    VLOG(3) << fusion->ToString();
+  } else {
+    VLOG(3) << llvm_ir::DumpToString(op);
+  }
   std::string suggested_kernel_name = std::string(fusion->name());
   TF_ASSIGN_OR_RETURN(
       auto kernel_arguments,
@@ -2103,14 +2110,18 @@ StatusOr<FusionEmissionResult> IrEmitterUnnested::EmitTritonFusion(
                         ir_emitter_context_->cuda_compute_capability(),
                         ir_emitter_context_->gpu_device_info(), config, module_,
                         &EmitSoftMax, *ir_emitter_context_->mlir_context()));
-      launch_dimensions = GetSoftMaxLaunchDimensions(
-          hlo_fusion_analysis.fusion_roots(),
-          hlo_fusion_analysis.fusion_boundary(), config);
+      launch_dimensions =
+          GetSoftMaxLaunchDimensions(hlo_fusion_analysis.fusion(), config);
     } else {  // Must be a MatMul
       CHECK_EQ(fusion_kind, kTritonGemmFusionKind);
       if (!backend_config.has_triton_gemm_config()) {
-        LOG(WARNING) << "Using fallback triton GEMM config for op "
-                     << GetIrNameFromLoc(op->getLoc());
+        if (ir_emitter_context_->emit_ir_from_hlo()) {
+          LOG(WARNING) << "Using fallback triton GEMM config for op "
+                       << fusion->name();
+        } else {
+          LOG(WARNING) << "Using fallback triton GEMM config for op "
+                       << GetIrNameFromLoc(op->getLoc());
+        }
         auto& triton_config = *backend_config.mutable_triton_gemm_config();
         triton_config.set_block_m(64);
         triton_config.set_block_k(64);
@@ -2132,8 +2143,7 @@ StatusOr<FusionEmissionResult> IrEmitterUnnested::EmitTritonFusion(
                         ir_emitter_context_->gpu_device_info(), config, module_,
                         &EmitMatMul, *ir_emitter_context_->mlir_context()));
       launch_dimensions = GetMatMulLaunchDimensions(
-          analysis, hlo_fusion_analysis.fusion_roots(),
-          hlo_fusion_analysis.fusion_boundary(), config);
+          analysis, hlo_fusion_analysis.fusion(), config);
     }
 
     llvm::Function* impl_fn = module_->getFunction(impl_fn_name);
