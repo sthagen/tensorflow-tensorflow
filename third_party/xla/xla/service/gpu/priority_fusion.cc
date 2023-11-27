@@ -110,7 +110,6 @@ class GpuPriorityFusionQueue : public FusionQueue {
           std::make_pair(priority, instruction->unique_id()), instruction);
       CHECK(emplace_result.second);
       reverse_map_.emplace(instruction, emplace_result.first);
-      producer_user_count_[instruction] = instruction->user_count();
     }
   }
 
@@ -185,6 +184,9 @@ class GpuPriorityFusionQueue : public FusionQueue {
       fusion_step->set_consumer_name(std::string(original_consumer->name()));
     }
 
+    HloInstructionAdaptor fusion_adaptor(*fusion);
+    can_fuse_cache_.erase(fusion_adaptor);
+
     fusion_analysis_cache_.Invalidate(*fusion);
     fusion_analysis_cache_.Invalidate(*original_producer);
 
@@ -218,7 +220,9 @@ class GpuPriorityFusionQueue : public FusionQueue {
       if (!operand->IsFusible()) {
         continue;
       }
-      producer_user_count_[operand] = operand->user_count();
+
+      HloInstructionAdaptor operand_adaptor(*operand);
+      can_fuse_cache_[operand_adaptor].erase(fusion_adaptor);
       to_update_priority_.insert(operand);
     }
     to_update_priority_.insert(fusion);
@@ -264,7 +268,6 @@ class GpuPriorityFusionQueue : public FusionQueue {
   // Removes data for the instruction.
   void RemoveInstruction(HloInstruction* instruction) override {
     to_update_priority_.erase(instruction);
-    producer_user_count_.erase(instruction);
     fusion_analysis_cache_.Invalidate(*instruction);
 
     auto reverse_it = reverse_map_.find(instruction);
@@ -314,14 +317,44 @@ class GpuPriorityFusionQueue : public FusionQueue {
                                     run_times.time_fused);
   }
 
-  FusionDecision CanFuseWithAllUsers(HloInstruction* producer) const {
+  FusionDecision CanFuseCached(HloInstruction* producer,
+                               HloInstruction* consumer) {
+    HloInstructionAdaptor producer_adaptor(*producer);
+    HloInstructionAdaptor consumer_adaptor(*consumer);
+
+    {
+      absl::MutexLock lock(&can_fuse_cache_mutex_);
+      auto& producer_cache = can_fuse_cache_[producer_adaptor];
+
+      auto it = producer_cache.find(consumer_adaptor);
+      if (it != producer_cache.end()) {
+        return it->second;
+      }
+    }
+
+    auto fusion_decision =
+        can_fuse_(consumer, consumer->operand_index(producer));
+
+    // The lock is required, because writing to a flat_hash_map is not
+    // thread-safe even for different keys. We never call this computation
+    // concurrently for the same producer, so it's guaranteed that we don't
+    // override any value.
+    {
+      absl::MutexLock lock(&can_fuse_cache_mutex_);
+      can_fuse_cache_[producer_adaptor][consumer_adaptor] = fusion_decision;
+    }
+
+    return fusion_decision;
+  }
+
+  FusionDecision CanFuseWithAllUsers(HloInstruction* producer) {
     if (producer->users().size() == 0) {
       return "No users to fuse";
     }
 
     FusionDecision result;
     for (const auto& user : producer->users()) {
-      if (auto fusion_decision = can_fuse_(user, user->operand_index(producer));
+      if (auto fusion_decision = CanFuseCached(producer, user);
           !fusion_decision) {
         VLOG(10) << "Cannot fuse " << producer->name() << " with "
                  << user->name() << ", because: " << fusion_decision.Explain();
@@ -357,10 +390,6 @@ class GpuPriorityFusionQueue : public FusionQueue {
   // and the producer is given as the consumer's operand index.
   CanFuseCallback can_fuse_;
 
-  // The user counts of producers, used to determine whether we update their
-  // priorities when fusion happens.
-  absl::flat_hash_map<HloInstruction*, int64_t> producer_user_count_;
-
   // The set of producers whose priorities need to be updated. Their
   // priorities are changed because their neighbors got fused, but we delay
   // the priority updates until current_consumers_ becomes empty. This is to
@@ -376,6 +405,14 @@ class GpuPriorityFusionQueue : public FusionQueue {
   tsl::thread::ThreadPool* thread_pool_;
 
   HloFusionAnalysisCache& fusion_analysis_cache_;
+
+  // Caches result of can_fuse for a (producer, consumer) pair. A cache entry is
+  // invalidated if producer or consumer is modified.
+  absl::flat_hash_map<
+      HloInstructionAdaptor,
+      absl::flat_hash_map<HloInstructionAdaptor, FusionDecision>>
+      can_fuse_cache_;
+  absl::Mutex can_fuse_cache_mutex_;
 };
 
 }  // namespace
