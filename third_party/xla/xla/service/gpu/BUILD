@@ -332,6 +332,7 @@ cc_library(
         "//xla/service/gpu/kernels:custom_fusion",
         "//xla/service/gpu/kernels:custom_kernel",
         "//xla/service/gpu/runtime3:command_buffer_cmd",
+        "//xla/service/gpu/runtime3:command_buffer_cmd_emitter",
         "//xla/service/gpu/runtime3:command_buffer_thunk",
         "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/service/gpu/runtime3:fft_thunk",
@@ -474,7 +475,10 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:cord",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Linker",
         "@llvm-project//llvm:Support",
@@ -4890,7 +4894,10 @@ xla_cc_test(
 xla_cc_test(
     name = "determinism_test",
     srcs = ["determinism_test.cc"],
-    tags = tf_cuda_tests_tags(),
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
+        "TENSORFLOW_USE_ROCM=1",
+    ]),
+    tags = tf_gpu_tests_tags(),
     deps = [
         ":autotuner_util",
         "//xla:literal",

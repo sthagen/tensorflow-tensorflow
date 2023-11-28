@@ -108,6 +108,9 @@ class StaticRangeQuantizationTest(quantize_model_test_base.QuantizedModelTest):
                 tfrecord_file_path=dataset_path
             )
         },
+        calibration_options=quant_opts_pb2.CalibrationOptions(
+            calibration_method=quant_opts_pb2.CalibrationOptions.CALIBRATION_METHOD_MIN_MAX
+        ),
     )
     quantization.quantize_saved_model(
         self._input_saved_model_path,
@@ -132,9 +135,11 @@ class StaticRangeQuantizationTest(quantize_model_test_base.QuantizedModelTest):
       parameter_combinations([{
           'same_scale_op': [
               'concatenate',
+              'gather',
               'pad',
               'reshape',
               'select',
+              'slice',
               'transpose',
           ],
       }])
@@ -190,6 +195,9 @@ class StaticRangeQuantizationTest(quantize_model_test_base.QuantizedModelTest):
                 tfrecord_file_path=dataset_path
             )
         },
+        calibration_options=quant_opts_pb2.CalibrationOptions(
+            calibration_method=quant_opts_pb2.CalibrationOptions.CALIBRATION_METHOD_MIN_MAX
+        ),
     )
     quantization.quantize_saved_model(
         self._input_saved_model_path,
