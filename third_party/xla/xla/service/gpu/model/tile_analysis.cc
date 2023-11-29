@@ -15,14 +15,18 @@ limitations under the License.
 
 #include "xla/service/gpu/model/tile_analysis.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <ostream>
 #include <queue>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
@@ -37,6 +41,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/gpu/matmul_utils.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
@@ -50,9 +55,12 @@ namespace gpu {
 namespace {
 
 using llvm::SmallVector;
+using mlir::AffineBinaryOpExpr;
+using mlir::AffineDimExpr;
 using mlir::AffineExpr;
 using mlir::AffineExprKind;
 using mlir::AffineMap;
+using mlir::AffineSymbolExpr;
 using mlir::getAffineBinaryOpExpr;
 using mlir::getAffineConstantExpr;
 using mlir::getAffineDimExpr;
@@ -346,6 +354,168 @@ StatusOr<HloInstructionIndexing> ComputeReduceOpIndexing(
   }
   return HloInstructionIndexing{std::move(operand_indexing_maps)};
 }
+// Computes strides for a shape.
+std::vector<int64_t> ComputeStrides(absl::Span<const int64_t> dims) {
+  int rank = static_cast<int>(dims.size());
+  std::vector<int64_t> strides(rank, 1);
+  for (int i = rank - 2; i >= 0; --i) {
+    strides[i] = dims[i + 1] * strides[i + 1];
+  }
+  return strides;
+}
+
+// Computes 1D index given a shape and N-d indexing expressions.
+AffineExpr LinearizeShape(absl::Span<const int64_t> dims,
+                          absl::Span<const AffineExpr> dimension_exprs,
+                          MLIRContext* mlir_context) {
+  AffineExpr linear_index = getAffineConstantExpr(0, mlir_context);
+
+  auto strides = ComputeStrides(dims);
+  for (auto [stride, dimension_expr] : llvm::zip(strides, dimension_exprs)) {
+    linear_index = getAffineBinaryOpExpr(
+        AffineExprKind::Add, linear_index,
+        getAffineBinaryOpExpr(AffineExprKind::Mul,
+                              getAffineConstantExpr(stride, mlir_context),
+                              dimension_expr));
+  }
+  return linear_index;
+}
+
+// Computes N-d indexing expressions given a linear index and a shape.
+std::vector<AffineExpr> DelinearizeIndex(absl::Span<const int64_t> dims,
+                                         AffineExpr linear_index,
+                                         MLIRContext* mlir_context) {
+  std::vector<AffineExpr> multi_index;
+  multi_index.reserve(dims.size());
+
+  AffineExpr remainder = linear_index;
+  for (int64_t stride : ComputeStrides(dims)) {
+    AffineExpr stride_expr = getAffineConstantExpr(stride, mlir_context);
+    multi_index.push_back(getAffineBinaryOpExpr(AffineExprKind::FloorDiv,
+                                                remainder, stride_expr));
+    remainder =
+        getAffineBinaryOpExpr(AffineExprKind::Mod, remainder, stride_expr);
+  }
+  return multi_index;
+}
+
+// Computes indexing for "minimal" reshapes, i.e. reshapes that cannot be
+// represented by a series of composed reshapes, i.e. when there are no
+// subshapes in input and output that have the same number of elements.
+// For example, [8, 4] -> [8, 2, 2] is not a minimal reshape, it has matching
+// subshapes [8] -> [8] and [4] -> [2, 2].
+//
+// There are only 4 types of "minimal" reshapes considers only 4 cases:
+//   1. Dimension is not changed, e.g. [8] -> [8]
+//   2. Dimension is expanded, e.g. [8] -> [4, 2]
+//   3. Dimension is collapsed, e.g. [4, 2] -> [8]
+//   4. Dimension is collapsed and expanded, e.g. [8, 16] -> [4, 32]
+//
+// The function computes indexing maps for these 4 cases, i.e. considers given
+// input/output shapes and checks if the shapes are the same, expanded or
+// collapsed. Otherwise, performs linearization/delinearization.
+void ComputeMinimalReshapeIndexing(
+    absl::Span<const int64_t> input_dims, absl::Span<const int64_t> output_dims,
+    absl::Span<const AffineExpr> output_dims_exprs,
+    std::vector<AffineExpr>* exprs, MLIRContext* mlir_context) {
+  // The shape does not change.
+  if (input_dims.size() == 1 && output_dims.size() == 1) {
+    absl::c_copy(output_dims_exprs, std::back_inserter(*exprs));
+    return;
+  }
+  // Expand shape.
+  if (input_dims.size() == 1) {
+    exprs->push_back(
+        LinearizeShape(output_dims, output_dims_exprs, mlir_context));
+    return;
+  }
+  // Collapse shape.
+  if (output_dims.size() == 1) {
+    auto multi_index =
+        DelinearizeIndex(input_dims, output_dims_exprs.front(), mlir_context);
+    absl::c_copy(multi_index, std::back_inserter(*exprs));
+    return;
+  }
+  // Generic case.
+  AffineExpr linear_index =
+      LinearizeShape(output_dims, output_dims_exprs, mlir_context);
+  auto multi_index = DelinearizeIndex(input_dims, linear_index, mlir_context);
+  absl::c_copy(multi_index, std::back_inserter(*exprs));
+}
+
+// Scans input and output shapes from left to right in an attempt to find
+// subshapes with the same number of elements and then computes indexing map for
+// every pair of subshapes.
+//
+// Example:
+//   p0 = f32[4, 8, 12] parameter(0)
+//   reshape = f32[32, 3, 4] reshape(p0)
+//
+// This reshape can be represented as a composition of two reshapes.
+// The first reshape collapses dimensions first two input dimensions [4, 8] onto
+// the output dimension [32].
+// The second reshape expands the input dimension [12] into two output
+// dimensions [3, 4].
+// This is an optimization that allows us to construct simpler affine maps,
+// otherwise we would need to linearize/delinearize even some of the simpler
+// cases.
+IndexingMap ComputeReshapeIndexingMap(absl::Span<const int64_t> input_dims,
+                                      absl::Span<const int64_t> output_dims,
+                                      MLIRContext* mlir_context) {
+  std::vector<AffineExpr> exprs;
+
+  size_t input_rank = input_dims.size();
+  size_t output_rank = output_dims.size();
+  std::vector<AffineExpr> output_dims_exprs;
+
+  // Find subshapes with the same element count and compute indexing for them.
+  int64_t input_num_elements = 1;
+  int64_t output_num_elements = 1;
+  std::vector<int64_t> input_subshape, output_subshape;
+  size_t input_dim_id = 0, output_dim_id = 0;
+  while (input_dim_id < input_rank || output_dim_id < output_rank ||
+         !input_subshape.empty()) {
+    if (input_dim_id < input_rank &&
+        (input_subshape.empty() || input_num_elements < output_num_elements ||
+         input_dims[input_dim_id] == 1)) {
+      input_num_elements *= input_dims[input_dim_id];
+      input_subshape.push_back(input_dims[input_dim_id]);
+      ++input_dim_id;
+      continue;
+    }
+    if (output_dim_id < output_rank &&
+        (output_subshape.empty() || output_num_elements < input_num_elements ||
+         output_dims[output_dim_id] == 1)) {
+      output_num_elements *= output_dims[output_dim_id];
+      output_subshape.push_back(output_dims[output_dim_id]);
+      output_dims_exprs.push_back(
+          getAffineDimExpr(output_dim_id, mlir_context));
+      ++output_dim_id;
+      continue;
+    }
+    ComputeMinimalReshapeIndexing(input_subshape, output_subshape,
+                                  output_dims_exprs, &exprs, mlir_context);
+    input_num_elements = 1;
+    output_num_elements = 1;
+    input_subshape.clear();
+    output_subshape.clear();
+    output_dims_exprs.clear();
+  }
+  return IndexingMap{
+      .affine_map = AffineMap::get(output_dims.size(), /*symbolCount=*/0, exprs,
+                                   mlir_context),
+      .input_dims_sizes = {}};
+}
+
+StatusOr<HloInstructionIndexing> ComputeReshapeOpIndexing(
+    const HloReshapeInstruction* reshape, MLIRContext* mlir_context) {
+  auto input_dims = reshape->operand(0)->shape().dimensions();
+  auto output_dims = reshape->shape().dimensions();
+  IndexingMap reshape_indexing_map =
+      ComputeReshapeIndexingMap(input_dims, output_dims, mlir_context);
+  return HloInstructionIndexing{{HloOperandIndexing{
+      .indexing_maps = {std::move(reshape_indexing_map)}, .operand_id = 0}}};
+}
 
 StatusOr<HloInstructionIndexing> ComputeReverseOpIndexing(
     const HloReverseInstruction* reverse, MLIRContext* mlir_context) {
@@ -400,17 +570,63 @@ StatusOr<HloInstructionIndexing> ComputeSliceOpIndexing(
       .indexing_maps = {std::move(indexing_map)}, .operand_id = 0}}};
 }
 
+IndexingMap ComputeTransposeIndexingMap(absl::Span<const int64_t> permutation,
+                                        MLIRContext* mlir_context) {
+  auto forward_permutation = AffineMap::getPermutationMap(
+      std::vector<unsigned>(permutation.begin(), permutation.end()),
+      mlir_context);
+  return IndexingMap{
+      .affine_map = mlir::inversePermutation(forward_permutation),
+      .input_dims_sizes = {}};
+}
+
 StatusOr<HloInstructionIndexing> ComputeTransposeOpIndexing(
     const HloTransposeInstruction* transpose, MLIRContext* mlir_context) {
-  std::vector<unsigned> permutation(transpose->dimensions().begin(),
-                                    transpose->dimensions().end());
-  IndexingMap permutation_map{
-      .affine_map = mlir::inversePermutation(
-          AffineMap::getPermutationMap(permutation, mlir_context)),
-      .input_dims_sizes = {}};
-
+  IndexingMap transpose_indexing_map =
+      ComputeTransposeIndexingMap(transpose->dimensions(), mlir_context);
   return HloInstructionIndexing{{HloOperandIndexing{
-      .indexing_maps = {std::move(permutation_map)}, .operand_id = 0}}};
+      .indexing_maps = {std::move(transpose_indexing_map)}, .operand_id = 0}}};
+}
+
+StatusOr<HloInstructionIndexing> ComputeBitcastOpIndexing(
+    const HloInstruction* bitcast, MLIRContext* mlir_context) {
+  const Shape& input_shape = bitcast->operand(0)->shape();
+  const Shape& output_shape = bitcast->shape();
+  ShapeUtil::BitcastDecomposition decomposed_bitcast =
+      ShapeUtil::DecomposeBitcast(input_shape, output_shape);
+
+  if (std::holds_alternative<ShapeUtil::BitcastDecompositionTranspose>(
+          decomposed_bitcast)) {
+    auto permutation = ShapeUtil::DeduceTransposeDimensionsForBitcast(
+        input_shape, output_shape);
+    CHECK(permutation.has_value())
+        << "Failed to deduce permutation for a bitcast.";
+    IndexingMap transpose_indexing_map =
+        ComputeTransposeIndexingMap(*permutation, mlir_context);
+    return HloInstructionIndexing{{HloOperandIndexing{
+        .indexing_maps = {std::move(transpose_indexing_map)},
+        .operand_id = 0}}};
+  }
+  if (std::holds_alternative<ShapeUtil::BitcastDecompositionReshape>(
+          decomposed_bitcast)) {
+    IndexingMap reshape_indexing_map = ComputeReshapeIndexingMap(
+        input_shape.dimensions(), output_shape.dimensions(), mlir_context);
+    return HloInstructionIndexing{{HloOperandIndexing{
+        .indexing_maps = {std::move(reshape_indexing_map)}, .operand_id = 0}}};
+  }
+  // `trt` stands for transpose-reshape-transpose decomposition of bitcast.
+  auto trt = std::get<ShapeUtil::BitcastDecompositionTrt>(decomposed_bitcast);
+  IndexingMap transpose_map_1 =
+      ComputeTransposeIndexingMap(trt.transpose1_dims, mlir_context);
+  IndexingMap reshape_map =
+      ComputeReshapeIndexingMap(trt.transpose1_shape.dimensions(),
+                                trt.reshape_shape.dimensions(), mlir_context);
+  IndexingMap transpose_map_2 =
+      ComputeTransposeIndexingMap(trt.transpose2_dims, mlir_context);
+  IndexingMap composed_map = ComposeIndexingMaps(
+      ComposeIndexingMaps(transpose_map_1, reshape_map), transpose_map_2);
+  return HloInstructionIndexing{{HloOperandIndexing{
+      .indexing_maps = {std::move(composed_map)}, .operand_id = 0}}};
 }
 
 template <typename T>
@@ -421,7 +637,268 @@ std::string ToStringImpl(const T& value) {
   return ss.str();
 }
 
+struct IndexingMapSimplifier {
+  struct Bounds {
+    int64_t lower;
+    int64_t upper;
+  };
+
+  Bounds BoundsInclusive(AffineExpr expr) {
+    auto bound = bounds.find(expr);
+    if (bound != bounds.end()) return bound->second;
+
+    switch (expr.getKind()) {
+      case AffineExprKind::Constant: {
+        int64_t value = mlir::cast<mlir::AffineConstantExpr>(expr).getValue();
+        CHECK_GE(value, 0);
+        return bounds[expr] = {value, value};
+      }
+      case AffineExprKind::DimId: {
+        int64_t size =
+            dimension_sizes[mlir::cast<AffineDimExpr>(expr).getPosition()];
+        return bounds[expr] = {0, size - 1};
+      }
+      case AffineExprKind::SymbolId: {
+        int64_t size =
+            symbol_sizes[mlir::cast<AffineSymbolExpr>(expr).getPosition()];
+        return bounds[expr] = {0, size - 1};
+      }
+      default:
+        auto binary_op = mlir::dyn_cast<AffineBinaryOpExpr>(expr);
+        CHECK(binary_op);
+        auto lhs = BoundsInclusive(binary_op.getLHS());
+        auto rhs = BoundsInclusive(binary_op.getRHS());
+
+        auto& result = bounds[expr];
+        switch (expr.getKind()) {
+          case AffineExprKind::Add:
+            return result = {lhs.lower + rhs.lower, lhs.upper + rhs.upper};
+          case AffineExprKind::Mul:
+            return result = {lhs.lower * rhs.lower, lhs.upper * rhs.upper};
+          case AffineExprKind::Mod: {
+            CHECK_EQ(rhs.lower, rhs.upper) << "RHS of mod must be a constant";
+            int64_t m = rhs.lower;
+            if (lhs.upper < m) {
+              return result = lhs;
+            }
+            return result = {0, m - 1};
+          }
+          case AffineExprKind::FloorDiv: {
+            CHECK_EQ(rhs.lower, rhs.upper)
+                << "RHS of floor_div must be a constant";
+            int64_t d = rhs.lower;
+            return result = {lhs.lower / d, lhs.upper / d};
+          }
+          default:
+            // We don't use ceildiv, so we don't support it.
+            LOG(FATAL) << "Unsupported expression";
+        }
+    }
+  }
+
+  // Simplifier for mod.
+  // - Rewrites (a * 100 + ...) % 100 to (...) % 100
+  // - Rewrites a % b to a if a is known to be less than b.
+  AffineExpr RewriteMod(AffineBinaryOpExpr mod) {
+    auto lhs_simplified = SimplifyOnce(mod.getLHS());
+
+    auto lhs = BoundsInclusive(lhs_simplified);
+    auto rhs = BoundsInclusive(mod.getRHS());
+
+    // a % b where b is always larger than a?
+    if (lhs.upper < rhs.lower) return lhs_simplified;
+
+    // The logic below assumes we have a constant RHS.
+    if (rhs.lower != rhs.upper) return mod;
+    int64_t m = rhs.lower;
+
+    auto new_lhs = RewriteSumIf(lhs_simplified, [&](AffineExpr expr) {
+      if (expr.getKind() != AffineExprKind::Mul) {
+        return true;
+      }
+
+      auto mul_rhs =
+          BoundsInclusive(mlir::cast<AffineBinaryOpExpr>(expr).getRHS());
+      bool remove = mul_rhs.lower == mul_rhs.upper && (mul_rhs.lower % m) == 0;
+      return !remove;  // We keep it if we don't remove it!
+    });
+
+    // If we weren't able to remove or simplify anything, return the original
+    // expression.
+    if (new_lhs == mod.getLHS()) {
+      return mod;
+    }
+    // If we removed everything, return 0.
+    if (!new_lhs) {
+      return getAffineConstantExpr(0, mlir_context);
+    }
+    // Otherwise, return new_sum % m.
+    return getAffineBinaryOpExpr(AffineExprKind::Mod, new_lhs, mod.getRHS());
+  }
+
+  // Simplifier for floordiv.
+  // - Rewrites (a * 100 + ...) / 100 to a + (...) / 100
+  // - Rewrites a / 100 to 0 when a is known to be less than 100.
+  AffineExpr RewriteFloorDiv(AffineBinaryOpExpr div) {
+    auto lhs_simplified = SimplifyOnce(div.getLHS());
+    auto lhs = BoundsInclusive(lhs_simplified);
+    auto rhs = BoundsInclusive(div.getRHS());
+
+    if (lhs.upper < rhs.lower) {
+      return getAffineConstantExpr(0, mlir_context);
+    }
+
+    // The logic below assumes we have a constant RHS.
+    if (rhs.lower != rhs.upper) return div;
+    int64_t d = rhs.lower;
+
+    AffineExpr extracted = getAffineConstantExpr(0, mlir_context);
+    auto new_dividend = RewriteSumIf(lhs_simplified, [&](AffineExpr expr) {
+      if (auto multiplier = GetConstantRhsMultiplier(expr)) {
+        // (x * 7 + ...) / 3 -> can't extract. We could extract x * 2 and keep
+        // one x, but we currently have no reason to do that.
+        if (*multiplier % d != 0) return true;
+        int64_t factor = *multiplier / d;
+        extracted = getAffineBinaryOpExpr(
+            AffineExprKind::Add, extracted,
+            getAffineBinaryOpExpr(AffineExprKind::Mul,
+                                  cast<AffineBinaryOpExpr>(expr).getLHS(),
+                                  getAffineConstantExpr(factor, mlir_context)));
+        // Remove from dividend.
+        return false;
+      }
+
+      // Not a constant multiplier, keep in dividend.
+      return true;
+    });
+
+    // If we removed everything, skip the div.
+    if (!new_dividend) return extracted;
+    // If we removed nothing, return the original division.
+    if (extracted == getAffineConstantExpr(0, mlir_context) &&
+        new_dividend == div.getLHS()) {
+      return div;
+    }
+
+    return getAffineBinaryOpExpr(
+        AffineExprKind::Add, extracted,
+        getAffineBinaryOpExpr(AffineExprKind::FloorDiv, new_dividend,
+                              div.getRHS()));
+  }
+
+  std::optional<int64_t> GetConstantRhsMultiplier(AffineExpr expr) {
+    if (expr.getKind() != AffineExprKind::Mul) return std::nullopt;
+    auto bound = BoundsInclusive(mlir::cast<AffineBinaryOpExpr>(expr).getRHS());
+    if (bound.lower != bound.upper) return std::nullopt;
+    return bound.lower;
+  }
+
+  AffineExpr RewriteSumIf(AffineExpr expr,
+                          const std::function<bool(AffineExpr)>& pred) {
+    if (expr.getKind() == AffineExprKind::Add) {
+      auto add = mlir::dyn_cast<AffineBinaryOpExpr>(expr);
+      auto lhs = RewriteSumIf(add.getLHS(), pred);
+      auto rhs = RewriteSumIf(add.getRHS(), pred);
+      if (lhs == add.getLHS() && rhs == add.getRHS()) {
+        return add;
+      }
+      if (lhs && rhs) {
+        return getAffineBinaryOpExpr(AffineExprKind::Add, lhs, rhs);
+      }
+      return lhs ? lhs : (rhs ? rhs : nullptr);
+    }
+    return pred(expr) ? expr : nullptr;
+  }
+
+  // Attempts to simplify the expression, but doesn't attempt to simplify the
+  // result further.
+  AffineExpr SimplifyOnce(AffineExpr expr) {
+    switch (expr.getKind()) {
+      case AffineExprKind::Mul:
+      case AffineExprKind::Add: {
+        auto binop = mlir::cast<AffineBinaryOpExpr>(expr);
+        auto lhs = SimplifyOnce(binop.getLHS());
+        auto rhs = SimplifyOnce(binop.getRHS());
+        if (lhs == binop.getLHS() && rhs == binop.getRHS()) {
+          return expr;
+        }
+        return getAffineBinaryOpExpr(expr.getKind(), lhs, rhs);
+      }
+      case AffineExprKind::Mod:
+        return RewriteMod(cast<AffineBinaryOpExpr>(expr));
+      case AffineExprKind::FloorDiv:
+        return RewriteFloorDiv(cast<AffineBinaryOpExpr>(expr));
+      default:
+        return expr;
+    }
+  }
+
+  // Simplifies the expression as much as possible.
+  AffineExpr Simplify(AffineExpr expr) {
+    while (true) {
+      auto simplified = SimplifyOnce(expr);
+      if (simplified == expr) return expr;
+      expr = simplified;
+    }
+  }
+
+  MLIRContext* mlir_context;
+  absl::Span<const int64_t> dimension_sizes;
+  absl::Span<const int64_t> symbol_sizes;
+  llvm::DenseMap<AffineExpr, Bounds> bounds{};
+};
+
 }  // namespace
+
+bool IndexingMap::Simplify(absl::Span<const int64_t> dimension_sizes) {
+  IndexingMapSimplifier simplifier{affine_map.getContext(), dimension_sizes,
+                                   input_dims_sizes};
+  std::vector<AffineExpr> results;
+  bool any_changed = false;
+  for (auto expr : affine_map.getResults()) {
+    auto simplified = simplifier.Simplify(expr);
+    any_changed |= simplified != expr;
+    results.push_back(simplified);
+  }
+
+  if (!any_changed) {
+    return false;
+  }
+
+  affine_map =
+      AffineMap::get(affine_map.getNumDims(), affine_map.getNumSymbols(),
+                     results, affine_map.getContext());
+  return true;
+}
+
+bool HloOperandIndexing::Simplify(absl::Span<const int64_t> dimension_sizes) {
+  std::vector<IndexingMap> to_remove;
+  std::vector<IndexingMap> to_add;
+  for (auto map : indexing_maps) {
+    to_remove.push_back(map);
+    if (map.Simplify(dimension_sizes)) {
+      to_add.push_back(map);
+    } else {
+      to_remove.pop_back();
+    }
+  }
+  for (auto& map : to_remove) {
+    indexing_maps.erase(map);
+  }
+  for (auto& map : to_add) {
+    indexing_maps.insert(map);
+  }
+  return !to_remove.empty();
+}
+
+bool HloInstructionIndexing::Simplify(
+    absl::Span<const int64_t> dimension_sizes) {
+  bool any_simplified = false;
+  for (auto& operand_indexing : operand_indexing_maps) {
+    any_simplified |= operand_indexing.Simplify(dimension_sizes);
+  }
+  return any_simplified;
+}
 
 std::string ToString(const AffineMap& affine_map) {
   std::string s;
@@ -474,6 +951,9 @@ StatusOr<HloInstructionIndexing> ComputeInstructionIndexing(
   if (auto bcast = DynCast<HloBroadcastInstruction>(instr)) {
     return ComputeBroadcastOpIndexing(bcast, mlir_context);
   }
+  if (instr->opcode() == HloOpcode::kBitcast) {
+    return ComputeBitcastOpIndexing(instr, mlir_context);
+  }
   if (auto dot = DynCast<HloDotInstruction>(instr)) {
     return ComputeDotOpIndexing(dot, mlir_context);
   }
@@ -482,6 +962,9 @@ StatusOr<HloInstructionIndexing> ComputeInstructionIndexing(
   }
   if (auto reduce = DynCast<HloReduceInstruction>(instr)) {
     return ComputeReduceOpIndexing(reduce, output_id, mlir_context);
+  }
+  if (auto reshape = DynCast<HloReshapeInstruction>(instr)) {
+    return ComputeReshapeOpIndexing(reshape, mlir_context);
   }
   if (auto reverse = DynCast<HloReverseInstruction>(instr)) {
     return ComputeReverseOpIndexing(reverse, mlir_context);
