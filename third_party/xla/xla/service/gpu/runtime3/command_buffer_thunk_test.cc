@@ -110,7 +110,7 @@ TEST(CommandBufferThunkTest, MemcpyCmd) {
 // 3. MemCopyDeviceToDevice from "a" to "b" inside command buffer.
 // 4. MemCopyDEviceToDevice from "b" to "c" inside command buffer.
 // 5. Verify that region "c" has the same content as "a".
-TEST(CommandBufferThunkTest, MemallocCmd) {
+TEST(CommandBufferThunkTest, AllocateCmd) {
   se::StreamExecutor* executor = CudaExecutor();
 
   se::Stream stream(executor);
@@ -140,10 +140,9 @@ TEST(CommandBufferThunkTest, MemallocCmd) {
   // Prepare arguments: a=42, b=0
   se::DeviceMemory<int32_t> a = executor->AllocateArray<int32_t>(length, 0);
   stream.ThenMemset32(&a, 42, byte_length);
-
-  se::DeviceMemory<int32_t> b =
-      se::DeviceMemory<int32_t>::MakeExternalAllocationFromByteSize(
-          byte_length);
+  se::DeviceMemory<int32_t> b(se::DeviceMemoryBase(
+      reinterpret_cast<int32_t*>(BufferAllocations::kExternalAllocationMarker),
+      byte_length));
   se::DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
   BufferAllocations allocations({a, b, c}, 0, executor->GetAllocator());
 

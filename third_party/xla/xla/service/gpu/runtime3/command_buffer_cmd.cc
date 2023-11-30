@@ -21,6 +21,7 @@ limitations under the License.
 #include <utility>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
@@ -130,8 +131,9 @@ Status LaunchCmd::Record(const RecordParams& params,
 
   absl::InlinedVector<se::DeviceMemoryBase, 4> buffers;
   for (const BufferAllocation::Slice& arg : args_) {
-    se::DeviceMemoryBase buf =
-        params.buffer_allocations->GetDeviceAddress(arg, command_buffer);
+    TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase buf,
+                        params.buffer_allocations->GetDeviceAddress(
+                            arg, *params.command_buffer_allocations));
     VLOG(5) << "  Arg: " << arg << ": " << buf.opaque();
     buffers.push_back(buf);
   }
@@ -165,10 +167,14 @@ Status MemcpyDeviceToDeviceCmd::Record(const RecordParams& params,
                                        se::CommandBuffer* command_buffer) {
   VLOG(5) << "MemcpyDeviceToDeviceCmd: dst=" << dst_ << ", src=" << src_
           << ", num_bytes=" << num_bytes_;
-  se::DeviceMemoryBase dst =
-      params.buffer_allocations->GetDeviceAddress(dst_, command_buffer);
-  se::DeviceMemoryBase src =
-      params.buffer_allocations->GetDeviceAddress(src_, command_buffer);
+
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase dst,
+                      params.buffer_allocations->GetDeviceAddress(
+                          dst_, *params.command_buffer_allocations));
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase src,
+                      params.buffer_allocations->GetDeviceAddress(
+                          src_, *params.command_buffer_allocations));
+
   return command_buffer->MemcpyDeviceToDevice(&dst, src, num_bytes_);
 }
 
@@ -219,8 +225,14 @@ Status AllocateCmd::Record(const RecordParams& params,
   // Memory allocation address is returned on graph creation, and there is no
   // update operation
   VLOG(5) << "AllocationCmd: index=" << allocation_->index();
-  return command_buffer->Allocate(se::CommandBuffer::AllocIndexSize{
-      allocation_->index(), static_cast<uint64_t>(allocation_->size())});
+
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase buffer,
+                      command_buffer->Allocate(allocation_->size()));
+
+  TF_RETURN_IF_ERROR(params.command_buffer_allocations->AddAllocation(
+      allocation_->index(), buffer));
+
+  return OkStatus();
 }
 
 CommandBufferCmd::Slices AllocateCmd::slices() { return {}; }
@@ -255,12 +267,16 @@ Status GemmCmd::Record(const RecordParams& params,
 
   se::DeviceMemoryBase workspace(nullptr, 0);
 
-  se::DeviceMemoryBase lhs =
-      params.buffer_allocations->GetDeviceAddress(lhs_buffer_, command_buffer);
-  se::DeviceMemoryBase rhs =
-      params.buffer_allocations->GetDeviceAddress(rhs_buffer_, command_buffer);
-  se::DeviceMemoryBase out = params.buffer_allocations->GetDeviceAddress(
-      output_buffer_, command_buffer);
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase lhs,
+                      params.buffer_allocations->GetDeviceAddress(
+                          lhs_buffer_, *params.command_buffer_allocations));
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase rhs,
+                      params.buffer_allocations->GetDeviceAddress(
+                          rhs_buffer_, *params.command_buffer_allocations));
+  TF_ASSIGN_OR_RETURN(se::DeviceMemoryBase out,
+                      params.buffer_allocations->GetDeviceAddress(
+                          output_buffer_, *params.command_buffer_allocations));
+
   TF_ASSIGN_OR_RETURN(
       auto nested_buffer,
       se::CommandBuffer::Trace(params.executor, [&](se::Stream* stream) {

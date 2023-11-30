@@ -495,6 +495,19 @@ AutoShardingSolverResult CallORToolsSolver(
       LOG(ERROR) << write_status.message();
     }
   }
+  // Exports the solver request proto for debugging.
+  bool dump_solver_request = false;
+  if (dump_solver_request) {
+    uint64_t solver_request_fprint =
+        tsl::Fingerprint64(request.SerializeAsString());
+    auto write_status = file::SetBinaryProto(
+        // Modify this file path if needed.
+        absl::StrCat("/tmp/solver_request_", solver_request_fprint, ".proto"),
+        request, file::Defaults());
+    if (!write_status.ok()) {
+      LOG(ERROR) << write_status.message();
+    }
+  }
 #endif
   if (request.has_solver_timeout()) {
     solver->SetTimeLimit(
@@ -510,9 +523,35 @@ AutoShardingSolverResult CallORToolsSolver(
           << "Total instructions: " << request.num_nodes() << "\n"
           << "Memory budget: " << request.memory_budget() / (1024 * 1024 * 1024)
           << "GB\n"
-          << "Number of ILP constraints: " << solver->NumConstraints();
-  return SolveAndExtractSolution(request, s, e, overbudget_var, makespan_var,
-                                 *solver);
+          << "Number of ILP constraints: " << solver->NumConstraints() << "\n"
+          << "Module name: " << request.module_name();
+  auto result = SolveAndExtractSolution(request, s, e, overbudget_var,
+                                        makespan_var, *solver);
+  if (result.status.ok()) {
+    const AutoShardingEvaluation evaluation = Evaluate(request, result);
+    LOG(INFO) << "Total Communication Cost: "
+              << evaluation.total.communication_cost
+              << " (lower bound: " << evaluation.lower_bound.communication_cost
+              << ")";
+    LOG(INFO) << "Total Computation Cost: " << evaluation.total.computation_cost
+              << " (lower bound: " << evaluation.lower_bound.computation_cost
+              << ")";
+    LOG(INFO) << "Total Resharding Cost: " << evaluation.total.resharding_cost
+              << " (lower bound: " << evaluation.lower_bound.resharding_cost
+              << ")";
+    LOG(INFO) << "Total Overbudget Cost: " << evaluation.total.overbudget_cost
+              << " (lower bound: " << evaluation.lower_bound.overbudget_cost
+              << ")";
+    LOG(INFO) << "Total Makespan Cost: " << evaluation.total.makespan_cost
+              << " (lower bound: " << evaluation.lower_bound.makespan_cost
+              << ")";
+    LOG(INFO) << "Total Cost: " << evaluation.total.cost()
+              << " (lower bound: " << evaluation.lower_bound.cost() << ")";
+    LOG(INFO) << "Total Departures: " << evaluation.total_departures;
+    LOG(INFO) << "Total Makespan: " << evaluation.total_makespan;
+    LOG(INFO) << "Total Violations: " << evaluation.violation_codes.size();
+  }
+  return result;
 }
 
 AutoShardingSolverResult SolveAndExtractSolution(

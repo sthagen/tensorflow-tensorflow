@@ -156,127 +156,6 @@ diff --ruN a/stablehlo/stablehlo/CMakeLists.txt b/stablehlo/stablehlo/CMakeLists
  add_subdirectory(integrations)
  add_subdirectory(reference)
  add_subdirectory(tests)
-diff --ruN a/stablehlo/stablehlo/experimental/BUILD b/stablehlo/stablehlo/experimental/BUILD
---- stablehlo/stablehlo/experimental/BUILD
-+++ stablehlo/stablehlo/experimental/BUILD
-@@ -0,0 +1,117 @@
-+load("//third_party/llvm/llvm-project/mlir:tblgen.bzl", "gentbl_cc_library")
-+load("//tensorflow:tensorflow.google.bzl", "get_compatible_with_portable")
-+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
-+
-+package(
-+    default_applicable_licenses = ["//third_party/stablehlo:license"],  # copybara:comment
-+    default_visibility = ["//learning/brain/mlir:stablehlo_friends"],
-+    licenses = ["notice"],
-+)
-+
-+filegroup(
-+    name = "stablehlo_experimental_filegroup",
-+    srcs = glob(["**"]),
-+)
-+
-+cc_library(
-+    name = "experimental_base",
-+    srcs = [
-+        "dialect/Base.cpp",
-+    ],
-+    hdrs = [
-+        "dialect/Base.h",
-+    ],
-+    compatible_with = get_compatible_with_portable(),
-+    includes = ["../.."],
-+    deps = [
-+        "//third_party/llvm/llvm-project/llvm:Support",
-+        "//third_party/llvm/llvm-project/mlir:IR",
-+    ],
-+)
-+
-+cc_library(
-+    name = "experimental_stablehlo_ops",
-+    srcs = [
-+        "dialect/StablehloOps.cpp",
-+    ],
-+    hdrs = [
-+        "dialect/StablehloOps.h",
-+    ],
-+    compatible_with = get_compatible_with_portable(),
-+    includes = ["../.."],
-+    deps = [
-+        ":experimental_base",
-+        "//third_party/llvm/llvm-project/llvm:Support",
-+        "//third_party/llvm/llvm-project/mlir:FuncDialect",
-+        "//third_party/llvm/llvm-project/mlir:IR",
-+        "//third_party/llvm/llvm-project/mlir:Support",
-+        "//third_party/stablehlo:stablehlo_ops",
-+    ],
-+)
-+
-+gentbl_cc_library(
-+    name = "experimental_stablehlo_pass_inc_gen",
-+    compatible_with = get_compatible_with_portable(),
-+    tbl_outs = [
-+        (
-+            [
-+                "-gen-pass-decls",
-+            ],
-+            "transforms/Passes.h.inc",
-+        ),
-+    ],
-+    tblgen = "//third_party/llvm/llvm-project/mlir:mlir-tblgen",
-+    td_file = "transforms/Passes.td",
-+    deps = ["//third_party/llvm/llvm-project/mlir:PassBaseTdFiles"],
-+)
-+
-+cc_library(
-+    name = "experimental_stablehlo_passes",
-+    srcs = [
-+        "transforms/StablehloCanonicalizeDynamism.cpp",
-+        "transforms/StablehloRefineShapes.cpp",
-+    ],
-+    hdrs = [
-+        "transforms/Passes.h",
-+    ],
-+    compatible_with = get_compatible_with_portable(),
-+    includes = ["../.."],
-+    deps = [
-+        ":experimental_stablehlo_ops",
-+        ":experimental_stablehlo_pass_inc_gen",
-+        "//third_party/llvm/llvm-project/llvm:Support",
-+        "//third_party/llvm/llvm-project/mlir:FuncDialect",
-+        "//third_party/llvm/llvm-project/mlir:IR",
-+        "//third_party/llvm/llvm-project/mlir:InferTypeOpInterface",
-+        "//third_party/llvm/llvm-project/mlir:Pass",
-+        "//third_party/llvm/llvm-project/mlir:Support",
-+        "//third_party/llvm/llvm-project/mlir:TransformUtils",
-+        "//third_party/llvm/llvm-project/mlir:Transforms",
-+        "//third_party/stablehlo:base",
-+        "//third_party/stablehlo:chlo_ops",
-+        "//third_party/stablehlo:stablehlo_ops",
-+        "//third_party/stablehlo:stablehlo_ops_inc_gen",
-+        "//third_party/stablehlo:stablehlo_type_inference",
-+    ],
-+)
-+
-+cc_binary(
-+    name = "experimental-stablehlo-opt",
-+    srcs = [
-+        "tools/StablehloOptMain.cpp",
-+    ],
-+    compatible_with = get_compatible_with_portable(),
-+    includes = ["../.."],
-+    deps = [
-+        ":experimental_stablehlo_passes",
-+        "//third_party/llvm/llvm-project/mlir:AllExtensions",
-+        "//third_party/llvm/llvm-project/mlir:AllPassesAndDialects",
-+        "//third_party/llvm/llvm-project/mlir:MlirOptLib",
-+        "//third_party/llvm/llvm-project/mlir:TosaDialect",
-+        "//third_party/stablehlo:interpreter_ops",
-+        "//third_party/stablehlo:register",
-+        "//third_party/stablehlo:stablehlo_passes",
-+        "//third_party/stablehlo:test_utils",
-+        "//third_party/stablehlo:tosa_passes",
-+    ],
-+)
 diff --ruN a/stablehlo/stablehlo/experimental/BUILD.bazel b/stablehlo/stablehlo/experimental/BUILD.bazel
 --- stablehlo/stablehlo/experimental/BUILD.bazel
 +++ stablehlo/stablehlo/experimental/BUILD.bazel
@@ -1291,7 +1170,7 @@ diff --ruN a/stablehlo/stablehlo/experimental/dialect/StablehloOps.h b/stablehlo
 diff --ruN a/stablehlo/stablehlo/experimental/tests/BUILD.bazel b/stablehlo/stablehlo/experimental/tests/BUILD.bazel
 --- stablehlo/stablehlo/experimental/tests/BUILD.bazel
 +++ stablehlo/stablehlo/experimental/tests/BUILD.bazel
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,59 @@
 +# Copyright 2023 The StableHLO Authors. All Rights Reserved.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -1338,6 +1217,7 @@ diff --ruN a/stablehlo/stablehlo/experimental/tests/BUILD.bazel b/stablehlo/stab
 +            "lit.site.cfg.py",
 +            "//:stablehlo-opt",
 +            "//:stablehlo-translate",
++            "//stablehlo/experimental:experimental-stablehlo-opt",
 +            "@llvm-project//llvm:FileCheck",
 +            "@llvm-project//llvm:not",
 +        ] + glob(["%s.bc" % src]),
@@ -2509,7 +2389,7 @@ diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloCanonicalizeDy
 diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.cpp b/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.cpp
 --- stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.cpp
 +++ stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.cpp
-@@ -0,0 +1,1293 @@
+@@ -0,0 +1,1308 @@
 +/* Copyright 2022 The StableHLO Authors.
 +Licensed under the Apache License, Version 2.0 (the "License");
 +you may not use this file except in compliance with the License.
@@ -2815,6 +2695,20 @@ diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.c
 +                                PatternRewriter& rewriter) const override {
 +    return evalElementwise(rewriter, op,
 +                           [&](APSInt lhs, APSInt rhs) { return lhs * rhs; });
++  }
++};
++
++struct EvalOrOpPattern : public OpRewritePattern<OrOp> {
++  using OpRewritePattern::OpRewritePattern;
++  LogicalResult matchAndRewrite(OrOp op,
++                                PatternRewriter& rewriter) const override {
++    auto resultType = op.getType();
++    if (!resultType.getElementType().isInteger(1))
++      return rewriter.notifyMatchFailure(op, "expected boolean element type");
++
++    return evalElementwise(rewriter, op, [&](APSInt lhsInt, APSInt rhsInt) {
++      return getAPSInt(resultType.getElementType(), lhsInt != 0 || rhsInt != 0);
++    });
 +  }
 +};
 +
@@ -3764,6 +3658,7 @@ diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.c
 +    patterns.add<EvalMaxOpPattern>(&getContext());
 +    patterns.add<EvalMinOpPattern>(&getContext());
 +    patterns.add<EvalMulOpPattern>(&getContext());
++    patterns.add<EvalOrOpPattern>(&getContext());
 +    patterns.add<EvalRemOpPattern>(&getContext());
 +    patterns.add<EvalReshapeOpPattern>(&getContext());
 +    patterns.add<EvalSelectOpPattern>(&getContext());
@@ -3803,4 +3698,59 @@ diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.c
 +}  // namespace experimental
 +}  // namespace stablehlo
 +}  // namespace mlir
+diff --ruN a/stablehlo/stablehlo/tests/stablehlo_refine_shapes.mlir b/stablehlo/stablehlo/tests/stablehlo_refine_shapes.mlir
+--- stablehlo/stablehlo/tests/stablehlo_refine_shapes.mlir
++++ stablehlo/stablehlo/tests/stablehlo_refine_shapes.mlir
+@@ -340,6 +340,19 @@
+   %1 = stablehlo.constant dense<2> : tensor<i64>
+   %2 = stablehlo.multiply %0, %1 : tensor<i64>
+   func.return %2 : tensor<i64>
++}
++
++// -----
++
++// CHECK-LABEL: func @eval_or
++func.func @eval_or() -> tensor<i1> {
++  // CHECK-NOT: stablehlo.or
++  // CHECK: [[RESULT:%.*]] = stablehlo.constant dense<true> : tensor<i1>
++  // CHECK: return [[RESULT]]
++  %0 = stablehlo.constant dense<true> : tensor<i1>
++  %1 = stablehlo.constant dense<false> : tensor<i1>
++  %2 = stablehlo.or %0, %1 : tensor<i1>
++  func.return %2 : tensor<i1>
+ }
+ 
+ // -----
+diff --ruN a/stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp b/stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
+--- stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
++++ stablehlo/stablehlo/transforms/StablehloRefineShapes.cpp
+@@ -304,6 +304,20 @@
+   }
+ };
+ 
++struct EvalOrOpPattern : public OpRewritePattern<OrOp> {
++  using OpRewritePattern::OpRewritePattern;
++  LogicalResult matchAndRewrite(OrOp op,
++                                PatternRewriter& rewriter) const override {
++    auto resultType = op.getType();
++    if (!resultType.getElementType().isInteger(1))
++      return rewriter.notifyMatchFailure(op, "expected boolean element type");
++
++    return evalElementwise(rewriter, op, [&](APSInt lhsInt, APSInt rhsInt) {
++      return getAPSInt(resultType.getElementType(), lhsInt != 0 || rhsInt != 0);
++    });
++  }
++};
++
+ struct EvalRemOpPattern : public OpRewritePattern<RemOp> {
+   using OpRewritePattern::OpRewritePattern;
+   LogicalResult matchAndRewrite(RemOp op,
+@@ -1165,6 +1179,7 @@
+     patterns.add<EvalMaxOpPattern>(&getContext());
+     patterns.add<EvalMinOpPattern>(&getContext());
+     patterns.add<EvalMulOpPattern>(&getContext());
++    patterns.add<EvalOrOpPattern>(&getContext());
+     patterns.add<EvalRemOpPattern>(&getContext());
+     patterns.add<EvalReshapeOpPattern>(&getContext());
+     patterns.add<EvalSelectOpPattern>(&getContext());
 

@@ -25,10 +25,19 @@ limitations under the License.
 #include "xla/stream_executor/device_memory.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/lib/core/status_test_util.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/status_matchers.h"
 #include "tsl/platform/test.h"
 #include "tsl/platform/test_benchmark.h"
 
 namespace xla::ffi {
+
+namespace {
+
+using ::testing::HasSubstr;
+using ::tsl::testing::StatusIs;
+
+}  // namespace
 
 TEST(FfiTest, DataTypeEnumValue) {
   // Verify that xla::PrimitiveType and xla::ffi::DataType use the same
@@ -62,16 +71,62 @@ TEST(FfiTest, BufferArgument) {
   builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
-  auto fn = [&](BufferBase<DataType::F32> buffer) {
-    EXPECT_EQ(buffer.data, storage.data());
-    EXPECT_EQ(buffer.dimensions.size(), 2);
-    return Error::Success();
-  };
-
-  auto handler = Ffi::Bind().Arg<BufferBase<DataType::F32>>().To(fn);
+  auto handler =
+      Ffi::Bind().Arg<BufferBase<DataType::F32, 2>>().To([&](auto buffer) {
+        EXPECT_EQ(buffer.data, storage.data());
+        EXPECT_EQ(buffer.dimensions.size(), 2);
+        return Error::Success();
+      });
   auto status = Call(*handler, call_frame);
 
   TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, MissingBufferArgument) {
+  CallFrameBuilder builder;
+  auto call_frame = builder.Build();
+
+  auto handler = Ffi::Bind().Arg<BufferBase<DataType::F32, 1>>().To(
+      [](auto) { return Error::Success(); });
+  auto status = Call(*handler, call_frame);
+
+  EXPECT_THAT(status, StatusIs(tsl::error::INVALID_ARGUMENT,
+                               HasSubstr("Wrong number of arguments")));
+}
+
+TEST(FfiTest, WrongRankBufferArgument) {
+  std::vector<std::int32_t> storage(4, 0.0);
+  se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(std::int32_t));
+
+  CallFrameBuilder builder;
+  builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
+  auto call_frame = builder.Build();
+
+  auto handler = Ffi::Bind().Arg<BufferBase<DataType::F32, 1>>().To(
+      [](auto) { return Error::Success(); });
+  auto status = Call(*handler, call_frame);
+
+  EXPECT_THAT(status,
+              StatusIs(tsl::error::INVALID_ARGUMENT,
+                       HasSubstr("Wrong buffer rank: expected 1 but got 2")));
+}
+
+TEST(FfiTest, WrongTypeBufferArgument) {
+  std::vector<std::int32_t> storage(4, 0.0);
+  se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(std::int32_t));
+
+  CallFrameBuilder builder;
+  builder.AddBufferArg(memory, PrimitiveType::S32, /*dims=*/{2, 2});
+  auto call_frame = builder.Build();
+
+  auto handler = Ffi::Bind().Arg<BufferBase<DataType::F32, 2>>().To(
+      [](auto) { return Error::Success(); });
+  auto status = Call(*handler, call_frame);
+
+  EXPECT_THAT(
+      status,
+      StatusIs(tsl::error::INVALID_ARGUMENT,
+               HasSubstr("Wrong buffer dtype: expected F64 but got S64")));
 }
 
 //===----------------------------------------------------------------------===//
@@ -96,12 +151,11 @@ static CallFrameBuilder WithBufferArgs(size_t num_args, size_t rank = 4) {
 void BM_BufferArgX1(benchmark::State& state) {
   auto call_frame = WithBufferArgs(1).Build();
 
-  auto fn = [](BufferBase<DataType::F32> buffer) {
-    benchmark::DoNotOptimize(buffer);
-    return Error::Success();
-  };
-
-  auto handler = Ffi::Bind().Arg<BufferBase<DataType::F32>>().To(fn);
+  auto handler =
+      Ffi::Bind().Arg<BufferBase<DataType::F32, 4>>().To([](auto buffer) {
+        benchmark::DoNotOptimize(buffer);
+        return Error::Success();
+      });
   for (auto _ : state) {
     CHECK_OK(Call(*handler, call_frame));
   }
@@ -116,21 +170,18 @@ BENCHMARK(BM_BufferArgX1);
 void BM_BufferArgX4(benchmark::State& state) {
   auto call_frame = WithBufferArgs(4).Build();
 
-  auto fn = [](BufferBase<DataType::F32> b0, BufferBase<DataType::F32> b1,
-               BufferBase<DataType::F32> b2, BufferBase<DataType::F32> b3) {
-    benchmark::DoNotOptimize(b0);
-    benchmark::DoNotOptimize(b1);
-    benchmark::DoNotOptimize(b2);
-    benchmark::DoNotOptimize(b3);
-    return Error::Success();
-  };
-
   auto handler = Ffi::Bind()
-                     .Arg<BufferBase<DataType::F32>>()
-                     .Arg<BufferBase<DataType::F32>>()
-                     .Arg<BufferBase<DataType::F32>>()
-                     .Arg<BufferBase<DataType::F32>>()
-                     .To(fn);
+                     .Arg<BufferBase<DataType::F32, 4>>()
+                     .Arg<BufferBase<DataType::F32, 4>>()
+                     .Arg<BufferBase<DataType::F32, 4>>()
+                     .Arg<BufferBase<DataType::F32, 4>>()
+                     .To([](auto b0, auto b1, auto b2, auto b3) {
+                       benchmark::DoNotOptimize(b0);
+                       benchmark::DoNotOptimize(b1);
+                       benchmark::DoNotOptimize(b2);
+                       benchmark::DoNotOptimize(b3);
+                       return Error::Success();
+                     });
 
   for (auto _ : state) {
     CHECK_OK(Call(*handler, call_frame));
@@ -167,12 +218,10 @@ void BM_TupleOfI32Attrs(benchmark::State& state) {
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
-  auto fn = [](TupleOfI32 tuple) {
+  auto handler = Ffi::Bind().Attrs<TupleOfI32>().To([](auto tuple) {
     benchmark::DoNotOptimize(tuple);
     return Error::Success();
-  };
-
-  auto handler = Ffi::Bind().Attrs<TupleOfI32>().To(fn);
+  });
 
   for (auto _ : state) {
     CHECK_OK(Call(*handler, call_frame));

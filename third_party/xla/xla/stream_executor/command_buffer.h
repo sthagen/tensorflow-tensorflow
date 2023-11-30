@@ -55,10 +55,6 @@ class CommandBuffer {
  public:
   // Builder constructs nested command buffers owned by a parent command buffer.
   using Builder = std::function<tsl::Status(CommandBuffer*)>;
-  struct AllocIndexSize {
-    int64_t index;
-    uint64_t size;
-  };
 
   ~CommandBuffer();
   CommandBuffer(CommandBuffer&&);
@@ -158,14 +154,17 @@ class CommandBuffer {
                    std::vector<Builder> branches);
 
   // Adds a conditional operation that will execute a command buffer constructed
-  // by the `body_builder` exactly `num_iteration` times.
+  // by the `body_builder` exactly `num_iteration` times. This means the
+  // condition is known at compile time (`num_iteration` < `loop_counter`), and
+  // does not require a `cond_builder`.
   tsl::Status For(StreamExecutor* executor, int32_t num_iteration,
                   DeviceMemory<int32_t> loop_counter, Builder body_builder);
 
   // Adds a conditional operation that will execute a command buffer constructed
   // by the `cond_builder` that must update `pred` value, and then depending on
   // the value might execute command buffer constructed by `body_builder` and
-  // `cond_builder`. Will continue while `pred` value is `true`.
+  // `cond_builder`. Will continue while `pred` value (which is continously
+  // updated by `cond_builder`) is `true`.
   //
   // In pseudocode:
   //
@@ -179,13 +178,8 @@ class CommandBuffer {
 
   //--------------------------------------------------------------------------//
 
-  // Adds a device memory allocation command to the command buffer, allocated
-  // address is tracked by command buffer runtime.
-  tsl::Status Allocate(AllocIndexSize alloc);
-
-  // Get the device address for allocations previously allocated through
-  // Allocate command.
-  tsl::StatusOr<DeviceMemoryBase> GetAllocationAddress(int64_t index) const;
+  // Adds a device memory allocation command to the command buffer.
+  tsl::StatusOr<DeviceMemoryBase> Allocate(size_t bytes);
 
   // Finalizes command buffer and makes it executable. Once command buffer is
   // finalized no commands can be added to it.
