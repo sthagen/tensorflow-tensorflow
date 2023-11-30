@@ -63,6 +63,13 @@ class TileAnalysisTest : public HloTestBase {
     TF_ASSIGN_OR_RETURN(auto module, ParseAndReturnVerifiedModule(hlo_string));
     HloInstruction* root = module->entry_computation()->root_instruction();
 
+    for (auto* operand : root->operands()) {
+      TF_RET_CHECK(operand->opcode() == HloOpcode::kParameter ||
+                   operand->opcode() == HloOpcode::kConstant)
+          << "If there are multiple instructions, they need to be wrapped in a "
+             "fusion.";
+    }
+
     return ComputeInstructionIndexing(root, operand_id, &mlir_context_);
   }
   mlir::MLIRContext mlir_context_;
@@ -175,6 +182,96 @@ TEST_F(TileAnalysisTest, FusionOpWithSingleBinaryOp) {
                                       "(d0) -> (d0)", std::vector<int>{})))));
 }
 
+TEST_F(TileAnalysisTest, FusionOpWithDot) {
+  TF_ASSERT_OK_AND_ASSIGN(auto input_indexing,
+                          GetIndexingMapsForEntryComputation(R"(
+    f {
+      p0 = s8[3,12288,6,128]{3,2,1,0} parameter(0)
+      bitcast1 = s8[3,6,128,12288]{2,1,3,0} bitcast(p0)
+      copy1 = s8[3,6,128,12288]{3,2,1,0} copy(bitcast1)
+      bitcast2 = s8[2304,12288]{1,0} bitcast(copy1)
+      convert1 = bf16[2304,12288]{1,0} convert(bitcast2)
+      bitcast3 = bf16[2304,16,768]{2,1,0} bitcast(convert1)
+      p3 = bf16[16,12288]{1,0} parameter(3)
+      convert2 = f32[16,12288]{1,0} convert(p3)
+      p4 = bf16[16,12288]{1,0} parameter(4)
+      convert3 = f32[16,12288]{1,0} convert(p4)
+      add1 = f32[16,12288]{1,0} add(convert2, convert3)
+      p2 = bf16[16]{0} parameter(2)
+      convert15 = f32[16]{0} convert(p2)
+      rsqrt = f32[16]{0} rsqrt(convert15)
+      convert4 = bf16[16]{0} convert(rsqrt)
+      bcast1 = bf16[16,12288]{1,0} broadcast(convert4), dimensions={0}
+      convert5 = f32[16,12288]{1,0} convert(bcast1)
+      multiply1 = f32[16,12288]{1,0} multiply(add1, convert5)
+      p1 = bf16[12288]{0} parameter(1)
+      convert6 = f32[12288]{0} convert(p1)
+      c1 = bf16[] constant(1)
+      bcast2 = bf16[12288]{0} broadcast(c1), dimensions={}
+      convert7 = f32[12288]{0} convert(bcast2)
+      add2 = f32[12288]{0} add(convert6, convert7)
+      convert8 = bf16[12288]{0} convert(add2)
+      bcast3 = bf16[16,12288]{1,0} broadcast(convert8), dimensions={1}
+      convert9 = f32[16,12288]{1,0} convert(bcast3)
+      multiply2 = f32[16,12288]{1,0} multiply(multiply1, convert9)
+      convert10 = bf16[16,12288]{1,0} convert(multiply2)
+      bcast4 = bf16[16,16,768]{2,1,0} bitcast(convert10)
+      dot = bf16[16,2304,16]{2,1,0} dot(bitcast3, bcast4),
+        lhs_batch_dims={1}, lhs_contracting_dims={2},
+        rhs_batch_dims={1}, rhs_contracting_dims={2}
+      bcast5 = bf16[16,3,6,128,16]{4,3,2,1,0} bitcast(dot)
+      copy2 = bf16[16,3,6,128,16]{3,2,4,1,0} copy(bcast5)
+      convert13 = f32[16,3,6,128,16]{3,2,4,1,0} convert(copy2)
+      p5 = bf16[3,6,128]{2,1,0} parameter(5)
+      bcast6 = bf16[3,6,128,16]{2,1,3,0} broadcast(p5), dimensions={0,1,2}
+      convert11 = f32[3,6,128,16]{2,1,3,0} convert(bcast6)
+      bcast7 = f32[16,3,6,128,16]{3,2,4,1,0} broadcast(convert11),
+        dimensions={1,2,3,4}
+      multiply3 = f32[16,3,6,128,16]{3,2,4,1,0} multiply(convert13, bcast7)
+      convert12 = bf16[16,3,6,128,16]{3,2,4,1,0} convert(multiply3)
+      ROOT bcast8 = bf16[16,16,3,1,6,128]{5,4,1,3,2,0} bitcast(convert12)
+    }
+    ENTRY e {
+      p0 = s8[3,12288,6,128]{3,2,1,0} parameter(0)
+      p1 = bf16[12288]{0} parameter(1)
+      p2 = bf16[16]{0} parameter(2)
+      p3 = bf16[16,12288]{1,0} parameter(3)
+      p4 = bf16[16,12288]{1,0} parameter(4)
+      p5 = bf16[3,6,128]{2,1,0} parameter(5)
+      ROOT fusion = bf16[16,16,3,1,6,128]{5,4,1,3,2,0}
+        fusion(p0, p1, p2, p3, p4, p5), kind=kLoop, calls=f
+    }
+  )"));
+  EXPECT_TRUE(input_indexing.Simplify({16, 16, 3, 1, 6, 128}));
+
+  EXPECT_THAT(
+      input_indexing.operand_indexing_maps,
+      UnorderedElementsAre(
+          MatchOperandIndexing(0, ElementsAre(MatchIndexingMap(
+                                      "(d0, d1, d2, d3, d4, d5)[s0] -> "
+                                      "(d2 + d3, d0 * 768 + s0, d4, d5)",
+                                      std::vector<int>{768}))),
+          MatchOperandIndexing(
+              1, ElementsAre(MatchIndexingMap(
+                     "(d0, d1, d2, d3, d4, d5)[s0] -> (d0 * 768 + s0)",
+                     std::vector<int>{768}))),
+          MatchOperandIndexing(
+              2, ElementsAre(MatchIndexingMap(
+                     "(d0, d1, d2, d3, d4, d5) -> (d1)", std::vector<int>{}))),
+          MatchOperandIndexing(
+              3, ElementsAre(MatchIndexingMap(
+                     "(d0, d1, d2, d3, d4, d5)[s0] -> (d1, d0 * 768 + s0)",
+                     std::vector<int>{768}))),
+          MatchOperandIndexing(
+              4, ElementsAre(MatchIndexingMap(
+                     "(d0, d1, d2, d3, d4, d5)[s0] -> (d1, d0 * 768 + s0)",
+                     std::vector<int>{768}))),
+          MatchOperandIndexing(
+              5, ElementsAre(MatchIndexingMap(
+                     "(d0, d1, d2, d3, d4, d5) -> (d2 + d3, d4, d5)",
+                     std::vector<int>{})))));
+}
+
 TEST_F(TileAnalysisTest, FusionOpTensorPlusTransposedTensor) {
   TF_ASSERT_OK_AND_ASSIGN(auto input_indexing,
                           GetIndexingMapsForEntryComputation(R"(
@@ -202,7 +299,8 @@ TEST_F(TileAnalysisTest, FusionExponentialDuplication) {
   TF_ASSERT_OK_AND_ASSIGN(auto input_indexing,
                           GetIndexingMapsForEntryComputation(R"(
     HloModule test_module
-    ENTRY entry_computation {
+
+    fused_computation {
       p0 = f32[4] parameter(0)
       p1 = f32[4] parameter(1)
       add0 = f32[4] add(p0, p1)
@@ -212,14 +310,27 @@ TEST_F(TileAnalysisTest, FusionExponentialDuplication) {
       slice2.0 = f32[2] slice(add1), slice={[0:2]}
       slice2.1 = f32[2] slice(add1), slice={[1:3]}
       ROOT add2 = f32[2] add(slice2.0, slice2.1)
-  })"));
+    }
+
+    ENTRY entry_computation {
+      p0 = f32[4] parameter(0)
+      p1 = f32[4] parameter(1)
+      ROOT fusion = f32[2] fusion(p0, p1), kind=kLoop, calls=fused_computation
+    })"));
   EXPECT_THAT(
       input_indexing.operand_indexing_maps,
-      ElementsAre(
-          MatchOperandIndexing(0, ElementsAre(MatchIndexingMap(
-                                      "(d0) -> (d0)", std::vector<int>{}))),
-          MatchOperandIndexing(1, ElementsAre(MatchIndexingMap(
-                                      "(d0) -> (d0)", std::vector<int>{})))));
+      UnorderedElementsAre(
+          MatchOperandIndexing(
+              0, UnorderedElementsAre(
+                     MatchIndexingMap("(d0) -> (d0)", std::vector<int>{}),
+                     MatchIndexingMap("(d0) -> (d0 + 1)", std::vector<int>{}),
+                     MatchIndexingMap("(d0) -> (d0 + 2)", std::vector<int>{}))),
+          MatchOperandIndexing(
+              1,
+              UnorderedElementsAre(
+                  MatchIndexingMap("(d0) -> (d0)", std::vector<int>{}),
+                  MatchIndexingMap("(d0) -> (d0 + 1)", std::vector<int>{}),
+                  MatchIndexingMap("(d0) -> (d0 + 2)", std::vector<int>{})))));
 }
 
 TEST_F(TileAnalysisTest, FusionOpWithReduceOfReduce) {
@@ -617,15 +728,38 @@ TEST_F(TileAnalysisTest, ReverseOp) {
     HloModule m
     ENTRY e {
       p0 = f32[1, 17, 9, 9] parameter(0)
-     ROOT reverse = f32[1, 17, 9, 9] reverse(p0), dimensions={1, 2}
+      ROOT reverse = f32[1, 17, 9, 9] reverse(p0), dimensions={1, 2}
     }
   )"));
-  // TODO(b/313840171): Support simplifying this.
+  EXPECT_FALSE(input_indexing.Simplify({1, 17, 9, 9}));
   EXPECT_THAT(input_indexing.operand_indexing_maps,
               ElementsAre(MatchOperandIndexing(
                   0, ElementsAre(MatchIndexingMap(
-                         "(d0, d1, d2, d3) -> (d0, -d1 + 17, -d2 + 9, d3)",
+                         "(d0, d1, d2, d3) -> (d0, -d1 + 16, -d2 + 8, d3)",
                          std::vector<int>{})))));
+}
+
+TEST_F(TileAnalysisTest, ReverseReshape) {
+  TF_ASSERT_OK_AND_ASSIGN(auto input_indexing,
+                          GetIndexingMapsForEntryComputation(R"(
+    HloModule m
+    fused_computation {
+      p0 = f32[10, 11] parameter(0)
+      reverse.0 = f32[10, 11] reverse(p0), dimensions={0, 1}
+      reshape.0 = f32[110] reshape(reverse.0)
+      reverse.1 = f32[110] reverse(reshape.0), dimensions={0}
+      ROOT reshape.1 = f32[10, 11] reshape(reverse.1)
+    }
+    ENTRY e {
+      p0 = f32[10, 11] parameter(0)
+      ROOT fusion = f32[10, 11] fusion(p0), kind=kLoop, calls=fused_computation
+    }
+  )"));
+  EXPECT_TRUE(input_indexing.Simplify({10, 11}));
+  EXPECT_THAT(input_indexing.operand_indexing_maps,
+              ElementsAre(MatchOperandIndexing(
+                  0, ElementsAre(MatchIndexingMap("(d0, d1) -> (d0, d1)",
+                                                  std::vector<int>{})))));
 }
 
 TEST_F(TileAnalysisTest, SliceOp) {
