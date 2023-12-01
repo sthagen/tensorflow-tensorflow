@@ -314,7 +314,7 @@ Status EinsumDepthAnalysis::HandleGetTupleElement(
         if (operand_depth.IsLeaf(shape_index)) {
           ShapeIndex output_index = shape_index;
           output_index.pop_front();
-          *depth_ptr = std::max(*depth_ptr, depth_tree.element(output_index));
+          *depth_ptr = MergeDepth(*depth_ptr, depth_tree.element(output_index));
         }
       });
   return OkStatus();
@@ -1370,6 +1370,15 @@ Status HloValueSemanticsPropagation::HandleDomain(HloInstruction* domain) {
   const ShapeTree<const HloValueSemantics*>& operand_semantics =
       analysis_->GetInstructionSemantics(domain_operand);
   analysis_->DeepCopyHloValueSemantics(domain, operand_semantics);
+  return OkStatus();
+}
+
+Status HloValueSemanticsPropagation::HandleOptimizationBarrier(
+    HloInstruction* opt_barrier) {
+  HloInstruction* opt_barrier_operand = opt_barrier->mutable_operand(0);
+  const ShapeTree<const HloValueSemantics*>& operand_semantics =
+      analysis_->GetInstructionSemantics(opt_barrier_operand);
+  analysis_->DeepCopyHloValueSemantics(opt_barrier, operand_semantics);
   return OkStatus();
 }
 
