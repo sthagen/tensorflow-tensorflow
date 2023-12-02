@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,19 +12,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "absl/status/status.h"
-#include "tsl/platform/default/dso_loader.h"
-#include "tsl/platform/logging.h"
 
-namespace tsl {
-namespace internal {
-namespace DsoLoader {
+#include "xla/service/gpu/kernels/cutlass_gemm_kernels.cu.h"
 
-// Skip check when GPU libraries are statically linked.
-absl::Status MaybeTryDlopenGPULibraries() {
-  LOG(INFO) << "GPU libraries are statically linked, skip dlopen check.";
-  return absl::OkStatus();
-}
-}  // namespace DsoLoader
-}  // namespace internal
-}  // namespace tsl
+namespace xla::gpu::kernel::gemm_universal {
+
+template void* GetKernelSymbol<CutlassGemmKernels::BF16xBF16toBF16>();
+
+}  // namespace xla::gpu::kernel::gemm_universal
