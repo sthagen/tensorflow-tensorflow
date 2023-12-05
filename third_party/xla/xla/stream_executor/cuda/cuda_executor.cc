@@ -469,8 +469,7 @@ tsl::Status GpuExecutor::Launch(Stream* stream, const ThreadDim& thread_dims,
           "Kernel is missing a custom arguments packing function for device "
           "memory arguments array");
 
-    KernelLaunchContext ctx(&kernel, block_dims, thread_dims);
-    TF_ASSIGN_OR_RETURN(auto packed, pack(ctx, *device_mem));
+    TF_ASSIGN_OR_RETURN(auto packed, pack(kernel, *device_mem));
     return launch(*packed);
   }
 
@@ -571,12 +570,6 @@ int GpuExecutor::CompareOccupancy(int* initial_blocks,
 DeviceMemoryBase GpuExecutor::Allocate(uint64_t size, int64_t memory_space) {
   CHECK_EQ(memory_space, 0);
   return DeviceMemoryBase(GpuDriver::DeviceAllocate(context_, size), size);
-}
-
-void* GpuExecutor::GetSubBuffer(DeviceMemoryBase* mem, uint64_t offset_bytes,
-                                uint64_t size_bytes) {
-  // offset and size are in bytes, so char* works as the pointer type.
-  return reinterpret_cast<char*>(mem->opaque()) + offset_bytes;
 }
 
 void GpuExecutor::Deallocate(DeviceMemoryBase* mem) {

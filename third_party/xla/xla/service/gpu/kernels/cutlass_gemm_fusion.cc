@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -34,6 +35,7 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/status.h"
 #include "xla/statusor.h"
+#include "xla/stream_executor/device_description.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -93,16 +95,19 @@ static Status MatchRowMajorGemm(HloDotInstruction* dot) {
 
 // Return OK if dot instruction is a simple gemm with all operands and result
 // having the same data type.
-static Status MatchSimpleGemm(HloDotInstruction* dot, PrimitiveType dtype) {
+static Status MatchSimpleGemm(HloDotInstruction* dot,
+                              absl::Span<const PrimitiveType> support_dtypes) {
   TF_RETURN_IF_ERROR(MatchRowMajorGemm(dot));
 
-  if (dot->operand(0)->shape().element_type() != dtype ||
-      dot->operand(1)->shape().element_type() != dtype ||
-      dot->shape().element_type() != dtype) {
-    return absl::InternalError("operands and result must have the same type");
+  for (PrimitiveType dtype : support_dtypes) {
+    if (dot->operand(0)->shape().element_type() == dtype &&
+        dot->operand(1)->shape().element_type() == dtype &&
+        dot->shape().element_type() == dtype) {
+      return OkStatus();
+    }
   }
 
-  return OkStatus();
+  return absl::InternalError("unsupported operands type");
 }
 
 // Returns matched GEMM with one of the operands upcasted to the accumulator
@@ -148,11 +153,11 @@ static StatusOr<GemmWithDynamicSlice> MatchGemmWithDynamicUpdateSlice(
 //===----------------------------------------------------------------------===//
 
 std::optional<CustomFusionPattern::Match> CutlassGemmPattern::TryMatch(
-    HloInstruction* instr) const {
+    const se::DeviceDescription& device, HloInstruction* instr) const {
   auto* dot = DynCast<HloDotInstruction>(instr);
   if (!dot) return std::nullopt;
 
-  auto matched = MatchSimpleGemm(dot, PrimitiveType::F32);
+  auto matched = MatchSimpleGemm(dot, {PrimitiveType::F32});
   if (!matched.ok()) return std::nullopt;
 
   CustomFusionConfig config;
@@ -162,7 +167,7 @@ std::optional<CustomFusionPattern::Match> CutlassGemmPattern::TryMatch(
 
 std::optional<CustomFusionPattern::Match>
 CutlassGemmWithDynamicUpdateSlicePattern::TryMatch(
-    HloInstruction* instr) const {
+    const se::DeviceDescription& device, HloInstruction* instr) const {
   auto* update_slice = DynCast<HloDynamicUpdateSliceInstruction>(instr);
   if (!update_slice) return std::nullopt;
 
@@ -172,11 +177,26 @@ CutlassGemmWithDynamicUpdateSlicePattern::TryMatch(
   CustomFusionConfig config;
   config.set_name("cutlass_gemm_with_dynamic_update_slice");
 
-  return Match{config, matched->Instrs()};
+  Match match(config, matched->Instrs());
+
+  // Add an optional replacement for intermediate dot instruction as a
+  // dynamic-slice from the fusion result.
+  match.AddReplacement(matched->dot, [=](HloFusionInstruction* fusion) {
+    HloComputation* parent = fusion->parent();
+    auto* dus = Cast<HloDynamicUpdateSliceInstruction>(matched->update_slice);
+    auto* slice = parent->AddInstruction(HloInstruction::CreateDynamicSlice(
+        matched->bitcast->shape(), fusion, dus->index_operands(),
+        matched->bitcast->shape().dimensions()));
+    return parent->AddInstruction(
+        HloInstruction::CreateBitcast(matched->dot->shape(), slice));
+  });
+
+  return match;
 }
 
 std::optional<CustomFusionPattern::Match>
-CutlassGemmWithUpcastPattern::TryMatch(HloInstruction* instr) const {
+CutlassGemmWithUpcastPattern::TryMatch(const se::DeviceDescription& device,
+                                       HloInstruction* instr) const {
   auto* dot = DynCast<HloDotInstruction>(instr);
   if (!dot) return std::nullopt;
 
@@ -200,6 +220,7 @@ CutlassGemmWithUpcastPattern::TryMatch(HloInstruction* instr) const {
 class CutlassGemmFusion : public CustomFusion {
  public:
   StatusOr<std::vector<CustomKernel>> LoadKernels(
+      const se::DeviceDescription& device,
       const HloComputation* computation) const final {
     auto* dot = DynCast<HloDotInstruction>(computation->root_instruction());
     if (dot == nullptr) {
@@ -207,7 +228,7 @@ class CutlassGemmFusion : public CustomFusion {
           "cutlass_gemm requires ROOT operation to be a dot");
     }
 
-    TF_RETURN_IF_ERROR(MatchSimpleGemm(dot, PrimitiveType::F32));
+    TF_RETURN_IF_ERROR(MatchSimpleGemm(dot, {PrimitiveType::F32}));
 
     auto dtype = dot->shape().element_type();
 
@@ -229,7 +250,7 @@ class CutlassGemmFusion : public CustomFusion {
     TF_ASSIGN_OR_RETURN(
         auto kernel,
         kernel::gemm_universal::GetCutlassGemmKernel(
-            "cutlass_gemm", dtype, m, n, k, indices, /*slices=*/{}));
+            "cutlass_gemm", dtype, m, n, k, indices, /*slices=*/{}, device));
     return std::vector<CustomKernel>{std::move(kernel)};
   }
 };
@@ -237,6 +258,7 @@ class CutlassGemmFusion : public CustomFusion {
 class CutlassGemmWithUpcastFusion : public CustomFusion {
  public:
   StatusOr<std::vector<CustomKernel>> LoadKernels(
+      const se::DeviceDescription& device,
       const HloComputation* computation) const final {
     auto* dot = DynCast<HloDotInstruction>(computation->root_instruction());
     if (dot == nullptr) {
@@ -264,6 +286,7 @@ class CutlassGemmWithUpcastFusion : public CustomFusion {
 class CutlassGemmWithDynamicUpdateSliceFusion : public CustomFusion {
  public:
   StatusOr<std::vector<CustomKernel>> LoadKernels(
+      const se::DeviceDescription& device,
       const HloComputation* computation) const final {
     auto* dus = DynCast<HloDynamicUpdateSliceInstruction>(
         computation->root_instruction());
@@ -274,8 +297,9 @@ class CutlassGemmWithDynamicUpdateSliceFusion : public CustomFusion {
     }
 
     TF_ASSIGN_OR_RETURN(auto matched, MatchGemmWithDynamicUpdateSlice(dus));
-    TF_RETURN_IF_ERROR(MatchSimpleGemm(Cast<HloDotInstruction>(matched.dot),
-                                       PrimitiveType::F32));
+    TF_RETURN_IF_ERROR(
+        MatchSimpleGemm(Cast<HloDotInstruction>(matched.dot),
+                        {PrimitiveType::F32, PrimitiveType::BF16}));
 
     auto dtype = matched.dot->shape().element_type();
 
@@ -305,7 +329,7 @@ class CutlassGemmWithDynamicUpdateSliceFusion : public CustomFusion {
     TF_ASSIGN_OR_RETURN(
         auto kernel, kernel::gemm_universal::GetCutlassGemmKernel(
                          "cutlass_gemm_with_dynamic_update_slice", dtype, m, n,
-                         k, args_indices, slices));
+                         k, args_indices, slices, device));
     return std::vector<CustomKernel>{std::move(kernel)};
   }
 };

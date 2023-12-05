@@ -24,6 +24,7 @@ cc_library(
         "//xla:status",
         "//xla:statusor",
         "//xla/hlo/ir:hlo",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
@@ -41,9 +42,15 @@ cc_library(
     hdrs = ["custom_fusion_pattern.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:backend_configs_cc",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -85,12 +92,14 @@ cc_library(
 #         ":cutlass_gemm",
 #         ":cutlass_gemm_custom_kernel",
 #         "@com_google_absl//absl/status",
+#         "@com_google_absl//absl/types:span",
 #         "//xla:shape_util",
 #         "//xla:status",
 #         "//xla:statusor",
 #         "//xla:xla_data_proto_cc",
 #         "//xla/hlo/ir:hlo",
 #         "//xla/service:pattern_matcher",
+#         "//xla/stream_executor:device_description",
 #         "@local_tsl//tsl/platform:errors",
 #         "@local_tsl//tsl/platform:logging",
 #         "@local_tsl//tsl/platform:statusor",
@@ -113,6 +122,7 @@ cc_library(
 #         "//xla:error_spec",
 #         "//xla:literal_util",
 #         "//xla/service/gpu:custom_fusion_rewriter",
+#         "//xla/service/gpu:gpu_device_info_for_tests",
 #         "//xla/tests:hlo_test_base",
 #         "@local_tsl//tsl/platform:test",
 #         "@local_tsl//tsl/platform:test_main",
@@ -146,6 +156,25 @@ cc_library(
 # xla_test(
 #     name = "cutlass_gemm_custom_kernel_test",
 #     srcs = if_cuda_is_configured(["cutlass_gemm_custom_kernel_test.cc"]),
+#     backends = ["gpu"],
+#     deps = [
+#         ":cutlass_gemm_custom_kernel",
+#         "//xla:types",
+#         "//xla:xla_data_proto_cc",
+#         "//xla/stream_executor",
+#         "//xla/stream_executor:multi_platform_manager",
+#         "//xla/stream_executor:platform",
+#         "//xla/stream_executor/cuda:cuda_platform",
+#         "@local_tsl//tsl/lib/core:status_test_util",
+#         "@local_tsl//tsl/platform:status",
+#         "@local_tsl//tsl/platform:test",
+#         "@local_tsl//tsl/platform:test_main",
+#     ],
+# )
+#
+# xla_test(
+#     name = "cutlass_gemm_custom_kernel_benchmarks",
+#     srcs = if_cuda_is_configured(["cutlass_gemm_custom_kernel_benchmarks.cc"]),
 #     backends = ["gpu"],
 #     deps = [
 #         ":cutlass_gemm_custom_kernel",

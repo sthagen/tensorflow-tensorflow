@@ -140,7 +140,8 @@ int32_t *SlicePtr(const se::KernelArgsDeviceMemoryArray *args, int64_t index) {
 template <typename Gemm>
 KernelArgsPacking ArgsPacking(cutlass::gemm::GemmCoord problem_size,
                               const ArgsIndices &indices,
-                              const DynamicSliceIndices &slices) {
+                              const DynamicSliceIndices &slices,
+                              int32_t device_sms) {
   using Accumulator = typename Gemm::ElementAccumulator;
   using Arguments = typename Gemm::Arguments;
   using Kernel = typename Gemm::GemmKernel;
@@ -150,10 +151,8 @@ KernelArgsPacking ArgsPacking(cutlass::gemm::GemmCoord problem_size,
   static_assert(sizeof(Params) < 512,
                 "Params struct size is unexpectedly large");
 
-  using PackedArgs = StatusOr<std::unique_ptr<se::KernelArgsPackedArrayBase>>;
-
-  return [=](const se::KernelLaunchContext &ctx,
-             const se::KernelArgs &args) -> PackedArgs {
+  return [=](const se::Kernel &kernel, const se::KernelArgs &args)
+             -> StatusOr<std::unique_ptr<se::KernelArgsPackedArrayBase>> {
     auto *mem_args = Cast<se::KernelArgsDeviceMemoryArray>(&args);
 
     cutlass::Status can_implement = Kernel::can_implement(problem_size);
@@ -190,15 +189,16 @@ KernelArgsPacking ArgsPacking(cutlass::gemm::GemmCoord problem_size,
                         lda, ldb, ldc, ldc           // strides
     );
 
-    // Query kernel API for SM occupancy for the launch dimensions.
-    TF_ASSIGN_OR_RETURN(int32_t sm_occupancy,
-                        ctx.kernel()->GetMaxOccupiedBlocksPerCore(
-                            ctx.threads(), args.number_of_shared_bytes()));
-
-    // TODO(ezhulenev): Get number of SMs from DeviceDescription.
+    // We keep max_occupancy in a static variable as currently for all practical
+    // purposes all stream executors in the process have identical underlying
+    // devices, and there is no need to repeatedly query this property.
+    static int32_t shared_mem_bytes = sizeof(typename Kernel::SharedStorage);
+    static int32_t sm_occupancy =
+        kernel.GetMaxOccupiedBlocksPerCore(ThreadDim<Gemm>(), shared_mem_bytes)
+            .value_or(1);
 
     // Convert CUTLASS operation arguments to a device kernel parameters.
-    Params params(arguments, /*device_sms=*/128, sm_occupancy);
+    Params params(arguments, device_sms, sm_occupancy);
 
     // Optionally set up dynamic slice parameters to allow kernel adjust buffer
     // pointers passed via `params`.
