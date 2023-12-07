@@ -237,10 +237,11 @@ tf_cc_test(
     ],
 )
 
+# Do not depend on this rule! Depend on the fine-grained sub-targets instead.
 py_strict_library(
     name = "for_generated_wrappers",
-    deprecation = "Depending on this target can cause build dependency cycles. Depend on the fine-grained sub-targets instead.",
     srcs_version = "PY3",
+    tags = ["avoid_dep"],
     visibility = ["//visibility:public"],
     deps = [
         ":byte_swap_tensor",
@@ -356,6 +357,16 @@ py_strict_library(
         "//tensorflow/python/saved_model:nested_structure_coder",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
+    ],
+)
+
+py_strict_library(
+    name = "constant_tensor_conversion",
+    srcs = ["constant_tensor_conversion.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":constant_op",
+        ":tensor_conversion_registry",
     ],
 )
 

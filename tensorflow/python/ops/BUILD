@@ -797,6 +797,7 @@ py_strict_library(
         "//tensorflow/python/framework:common_shapes",
         "//tensorflow/python/framework:composite_tensor",
         "//tensorflow/python/framework:constant_op",
+        "//tensorflow/python/framework:constant_tensor_conversion",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:indexed_slices",
@@ -3722,7 +3723,7 @@ cuda_py_strict_test(
     main = "nn_fused_batchnorm_test.py",
     python_version = "PY3",
     shard_count = 24,
-    tags = ["no_rocm"],
+    tags = [],
     deps = [
         ":array_ops",
         ":gradient_checker",
