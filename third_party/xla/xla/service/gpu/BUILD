@@ -132,6 +132,7 @@ xla_cc_test(
     tags = tf_cuda_tests_tags(),
     deps = [
         "//xla:debug_options_flags",
+        "//xla:shape_util",
         "//xla:status",
         "//xla:status_macros",
         "//xla:test_helpers",
@@ -139,6 +140,7 @@ xla_cc_test(
         "//xla/client/lib:constants",
         "//xla/ffi",
         "//xla/ffi:ffi_api",
+        "//xla/hlo/ir:hlo",
         "//xla/runtime:custom_call",
         "//xla/runtime:custom_call_registry",
         "//xla/runtime:executable",
@@ -4455,6 +4457,7 @@ test_suite(
         # copybara:uncomment # "//third_party/py/jax/experimental/jax2tf/tests:primitives_test_gpu",
         # copybara:uncomment "//third_party/py/jax/tests:pmap_test_gpu",
         # copybara:uncomment "//tensorflow/compiler/tests:fft_test_gpu",
+        "//xla/pjrt/gpu:se_gpu_pjrt_client_test",
         "//xla/python:xla_client_test_gpu",
         # copybara:uncomment "//xla/service/gpu/kernels:cutlass_gemm_fusion_test_gpu",
         "//xla/service/gpu/tests:add_preds.hlo.test",
