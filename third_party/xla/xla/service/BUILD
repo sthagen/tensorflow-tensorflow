@@ -4806,6 +4806,7 @@ cc_library(
     deps = [
         ":hlo_dataflow_analysis",
         ":hlo_pass",
+        "//xla:shape_util",
         "//xla/hlo/ir:hlo",
     ],
 )
@@ -6835,9 +6836,9 @@ cc_library(
     deps = [
         ":op_expander_pass",
         "//xla:comparison_util",
+        "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
-        "@com_google_absl//absl/base:core_headers",
     ],
 )
 
