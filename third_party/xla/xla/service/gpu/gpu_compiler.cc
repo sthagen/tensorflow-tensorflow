@@ -278,7 +278,7 @@ StatusOr<AutotuneConfig> GetAutotuneConfig(
   return deviceless_config;
 }
 
-se::GpuComputeCapability GetGpuVersion(se::StreamExecutor* stream_exec) {
+se::GpuComputeCapability GetGpuVersion(const se::StreamExecutor* stream_exec) {
   return stream_exec->GetDeviceDescription().gpu_compute_capability();
 }
 
@@ -328,7 +328,7 @@ class GpuAotCompilationResult : public AotCompilationResult {
   }
 
   StatusOr<std::unique_ptr<Executable>> LoadExecutable(
-      Compiler* compiler, se::StreamExecutor* executor) override;
+      Compiler* compiler, const se::StreamExecutor* executor) const override;
 
  private:
   XlaRuntimeGpuExecutableProto xla_runtime_gpu_executable_;
@@ -364,7 +364,7 @@ class GpuThunkAotCompilationResult : public AotCompilationResult {
   }
 
   StatusOr<std::unique_ptr<Executable>> LoadExecutable(
-      Compiler* compiler, se::StreamExecutor* stream_exec) override;
+      Compiler* compiler, const se::StreamExecutor* stream_exec) const override;
 
  private:
   CompilationResultProto proto_;
@@ -373,7 +373,7 @@ class GpuThunkAotCompilationResult : public AotCompilationResult {
 }  // end anonymous namespace
 
 StatusOr<std::unique_ptr<Executable>> GpuAotCompilationResult::LoadExecutable(
-    Compiler* compiler, se::StreamExecutor* executor) {
+    Compiler* compiler, const se::StreamExecutor* executor) const {
   XlaRuntimeExecutableProto xla_runtime_executable =
       xla_runtime_gpu_executable_.xla_runtime_executable();
   TF_ASSIGN_OR_RETURN(HloModuleConfig hlo_module_config,
@@ -399,12 +399,12 @@ StatusOr<std::unique_ptr<Executable>> GpuAotCompilationResult::LoadExecutable(
       xla_runtime_executable.mlir_module(), GetDebugOptionsFromFlags(),
       xla_runtime_gpu_executable_.gpu_asm_text(),
       xla_runtime_gpu_executable_.gpu_binary(), std::move(constants),
-      GetGpuVersion(executor), executor);
+      GetGpuVersion(executor));
 }
 
 StatusOr<std::unique_ptr<Executable>>
-GpuThunkAotCompilationResult::LoadExecutable(Compiler* compiler,
-                                             se::StreamExecutor* stream_exec) {
+GpuThunkAotCompilationResult::LoadExecutable(
+    Compiler* compiler, const se::StreamExecutor* stream_exec) const {
   // Recreate HloModule from proto.
   TF_ASSIGN_OR_RETURN(HloModuleConfig hlo_module_config,
                       HloModule::CreateModuleConfigFromProto(
@@ -1311,11 +1311,21 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // duplicate or NOPs, so remove them with algebraic simplification and CSE.
   pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(simplifier_options);
 
+  if (debug_options.xla_gpu_simplify_all_fp_conversions()) {
+    // This pass cleans up chains of compiler-generated converts
+    // (i.e. f32 -> bf16 -> f32) that have been produced by the algebraic
+    // simplifier by rearranging ops (i.e. by pushing broadcasts towards the
+    // root).
+    pipeline.AddPass<SimplifyFPConversions>(
+        SimplifyFPConversions::Scope::
+            kOnlySimplifyCompilerGeneratedConversions);
+  }
+
   // Since this CSE runs after collective schedule linearizer which inserts
   // control dependencies, ignore these control deps when replacing instructions
   // with equivalent ones here.
   pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true,
-                           /*only_fusion_computations*/ false,
+                           /*only_fusion_computations=*/false,
                            /*ignore_control_dependencies=*/true);
   TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
 
@@ -1445,7 +1455,7 @@ Status RunPostSchedulingCopyInsertion(
 }  // namespace
 
 StatusOr<std::unique_ptr<BufferAssignment>> GpuCompiler::AssignBuffers(
-    HloModule* hlo_module, se::StreamExecutor* stream_exec) {
+    HloModule* hlo_module, const se::StreamExecutor* stream_exec) {
   const se::DeviceDescription& gpu_device_info =
       stream_exec->GetDeviceDescription();
   const int64_t scheduler_mem_limit =
@@ -1713,12 +1723,6 @@ GpuCompiler::CompileToBackendResult(
       GetSchedulerMemoryLimit(module, gpu_device_info, pointer_size_);
   TF_RETURN_IF_ERROR(ScheduleGpuModule(module, pointer_size_,
                                        scheduler_mem_limit, gpu_device_info));
-
-  if (!IsXlaRuntimeExecutableEnabled(module->config())) {
-    HloPassPipeline pipeline("command-buffer-scheduling");
-    pipeline.AddPass<CommandBufferScheduling>();
-    TF_RETURN_IF_ERROR(pipeline.Run(module).status());
-  }
 
   TF_RETURN_IF_ERROR(RunPostSchedulingPipelines(module, scheduler_mem_limit));
 
@@ -2051,6 +2055,15 @@ Status GpuCompiler::RunPostSchedulingPipelines(
     // insert additional copies.
     TF_RETURN_IF_ERROR(pipeline.Run(module).status());
   }
+
+  // After we have a scheduled module and all operations wrapped into fusions we
+  // can decide how to wrap them into command buffers.
+  if (!IsXlaRuntimeExecutableEnabled(module->config())) {
+    HloPassPipeline pipeline("command-buffer-scheduling");
+    pipeline.AddPass<CommandBufferScheduling>();
+    TF_RETURN_IF_ERROR(pipeline.Run(module).status());
+  }
+
   return OkStatus();
 }
 
