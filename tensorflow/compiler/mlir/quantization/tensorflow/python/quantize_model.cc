@@ -47,18 +47,18 @@ limitations under the License.
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/cc/export.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/cc/io.h"
+#include "tensorflow/compiler/mlir/quantization/stablehlo/cc/precalibration.h"
+#include "tensorflow/compiler/mlir/quantization/stablehlo/quantization_config.pb.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/cc/convert_asset_args.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/cc/run_passes.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/exported_model.pb.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/passes/constants.h"
-#include "tensorflow/compiler/mlir/quantization/tensorflow/passes/passes.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/python/unfreeze_constants.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/quantization_options.pb.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/quantize_passes.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/quantize_preprocess.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_saved_model.h"
-#include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/export_graphdef.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_import_options.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_roundtrip_flags.h"
@@ -78,47 +78,16 @@ namespace {
 
 using ::mlir::quant::kTfFilePrefix;
 using ::mlir::quant::kTfQuantSaveOpName;
+using ::mlir::quant::stablehlo::PreCalibrationComponent;
 using ::mlir::tf_saved_model::kTfSavedModelIndexPathAttr;
 using ::mlir::tf_saved_model::kTfSavedModelInitializerInitType;
 using ::mlir::tf_saved_model::kTfSavedModelInitializerRestoreType;
+using ::stablehlo::quantization::AddExportPasses;
+using ::stablehlo::quantization::CreateExportedModel;
 using ::stablehlo::quantization::ExportOptions;
 using ::stablehlo::quantization::kExportStepSuffix;
+using ::stablehlo::quantization::QuantizationConfig;
 using ::stablehlo::quantization::io::GetLocalTmpFileName;
-
-// Add passes for transforming the MLIR module op so that it can be exported
-// back to GraphDef. Roughly, this consists of:
-//   1) Inserting the @main function, which will become the main Graph.
-//   2) Duplicating shape-determining constants.
-//   3) Converting TF dialect -> tf_executor dialect.
-//   4) Adding initializer function's ops into @main function for correct
-//      resource initialization when loading the exported model.
-//
-// Duplicating shape-determining constants is required to place constants that
-// affect the shape of a tensor to be placed in the TPU graph instead of in the
-// CPU graph, when the graph gets converted for TPU inference. This allows these
-// constants to be known at XLA compilation time.
-void AddExportPasses(const bool duplicate_shape_determining_constants,
-                     mlir::PassManager &pm) {
-  if (duplicate_shape_determining_constants) {
-    pm.addNestedPass<mlir::func::FuncOp>(
-        mlir::quant::CreateDuplicateShapeDeterminingConstantsPass());
-  }
-
-  pm.addPass(mlir::quant::CreateInsertMainFunctionPass());
-  pm.addPass(mlir::quant::CreateLiftHashTableOpsAsArgsPass());
-  pm.addNestedPass<mlir::func::FuncOp>(
-      mlir::CreateFunctionalToExecutorDialectConversionPass());
-  pm.addPass(mlir::CreateBreakUpIslandsPass());
-  pm.addPass(mlir::quant::CreateMergeInitializerFunctionOpsToMainPass());
-  pm.addPass(mlir::quant::CreateMergeSaveFunctionOpsToMainPass());
-  pm.addNestedPass<mlir::func::FuncOp>(
-      mlir::quant::CreateMergeDuplicateResourceOpsPass());
-
-  // Used to clean up the "tf._noinliner" attribute that is previously used to
-  // prevent certain functions from being inlined (see
-  // `MarkFunctionsNoinlinePass`). InlinerPass must not come after this pass.
-  pm.addPass(mlir::TF::CreateStripNoinlineAttributePass());
-}
 
 // Finds and returns the name of the node from a set of control output nodes.
 // The name should contain the string `contains`. Returns an empty string if no
@@ -135,32 +104,6 @@ std::string GetNodeName(const absl::flat_hash_set<Node *> &control_ret_nodes,
   }
   VLOG(1) << "Could not find node whose name conatins: " << contains;
   return "";
-}
-
-// Factory function for `ExportedModel`.
-[[nodiscard]] ExportedModel CreateExportedModel(
-    GraphDef &&graph_def, const absl::string_view init_node_name,
-    const absl::string_view checkpoint_dir,
-    const std::optional<SaverDef> saver_def,
-    const absl::flat_hash_map<std::string, std::string> &function_aliases,
-    const std::vector<AssetFileDef> &asset_file_defs) {
-  ExportedModel exported_model{};
-  *exported_model.mutable_graph_def() = graph_def;
-  exported_model.set_init_node_name(std::string(init_node_name));
-  exported_model.set_checkpoint_dir(std::string(checkpoint_dir));
-
-  exported_model.mutable_function_aliases()->insert(function_aliases.begin(),
-                                                    function_aliases.end());
-
-  for (const auto &asset_file_def : asset_file_defs) {
-    *exported_model.mutable_asset_file_defs()->Add() = asset_file_def;
-  }
-
-  if (saver_def != std::nullopt) {
-    *exported_model.mutable_saver_def() = *std::move(saver_def);
-  }
-
-  return exported_model;
 }
 
 // Returns the file prefix tensor name. An empty string is returned if no such a
@@ -327,7 +270,7 @@ absl::StatusOr<llvm::SmallVector<AssetFileDef>> RunExportPasses(
           /*name=*/export_opts.debug_name,
           /*add_passes_func=*/
           [dup_constants = export_opts.duplicate_shape_determining_constants](
-              mlir::PassManager &pm) { AddExportPasses(dup_constants, pm); },
+              mlir::PassManager &pm) { AddExportPasses(pm, dup_constants); },
           ctx, module_op);
       !pass_run_status.ok()) {
     return pass_run_status;
@@ -472,14 +415,10 @@ absl::StatusOr<ExportedModel> QuantizePtqModelPreCalibration(
 
   // Use StableHLO Quantizer option if opset is specified.
   if (run_tf_to_stablehlo) {
-    TF_RETURN_IF_ERROR(
-        RunPasses(/*name=*/kTfQuantPtqPreCalibrationStepStableHloName,
-                  /*add_passes_func=*/
-                  [&quantization_options](mlir::PassManager &pm) {
-                    AddQuantizePtqPreCalibrationStablehloPasses(
-                        pm, quantization_options.calibration_options());
-                  },
-                  context, *module_ref));
+    PreCalibrationComponent pre_calibration_component(
+        &context, quantization_options.calibration_options());
+    TF_ASSIGN_OR_RETURN(*module_ref, pre_calibration_component.Run(
+                                         *module_ref, QuantizationConfig()));
   } else {
     TF_RETURN_IF_ERROR(RunPasses(
         /*name=*/kTfQuantPtqPreCalibrationStepName, /*add_passes_func=*/

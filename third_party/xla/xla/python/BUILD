@@ -1119,7 +1119,6 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
-        "//third_party/gloo:transport_tcp",
         "@local_config_python//:python_headers",  # buildcleaner: keep
         "//xla:literal",
         "//xla:shape_util",
@@ -1136,8 +1135,6 @@ cc_library(
         "//xla/pjrt:status_casters",
         "//xla/pjrt/c:pjrt_c_api_hdrs",
         "//xla/pjrt/cpu:cpu_client",
-        "//xla/pjrt/cpu:gloo_collectives",
-        "//xla/pjrt/cpu:gloo_kv_store",
         "//xla/pjrt/distributed",
         "//xla/pjrt/distributed:client",
         "//xla/pjrt/distributed:protocol_proto_cc",
@@ -1152,6 +1149,15 @@ cc_library(
         "@local_tsl//tsl/python/lib/core:numpy",
         "@pybind11",
     ] + select({
+        # gloo transport only builds on linux
+        "@local_tsl//tsl:macos": [],
+        "@local_tsl//tsl:windows": [],
+        "//conditions:default": [
+            "//third_party/gloo:transport_tcp",
+            "//xla/pjrt/cpu:gloo_collectives",
+            "//xla/pjrt/cpu:gloo_kv_store",
+        ],
+    }) + select({
         ":gpu_enabled": [
             "//xla/pjrt/gpu:se_gpu_pjrt_client",
         ],

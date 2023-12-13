@@ -31,6 +31,7 @@ cc_library(
         "passes/lift_quantizable_spots_as_functions.cc",
         "passes/lift_quantizable_spots_as_functions_fusion.inc",
         "passes/lift_quantizable_spots_as_functions_simple.inc",
+        "passes/populate_shape.cc",
         "passes/post_quantize.cc",
         "passes/prepare_quantize.cc",
         "passes/quantize.cc",
@@ -64,9 +65,12 @@ cc_library(
         "//tensorflow/compiler/mlir/quantization/stablehlo/ops:stablehlo_op_quant_spec",
         "//tensorflow/compiler/mlir/quantization/tensorflow:passes",
         "//tensorflow/compiler/mlir/quantization/tensorflow:quantization_options_proto_cc",
+        "//tensorflow/compiler/mlir/quantization/tensorflow:tf_quant_ops",
         "//tensorflow/compiler/mlir/quantization/tensorflow/cc:run_passes",
         "//tensorflow/compiler/mlir/quantization/tensorflow/ops:tf_op_quant_spec",
         "//tensorflow/compiler/mlir/tensorflow",
+        "//tensorflow/compiler/mlir/tensorflow:dynamic_shape_utils",
+        "//tensorflow/compiler/mlir/tensorflow:tensorflow_attributes",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
         "//tensorflow/compiler/mlir/tensorflow:xla_call_module_attrs",
         "//tensorflow/core:protos_all_cc",
@@ -524,10 +528,15 @@ tf_proto_library(
 # )
 # copybara:uncomment_end
 
+# OSS only: This target is header-only. Link `quantization_config_proto_cc_impl` only to
+# `libtensorflow_framework.so` via `lib_internal_impl`. Do NOT link
+# `quantization_config_proto_cc_impl` directly unless the target does not link
+# `libtensorflow_framework.so`.
 tf_proto_library(
     name = "quantization_config_proto",
     srcs = ["quantization_config.proto"],
     cc_api_version = 2,
+    make_default_target_header_only = True,
     visibility = ["//visibility:public"],
 )
 

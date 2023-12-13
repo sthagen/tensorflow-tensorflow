@@ -35,6 +35,7 @@ tf_cc_test(
         "@com_google_absl//absl/time",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:tstring",
     ] + tf_grpc_cc_dependencies() + tf_protos_profiler_service(),
 )
@@ -272,6 +273,7 @@ cc_library(
     deps = [
         ":file_utils",
         ":path_utils",
+        "//tensorflow/core:framework",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
@@ -279,10 +281,14 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/distributed_runtime/rpc:grpc_util",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:status_to_from_proto",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:tstring",
+        "@local_tsl//tsl/protobuf:status_proto_cc",
     ],
 )
 
@@ -305,7 +311,9 @@ tf_cc_test(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:status_to_from_proto",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/protobuf:status_proto_cc",
     ],
 )
 

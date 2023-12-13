@@ -329,10 +329,12 @@ cc_library(
         "//xla/service/gpu/fusions:tiling_util",
         "//xla/service/gpu/kernels:custom_fusion",
         "//xla/service/gpu/kernels:custom_kernel",
+        "//xla/service/gpu/kernels:topk_custom_kernel",
         "//xla/service/gpu/runtime3:command_buffer_cmd",
         "//xla/service/gpu/runtime3:command_buffer_cmd_emitter",
         "//xla/service/gpu/runtime3:command_buffer_thunk",
         "//xla/service/gpu/runtime3:conditional_thunk",
+        "//xla/service/gpu/runtime3:convolution_thunk",
         "//xla/service/gpu/runtime3:custom_call_thunk",
         "//xla/service/gpu/runtime3:fft_thunk",
         "//xla/service/gpu/runtime3:for_thunk",
@@ -933,7 +935,6 @@ xla_cc_test(
 cc_library(
     name = "gpu_executable",
     srcs = [
-        "convolution_thunk.cc",
         "copy_thunk.cc",
         "fused_mha_thunk.cc",
         "gpu_executable.cc",
@@ -945,7 +946,6 @@ cc_library(
         "replica_id_thunk.cc",
     ],
     hdrs = [
-        "convolution_thunk.h",
         "copy_thunk.h",
         "fused_mha_thunk.h",
         "gemm_thunk.h",
@@ -1480,6 +1480,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":backend_configs_cc",
+        ":gpu_fusible",
         ":ir_emission_utils",
         ":triton_fusion_analysis",
         "//xla:status",
@@ -1492,9 +1493,7 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -3865,6 +3864,7 @@ cc_library(
     hdrs = ["gpu_fusible.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":backend_configs_cc",
         ":ir_emission_utils",
         ":reduction_utils",
         "//xla:shape_util",

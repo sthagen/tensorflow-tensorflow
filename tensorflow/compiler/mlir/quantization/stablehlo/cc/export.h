@@ -15,9 +15,17 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_MLIR_QUANTIZATION_STABLEHLO_CC_EXPORT_H_
 #define TENSORFLOW_COMPILER_MLIR_QUANTIZATION_STABLEHLO_CC_EXPORT_H_
 
+#include <optional>
 #include <string>
+#include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
+#include "mlir/Pass/PassManager.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/quantization/tensorflow/exported_model.pb.h"
+#include "tensorflow/core/framework/graph.pb.h"
+#include "tensorflow/core/protobuf/meta_graph.pb.h"
+#include "tensorflow/core/protobuf/saver.pb.h"
 
 namespace stablehlo::quantization {
 
@@ -42,6 +50,29 @@ struct ExportOptions {
   // debugging and does not modify the behavior of the export.
   std::string debug_name = "stablehlo_quant";
 };
+
+// Factory function for `ExportedModel`.
+[[nodiscard]] tensorflow::quantization::ExportedModel CreateExportedModel(
+    tensorflow::GraphDef&& graph_def, absl::string_view init_node_name,
+    absl::string_view checkpoint_dir,
+    std::optional<tensorflow::SaverDef> saver_def,
+    const absl::flat_hash_map<std::string, std::string>& function_aliases,
+    const std::vector<tensorflow::AssetFileDef>& asset_file_defs);
+
+// Adds passes for transforming the MLIR module op so that it can be exported
+// back to GraphDef. Roughly, this consists of:
+//   1) Inserting the @main function, which will become the main Graph.
+//   2) Duplicating shape-determining constants.
+//   3) Converting TF dialect -> tf_executor dialect.
+//   4) Adding initializer function's ops into @main function for correct
+//      resource initialization when loading the exported model.
+//
+// Duplicating shape-determining constants is required to place constants that
+// affect the shape of a tensor to be placed in the TPU graph instead of in the
+// CPU graph, when the graph gets converted for TPU inference. This allows these
+// constants to be known at XLA compilation time.
+void AddExportPasses(mlir::PassManager& pm,
+                     bool duplicate_shape_determining_constants);
 
 }  // namespace stablehlo::quantization
 
