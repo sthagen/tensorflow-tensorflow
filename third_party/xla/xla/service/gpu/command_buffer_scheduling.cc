@@ -34,6 +34,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_schedule.h"
+#include "xla/service/gpu/cublas_cudnn.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status.h"
@@ -58,24 +59,29 @@ static bool IsConstant(const HloInstruction* hlo) {
   return hlo->opcode() == HloOpcode::kConstant;
 }
 
+static bool IsParameter(const HloInstruction* hlo) {
+  return hlo->opcode() == HloOpcode::kParameter;
+}
+
 // Returns true if instruction is no-op at run time and doesn't have a
 // corresponding Thunk or Command (metadata only operation).
 static bool IsNoOp(const HloInstruction* hlo) {
-  return HloPredicateIsOp<HloOpcode::kParameter, HloOpcode::kBitcast,
-                          HloOpcode::kTuple, HloOpcode::kGetTupleElement>(hlo);
+  return HloPredicateIsOp<HloOpcode::kBitcast, HloOpcode::kTuple,
+                          HloOpcode::kGetTupleElement>(hlo);
 };
 
 // Returns true if HLO instruction has a corresponding command buffer command.
 static bool IsCommand(const HloInstruction* hlo,
                       const CommandBufferConfig& config);
 
-// Returns true if HLO computation can executed as a command buffer.
+// Returns true if HLO computation can be executed as a command buffer.
 static bool IsCommand(const HloComputation* computation,
                       const CommandBufferConfig& config) {
-  return absl::c_all_of(
-      computation->instructions(), [&](const HloInstruction* inst) {
-        return IsNoOp(inst) || IsConstant(inst) || IsCommand(inst, config);
-      });
+  return absl::c_all_of(computation->instructions(),
+                        [&](const HloInstruction* inst) {
+                          return IsNoOp(inst) || IsConstant(inst) ||
+                                 IsParameter(inst) || IsCommand(inst, config);
+                        });
 }
 
 // This is a template to define pattern matching functions for HLO instructions
@@ -115,6 +121,11 @@ bool IsCommand<HloOpcode::kWhile>(const HloInstruction* hlo,
          IsCommand(hlo->while_body(), config);
 }
 
+static bool IsCommand(const HloCustomCallInstruction* hlo,
+                      const CommandBufferConfig& config) {
+  return config.contains(DebugOptions::CUBLAS) && IsLegacyCublasMatmul(*hlo);
+}
+
 static bool IsCommand(const HloInstruction* hlo,
                       const CommandBufferConfig& config) {
   if (auto* fusion = DynCast<HloFusionInstruction>(hlo))
@@ -122,6 +133,9 @@ static bool IsCommand(const HloInstruction* hlo,
 
   if (auto* sort = DynCast<HloSortInstruction>(hlo))
     return IsCommand(sort, config);
+
+  if (auto* custom_call = DynCast<HloCustomCallInstruction>(hlo))
+    return IsCommand(custom_call, config);
 
   if (hlo->opcode() == HloOpcode::kWhile)
     return IsCommand<HloOpcode::kWhile>(hlo, config);
@@ -190,22 +204,24 @@ CommandBufferScheduling::CollectCommandBufferSequences(
   return start_new_sequence(&acc)->sequences;
 }
 
-// This function moves kParameter instructions in a computation to the beginning
-// of the computation. This simplifies the construction of command buffer
-// computations because we don't need to consider kParameter's as intermediates.
-void CommandBufferScheduling::MoveParametersToFront(
+// This function moves kParameter and kConstant instructions in a computation to
+// the beginning of the computation. This simplifies the construction of command
+// buffer computations because we don't need to deal with parameters and
+// constants that have users outside of a command buffer.
+void CommandBufferScheduling::MoveParametersAndConstantsToFront(
     HloComputation* computation) {
+  HloInstructionSequence new_sequence;
   HloSchedule& schedule = computation->parent()->schedule();
   HloInstructionSequence& sequence = schedule.GetOrCreateSequence(computation);
-  std::vector<HloInstruction*> new_sequence;
+
   for (HloInstruction* inst : sequence.instructions()) {
-    if (inst->opcode() == HloOpcode::kParameter) {
+    if (IsParameter(inst) || IsConstant(inst)) {
       new_sequence.push_back(inst);
     }
   }
 
   for (HloInstruction* inst : sequence.instructions()) {
-    if (inst->opcode() != HloOpcode::kParameter) {
+    if (!IsParameter(inst) && !IsConstant(inst)) {
       new_sequence.push_back(inst);
     }
   }
@@ -442,7 +458,7 @@ StatusOr<bool> CommandBufferScheduling::Run(
   // TODO(b/315874495): We should traverse all computations in topological order
   // to discover command buffers inside nested control flow computations.
   HloComputation* entry = module->entry_computation();
-  MoveParametersToFront(entry);
+  MoveParametersAndConstantsToFront(entry);
 
   std::vector<HloInstructionSequence> sequences =
       CollectCommandBufferSequences(module->schedule().sequence(entry), config);

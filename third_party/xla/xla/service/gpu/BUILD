@@ -280,6 +280,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":backend_configs_cc",
+        ":cublas_cudnn",
         ":gemm_thunk",
         ":gpu_asm_opts_util",
         ":gpu_constants",
@@ -2814,6 +2815,7 @@ cc_library(
     hdrs = ["command_buffer_scheduling.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":cublas_cudnn",
         "//xla:shape_util",
         "//xla:status",
         "//xla:statusor",
@@ -3772,6 +3774,7 @@ xla_cc_test(
         ":gpu_device_info_for_tests",
         ":hlo_fusion_analysis",
         ":hlo_traversal",
+        "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
         "@local_tsl//tsl/platform:statusor",
@@ -4490,8 +4493,7 @@ test_suite(
         "//xla/service/gpu/tests:gpu_infeed_test",
         "//xla/service/gpu/tests:gpu_input_fusible_slice_test",
         "//xla/service/gpu/tests:gpu_kernel_tiling_test",
-        # TODO(ezhulenev): Re-enable this test.
-        #"//xla/service/gpu/tests:gpu_ldg_test",
+        "//xla/service/gpu/tests:gpu_ldg_test",
         "//xla/service/gpu/tests:gpu_noalias_test",
         "//xla/service/gpu/tests:gpu_reduce_scatter_creator_test",
         "//xla/service/gpu/tests:gpu_spmd_e2e_compile_test",
@@ -5021,22 +5023,18 @@ cc_library(
 
 xla_cc_test(
     name = "loop_double_buffer_transformer_test",
-    srcs = if_gpu_is_configured(["loop_double_buffer_transformer_test.cc"]),
-    tags = tf_cuda_tests_tags(),
-    deps = if_gpu_is_configured([
-        ":gpu_compiler",
+    srcs = ["loop_double_buffer_transformer_test.cc"],
+    deps = [
         ":loop_double_buffer_transformer",
         "//xla:test",
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:tuple_simplifier",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
-    ]) + [
-        "//xla:test_helpers",
-        "//xla:xla_data_proto_cc",
-        "//xla:xla_proto_cc",
-        "//xla/service:hlo_dce",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
     ],
 )

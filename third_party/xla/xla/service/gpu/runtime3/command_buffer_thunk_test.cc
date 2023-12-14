@@ -35,6 +35,7 @@ limitations under the License.
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/cuda/cuda_test_kernels.h"
 #include "xla/stream_executor/device_memory.h"
+#include "xla/stream_executor/gpu/gpu_types.h"  // IWYU pragma: keep
 #include "xla/stream_executor/multi_platform_manager.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/stream_executor.h"
@@ -43,6 +44,8 @@ limitations under the License.
 #include "tsl/platform/test.h"
 
 namespace xla::gpu {
+
+using MemoryAccess = CommandBufferCmd::MemoryAccess;
 
 static se::StreamExecutor* CudaExecutor() {
   auto* platform = se::MultiPlatformManager::PlatformWithName("CUDA").value();
@@ -272,10 +275,12 @@ TEST(CommandBufferThunkTest, LaunchCmd) {
   BufferAllocation::Slice slice_b(&alloc_b, 0, byte_length);
 
   auto args = {slice_a, slice_a, slice_b};  // b = a + a
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
 
   // Prepare commands sequence for constructing command buffer.
   CommandBufferCmdSequence commands;
-  commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+  commands.Emplace<LaunchCmd>("add", args, args_access, LaunchDimensions(1, 4),
                               /*shmem_bytes=*/0);
 
   // Construct a thunk with command sequence.
@@ -363,14 +368,20 @@ TEST(CommandBufferThunkTest, GemmCmd) {
   se::DeviceMemory<float> out = executor->AllocateArray<float>(2 * 3);
   stream.ThenMemZero(&out, out_length);
 
+  se::DeviceMemory<float> workspace =
+      executor->AllocateArray<float>(1024 * 1024);
+  stream.ThenMemZero(&workspace, 1024 * 1024);
+
   // Prepare buffer allocations for recording command buffer.
   BufferAllocation alloc_lhs(/*index=*/0, lhs_length, /*color=*/0);
   BufferAllocation alloc_rhs(/*index=*/1, rhs_length, /*color=*/0);
   BufferAllocation alloc_out(/*index=*/2, out_length, /*color=*/0);
+  BufferAllocation alloc_workspace(/*index=*/3, 1024 * 1024, /*color=*/0);
 
   BufferAllocation::Slice slice_lhs(&alloc_lhs, 0, lhs_length);
   BufferAllocation::Slice slice_rhs(&alloc_rhs, 0, rhs_length);
   BufferAllocation::Slice slice_out(&alloc_out, 0, out_length);
+  BufferAllocation::Slice slice_workspace(&alloc_workspace, 0, 1024 * 1024);
 
   auto config = GemmConfig::For(
       ShapeUtil::MakeShape(PrimitiveType::F32, {2, 4}), {}, {1},
@@ -382,13 +393,14 @@ TEST(CommandBufferThunkTest, GemmCmd) {
   // Prepare commands sequence for constructing command buffer.
   CommandBufferCmdSequence commands;
   commands.Emplace<GemmCmd>(config.value(), slice_lhs, slice_rhs, slice_out,
-                            /*deterministic=*/true);
+                            slice_workspace, /*deterministic=*/true);
 
   // Construct a thunk with command sequence.
   CommandBufferThunk thunk(std::move(commands), Thunk::ThunkInfo(nullptr));
 
   ServiceExecutableRunOptions run_options;
-  BufferAllocations allocations({lhs, rhs, out}, 0, executor->GetAllocator());
+  BufferAllocations allocations({lhs, rhs, out, workspace}, 0,
+                                executor->GetAllocator());
   Thunk::ExecuteParams params(run_options, allocations, &stream, {});
 
   CommandBufferCmd::ExecutableSource source = {/*text=*/"", /*binary=*/{}};
@@ -409,8 +421,8 @@ TEST(CommandBufferThunkTest, GemmCmd) {
   stream.ThenMemZero(&updated_out, out_length);
 
   // Update buffer allocation to updated `out` buffer.
-  allocations =
-      BufferAllocations({lhs, rhs, updated_out}, 0, executor->GetAllocator());
+  allocations = BufferAllocations({lhs, rhs, updated_out, workspace}, 0,
+                                  executor->GetAllocator());
 
   // Thunk execution should automatically update underlying command buffer.
   TF_ASSERT_OK(thunk.ExecuteOnStream(params));
@@ -470,12 +482,15 @@ TEST(CommandBufferThunkTest, MultipleLaunchCmd) {
 
   auto args = {slice_a, slice_a, slice_b};    // b = a + a
   auto args_1 = {slice_c, slice_c, slice_d};  // d = c + c
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
 
   // Prepare commands sequence for constructing command buffer.
   CommandBufferCmdSequence commands;
-  commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+  commands.Emplace<LaunchCmd>("add", args, args_access, LaunchDimensions(1, 4),
                               /*shmem_bytes=*/0);
-  commands.Emplace<LaunchCmd>("add", args_1, LaunchDimensions(1, 4),
+  commands.Emplace<LaunchCmd>("add", args_1, args_access,
+                              LaunchDimensions(1, 4),
                               /*shmem_bytes=*/0);
 
   // Construct a thunk with command sequence.
@@ -578,10 +593,13 @@ TEST(CommandBufferThunkTest, IfCmd) {
   BufferAllocation::Slice slice_b(&alloc_b, 0, byte_length);
 
   auto args = {slice_a, slice_a, slice_b};  // b = a + a
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
 
   // Prepare commands sequence for `then` branch.
   CommandBufferCmdSequence then_commands;
-  then_commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+  then_commands.Emplace<LaunchCmd>("add", args, args_access,
+                                   LaunchDimensions(1, 4),
                                    /*shmem_bytes=*/0);
 
   // Prepare commands sequence for thunk.
@@ -663,15 +681,20 @@ TEST(CommandBufferThunkTest, IfElseCmd) {
   CommandBufferCmdSequence then_commands;
   CommandBufferCmdSequence else_commands;
 
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
+
   {  // Then: b = a + a
     auto args = {slice_a, slice_a, slice_b};
-    then_commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+    then_commands.Emplace<LaunchCmd>("add", args, args_access,
+                                     LaunchDimensions(1, 4),
                                      /*shmem_bytes=*/0);
   }
 
   {  // Else: b = b + b
     auto args = {slice_b, slice_b, slice_b};
-    else_commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+    else_commands.Emplace<LaunchCmd>("add", args, args_access,
+                                     LaunchDimensions(1, 4),
                                      /*shmem_bytes=*/0);
   }
 
@@ -746,15 +769,20 @@ TEST(CommandBufferThunkTest, CaseCmd) {
   // Prepare commands sequence for branches.
   std::vector<CommandBufferCmdSequence> branches(2);
 
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
+
   {  // Case 0: b = a + a
     auto args = {slice_a, slice_a, slice_b};
-    branches[0].Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+    branches[0].Emplace<LaunchCmd>("add", args, args_access,
+                                   LaunchDimensions(1, 4),
                                    /*shmem_bytes=*/0);
   }
 
   {  // Case 1: b = b + b
     auto args = {slice_b, slice_b, slice_b};
-    branches[1].Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+    branches[1].Emplace<LaunchCmd>("add", args, args_access,
+                                   LaunchDimensions(1, 4),
                                    /*shmem_bytes=*/0);
   }
 
@@ -825,10 +853,13 @@ TEST(CommandBufferThunkTest, ForCmd) {
   BufferAllocation::Slice slice_b(&alloc_b, 0, byte_length);
 
   auto args = {slice_a, slice_b, slice_b};  // b = a + b
+  auto args_access = {MemoryAccess::kRead, MemoryAccess::kRead,
+                      MemoryAccess::kWrite};
 
   // Prepare commands sequence for loop `body`.
   CommandBufferCmdSequence body_commands;
-  body_commands.Emplace<LaunchCmd>("add", args, LaunchDimensions(1, 4),
+  body_commands.Emplace<LaunchCmd>("add", args, args_access,
+                                   LaunchDimensions(1, 4),
                                    /*shmem_bytes=*/0);
 
   // Prepare commands sequence for thunk.

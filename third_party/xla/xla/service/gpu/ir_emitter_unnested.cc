@@ -95,6 +95,7 @@ limitations under the License.
 #include "xla/service/custom_call_target_registry.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/copy_thunk.h"
+#include "xla/service/gpu/cublas_cudnn.h"
 #include "xla/service/gpu/fused_mha_thunk.h"
 #include "xla/service/gpu/fusions/fusion_emitter.h"
 #include "xla/service/gpu/fusions/fusions.h"
@@ -349,37 +350,6 @@ StatusOr<std::unique_ptr<Thunk>> BuildCustomKernelThunkForFusion(
 
   return std::make_unique<CustomKernelThunk>(
       instr, std::move(custom_kernel), std::move(kernel_arguments.args()));
-}
-
-// Derives the number of warps to use for processing a Triton Softmax fusion.
-int DeriveNumWarpsFromTritonSoftmaxComputation(
-    const HloComputation* computation) {
-  const HloInstruction* reduce = hlo_query::GetFirstInstructionWithOpcode(
-      *computation, HloOpcode::kReduce);
-
-  CHECK_NE(reduce, nullptr);
-  Shape reduce_input_shape = reduce->operand(0)->shape();
-
-  CHECK_EQ(reduce->dimensions().size(), 1);
-  CHECK_EQ(reduce->dimensions()[0], reduce_input_shape.rank() - 1);
-
-  int reduction_dim = reduce_input_shape.dimensions_minor(0);
-
-  int num_warps = 32;
-
-  if (reduction_dim <= 512) {
-    num_warps = 1;
-  } else if (reduction_dim <= 1024) {
-    num_warps = 2;
-  } else if (reduction_dim <= 16384) {
-    num_warps = 4;
-  } else if (reduction_dim <= 32768) {
-    num_warps = 8;
-  } else if (reduction_dim <= 65536) {
-    num_warps = 16;
-  }
-
-  return num_warps;
 }
 
 }  // namespace
@@ -989,8 +959,34 @@ Status IrEmitterUnnested::EmitGemmThunk(mlir::Operation* op) {
   TF_ASSIGN_OR_RETURN(GemmConfig config, GemmConfig::For(gemm));
   auto thunk = std::make_unique<GemmThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(op), std::move(config), a, b, c,
-      deterministic_ops);
+      std::nullopt, deterministic_ops);
 
+  AddThunkToThunkSequence(std::move(thunk));
+  return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitGemmThunk(const HloCustomCallInstruction* instr) {
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice a,
+                      GetAllocationSliceForHlo(instr->operand(0), {}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice b,
+                      GetAllocationSliceForHlo(instr->operand(1), {}));
+  // The output of the legacy cuBLAS custom call is a tuple that contains the
+  // output matrix and the workspace.
+  DCHECK(instr->shape().IsTuple() && instr->shape().tuple_shapes_size() == 2);
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice c,
+                      GetAllocationSliceForHlo(instr, {0}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice workspace,
+                      GetAllocationSliceForHlo(instr, {1}));
+
+  bool deterministic_ops =
+      ir_emitter_context_->debug_options().xla_gpu_deterministic_ops();
+
+  TF_ASSIGN_OR_RETURN(
+      GemmConfig config,
+      GemmConfig::For(static_cast<const HloInstruction*>(instr)));
+  auto thunk = std::make_unique<GemmThunk>(
+      Thunk::ThunkInfo::WithProfileAnnotation(instr), std::move(config), a, b,
+      c, workspace, deterministic_ops);
   AddThunkToThunkSequence(std::move(thunk));
   return OkStatus();
 }
@@ -2147,10 +2143,14 @@ StatusOr<FusionEmissionResult> IrEmitterUnnested::EmitTritonFusion(
     TritonWrapperResult triton_wrapper_result;
     LaunchDimensions launch_dimensions;
     if (fusion_kind == kTritonSoftmaxFusionKind) {
+      TF_ASSIGN_OR_RETURN(launch_dimensions,
+                          hlo_fusion_analysis.GetLaunchDimensions());
+
       auto& triton_config = *backend_config.mutable_triton_gemm_config();
       triton_config.set_num_stages(1);
-      triton_config.set_num_warps(DeriveNumWarpsFromTritonSoftmaxComputation(
-          fusion->fused_instructions_computation()));
+      // Thread count per block is always a multiple of WarpSize.
+      triton_config.set_num_warps(launch_dimensions.num_threads_per_block() /
+                                  WarpSize());
       TritonGemmConfig config = TritonGemmConfig::FromProto(triton_config);
 
       TF_ASSIGN_OR_RETURN(auto analysis,
@@ -2162,8 +2162,6 @@ StatusOr<FusionEmissionResult> IrEmitterUnnested::EmitTritonFusion(
                         ir_emitter_context_->cuda_compute_capability(),
                         ir_emitter_context_->gpu_device_info(), config, module_,
                         &EmitSoftMax, *ir_emitter_context_->mlir_context()));
-      launch_dimensions =
-          GetSoftMaxLaunchDimensions(hlo_fusion_analysis.fusion(), config);
     } else {  // Must be a MatMul
       CHECK_EQ(fusion_kind, kTritonGemmFusionKind);
       if (!backend_config.has_triton_gemm_config()) {
@@ -3639,6 +3637,11 @@ Status IrEmitterUnnested::EmitOp(
   }
 
   if (mlir::isa<mlir::lmhlo_gpu::GEMMOp>(op)) {
+    if (ir_emitter_context_->emit_ir_from_hlo()) {
+      const HloCustomCallInstruction* instr =
+          Cast<HloCustomCallInstruction>(hlo_for_lmhlo.at(op));
+      return EmitGemmThunk(instr);
+    }
     return EmitGemmThunk(op);
   }
 
@@ -3874,6 +3877,14 @@ Status IrEmitterUnnested::EmitHloInstruction(const HloInstruction* instr) {
       return EmitSort(Cast<HloSortInstruction>(instr));
     case HloOpcode::kConstant:
       return EmitConstant(Cast<HloConstantInstruction>(instr));
+    case HloOpcode::kCustomCall: {
+      auto* custom_call = Cast<HloCustomCallInstruction>(instr);
+      if (IsLegacyCublasMatmul(*instr)) {
+        return EmitGemmThunk(custom_call);
+      }
+      return InternalError("Unsupported custom call instruction: %s",
+                           custom_call->name());
+    }
     // We don't need to emit thunks for these operations because their semantics
     // are encoded by buffers.
     case HloOpcode::kBitcast:
