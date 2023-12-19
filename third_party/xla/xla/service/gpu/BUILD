@@ -124,6 +124,7 @@ cc_library(
         "//xla:statusor",
         "//xla:util",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:launch_dim",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
     ],
@@ -2972,6 +2973,7 @@ cc_library(
     hdrs = ["custom_fusion_rewriter.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//xla:shape_util",
         "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_pass",
