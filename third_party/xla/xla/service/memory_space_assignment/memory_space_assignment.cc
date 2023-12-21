@@ -5142,22 +5142,23 @@ void AlternateMemoryBestFitHeap::AllocateCrossProgramPrefetchBuffer(
 
   // Add a repack allocation block for the Allocation objects in alternate
   // memory.
-  std::vector<RepackAllocationBlock*> colocations;
+  std::vector<MemorySpaceAssignmentRepacker::AllocationBlock*> colocations;
   for (int i = allocations_initial_size; i < allocations_->size(); ++i) {
     const auto& allocation = allocations_->at(i);
     if (allocation->memory_space() == MemorySpace::kAlternate) {
       repack_allocation_blocks_.push_back(MakeRepackAllocationBlock(
           allocation->start_time(), allocation->end_time(),
           allocation->chunk().size, allocation->chunk().offset,
-          static_cast<int64_t>(colocations.size()), allocation.get()));
-      RepackAllocationBlock* inserted = &repack_allocation_blocks_.back();
-      for (RepackAllocationBlock* colocation : colocations) {
-        inserted->colocations.push_back(colocation);
-        colocation->colocations.push_back(inserted);
-      }
-      inserted->colocations.emplace_back(inserted);
-      colocations.emplace_back(inserted);
+          static_cast<int64_t>(repack_allocation_blocks_.size()),
+          allocation.get()));
+      colocations.push_back(&repack_allocation_blocks_.back());
     }
+  }
+  for (int i = 0; i < colocations.size() - 1; ++i) {
+    colocations[i]->next_colocated = colocations[i + 1];
+  }
+  if (!colocations.empty()) {
+    colocations.back()->next_colocated = colocations.front();
   }
 
   ClearPendingChunks();
@@ -5166,7 +5167,6 @@ void AlternateMemoryBestFitHeap::AllocateCrossProgramPrefetchBuffer(
 void AlternateMemoryBestFitHeap::AllocateReservedScopedAllocations() {
   const auto& instruction_sequence =
       hlo_live_range_.flattened_instruction_sequence().instructions();
-  std::vector<MemorySpaceAssignmentRepacker::AllocationBlock*> colocations;
   for (int i = 0; i < instruction_sequence.size(); ++i) {
     const HloInstruction* instruction = instruction_sequence[i];
     int64_t reserved_scoped_memory =
@@ -5183,7 +5183,6 @@ void AlternateMemoryBestFitHeap::AllocateReservedScopedAllocations() {
       interval.start = i;
       interval.end = i;
       interval.need_allocation = true;
-      interval.colocations = {};
       Chunk chunk_candidate =
           FindChunkCandidate(interval, /*preferred_offset=*/0);
       CHECK_EQ(chunk_candidate.offset, 0);
@@ -5204,7 +5203,6 @@ void AlternateMemoryBestFitHeap::AllocateReservedScopedAllocations() {
           /*initial_offset=*/0,
           static_cast<int64_t>(repack_allocation_blocks_.size()),
           allocations_->back().get()));
-      colocations.push_back(&repack_allocation_blocks_.back());
     }
   }
   // If requested, make all scoped allocations to colocate with each other so
@@ -5213,13 +5211,19 @@ void AlternateMemoryBestFitHeap::AllocateReservedScopedAllocations() {
   // opportunity to deduplicate different ops.  However, this may hurt the
   // memory packing efficiency.
   if (options_.allocate_reserved_scoped_memory_at_same_offset) {
-    for (MemorySpaceAssignmentRepacker::AllocationBlock* repack_block :
-         colocations) {
-      repack_block->colocations = colocations;
+    for (auto allocation_block_it = repack_allocation_blocks_.begin();
+         allocation_block_it != repack_allocation_blocks_.end() &&
+         std::next(allocation_block_it) != repack_allocation_blocks_.end();
+         ++allocation_block_it) {
+      allocation_block_it->next_colocated = &*std::next(allocation_block_it);
+    }
+    if (!repack_allocation_blocks_.empty()) {
+      repack_allocation_blocks_.back().next_colocated =
+          &repack_allocation_blocks_.front();
     }
   } else {
     for (RepackAllocationBlock& allocation_block : repack_allocation_blocks_) {
-      allocation_block.colocations.push_back(&allocation_block);
+      allocation_block.next_colocated = &allocation_block;
     }
   }
   ClearPendingChunks();
@@ -5612,6 +5616,8 @@ void AlternateMemoryBestFitHeap::ImportRepackedSlicedAllocation(
   using SlicedCopyAllocation = MemorySpaceAssignment::SlicedCopyAllocation;
   using SliceDetail = SlicedCopyAllocation::SliceDetail;
 
+  CHECK_OK(AreRepackedSlicesValid(block));
+
   SlicedCopyAllocation* allocation =
       dynamic_cast<SlicedCopyAllocation*>(block.allocation);
   CHECK(block.allocation->is_sliced_copy_allocation());
@@ -5623,9 +5629,6 @@ void AlternateMemoryBestFitHeap::ImportRepackedSlicedAllocation(
   // Update the Allocation, AllocationBlock, and interval_tree_.
   allocation->set_offset(repacked_offset);
   if (block.repacked_slice_data.has_value()) {
-    CHECK(block.original_slice_data.has_value());
-    CHECK_EQ(allocation->slice_details_sorted_by_start_time().size(),
-             block.repacked_slice_data->slices_sorted_by_offset.size());
     allocation->ImportRepackedSliceData(*block.repacked_slice_data);
   } else {
     allocation->AddDiffToAllSliceOffsets(repacked_offset - original_offset);
@@ -5662,6 +5665,53 @@ void AlternateMemoryBestFitHeap::ImportRepackedSlicedAllocation(
                             absl::StrJoin(offset_moves, ", "), "]");
       }()
           << "; Allocation: " << allocation->ToString();
+}
+
+Status AlternateMemoryBestFitHeap::AreRepackedSlicesValid(
+    const RepackAllocationBlock& block) {
+  if (!block.repacked_slice_data.has_value()) {
+    return OkStatus();
+  }
+  if (!block.original_slice_data.has_value()) {
+    return InvalidArgumentStrCat(
+        "Repacked sliced allocation has repacked slice data but not original "
+        "slice data.");
+  }
+  int64_t num_slices =
+      block.original_slice_data->slices_sorted_by_offset.size();
+  if (num_slices != block.repacked_slice_data->slices_sorted_by_offset.size()) {
+    return InvalidArgumentStrCat(
+        "Repacked sliced allocation has ", num_slices,
+        " slices but repacking has data for ",
+        block.repacked_slice_data->slices_sorted_by_offset.size(), " slices.");
+  }
+
+  // Ensure that the slice size to start time mapping has not changed. If it
+  // changes, its invalidates MSA's internal state, e.g., the peak_memory_usage_
+  // data structure.
+  std::vector<std::pair<int64_t, int64_t>> original_size_to_time_mapping;
+  original_size_to_time_mapping.reserve(num_slices);
+  for (const MemorySpaceAssignmentRepacker::Slice& slice :
+       block.original_slice_data->slices_sorted_by_offset) {
+    original_size_to_time_mapping.push_back(
+        std::make_pair(slice.size, slice.inclusive_start_time));
+  };
+  absl::c_sort(original_size_to_time_mapping);
+  std::vector<std::pair<int64_t, int64_t>> repacked_size_to_time_mapping;
+  repacked_size_to_time_mapping.reserve(num_slices);
+  for (const MemorySpaceAssignmentRepacker::Slice& slice :
+       block.repacked_slice_data->slices_sorted_by_offset) {
+    repacked_size_to_time_mapping.push_back(
+        std::make_pair(slice.size, slice.inclusive_start_time));
+  };
+  absl::c_sort(repacked_size_to_time_mapping);
+  if (original_size_to_time_mapping != repacked_size_to_time_mapping) {
+    return InvalidArgumentStrCat(
+        "Repacked slices do not preserve the initial slice size-start time "
+        "mappings.");
+  }
+
+  return OkStatus();
 }
 
 void AlternateMemoryBestFitHeap::UncommitPendingChunks(
@@ -5771,9 +5821,11 @@ void AlternateMemoryBestFitHeap::FinalizeAllocations(
           colocated_allocation));
       colocations.push_back(&repack_allocation_blocks_.back());
     }
-    for (MemorySpaceAssignmentRepacker::AllocationBlock* repack_block :
-         colocations) {
-      repack_block->colocations = colocations;
+    for (int i = 0; i < colocations.size() - 1; ++i) {
+      colocations[i]->next_colocated = colocations[i + 1];
+    }
+    if (!colocations.empty()) {
+      colocations.back()->next_colocated = colocations.front();
     }
   }
   ClearPendingChunks();

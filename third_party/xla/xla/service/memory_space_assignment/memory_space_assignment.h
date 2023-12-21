@@ -2638,6 +2638,7 @@ class AlternateMemoryBestFitHeap
   // Helper functions to implement ImportRepackedAllocations.
   void ImportRepackedNonSlicedAllocation(RepackAllocationBlock& block);
   void ImportRepackedSlicedAllocation(RepackAllocationBlock& block);
+  Status AreRepackedSlicesValid(const RepackAllocationBlock& block);
 
   // Adds an asynchronous copy to allocations.
   void AddAsyncCopy(
@@ -2712,7 +2713,7 @@ class AlternateMemoryBestFitHeap
     allocation_block.offset = -1;
     allocation_block.initial_offset = initial_offset;
     allocation_block.id = id;
-    allocation_block.colocations = {};
+    allocation_block.next_colocated = nullptr;
     allocation_block.allocation = allocation;
     return allocation_block;
   }

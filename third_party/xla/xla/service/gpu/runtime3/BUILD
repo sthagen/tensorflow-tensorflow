@@ -77,6 +77,7 @@ cc_library(
         "//xla:statusor",
         "//xla:util",
         "//xla/service:buffer_assignment",
+        "//xla/service/gpu:gemm_thunk",
         "//xla/service/gpu:gpu_executable",
         "//xla/service/gpu:thunk",
         "@com_google_absl//absl/container:inlined_vector",
@@ -291,11 +292,44 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sequential_thunk",
+        "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:buffer_allocations",
         "//xla/service/gpu:thunk",
         "//xla/stream_executor",
         "@local_tsl//tsl/platform:errors",
+    ],
+)
+
+cc_library(
+    name = "fused_mha_thunk",
+    srcs = ["fused_mha_thunk.cc"],
+    hdrs = ["fused_mha_thunk.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla:util",
+        "//xla:xla_data_proto_cc",
+        "//xla/service:buffer_assignment",
+        "//xla/service/gpu:gpu_fused_mha_runner",
+        "//xla/service/gpu:thunk",
+        "//xla/stream_executor",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_library(
+    name = "infeed_thunk",
+    srcs = ["infeed_thunk.cc"],
+    hdrs = ["infeed_thunk.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla:shape_util",
+        "//xla:status_macros",
+        "//xla:util",
+        "//xla/service/gpu:buffer_allocations",
+        "//xla/service/gpu:io_feed_manager",
+        "//xla/service/gpu:thunk",
+        "//xla/stream_executor",
     ],
 )
 

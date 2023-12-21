@@ -43,6 +43,7 @@ limitations under the License.
 #include "xla/statusor.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
+#include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla::gpu {
@@ -205,7 +206,7 @@ CommandBufferScheduling::CollectCommandBufferSequences(
 // the beginning of the computation. This simplifies the construction of command
 // buffer computations because we don't need to deal with parameters and
 // constants that have users outside of a command buffer.
-void CommandBufferScheduling::MoveParametersAndConstantsToFront(
+Status CommandBufferScheduling::MoveParametersAndConstantsToFront(
     HloComputation* computation) {
   HloInstructionSequence new_sequence;
   HloSchedule& schedule = computation->parent()->schedule();
@@ -214,6 +215,17 @@ void CommandBufferScheduling::MoveParametersAndConstantsToFront(
   for (HloInstruction* inst : sequence.instructions()) {
     if (IsParameter(inst) || IsConstant(inst)) {
       new_sequence.push_back(inst);
+
+      // Because we move instruction to the front of the computation we can't
+      // have any control predecessors, however silently dropping them is unsafe
+      // as we can have transitive dependencies that define schedule order, so
+      // we forward control predecessors to all users.
+      for (HloInstruction* control_predecessor : inst->control_predecessors()) {
+        for (HloInstruction* user : inst->users()) {
+          TF_RETURN_IF_ERROR(control_predecessor->AddControlDependencyTo(user));
+        }
+      }
+      TF_RETURN_IF_ERROR(inst->DropAllControlDeps());
     }
   }
 
@@ -224,6 +236,7 @@ void CommandBufferScheduling::MoveParametersAndConstantsToFront(
   }
 
   schedule.set_sequence(computation, new_sequence);
+  return OkStatus();
 }
 
 //===----------------------------------------------------------------------===//
@@ -436,6 +449,9 @@ Status CommandBufferScheduling::RewriteCommandBuffer(
 
 //===----------------------------------------------------------------------===//
 
+CommandBufferScheduling::CommandBufferScheduling(int32_t gpu_runtime_version)
+    : gpu_runtime_version_(gpu_runtime_version) {}
+
 StatusOr<bool> CommandBufferScheduling::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
@@ -452,10 +468,31 @@ StatusOr<bool> CommandBufferScheduling::Run(
     config.insert(static_cast<DebugOptions::CommandBufferCmdType>(cmd_type));
   }
 
+  // Erase command buffer cmd types that are not supported by the gpu runtime.
+  static constexpr auto kRequireConditionals = {DebugOptions::WHILE};
+  static constexpr auto kRequireTracing = {DebugOptions::CUBLAS,
+                                           DebugOptions::CUDNN};
+
+  auto erase = [&](absl::Span<const DebugOptions::CommandBufferCmdType> cmds) {
+    for (auto cmd : cmds) {
+      if (config.erase(cmd)) {
+        LOG(WARNING) << "Removed command buffer support for "
+                     << DebugOptions::CommandBufferCmdType_Name(cmd)
+                     << " as it's not supported with gpu runtime version "
+                     << gpu_runtime_version_;
+      }
+    }
+  };
+
+  if (gpu_runtime_version_ < 12030) {
+    erase(kRequireTracing);       // cuStreamBeginCaptureToGraph
+    erase(kRequireConditionals);  // on-device control flow
+  }
+
   // TODO(b/315874495): We should traverse all computations in topological order
   // to discover command buffers inside nested control flow computations.
   HloComputation* entry = module->entry_computation();
-  MoveParametersAndConstantsToFront(entry);
+  TF_RETURN_IF_ERROR(MoveParametersAndConstantsToFront(entry));
 
   std::vector<HloInstructionSequence> sequences =
       CollectCommandBufferSequences(module->schedule().sequence(entry), config);

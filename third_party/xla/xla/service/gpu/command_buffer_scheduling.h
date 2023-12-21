@@ -75,6 +75,8 @@ class CommandBufferScheduling : public HloModulePass {
   using CommandBufferConfig =
       absl::flat_hash_set<DebugOptions::CommandBufferCmdType>;
 
+  explicit CommandBufferScheduling(int32_t gpu_runtime_version);
+
   absl::string_view name() const override {
     return "command-buffer-scheduling";
   }
@@ -87,7 +89,11 @@ class CommandBufferScheduling : public HloModulePass {
   static std::vector<HloInstructionSequence> CollectCommandBufferSequences(
       HloInstructionSequence inst_sequence, const CommandBufferConfig& config);
 
-  static void MoveParametersAndConstantsToFront(HloComputation* computation);
+  // Moves kParameter and kConstant instructions in a computation to
+  // the beginning of the computation. This simplifies the construction of
+  // command buffer computations because we don't need to deal with parameters
+  // and constants that have users outside of a command buffer.
+  static Status MoveParametersAndConstantsToFront(HloComputation* computation);
 
   struct CommandBuffer {
     // Command buffer arguments (call instruction arguments).
@@ -115,6 +121,9 @@ class CommandBufferScheduling : public HloModulePass {
   static Status RewriteCommandBuffer(HloComputation* parent,
                                      const HloInstructionSequence& seq,
                                      CommandBuffer command_buffer);
+
+ private:
+  int32_t gpu_runtime_version_;
 };
 
 }  // namespace xla::gpu

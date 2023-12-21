@@ -91,6 +91,7 @@ tf_kernel_library(
     srcs = ["list_snapshot_chunks_dataset_op.cc"],
     compatible_with = get_compatible_with_portable(),
     deps = [
+        ":file_utils",
         ":snapshot_chunk_provider",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
@@ -276,7 +277,7 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core/framework:types_proto_cc",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
