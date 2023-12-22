@@ -506,6 +506,42 @@ TEST_F(PriorityFusionTest, DontFuseIntoFirstOperandOfScatter) {
               GmockMatch(m::Scatter(m::Parameter(), m::Add(), m::Add())));
 }
 
+// This test is similar to DontFuseIntoFirstOperandOfScatter, but PriorityFusion
+// has a separate run to fuse constants. Fusing anything into a scatter fusion
+// will fail in the emitter.
+TEST_F(PriorityFusionTest, DontFuseConstantIntoFirstOperandOfScatter) {
+  auto module = *ParseAndReturnVerifiedModule(R"(
+    HloModule test_module
+
+    add {
+      lhs = s32[] parameter(0)
+      rhs = s32[] parameter(1)
+      ROOT add = s32[] add(lhs, rhs)
+    }
+
+    ENTRY FuseIntoScatter {
+      operand = s32[1] constant({0})
+      indices = s32[24,1] parameter(0)
+      constant = s32[] constant(1)
+      updates = s32[24,1] broadcast(constant)
+      ROOT scatter = s32[1] scatter(operand, indices, updates),
+          to_apply=add,
+          update_window_dims={1},
+          inserted_window_dims={},
+          scatter_dims_to_operand_dims={0},
+          index_vector_dim=1
+    })");
+
+  EXPECT_THAT(priority_fusion_.Run(module.get()), IsOkAndHolds(true));
+
+  HloInstruction* root = module->entry_computation()->root_instruction();
+  ASSERT_THAT(root, GmockMatch(m::Fusion(m::Constant(), m::Parameter())));
+  EXPECT_EQ(root->fusion_kind(), HloInstruction::FusionKind::kInput);
+  EXPECT_THAT(root->fused_expression_root(),
+              GmockMatch(m::Scatter(m::Parameter(), m::Parameter(),
+                                    m::Broadcast(m::Constant()))));
+}
+
 TEST_F(PriorityFusionTest, DoNotFuseReduceIntoReduceEvenIfOccupancyIsHigh) {
   constexpr absl::string_view kHlo = R"(
     HloModule test_module

@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/service/gpu/command_buffer_scheduling.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -47,9 +48,6 @@ limitations under the License.
 #include "tsl/platform/statusor.h"
 
 namespace xla::gpu {
-
-// TODO(ezhulenev): We should use debug options to get this flag.
-static constexpr int kMinNumCommands = 2;
 
 using CommandBuffer = CommandBufferScheduling::CommandBuffer;
 using CommandBufferConfig = CommandBufferScheduling::CommandBufferConfig;
@@ -171,9 +169,9 @@ struct Accumulator {
 std::vector<HloInstructionSequence>
 CommandBufferScheduling::CollectCommandBufferSequences(
     const HloInstructionSequence inst_sequence,
-    const CommandBufferConfig& config) {
-  auto start_new_sequence = [](Accumulator* acc) {
-    if (acc->num_commands_in_current_seq >= kMinNumCommands) {
+    const CommandBufferConfig& config, int32_t min_num_commands) {
+  auto start_new_sequence = [&](Accumulator* acc) {
+    if (acc->num_commands_in_current_seq >= std::max(1, min_num_commands)) {
       RemoveTrailingNoOps(acc->current_seq);
       acc->sequences.push_back(acc->current_seq);
     }
@@ -449,8 +447,10 @@ Status CommandBufferScheduling::RewriteCommandBuffer(
 
 //===----------------------------------------------------------------------===//
 
-CommandBufferScheduling::CommandBufferScheduling(int32_t gpu_runtime_version)
-    : gpu_runtime_version_(gpu_runtime_version) {}
+CommandBufferScheduling::CommandBufferScheduling(int32_t gpu_toolkit_version,
+                                                 int32_t gpu_driver_version)
+    : gpu_toolkit_version_(gpu_toolkit_version),
+      gpu_driver_version_(gpu_driver_version) {}
 
 StatusOr<bool> CommandBufferScheduling::Run(
     HloModule* module,
@@ -462,9 +462,10 @@ StatusOr<bool> CommandBufferScheduling::Run(
   // buffers too early can impact async operations scheduling.
   if (!module->has_schedule()) return InternalError("module is not scheduled");
 
+  const DebugOptions& debug_options = module->config().debug_options();
+
   CommandBufferConfig config;
-  for (auto cmd_type :
-       module->config().debug_options().xla_gpu_enable_command_buffer()) {
+  for (auto cmd_type : debug_options.xla_gpu_enable_command_buffer()) {
     config.insert(static_cast<DebugOptions::CommandBufferCmdType>(cmd_type));
   }
 
@@ -478,13 +479,22 @@ StatusOr<bool> CommandBufferScheduling::Run(
       if (config.erase(cmd)) {
         LOG(WARNING) << "Removed command buffer support for "
                      << DebugOptions::CommandBufferCmdType_Name(cmd)
-                     << " as it's not supported with gpu runtime version "
-                     << gpu_runtime_version_;
+                     << " as it's not supported with gpu toolkit version "
+                     << gpu_toolkit_version_ << " and driver version "
+                     << gpu_driver_version_
+                     << ". This might negatively impact peformance. To enable "
+                     << DebugOptions::CommandBufferCmdType_Name(cmd)
+                     << " support in command buffers use cuda-compat package: "
+#if defined(PLATFORM_GOOGLE)
+                     << "set CUDA_COMPAT_LOAD=1 env variable.";
+#else
+                     << "https://docs.nvidia.com/deploy/cuda-compatibility/.";
+#endif
       }
     }
   };
 
-  if (gpu_runtime_version_ < 12030) {
+  if (std::min(gpu_toolkit_version_, gpu_driver_version_) < 12030) {
     erase(kRequireTracing);       // cuStreamBeginCaptureToGraph
     erase(kRequireConditionals);  // on-device control flow
   }
@@ -494,8 +504,9 @@ StatusOr<bool> CommandBufferScheduling::Run(
   HloComputation* entry = module->entry_computation();
   TF_RETURN_IF_ERROR(MoveParametersAndConstantsToFront(entry));
 
-  std::vector<HloInstructionSequence> sequences =
-      CollectCommandBufferSequences(module->schedule().sequence(entry), config);
+  std::vector<HloInstructionSequence> sequences = CollectCommandBufferSequences(
+      module->schedule().sequence(entry), config,
+      debug_options.xla_gpu_graph_min_graph_size());
 
   for (const HloInstructionSequence& seq : sequences) {
     TF_ASSIGN_OR_RETURN(CommandBuffer command_buffer,

@@ -274,10 +274,14 @@ AutoShardingSolverResult CallORToolsSolver(
       operations_research::MPSolver::SAT_INTEGER_PROGRAMMING) {
     // Set random_seed, interleave_search and share_binary_clauses for
     // determinism, and num_workers for parallelism.
-    solver_parameter_str = absl::StrCat(
-        "share_binary_clauses:false,random_seed:1,interleave_"
-        "search:true,num_workers:",
-        num_workers);
+    solver_parameter_str =
+        request.deterministic_mode()
+            ? absl::StrCat(
+                  "share_binary_clauses:false,random_seed:1,interleave_"
+                  "search:true,num_workers:",
+                  num_workers)
+            : absl::StrCat("num_workers:", num_workers);
+    solver->SetSolverSpecificParametersAsString(solver_parameter_str);
   }
 #endif
   // Create variables
@@ -506,19 +510,24 @@ AutoShardingSolverResult CallORToolsSolver(
     }
   }
   // h.
+  absl::flat_hash_set<std::pair<NodeIdx, NodeIdx>> alias_set;
   for (auto alias_idx = 0; alias_idx < request.aliases_size(); ++alias_idx) {
-    const auto& alias = request.aliases(alias_idx);
+    const auto& raw_alias = request.aliases(alias_idx);
+    const std::pair<NodeIdx, NodeIdx> alias(raw_alias.first(),
+                                            raw_alias.second());
+    if (alias_set.contains(alias)) continue;
+    alias_set.insert(alias);
     const auto& value_costs = request.value_costs(alias_idx).costs();
-    for (NodeStrategyIdx p = 0; p < s[alias.first()].size(); ++p) {
-      for (NodeStrategyIdx q = 0; q < s[alias.second()].size(); ++q) {
+    for (NodeStrategyIdx p = 0; p < s[alias.first].size(); ++p) {
+      for (NodeStrategyIdx q = 0; q < s[alias.second].size(); ++q) {
         // if lhs == 1
-        if (value_costs[p * s[alias.second()].size() + q] > 0.5) {
+        if (value_costs[p * s[alias.second].size() + q] > 0.5) {
           MPConstraint* constraint = solver->MakeRowConstraint(
               -MPSolver::infinity(), 1,
-              absl::StrCat("s[", alias.first(), "][", p, "] + s[",
-                           alias.second(), "][", q, "] <= 1"));
-          constraint->SetCoefficient(s[alias.first()][p], 1.0);
-          constraint->SetCoefficient(s[alias.second()][q], 1.0);
+              absl::StrCat("s[", alias.first, "][", p, "] + s[", alias.second,
+                           "][", q, "] <= 1"));
+          constraint->SetCoefficient(s[alias.first][p], 1.0);
+          constraint->SetCoefficient(s[alias.second][q], 1.0);
         }
       }
     }
@@ -538,7 +547,7 @@ AutoShardingSolverResult CallORToolsSolver(
     }
   }
 
-  if (!request.s_hint().empty()) {
+  if (!request.s_hint().empty() && !request.deterministic_mode()) {
     std::vector<std::pair<const MPVariable*, double>> hint;
     for (NodeIdx node_idx = 0; node_idx < request.num_nodes(); ++node_idx) {
       if (request.s_follow(node_idx) >= 0) continue;
@@ -594,6 +603,7 @@ AutoShardingSolverResult CallORToolsSolver(
           << "Memory budget: " << request.memory_budget() / (1024 * 1024 * 1024)
           << "GB\n"
           << "Number of ILP constraints: " << solver->NumConstraints() << "\n"
+          << "Deterministic mode: " << request.deterministic_mode() << "\n"
           << "Module name: " << request.module_name();
   if (request.has_max_cost()) {
     VLOG(0) << "Max cost: " << request.max_cost().coeff();
