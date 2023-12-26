@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -85,6 +86,7 @@ class CommandBufferCmd {
   // the target address as se::DeviceMemoryBase{nullptr, size}.
   struct RecordParams {
     se::StreamExecutor* executor;
+    se::Stream* trace_stream;
     const BufferAllocations* buffer_allocations;
   };
 
@@ -103,6 +105,9 @@ class CommandBufferCmd {
   // Returns all buffers used by the cmd. These will be used to track cmd
   // updates, thus they need to be consistent across calls to the function.
   virtual BufferUsageVector buffers() = 0;
+
+  // Returns true if command implemented as a nested command buffer.
+  virtual bool IsNestedCommandBuffer() const { return false; }
 
   virtual ~CommandBufferCmd() = default;
 };
@@ -159,13 +164,33 @@ class CommandBufferCmdSequence {
   size_t size() const { return commands_.size(); }
 
  private:
-  std::vector<std::unique_ptr<CommandBufferCmd>> commands_;
+  struct Command {
+    Command(std::unique_ptr<CommandBufferCmd> cmd, bool requires_barrier)
+        : cmd(std::move(cmd)), requires_barrier(requires_barrier) {}
+
+    std::unique_ptr<CommandBufferCmd> cmd;
+    bool requires_barrier;
+  };
+
+  // Functions for tracking buffer usage of recorded commands and figuring out
+  // when the next command requires a barrier for correctness.
+  bool HasConflicts(const CommandBufferCmd::BufferUsageVector& buffers);
+  void TrackBuffers(const CommandBufferCmd::BufferUsageVector& buffers);
+  void ClearTrackedBuffers();
+
+  std::vector<Command> commands_;
 
   // Buffers referenced by commands in this sequence.
   absl::flat_hash_set<CommandBufferCmd::BufferUsage> buffers_;
 
   // Buffer allocations indices referenced by commands in this sequence.
   absl::flat_hash_set<BufferAllocation::Index> allocs_indices_;
+
+  // We track read and write sets of commands recorded into the command
+  // sequence to detect conflicts and insert explicit barriers. These are the
+  // buffer allocation slices used by commands appended since the last barrier.
+  absl::flat_hash_set<BufferAllocation::Slice> read_set_;
+  absl::flat_hash_set<BufferAllocation::Slice> write_set_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -447,6 +472,8 @@ class GemmCmd : public CommandBufferCmd {
                 se::CommandBuffer* command_buffer) override;
 
   BufferUsageVector buffers() override;
+
+  bool IsNestedCommandBuffer() const final { return true; }
 
  private:
   const GemmConfig config_;

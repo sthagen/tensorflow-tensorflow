@@ -32,6 +32,7 @@ limitations under the License.
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
@@ -108,13 +109,26 @@ Status CommandBufferThunk::ExecuteOnStream(const ExecuteParams& params) {
   absl::MutexLock lock(&cmd_buffer->mutex);
 
   CommandBufferCmd::RecordParams record_params = {
-      executor, const_cast<BufferAllocations*>(params.buffer_allocations)};
+      executor, params.command_buffer_trace_stream,
+      const_cast<BufferAllocations*>(params.buffer_allocations)};
 
   if (cmd_buffer->ShouldUpdateCommandBuffer(commands_, record_params)) {
+    VLOG(3) << "Update command buffer by recoding command buffer cmd sequence"
+            << " after " << cmd_buffer->num_executions
+            << " executions since last update";
+    uint64_t start_micros = tsl::Env::Default()->NowMicros();
+
     TF_RETURN_IF_ERROR(
         commands_.Record(record_params, &cmd_buffer->command_buffer));
+
+    uint64_t end_micros = tsl::Env::Default()->NowMicros();
+    VLOG(3) << "Updated command buffer in " << (end_micros - start_micros)
+            << " μs";
+    cmd_buffer->num_executions = 0;
   }
 
+  VLOG(3) << "Execute command buffer on executor " << executor
+          << "; num_executions=" << ++cmd_buffer->num_executions;
   return executor->Submit(params.stream, cmd_buffer->command_buffer);
 }
 

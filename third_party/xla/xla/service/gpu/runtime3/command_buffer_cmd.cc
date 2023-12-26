@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,7 @@ limitations under the License.
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/types.h"  // IWYU pragma: keep
+#include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
 
@@ -78,83 +80,117 @@ void CommandBufferCmdSequence::Append(std::unique_ptr<CommandBufferCmd> cmd) {
     buffers_.insert(buffer);
     allocs_indices_.insert(buffer.slice.index());
   }
-  commands_.push_back(std::move(cmd));
+
+  CommandBufferCmd::BufferUsageVector buffers = cmd->buffers();
+  bool requires_barrier = HasConflicts(buffers);
+
+  // If the first recorded command is implemented as a nested command buffer we
+  // force a barrier before recording the next command as a workaround for CUDA
+  // graph bug, where child CUDA graph must be a single CUDA graph root node.
+  if (commands_.size() == 1 && commands_.front().cmd->IsNestedCommandBuffer()) {
+    requires_barrier = true;
+  }
+
+  if (requires_barrier) ClearTrackedBuffers();
+
+  commands_.emplace_back(std::move(cmd), requires_barrier);
+  TrackBuffers(buffers);
 }
 
 Status CommandBufferCmdSequence::Initialize(
     se::StreamExecutor* executor, CommandBufferCmd::ExecutableSource source) {
-  for (auto& cmd : commands_) {
-    TF_RETURN_IF_ERROR(cmd->Initialize(executor, source));
+  for (auto& command : commands_) {
+    TF_RETURN_IF_ERROR(command.cmd->Initialize(executor, source));
   }
   return OkStatus();
 }
 
-Status CommandBufferCmdSequence::Record(
-    const CommandBufferCmd::RecordParams& params,
-    se::CommandBuffer* command_buffer, RecordMode mode) {
-  if (mode == RecordMode::kExclusive) {
-    if (command_buffer->state() == se::CommandBuffer::State::kFinalized) {
-      TF_RETURN_IF_ERROR(command_buffer->Update());
-    }
-  }
-
-  // We track read and write sets of all commands recorded into the command
-  // buffer to detect conflicts and insert explicit barriers. This is likely not
-  // the most efficient algorithm to track buffer aliasing and read/write
-  // conflicts, but XLA optimizes for peak memory allocation and we almost never
-  // have a long chains of independent HLO operations writing into
-  // non-overlapping buffer slices, so here we prefer simplicity.
-  absl::flat_hash_set<BufferAllocation::Slice> read_set;
-  absl::flat_hash_set<BufferAllocation::Slice> write_set;
-
-  auto track_buffers = [&](const CommandBufferCmd::BufferUsageVector& buffers) {
-    for (auto& buffer : buffers) {
-      if (buffer.access == MemoryAccess::kWrite) write_set.insert(buffer.slice);
-      if (buffer.access == MemoryAccess::kRead) read_set.insert(buffer.slice);
-    }
-  };
-
+bool CommandBufferCmdSequence::HasConflicts(
+    const CommandBufferCmd::BufferUsageVector& buffers) {
   // Returns true if slice overlaps with any of the slices in read set.
   auto read_overlap = [&](const BufferAllocation::Slice& slice) {
-    if (read_set.contains(slice)) return true;
-    for (auto& read : read_set)
+    if (read_set_.contains(slice)) return true;
+    for (auto& read : read_set_)
       if (read.OverlapsWith(slice)) return true;
     return false;
   };
 
   // Returns true if slice overlaps with any of the slices in write set.
   auto write_overlap = [&](const BufferAllocation::Slice& slice) {
-    if (write_set.contains(slice)) return true;
-    for (auto& write : write_set)
+    if (write_set_.contains(slice)) return true;
+    for (auto& write : write_set_)
       if (write.OverlapsWith(slice)) return true;
     return false;
   };
 
-  auto has_conflict = [&](const CommandBufferCmd::BufferUsageVector& buffers) {
-    bool conflict = absl::c_any_of(buffers, [&](const auto& buffer) {
-      return buffer.access == MemoryAccess::kWrite
-                 ? write_overlap(buffer.slice) || read_overlap(buffer.slice)
-                 : write_overlap(buffer.slice);
-    });
-    if (conflict) {
-      write_set.clear();
-      read_set.clear();
-    }
-    return conflict;
-  };
+  return absl::c_any_of(buffers, [&](const auto& buffer) {
+    return buffer.access == MemoryAccess::kWrite
+               ? write_overlap(buffer.slice) || read_overlap(buffer.slice)
+               : write_overlap(buffer.slice);
+  });
+}
 
-  for (auto& cmd : commands_) {
-    CommandBufferCmd::BufferUsageVector buffers = cmd->buffers();
-    if (has_conflict(buffers)) {
-      TF_RETURN_IF_ERROR(command_buffer->Barrier(params.executor));
+void CommandBufferCmdSequence::TrackBuffers(
+    const CommandBufferCmd::BufferUsageVector& buffers) {
+  for (auto& buffer : buffers) {
+    if (buffer.access == MemoryAccess::kWrite) write_set_.insert(buffer.slice);
+    if (buffer.access == MemoryAccess::kRead) read_set_.insert(buffer.slice);
+  }
+}
+
+void CommandBufferCmdSequence::ClearTrackedBuffers() {
+  read_set_.clear();
+  write_set_.clear();
+}
+
+static std::string_view RecordModeString(
+    CommandBufferCmdSequence::RecordMode mode) {
+  switch (mode) {
+    case CommandBufferCmdSequence::RecordMode::kExclusive:
+      return "exclusive";
+    case CommandBufferCmdSequence::RecordMode::kConditional:
+      return "conditional";
+  }
+}
+
+Status CommandBufferCmdSequence::Record(
+    const CommandBufferCmd::RecordParams& params,
+    se::CommandBuffer* command_buffer, RecordMode mode) {
+  VLOG(3) << "Record " << commands_.size() << " commands into command buffer"
+          << "; mode=" << RecordModeString(mode);
+  uint64_t start_micros = tsl::Env::Default()->NowMicros();
+
+  if (mode == RecordMode::kExclusive) {
+    if (command_buffer->state() == se::CommandBuffer::State::kFinalized) {
+      TF_RETURN_IF_ERROR(command_buffer->Update());
     }
-    track_buffers(buffers);
-    TF_RETURN_IF_ERROR(cmd->Record(params, command_buffer));
+  }
+
+  // Track the number of commands recorded between barriers.
+  int64_t num_recorded_commands = 0;
+
+  for (auto& command : commands_) {
+    CommandBufferCmd::BufferUsageVector buffers = command.cmd->buffers();
+
+    if (command.requires_barrier) {
+      VLOG(3) << "Add command buffer barrier after " << num_recorded_commands
+              << " recorded commands";
+      TF_RETURN_IF_ERROR(command_buffer->Barrier(params.executor));
+      num_recorded_commands = 0;
+    }
+
+    TF_RETURN_IF_ERROR(command.cmd->Record(params, command_buffer));
+    ++num_recorded_commands;
   }
 
   if (mode == RecordMode::kExclusive) {
     TF_RETURN_IF_ERROR(command_buffer->Finalize());
   }
+
+  uint64_t end_micros = tsl::Env::Default()->NowMicros();
+  VLOG(3) << "Recorded " << commands_.size()
+          << " commands into command buffer in " << (end_micros - start_micros)
+          << " μs; mode=" << RecordModeString(mode);
 
   return OkStatus();
 }
@@ -610,10 +646,6 @@ Status GemmCmd::Initialize(se::StreamExecutor* executor,
 
 Status GemmCmd::Record(const RecordParams& params,
                        se::CommandBuffer* command_buffer) {
-  VLOG(5) << "GemmCmd: lhs=" << lhs_buffer_ << ", rhs=" << rhs_buffer_
-          << ", output=" << output_buffer_
-          << ", deterministic=" << deterministic_;
-
   se::DeviceMemoryBase lhs =
       params.buffer_allocations->GetDeviceAddress(lhs_buffer_);
   se::DeviceMemoryBase rhs =
@@ -623,12 +655,19 @@ Status GemmCmd::Record(const RecordParams& params,
   se::DeviceMemoryBase workspace =
       params.buffer_allocations->GetDeviceAddress(workspace_);
 
+  VLOG(5) << "GemmCmd: deterministic=" << deterministic_;
+  VLOG(5) << "  Lhs: " << lhs_buffer_ << " (" << lhs.opaque() << ")";
+  VLOG(5) << "  Lhs: " << rhs_buffer_ << " (" << rhs.opaque() << ")";
+  VLOG(5) << "  Out: " << output_buffer_ << " (" << out.opaque() << ")";
+  VLOG(5) << "  Workspace: " << workspace_ << " (" << workspace.opaque() << ")";
+
   TF_ASSIGN_OR_RETURN(
       auto nested_buffer,
-      se::CommandBuffer::Trace(params.executor, [&](se::Stream* stream) {
-        return RunGemm(config_, lhs, rhs, out, workspace, deterministic_,
-                       stream);
-      }));
+      se::CommandBuffer::Trace(
+          params.executor, params.trace_stream, [&](se::Stream* stream) {
+            return RunGemm(config_, lhs, rhs, out, workspace, deterministic_,
+                           stream);
+          }));
 
   return command_buffer->AddNestedCommandBuffer(nested_buffer);
 }
@@ -636,7 +675,8 @@ Status GemmCmd::Record(const RecordParams& params,
 CommandBufferCmd::BufferUsageVector GemmCmd::buffers() {
   return {{lhs_buffer_, MemoryAccess::kRead},
           {rhs_buffer_, MemoryAccess::kRead},
-          {output_buffer_, MemoryAccess::kWrite}};
+          {output_buffer_, MemoryAccess::kWrite},
+          {workspace_, MemoryAccess::kWrite}};
 }
 
 }  // namespace xla::gpu
