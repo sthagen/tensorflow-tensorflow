@@ -175,11 +175,9 @@ xla_cc_test(
     ]),
 )
 
-# TODO(ddunleavy): why does this sometimes get built on CPU Kokoro despite
-# `{build,test}_tag_filters?
 xla_cc_test(
     name = "gpu_copy_insertion_test",
-    srcs = if_gpu_is_configured(["gpu_copy_insertion_test.cc"]),
+    srcs = ["gpu_copy_insertion_test.cc"],
     tags = tf_cuda_tests_tags(),
     deps = [
         ":buffer_sharing",
@@ -792,7 +790,9 @@ cc_library(
         ":buffer_allocations",
         ":gpu_executable_run_options",
         "//xla:executable_run_options",
+        "//xla:status",
         "//xla/hlo/ir:hlo",
+        "//xla/service:buffer_assignment",
         "//xla/service:executable",
         "//xla/stream_executor",
         "//xla/translate/mhlo_to_hlo:location_exporter",
@@ -1040,6 +1040,7 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",
+        "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:random",
@@ -2960,7 +2961,7 @@ xla_cc_test(
         "//xla/tests:filecheck",
         "//xla/tests:hlo_test_base",
         "//xla/tests:verified_hlo_module",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status",
@@ -5274,7 +5275,7 @@ xla_cc_test(
 
 xla_cc_test(
     name = "determinism_test",
-    srcs = if_gpu_is_configured(["determinism_test.cc"]),
+    srcs = ["determinism_test.cc"],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
         "TENSORFLOW_USE_ROCM=1",
     ]),

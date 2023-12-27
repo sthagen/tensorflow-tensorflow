@@ -93,6 +93,7 @@ xla_test(
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured(["TENSORFLOW_USE_ROCM=1"]),
     deps = [
         ":command_buffer_cmd",
+        "//xla:status",
         "//xla:types",
         "//xla/service:buffer_assignment",
         "//xla/service:platform_util",
@@ -157,6 +158,7 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/profiler/lib:traceme",
+        "@local_tsl//tsl/profiler/lib:traceme_encode",
     ],
 )
 
@@ -200,6 +202,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sequential_thunk",
+        "//xla:status",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:buffer_allocations",
@@ -298,6 +301,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sequential_thunk",
+        "//xla:status",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:buffer_allocations",
@@ -348,6 +352,7 @@ cc_library(
     ]),
     visibility = ["//visibility:public"],
     deps = [
+        "//xla:status",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:buffer_allocations",
         "//xla/service/gpu:thunk",
@@ -412,6 +417,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sequential_thunk",
+        "//xla:status",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:buffer_allocations",
         "//xla/service/gpu:thunk",
