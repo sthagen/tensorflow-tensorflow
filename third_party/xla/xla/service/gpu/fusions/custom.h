@@ -12,13 +12,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef XLA_SERVICE_GPU_FUSIONS_TRITON_H_
-#define XLA_SERVICE_GPU_FUSIONS_TRITON_H_
+#ifndef XLA_SERVICE_GPU_FUSIONS_CUSTOM_H_
+#define XLA_SERVICE_GPU_FUSIONS_CUSTOM_H_
 
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/mlir_hlo/lhlo/IR/lhlo_ops.h"
 #include "xla/service/gpu/fusions/fusion_emitter.h"
-#include "xla/service/gpu/hlo_fusion_analysis.h"
 #include "xla/service/gpu/ir_emitter_context.h"
 #include "xla/service/gpu/kernel_reuse_cache.h"
 #include "xla/statusor.h"
@@ -26,21 +25,17 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
-class TritonFusion : public FusionInterface {
+// A wrapper for fusions implemented using the mechanism in
+// xla/service/gpu/kernels. See custom_fusion.h in that folder for details.
+class CustomFusionEmitter : public FusionInterface {
  public:
-  explicit TritonFusion(const HloFusionAnalysis& analysis)
-      : analysis_(analysis) {}
-
-  StatusOr<FusionEmissionResult> Emit(
-      IrEmitterContext& ir_emitter_context, mlir::lmhlo::FusionOp fusion_op,
-      const HloFusionInstruction& fusion,
-      KernelReuseCache& kernel_cache) const final;
-
- private:
-  const HloFusionAnalysis& analysis_;
+  StatusOr<FusionEmissionResult> Emit(IrEmitterContext& ir_emitter_context,
+                                      mlir::lmhlo::FusionOp fusion_op,
+                                      const HloFusionInstruction& fusion,
+                                      KernelReuseCache&) const final;
 };
 
 }  // namespace gpu
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_FUSIONS_TRITON_H_
+#endif  // XLA_SERVICE_GPU_FUSIONS_CUSTOM_H_

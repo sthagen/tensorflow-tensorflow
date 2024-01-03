@@ -49,6 +49,7 @@ limitations under the License.
 #include "xla/mlir_hlo/lhlo/IR/lhlo_ops.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/elemental_ir_emitter.h"
+#include "xla/service/gpu/elemental_ir_emitter.h"
 #include "xla/service/gpu/fusions/fusion_emitter.h"
 #include "xla/service/gpu/fusions/thunk_util.h"
 #include "xla/service/gpu/fusions/tiling_util.h"
@@ -112,7 +113,7 @@ llvm::Type* GetIndexType(const HloFusionInstruction& fusion,
 
 class ReductionEmitter {
  public:
-  ReductionEmitter(HloFusionAnalysis& analysis,
+  ReductionEmitter(const HloFusionAnalysis& analysis,
                    IrEmitterContext& ir_emitter_context,
                    ElementalIrEmitter& elemental_emitter,
                    mlir::lmhlo::FusionOp fusion_op,
@@ -170,7 +171,7 @@ class ReductionEmitter {
         .GetDimsInElems()[2];
   }
 
-  HloFusionAnalysis& analysis_;
+  const HloFusionAnalysis& analysis_;
   IrEmitterContext& ir_emitter_context_;
   ElementalIrEmitter& elemental_emitter_;
   mlir::lmhlo::FusionOp fusion_op_;
@@ -1237,12 +1238,18 @@ StatusOr<FusionEmissionResult> ReductionEmitter::Emit() {
 }  // namespace
 
 StatusOr<FusionEmissionResult> ReductionFusion::Emit(
-    IrEmitterContext& ir_emitter_context, ElementalIrEmitter& elemental_emitter,
-    mlir::lmhlo::FusionOp fusion_op, const HloFusionInstruction& fusion,
-    KernelReuseCache& kernel_cache, llvm::IRBuilder<>* builder) const {
+    IrEmitterContext& ir_emitter_context, mlir::lmhlo::FusionOp fusion_op,
+    const HloFusionInstruction& fusion, KernelReuseCache& kernel_cache) const {
+  llvm::IRBuilder<> builder(ir_emitter_context.llvm_module()->getContext());
+  GpuElementalIrEmitter elemental_emitter(ir_emitter_context, &builder);
   return ReductionEmitter(analysis_, ir_emitter_context, elemental_emitter,
-                          fusion_op, fusion, kernel_cache, builder)
+                          fusion_op, fusion, kernel_cache, &builder)
       .Emit();
+}
+
+std::optional<StatusOr<LaunchDimensions>> ReductionFusion::launch_dimensions()
+    const {
+  return analysis_.GetLaunchDimensions();
 }
 
 }  // namespace gpu
