@@ -1,3 +1,4 @@
+load("//xla:xla.bzl", "xla_cc_test")
 load("@local_tsl//tsl/platform/default:cuda_build_defs.bzl", "if_cuda_is_configured")
 
 package(
@@ -247,6 +248,22 @@ cc_library(
     ],
 )
 
+xla_cc_test(
+    name = "triton_test",
+    srcs = ["triton_test.cc"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
+    deps = [
+        ":fusions",
+        ":triton",
+        "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
 cc_library(
     name = "thunk_util",
     srcs = ["thunk_util.cc"],
@@ -280,12 +297,16 @@ cc_library(
         "//xla:status",
         "//xla:status_macros",
         "//xla:statusor",
+        "//xla:union_find",
+        "//xla:util",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
         "//xla/mlir_hlo:lhlo",
         "//xla/service:buffer_assignment",
         "//xla/service:elemental_ir_emitter",
         "//xla/service/gpu:gpu_fusible",
         "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/service/gpu:hlo_traversal",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/service/gpu:ir_emitter",
         "//xla/service/gpu:ir_emitter_context",
@@ -303,8 +324,12 @@ cc_library(
         "//xla/service/llvm_ir:llvm_loop",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/service/llvm_ir:loop_emitter",
+        "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",

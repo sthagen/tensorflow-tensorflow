@@ -2381,7 +2381,7 @@ Status IrEmitterUnnested::EmitSelectAndScatter(
 }
 
 Status IrEmitterUnnested::EmitWhile(
-    mlir::Operation* op, const HloInstruction* instr,
+    mlir::Operation* op,
     const absl::flat_hash_map<const mlir::Operation*, const HloInstruction*>&
         hlo_for_lmhlo) {
   auto while_op = mlir::cast<mlir::lmhlo::WhileOp>(op);
@@ -2413,6 +2413,7 @@ Status IrEmitterUnnested::EmitWhile(
     // special fusions, so we can't yet enable while thunk emission here.
     static constexpr bool kWhileThunkNotSupported = false;
     if (ir_emitter_context_->emit_ir_from_hlo() && kWhileThunkNotSupported) {
+      const HloInstruction* instr = hlo_for_lmhlo.at(op);
       TF_ASSIGN_OR_RETURN(
           auto thunk,
           BuildWhileThunk(instr,
@@ -2830,6 +2831,109 @@ Status IrEmitterUnnested::EmitNcclAsyncDone(Thunk::Kind kind,
   return OkStatus();
 }
 
+template <typename NcclThunkType, typename HloInstType>
+Status IrEmitterUnnested::EmitNcclThunk(
+    Thunk::Kind kind, const HloInstType* inst,
+    std::optional<bool> use_global_device_ids) {
+  const auto& hlo_config = ir_emitter_context_->hlo_module().config();
+  int64_t replica_count = hlo_config.replica_count();
+  int64_t partition_count = hlo_config.num_partitions();
+  VLOG(2) << NcclThunkType::GetHloOpName()
+          << "; replica count: " << replica_count
+          << "; partition count: " << partition_count
+          << "; operand count: " << inst->operand_count()
+          << "; NCCL is enabled: " << NcclThunkType::NcclIsEnabled();
+
+  // A given collective op can be degenerate if across all groups formed
+  // by it are singleton. In such a case, we don't need to do any communication
+  // and we can just copy the input to the output.
+  bool is_degenerate = GetNcclCollectiveConfig(inst, use_global_device_ids)
+                           .IsDegenerate(replica_count, partition_count);
+  Status implementable_status =
+      NcclThunkType::CheckImplementable(inst, replica_count, partition_count);
+  bool should_use_nccl_thunk = !is_degenerate && implementable_status.ok();
+
+  // Stash relevant information in NcclCollectiveThunk::Buffer even if we may
+  // not generate an NcclCollectiveThunk.
+  std::vector<NcclCollectiveThunk::Buffer> buffers;
+  buffers.reserve(inst->operand_count());
+
+  TF_RETURN_IF_ERROR(ShapeUtil::ForEachSubshapeWithStatus(
+      inst->shape(), [&](const Shape& shape, const ShapeIndex& index) {
+        if (!shape.IsArray()) return OkStatus();
+
+        TF_ASSIGN_OR_RETURN(
+            auto source_slice,
+            GetAllocationSliceForHlo(inst->operand(buffers.size()), {}));
+        TF_ASSIGN_OR_RETURN(auto dest_slice,
+                            GetAllocationSliceForHlo(inst, index));
+        buffers.push_back(NcclCollectiveThunk::Buffer{
+            /*element_count=*/ShapeUtil::ElementsIn(shape),
+            /*source_buffer=*/source_slice,
+            /*destination_buffer=*/dest_slice,
+            /*source_value=*/nullptr,
+            /*destination_value=*/nullptr});
+
+        return OkStatus();
+      }));
+
+  if (should_use_nccl_thunk) {
+    auto thunk = std::make_unique<NcclThunkType>(
+        Thunk::ThunkInfo::WithProfileAnnotation(inst), inst,
+        /*buffers=*/std::move(buffers));
+    async_executors_.insert({inst, thunk->async_executor()});
+    AddThunkToThunkSequence(std::move(thunk));
+    return OkStatus();
+  }
+
+  if (!is_degenerate) {
+    return implementable_status;
+  }
+
+  // Signal that start thunk not created with nullptr.
+  async_executors_.insert({inst, nullptr});
+
+  VLOG(1) << "Collective call is degenerate, not doing NCCL call";
+
+  // Degenerate collectives are simply identity function. Buffer
+  // assignment expects a copy, so that's what we do.
+  ThunkSequence thunks;
+  for (int64_t i = 0; i < buffers.size(); i++) {
+    const Shape shape = inst->operand(i)->shape();
+    thunks.push_back(std::make_unique<DeviceToDeviceCopyThunk>(
+        Thunk::ThunkInfo::WithProfileAnnotation(inst),
+        /*source_buffer=*/buffers[i].source_buffer,
+        /*destination_buffer=*/buffers[i].destination_buffer,
+        /*mem_size=*/ShapeUtil::ByteSizeOf(shape),
+        /*source_value=*/buffers[i].source_value,
+        /*destination_value=*/buffers[i].destination_value));
+  }
+  if (thunks.size() == 1) {
+    AddThunkToThunkSequence(std::move(thunks[0]));
+  } else {
+    AddThunkToThunkSequence(std::make_unique<SequentialThunk>(
+        Thunk::ThunkInfo::WithProfileAnnotation(inst), std::move(thunks)));
+  }
+  return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitNcclAsyncDone(Thunk::Kind kind,
+                                            const HloInstruction* inst) {
+  const HloInstruction* start = inst->operand(0);
+  auto async_executor = async_executors_.extract(start);
+  TF_RET_CHECK(async_executor)
+      << "couldn't find async executor for start operation";
+
+  // Can be null if no start thunk was created (e.g. if the start op is
+  // degenerate), in which case there's nothing to do here.
+  if (async_executor.mapped() != nullptr) {
+    AddThunkToThunkSequence(std::make_unique<NcclCollectiveDoneThunk>(
+        kind, Thunk::ThunkInfo::WithProfileAnnotation(inst),
+        *async_executor.mapped()));
+  }
+  return OkStatus();
+}
+
 StatusOr<std::vector<ShapedSlice>> IrEmitterUnnested::GetShapedSlices(
     mlir::Operation::operand_range operands) {
   std::vector<ShapedSlice> shaped_slices;
@@ -2884,6 +2988,31 @@ Status IrEmitterUnnested::EmitOutfeed(mlir::Operation* op) {
       Thunk::ThunkInfo::WithProfileAnnotation(op), std::move(shaped_slices));
   AddThunkToThunkSequence(std::move(thunk));
 
+  return OkStatus();
+}
+
+Status IrEmitterUnnested::EmitOutfeed(const HloOutfeedInstruction* instr) {
+  // HLO outfeed instruction has 2 operands, the source and a token, and a
+  // single token output.
+  const HloInstruction* source = instr->operand(0);
+  std::vector<ShapedSlice> shaped_slices;
+  TF_RETURN_IF_ERROR(ShapeUtil::ForEachSubshapeWithStatus(
+      source->shape(), [&](const Shape& subshape, const ShapeIndex& index) {
+        if (subshape.IsTuple()) return OkStatus();
+        if (subshape.IsArray()) {
+          TF_ASSIGN_OR_RETURN(BufferAllocation::Slice data,
+                              GetAllocationSliceForHlo(source, index));
+          ShapedSlice shaped_slice = {data, subshape};
+          shaped_slices.push_back(shaped_slice);
+          return OkStatus();
+        }
+        return InternalError("Unexpected shape kind for %s and shape index %s",
+                             source->ToString(), index.ToString());
+      }));
+
+  auto thunk = std::make_unique<OutfeedThunk>(
+      Thunk::ThunkInfo::WithProfileAnnotation(instr), std::move(shaped_slices));
+  AddThunkToThunkSequence(std::move(thunk));
   return OkStatus();
 }
 
@@ -3309,11 +3438,20 @@ Status IrEmitterUnnested::EmitOp(
   }
 
   if (mlir::isa<mlir::lmhlo_gpu::AllReduceStartOp>(op)) {
+    if (ir_emitter_context_->emit_ir_from_hlo()) {
+      auto* all_reduce = Cast<HloAllReduceInstruction>(hlo_for_lmhlo.at(op));
+      return EmitNcclThunk<NcclAllReduceStartThunk, HloAllReduceInstruction>(
+          Thunk::kNcclAllReduceStart, all_reduce,
+          all_reduce->use_global_device_ids());
+    }
     return EmitNcclThunk<NcclAllReduceStartThunk,
                          mlir::lmhlo_gpu::AllReduceStartOp>(op);
   }
 
   if (mlir::isa<mlir::lmhlo_gpu::AllReduceDoneOp>(op)) {
+    if (ir_emitter_context_->emit_ir_from_hlo()) {
+      return EmitNcclAsyncDone(Thunk::kNcclAllReduceDone, hlo_for_lmhlo.at(op));
+    }
     return EmitNcclAsyncDone(
         Thunk::kNcclAllReduceDone, op,
         mlir::cast<mlir::lmhlo_gpu::AllReduceDoneOp>(op).getToken());
@@ -3349,6 +3487,9 @@ Status IrEmitterUnnested::EmitOp(
   }
 
   if (mlir::isa<mlir::lmhlo::OutfeedOp>(op)) {
+    if (ir_emitter_context_->emit_ir_from_hlo()) {
+      return EmitOutfeed(Cast<HloOutfeedInstruction>(hlo_for_lmhlo.at(op)));
+    }
     return EmitOutfeed(op);
   }
 
@@ -3357,7 +3498,7 @@ Status IrEmitterUnnested::EmitOp(
   }
 
   if (mlir::isa<mlir::lmhlo::WhileOp>(op)) {
-    return EmitWhile(op, hlo_for_lmhlo.at(op), hlo_for_lmhlo);
+    return EmitWhile(op, hlo_for_lmhlo);
   }
 
   // Remaining arith.constant ops are the gpu.launch_func dimensions as a result
@@ -3445,6 +3586,16 @@ Status IrEmitterUnnested::EmitHloInstruction(const HloInstruction* instr) {
           Cast<HloRngGetAndUpdateStateInstruction>(instr));
     case HloOpcode::kInfeed:
       return EmitInfeed(Cast<HloInfeedInstruction>(instr));
+    case HloOpcode::kAllReduceStart: {
+      auto* all_reduce = Cast<HloAllReduceInstruction>(instr);
+      return EmitNcclThunk<NcclAllReduceStartThunk, HloAllReduceInstruction>(
+          Thunk::kNcclAllReduceStart, all_reduce,
+          all_reduce->use_global_device_ids());
+    }
+    case HloOpcode::kAllReduceDone:
+      return EmitNcclAsyncDone(Thunk::kNcclAllReduceDone, instr);
+    case HloOpcode::kOutfeed:
+      return EmitOutfeed(Cast<HloOutfeedInstruction>(instr));
     // We don't need to emit thunks for these operations because their semantics
     // are encoded by buffers.
     case HloOpcode::kBitcast:

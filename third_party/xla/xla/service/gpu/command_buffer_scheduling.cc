@@ -38,6 +38,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/cublas_cudnn.h"
+#include "xla/service/gpu/variant_visitor.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status.h"
@@ -536,32 +537,33 @@ StatusOr<bool> CommandBufferScheduling::Run(
   auto erase = [&](absl::Span<const DebugOptions::CommandBufferCmdType> cmds) {
     for (auto cmd : cmds) {
       if (config.erase(cmd)) {
-        LOG(WARNING) << "Removed command buffer support for "
-                     << DebugOptions::CommandBufferCmdType_Name(cmd)
-                     << " as it's not supported with gpu toolkit version "
-                     << gpu_toolkit_version_ << " and driver version "
-                     << gpu_driver_version_
-                     << ". This might negatively impact peformance. To enable "
-                     << DebugOptions::CommandBufferCmdType_Name(cmd)
-                     << " support in command buffers use cuda-compat package: "
+        LOG_FIRST_N(WARNING, 10)
+            << "Removed command buffer support for "
+            << DebugOptions::CommandBufferCmdType_Name(cmd)
+            << " as it's not supported with gpu toolkit version "
+            << gpu_toolkit_version_ << " and driver version "
+            << gpu_driver_version_
+            << ". This might negatively impact peformance. To enable "
+            << DebugOptions::CommandBufferCmdType_Name(cmd)
+            << " support in command buffers use cuda-compat package: "
 #if defined(PLATFORM_GOOGLE)
-                     << "set CUDA_COMPAT_LOAD=1 env variable.";
+            << "set CUDA_COMPAT_LOAD=1 env variable.";
 #else
-                     << "https://docs.nvidia.com/deploy/cuda-compatibility/.";
+            << "https://docs.nvidia.com/deploy/cuda-compatibility/.";
 #endif
       }
     }
   };
 
   bool do_erase = std::visit(
-      se::VariantVisitor{
-          [this](const se::CudaComputeCapability&) {
-            return std::min(gpu_toolkit_version_, gpu_driver_version_) < 12030;
-          },
-          [](const se::RocmComputeCapability&) {  // TODO: check for ROCM
-                                                  // support
-            return true;
-          }},
+      VariantVisitor{[this](const se::CudaComputeCapability&) {
+                       return std::min(gpu_toolkit_version_,
+                                       gpu_driver_version_) < 12030;
+                     },
+                     [](const se::RocmComputeCapability&) {  // TODO: check for
+                                                             // ROCM support
+                       return true;
+                     }},
       gpu_compute_comp_);
   if (do_erase) {
     erase(kRequireTracing);       // cuStreamBeginCaptureToGraph
