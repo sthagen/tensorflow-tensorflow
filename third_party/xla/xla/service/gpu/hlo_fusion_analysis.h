@@ -17,9 +17,10 @@ limitations under the License.
 #define XLA_SERVICE_GPU_HLO_FUSION_ANALYSIS_H_
 
 #include <optional>
-#include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/log/check.h"
+#include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/gpu/backend_configs.pb.h"
@@ -73,24 +74,6 @@ class HloFusionAnalysis {
   // Determines the fusion type for the emitter.
   EmitterFusionKind GetEmitterFusionKind() const;
 
-  ABSL_DEPRECATED("Use GetFusionEmitter().launch_dimensions() instead")
-  // Determines the launch dimensions for the fusion. The fusion kind must not
-  // be `kTriton`.
-  StatusOr<LaunchDimensions> GetLaunchDimensions() const;
-
-  // Calculates the transpose tiling information. Returns `nullptr` if the
-  // fusion is not a transpose.
-  const TilingScheme* GetTransposeTilingScheme() const {
-    return transpose_tiling_scheme_.has_value() ? &*transpose_tiling_scheme_
-                                                : nullptr;
-  }
-
-  // Calculates the loop fusion config. Returns `nullptr` if the fusion is not a
-  // loop.
-  const LaunchDimensionsConfig* GetLoopFusionConfig() const {
-    return loop_fusion_config_.has_value() ? &*loop_fusion_config_ : nullptr;
-  }
-
   // Returns the hero reduction of the computation.
   const HloInstruction* FindHeroReduction() const;
 
@@ -98,6 +81,13 @@ class HloFusionAnalysis {
 
   const FusionBackendConfig& fusion_backend_config() const {
     return fusion_backend_config_;
+  }
+
+  // Returns the tiled transpose description. Requires that GetEmitterFusionKind
+  // returns kTranspose.
+  const TransposeDescription& tiled_transpose() const {
+    CHECK(tiled_transpose_.has_value());
+    return *tiled_transpose_;
   }
 
   const InputOutputInfo& input_output_info() const {
@@ -113,8 +103,6 @@ class HloFusionAnalysis {
                     std::optional<TransposeDescription> tiled_transpose,
                     InputOutputInfo input_output_info);
 
-  const Shape& GetElementShape() const;
-  std::optional<LaunchDimensionsConfig> ComputeLoopFusionConfig() const;
   bool HasConsistentTransposeHeros() const;
 
   FusionBackendConfig fusion_backend_config_;
@@ -124,9 +112,6 @@ class HloFusionAnalysis {
   const se::DeviceDescription* device_info_;
   std::optional<TransposeDescription> tiled_transpose_;
   InputOutputInfo input_output_info_;
-
-  std::optional<TilingScheme> transpose_tiling_scheme_;
-  std::optional<LaunchDimensionsConfig> loop_fusion_config_;
 };
 
 // Creates a HloFusionAnalysis that analyzes a hypothetical fusion of producer

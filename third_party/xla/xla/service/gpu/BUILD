@@ -917,6 +917,105 @@ tsl_gpu_library(
     ]),
 )
 
+cuda_library(
+    name = "mock_nccl_sleep_kernel_cuda",
+    srcs = if_cuda_is_configured(
+        [
+            "mock_nccl_sleep_kernel.cu.cc",
+        ],
+    ),
+    hdrs = if_cuda_is_configured(["mock_nccl_sleep_kernel.h"]),
+    compatible_with = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@local_config_cuda//cuda:cuda_headers",
+    ],
+)
+
+alias(
+    name = "mock_nccl_utils",
+    actual = if_google(
+        google_value = if_nccl(":_mock_nccl_utils_google", ":empty"),
+        oss_value = if_nccl(":_mock_nccl_utils_default", ":empty"),
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Do not build mock_nccl_utils.cc in OSS. It uses the nccl internal cost model to estimate the
+# communication time of nccl collective calls. Only build it in Google builds.
+# TODO(b/306073484): Stub out the cost model api used in mock nccl functions.
+cc_library(
+    name = "_mock_nccl_utils_google",
+    srcs = if_cuda_is_configured(["mock_nccl_utils.cc"]),
+    hdrs = if_cuda_is_configured(["mock_nccl_utils.h"]),
+    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
+    compatible_with = [],
+    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = if_cuda_is_configured([
+        ":gpu_executable_run_options",
+        ":mock_nccl_sleep_kernel_cuda",
+        ":nccl_collective_thunks",
+        ":nccl_utils",
+        ":thunk",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
+        "@local_config_cuda//cuda:cuda_headers",
+        "@local_config_nccl//:nccl",
+        "//xla:debug_options_flags",
+        "//xla:executable_run_options",
+        "//xla:shape_util",
+        "//xla:status",
+        "//xla:status_macros",
+        "//xla:statusor",
+        "//xla:util",
+        "//xla/service:collective_ops_utils",
+        "//xla/service:global_device_id",
+        "//xla/service:rendezvous",
+        "//xla/stream_executor",
+        "//xla/stream_executor/gpu:gpu_activation",
+        "//xla/stream_executor/gpu:gpu_stream",
+        "//xla/stream_executor/gpu:gpu_types_header",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+    ]),
+)
+
+cc_library(
+    name = "_mock_nccl_utils_default",
+    srcs = if_gpu_is_configured(["mock_nccl_utils_default.cc"]),
+    hdrs = if_gpu_is_configured(["mock_nccl_utils.h"]),
+    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
+    compatible_with = [],
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = if_gpu_is_configured([
+        ":gpu_executable_run_options",
+        ":nccl_collective_thunks",
+        ":nccl_utils",
+        ":thunk",
+        "@com_google_absl//absl/strings:string_view",
+        "//xla:executable_run_options",
+        "//xla:status",
+        "//xla:statusor",
+        "//xla:util",
+        "//xla/service:collective_ops_utils",
+        "//xla/service:global_device_id",
+        "//xla/stream_executor",
+    ]),
+)
+
 # TODO(b/244780257): Remove this config.
 bool_flag(
     name = "enable_xlir",
@@ -949,14 +1048,12 @@ cc_library(
     name = "gpu_executable",
     srcs = [
         "gpu_executable.cc",
-        "memset_thunk.cc",
         "norm_thunk.cc",
         "outfeed_thunk.cc",
         "replica_id_thunk.cc",
     ],
     hdrs = [
         "gpu_executable.h",
-        "memset_thunk.h",
         "norm_thunk.h",
         "outfeed_thunk.h",
         "replica_id_thunk.h",

@@ -82,6 +82,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/hlo/utils/hlo_query.h"
 #include "xla/layout_util.h"
 #include "xla/literal.h"
@@ -3596,6 +3597,8 @@ Status IrEmitterUnnested::EmitHloInstruction(const HloInstruction* instr) {
       return EmitNcclAsyncDone(Thunk::kNcclAllReduceDone, instr);
     case HloOpcode::kOutfeed:
       return EmitOutfeed(Cast<HloOutfeedInstruction>(instr));
+    case HloOpcode::kCall:
+      return EmitCommandBufferThunk(instr);
     // We don't need to emit thunks for these operations because their semantics
     // are encoded by buffers.
     case HloOpcode::kBitcast:
@@ -3616,8 +3619,13 @@ Status IrEmitterUnnested::EmitHloInstruction(const HloInstruction* instr) {
 
 Status IrEmitterUnnested::EmitHloComputation(
     const HloComputation* computation) {
-  ThunkSequence thunk_sequence;
-  for (const HloInstruction* instr : computation->instructions()) {
+  const HloSchedule& schedule = computation->parent()->schedule();
+  if (!schedule.is_computation_scheduled(computation))
+    return InternalError("Sequence not found for computation: %s",
+                         computation->name());
+
+  const HloInstructionSequence& sequence = schedule.sequence(computation);
+  for (HloInstruction* instr : sequence.instructions()) {
     TF_RETURN_IF_ERROR(EmitHloInstruction(instr));
   }
   return OkStatus();

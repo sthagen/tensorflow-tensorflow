@@ -23,9 +23,11 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/collective_ops_utils.h"
@@ -53,6 +55,10 @@ using OwnedKernel = std::unique_ptr<se::Kernel>;
 
 // CommandBufferCmd is an abstract command that creates or updates command
 // buffer by recording commands into it.
+//
+// Command initialization and recording must be thread safe as commands can be
+// recorded concurrently for multiple command buffers on different stream
+// executors.
 class CommandBufferCmd {
  public:
   enum class MemoryAccess { kRead, kWrite };
@@ -90,6 +96,7 @@ class CommandBufferCmd {
   // the target address as se::DeviceMemoryBase{nullptr, size}.
   struct RecordParams {
     se::StreamExecutor* executor = nullptr;
+    se::Stream* stream = nullptr;
     se::Stream* trace_stream = nullptr;
     const BufferAllocations* buffer_allocations = nullptr;
     const NcclExecuteParams* nccl_params = nullptr;
@@ -229,7 +236,11 @@ class LaunchCmd : public CommandBufferCmd {
   LaunchDimensions dims_;
   int64_t shmem_bytes_;
 
-  absl::flat_hash_map<se::StreamExecutor*, OwnedKernel> kernels_;
+  // Command sequence can be recorded concurrently for multiple command buffers
+  // on different stream executors and we need to synchronize mutable state.
+  absl::Mutex mutex_;
+  absl::flat_hash_map<se::StreamExecutor*, OwnedKernel> kernels_
+      ABSL_GUARDED_BY(mutex_);
 };
 
 //===----------------------------------------------------------------------===//
@@ -255,7 +266,11 @@ class CustomKernelLaunchCmd : public CommandBufferCmd {
   std::vector<MemoryAccess> args_access_;
   CustomKernel custom_kernel_;
 
-  absl::flat_hash_map<se::StreamExecutor*, OwnedKernel> kernels_;
+  // Command sequence can be recorded concurrently for multiple command buffers
+  // on different stream executors and we need to synchronize mutable state.
+  absl::Mutex mutex_;
+  absl::flat_hash_map<se::StreamExecutor*, OwnedKernel> kernels_
+      ABSL_GUARDED_BY(mutex_);
 };
 
 //===----------------------------------------------------------------------===//
@@ -432,7 +447,7 @@ class WhileCmd : public CommandBufferCmd {
 
 class AllocateCmd : public CommandBufferCmd {
  public:
-  AllocateCmd(BufferAllocation allocation);
+  explicit AllocateCmd(BufferAllocation allocation);
 
   // After calling this function, the allocated memory is tracked in
   // CommandBuffer object.

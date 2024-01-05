@@ -145,10 +145,13 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":fusion_emitter",
+        "//xla:shape_util",
         "//xla:status",
         "//xla:statusor",
         "//xla/hlo/ir:hlo",
+        "//xla/service/gpu:gpu_fusible",
         "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/service/gpu:hlo_traversal",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/service/gpu:ir_emitter",
         "//xla/service/gpu:ir_emitter_context",
@@ -156,6 +159,7 @@ cc_library(
         "//xla/service/gpu:parallel_loop_emitter",
         "//xla/service/llvm_ir:fused_ir_emitter",
         "//xla/service/llvm_ir:ir_array",
+        "@com_google_absl//absl/numeric:bits",
         "@llvm-project//llvm:ir_headers",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -186,6 +190,22 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:ir_headers",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "scatter_test",
+    srcs = ["scatter_test.cc"],
+    deps = [
+        ":fusions",
+        ":scatter",
+        "//xla/service/gpu:gpu_device_info_for_tests",
+        "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -278,6 +298,7 @@ cc_library(
         "//xla/service/gpu:gpu_executable",
         "//xla/service/gpu:ir_emitter_context",
         "//xla/service/gpu:thunk",
+        "//xla/service/gpu/runtime3:memset_thunk",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/types:span",
         "@llvm-project//mlir:IR",

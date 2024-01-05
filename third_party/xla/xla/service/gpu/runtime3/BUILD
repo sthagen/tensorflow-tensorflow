@@ -57,11 +57,14 @@ cc_library(
         "//xla/service/gpu/kernels:custom_kernel",
         "//xla/stream_executor",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
@@ -78,6 +81,7 @@ cc_library(
         ":command_buffer_cmd",
         ":copy_thunk",
         ":kernel_thunk",
+        ":memset_thunk",
         ":sequential_thunk",
         ":while_thunk",
         "//xla:statusor",
@@ -375,6 +379,19 @@ cc_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "memset_thunk",
+    srcs = ["memset_thunk.cc"],
+    hdrs = ["memset_thunk.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla:status",
+        "//xla/service:buffer_assignment",
+        "//xla/service/gpu:thunk",
+        "//xla/stream_executor",
     ],
 )
 
