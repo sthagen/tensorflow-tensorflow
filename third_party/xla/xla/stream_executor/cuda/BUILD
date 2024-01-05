@@ -12,7 +12,7 @@ load(
     "tf_additional_cudnn_plugin_deps",
     "tf_additional_gpu_compilation_copts",
 )
-load("@local_tsl//tsl:tsl.bzl", "if_google", "set_external_visibility", "tsl_copts")
+load("@local_tsl//tsl:tsl.bzl", "if_google", "if_nccl", "set_external_visibility", "tsl_copts")
 load(
     "@local_tsl//tsl/platform:build_config_root.bzl",
     "if_static",
@@ -131,6 +131,7 @@ cc_library(
     name = "cuda_driver",
     srcs = if_cuda_is_configured(["cuda_driver.cc"]),
     hdrs = if_cuda_is_configured(["cuda_driver.h"]),
+    defines = if_nccl(["NCCL_ENABLED=1"]),
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured([
         ":cuda_diagnostics",
@@ -164,7 +165,7 @@ cc_library(
         "@local_tsl//tsl/platform:stacktrace",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
-    ]),
+    ]) + if_nccl(["@local_config_nccl//:nccl"]),
 )
 
 cc_library(
@@ -621,23 +622,4 @@ cc_library(
             "//conditions:default": [],
         }),
     ),
-)
-
-xla_cc_test(
-    name = "redzone_allocator_test",
-    srcs = ["redzone_allocator_test.cc"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
-    tags = tf_cuda_tests_tags() + [
-        "no_cuda_asan",  # TODO(b/171512140): re-enable.
-    ],
-    deps = [
-        ":cuda_executor",
-        "//xla/stream_executor",
-        "//xla/stream_executor:device_memory_allocator",
-        "//xla/stream_executor/gpu:gpu_asm_opts",
-        "//xla/stream_executor/gpu:redzone_allocator",
-        "@local_tsl//tsl/lib/core:status_test_util",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
 )
