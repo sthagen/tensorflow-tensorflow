@@ -548,10 +548,10 @@ cc_library(
 xla_test(
     name = "ir_emitter_triton_test",
     srcs = if_cuda_is_configured(["ir_emitter_triton_test.cc"]),
-    backend_tags = {"gpu": [
-        "requires-gpu-sm70",
-    ]},
-    backends = ["gpu"],
+    backends = [
+        "gpu_a100",
+        "gpu_v100",
+    ],
     shard_count = 20,
     tags = ["nomac"],
     deps = [
@@ -834,7 +834,7 @@ tsl_gpu_library(
         "nccl_recv_thunk.h",
         "nccl_send_thunk.h",
     ],
-    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
+    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:<something>"].
     compatible_with = [],
     visibility = ["//visibility:public"],
     deps = [
@@ -891,7 +891,7 @@ tsl_gpu_library(
     name = "_nccl_utils",
     srcs = if_gpu_is_configured(["nccl_utils.cc"]),
     hdrs = if_gpu_is_configured(["nccl_utils.h"]),
-    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
+    # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:<something>"].
     compatible_with = [],
     defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),
     tags = ["manual"],  # Only builds with if_nccl().
