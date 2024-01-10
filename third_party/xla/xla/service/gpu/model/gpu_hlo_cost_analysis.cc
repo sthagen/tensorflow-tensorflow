@@ -41,7 +41,7 @@ limitations under the License.
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/cublas_cudnn.h"
 #include "xla/service/gpu/model/hlo_op_profile.pb.h"
-#include "xla/service/gpu/model/hlo_op_profiles.h"
+#include "xla/service/gpu/model/hlo_op_profiles_data.h"
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/shape.h"
@@ -69,7 +69,7 @@ static constexpr absl::string_view kCollNumDevicesKey =
 // type of hardware below.
 // TODO TJ this needs to be hosted somewhere more centralized.
 
-Status GpuHloCostAnalysis::Preprocess(const HloInstruction* hlo) {
+absl::Status GpuHloCostAnalysis::Preprocess(const HloInstruction* hlo) {
   TF_RETURN_IF_ERROR(HloCostAnalysis::Preprocess(hlo));
 
   current_properties_[kIRSizeKey] = 1;
@@ -98,7 +98,7 @@ int64_t GpuHloCostAnalysis::FusionParameterReadBytes(
   return GetShapeSize(hlo->shape()) * utilization;
 }
 
-Status GpuHloCostAnalysis::FusionCalculateUtilizations(
+absl::Status GpuHloCostAnalysis::FusionCalculateUtilizations(
     const HloInstruction* fusion) {
   const HloInstruction* root = fusion->fused_expression_root();
   // Traverse through the computation from the root till parameters propagating
@@ -173,8 +173,16 @@ Status GpuHloCostAnalysis::FusionCalculateUtilizations(
         // to be more realistic.
         int64_t operand_elements =
             ShapeUtil::ElementsInRecursive(operand->shape());
-        cur_operand_utilization =
-            ceil(cur_operand_utilization * operand_elements) / operand_elements;
+
+        if (operand_elements == 0) {
+          // Element count should not be 0 in any production use case, but there
+          // are valid HLO inputs that occur in tests.
+          cur_operand_utilization = 0;
+        } else {
+          cur_operand_utilization =
+              ceil(cur_operand_utilization * operand_elements) /
+              operand_elements;
+        }
         root_utilizations_[operand] += cur_operand_utilization;
         root_ir_sizes[operand] += cur_instr_times_emitted;
       }
@@ -222,7 +230,8 @@ bool GpuHloCostAnalysis::ProducerConsumerMergedTooLarge(
   return merged_ir_size > kMaxIRSize;
 }
 
-Status GpuHloCostAnalysis::HandleCustomCall(const HloInstruction* custom_call) {
+absl::Status GpuHloCostAnalysis::HandleCustomCall(
+    const HloInstruction* custom_call) {
   if (IsCublasGemm(*custom_call)) {
     // The naming conventions and meanings of gemm parameters are documented
     // here:
@@ -371,7 +380,8 @@ int64_t GetFlopsForElementwiseOp(const se::DeviceDescription* gpu_device_info,
                                   instr->shape());
 }
 
-Status GpuHloCostAnalysis::HandleAllReduce(const HloInstruction* allreduce) {
+absl::Status GpuHloCostAnalysis::HandleAllReduce(
+    const HloInstruction* allreduce) {
   const HloModuleConfig& config = allreduce->GetModule()->config();
   TF_ASSIGN_OR_RETURN(
       CollectiveOpGroupMode group_mode,
@@ -431,7 +441,7 @@ Status GpuHloCostAnalysis::HandleAllReduce(const HloInstruction* allreduce) {
   return absl::OkStatus();
 }
 
-Status GpuHloCostAnalysis::HandleConcatenate(const HloInstruction* hlo) {
+absl::Status GpuHloCostAnalysis::HandleConcatenate(const HloInstruction* hlo) {
   // Concat turns into a compare plus branch instruction.
   int64_t flop_per_element = 6;
   // If a warp crosses the operands boundary, both branches are executed. This
@@ -455,16 +465,19 @@ Status GpuHloCostAnalysis::HandleConcatenate(const HloInstruction* hlo) {
   return absl::OkStatus();
 }
 
-Status GpuHloCostAnalysis::HandleElementwiseOp(const HloInstruction* hlo) {
+absl::Status GpuHloCostAnalysis::HandleElementwiseOp(
+    const HloInstruction* hlo) {
   current_properties_[kFlopsKey] = GetFlopsForElementwiseOp(device_info_, hlo);
   return absl::OkStatus();
 }
 
-Status GpuHloCostAnalysis::HandleElementwiseUnary(const HloInstruction* hlo) {
+absl::Status GpuHloCostAnalysis::HandleElementwiseUnary(
+    const HloInstruction* hlo) {
   return HandleElementwiseOp(hlo);
 }
 
-Status GpuHloCostAnalysis::HandleElementwiseBinary(const HloInstruction* hlo) {
+absl::Status GpuHloCostAnalysis::HandleElementwiseBinary(
+    const HloInstruction* hlo) {
   return HandleElementwiseOp(hlo);
 }
 

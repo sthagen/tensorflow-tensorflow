@@ -36,7 +36,7 @@ StatusOr<bool> FusionWrapper::Run(
   bool changed = false;
 
   std::function<Status(HloInstruction*)> handle_instruction;
-  handle_instruction = [&](HloInstruction* instruction) -> Status {
+  handle_instruction = [&](HloInstruction* instruction) -> absl::Status {
     switch (instruction->opcode()) {
       case HloOpcode::kConditional:
       case HloOpcode::kWhile:
@@ -114,8 +114,8 @@ StatusOr<bool> FusionWrapper::Run(
         auto* computation = instruction->parent();
         auto* fusion_instruction =
             computation->AddInstruction(HloInstruction::CreateFusion(
-                instruction->shape(), ChooseFusionKind(*instruction),
-                instruction));
+                instruction->shape(),
+                ChooseFusionKind(*instruction, *instruction), instruction));
         instruction->GetModule()->SetAndUniquifyInstrName(
             fusion_instruction, absl::StrCat("wrapped_", instruction->name()));
         if (module->has_schedule()) {

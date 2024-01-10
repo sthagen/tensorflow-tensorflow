@@ -84,15 +84,15 @@ class KernelFusionInterface : public FusionInterface {
 
  protected:
   // Returns the default mapping for the given launch dimensions: linearizes
-  // the thread index and then reshapes it into the output layout. Assumes no
-  // unrolling.
+  // the thread index and then reshapes it into the output layout.
   static mlir::AffineMap GetDefaultThreadIdToOutputIndexingMap(
-      const LaunchDimensions& launch_dims, const Shape& output_shape,
-      mlir::MLIRContext* ctx);
+      const LaunchDimensions& launch_dims, int unroll_factor,
+      const Shape& output_shape, mlir::MLIRContext* ctx);
 
   // Populates the ranges for d0, d1, d2, d3, d4, d5 from the thread counts and
   // block sizes in the given launch dimensions.
-  static Domain GetThreadIdDomain(const LaunchDimensions& launch_dims);
+  static Domain GetThreadIdDomain(const LaunchDimensions& launch_dims,
+                                  int unroll_factor);
 };
 
 // Base class for fusions that are implemented using a single kernel, which is
@@ -112,12 +112,12 @@ class KernelFusionEmitterBase : public KernelFusionInterface {
     return FusionEmissionResult{};
   }
 
-  virtual Status EmitKernel(IrEmitterContext& ir_emitter_context,
-                            const HloFusionInstruction& fusion,
-                            const LaunchDimensions& launch_dims,
-                            std::vector<llvm_ir::IrArray> inputs,
-                            std::vector<llvm_ir::IrArray> outputs,
-                            llvm::IRBuilder<>* builder) const = 0;
+  virtual absl::Status EmitKernel(IrEmitterContext& ir_emitter_context,
+                                  const HloFusionInstruction& fusion,
+                                  const LaunchDimensions& launch_dims,
+                                  std::vector<llvm_ir::IrArray> inputs,
+                                  std::vector<llvm_ir::IrArray> outputs,
+                                  llvm::IRBuilder<>* builder) const = 0;
 };
 
 StatusOr<std::tuple<llvm::Function*, std::vector<llvm_ir::IrArray /*inputs*/>,

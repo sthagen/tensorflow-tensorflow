@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/service/gpu/conv_algorithm_picker.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -308,7 +309,7 @@ void PrintPlatformInfo(const se::Stream* stream) {
 // If the redzones are modified, logs an error, sets the appropriate failure
 // bits on `result`, and returns false.
 //
-// Returns a status if an unexpected error has occurred, and the stream
+// Returns a absl::Status if an unexpected error has occurred, and the stream
 // has been poisoned.
 //
 // `name` is a user-friendly name for the set of redzones being checked, e.g.
@@ -600,7 +601,7 @@ StatusOr<AutotuneResult> GpuConvAlgorithmPicker::AutotuneOneConvRunner(
   // https://github.com/NVIDIA/cudnn-frontend/blob/60496f42fdc7a4ccc059f5934e306e728a756755/include/cudnn_frontend_find_plan.h
   float max_time = 0;
   float min_time = std::numeric_limits<float>::max();
-  Status launch_status;
+  absl::Status launch_status;
   std::vector<se::DeviceMemoryBase> operand_buffers =
       runtime_arguments.operand_buffers;
   std::vector<se::DeviceMemoryBase> result_buffers =
@@ -608,10 +609,9 @@ StatusOr<AutotuneResult> GpuConvAlgorithmPicker::AutotuneOneConvRunner(
   // Dry-run to warmup the plan.
   launch_status = RunGpuConv(config, operand_buffers, result_buffers,
                              scratch_memory, stream, options);
-  constexpr float kThreshold = 0.95f;
   constexpr int kMaxIter = 10;
-  // Iterate until new measurement is less than
-  // kThreshold * min(prev measurements).
+  // Iterate until the new measurement is within kThreshold of the current
+  // minimum.
   int num_iters = 0;
   for (;
        num_iters < kMaxIter && launch_status.ok() && profile_result.is_valid();
@@ -621,7 +621,11 @@ StatusOr<AutotuneResult> GpuConvAlgorithmPicker::AutotuneOneConvRunner(
     float old_min_time = min_time;
     min_time = std::min(min_time, profile_result.elapsed_time_in_ms());
     max_time = std::max(max_time, profile_result.elapsed_time_in_ms());
-    if (profile_result.elapsed_time_in_ms() / old_min_time >= kThreshold) {
+
+    constexpr float kThreshold = 0.05f;
+    if (std::abs(profile_result.elapsed_time_in_ms() - old_min_time) /
+            old_min_time <
+        kThreshold) {
       break;
     }
   }
@@ -1029,7 +1033,7 @@ StatusOr<AutotuneResult> GpuConvAlgorithmPicker::PickBestAlgorithmNoCacheRocm(
       RunConvOptions options;
       options.profile_result = &profile_result;
       options.runner_cache = &runner_cache;
-      Status launch_status =
+      absl::Status launch_status =
           RunGpuConv(config, absl::MakeSpan(operand_buffers), result_buffers,
                      scratch_memory, stream, options);
 

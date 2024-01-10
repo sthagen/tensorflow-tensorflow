@@ -170,7 +170,8 @@ FusionDecision IsProducerMultiOutputFusible(const HloInstruction& producer);
 bool IsFusibleAsMultiOutputFusionRoot(const HloInstruction& instr);
 
 // Determines the fusion kind to be used when fusing into `consumer`.
-HloInstruction::FusionKind ChooseFusionKind(const HloInstruction& consumer);
+HloInstruction::FusionKind ChooseFusionKind(const HloInstruction& producer,
+                                            const HloInstruction& consumer);
 
 // Returns whether `consumer` is the only non-root user of `instr`.
 bool IsConsumerTheOnlyNonRootUser(const HloInstruction& instr,
@@ -206,10 +207,6 @@ size_t GetOutputSizeOfFusible(const HloInstruction& instr);
 // Expected output: [R1]
 std::vector<const HloInstruction*> GetFusionRoots(
     const HloComputation& computation);
-
-// Whether the instruction is a reduction hero for the given root.
-bool IsRealReductionHero(const HloInstruction& root,
-                         const HloInstruction& hero);
 
 // Whether the instruction is a Triton Softmax fusion.
 bool IsTritonSoftmaxFusion(const HloInstruction& instr);

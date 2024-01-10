@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "xla/executable_run_options.h"
 #include "xla/service/collective_ops_utils.h"
@@ -41,28 +42,29 @@ StatusOr<NcclComm::Lock> LockMockNcclComm(
     const NcclExecuteParams& params,
     const std::vector<ReplicaGroup>& replica_groups,
     CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id,
-    bool enable_clique_optimization);
+    bool enable_clique_optimization,
+    GpuExecutableRunOptions::MockNcclTopoModel topo_model);
 
 StatusOr<NcclComm::Lock> AcquireMockNcclComm(
-    ncclComm_t local_comm, RunId run_id, OpId op_id,
-    std::vector<GlobalDeviceId> participants,
+    RunId run_id, OpId op_id, std::vector<GlobalDeviceId> participants,
     std::vector<GlobalDeviceId> local_devices, size_t num_local_participants,
     const NcclUniqueIdCallback& unique_id_callback, int rank, int64_t stream_id,
-    bool enable_clique_optimization);
+    bool enable_clique_optimization,
+    GpuExecutableRunOptions::MockNcclTopoModel topo_model);
 
 // Mock a Nccl collective op including all-reduce, all-gather, and
 // reduce-scatter.
-Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
-                              se::Stream& stream, ncclComm_t comm,
-                              Thunk::Kind reduce_op);
+absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
+                                    se::Stream& stream, ncclComm_t comm,
+                                    Thunk::Kind reduce_op);
 
 // Mock a NCCL-based All-To-All op.
-Status RunMockNcclAllToAll(bool has_split_dimension,
-                           std::vector<DeviceBufferPair>& buffers,
-                           se::Stream& stream, ncclComm_t comm);
+absl::Status RunMockNcclAllToAll(bool has_split_dimension,
+                                 std::vector<DeviceBufferPair>& buffers,
+                                 se::Stream& stream, ncclComm_t comm);
 
 // Mock a collective permute op.
-Status RunMockCollectivePermute(
+absl::Status RunMockCollectivePermute(
     NcclP2PConfig::SourceTargetMapEntry source_target, DeviceBufferPair& buffer,
     se::Stream& stream, ncclComm_t comm, absl::string_view device_string,
     int64_t current_id);
