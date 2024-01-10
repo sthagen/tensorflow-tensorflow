@@ -213,7 +213,7 @@ Status NVPTXCompiler::OptimizeHloConvolutionCanonicalization(
   pipeline.AddPass<HloConstantFolding>();
   TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status NVPTXCompiler::OptimizeHloPostLayoutAssignment(
@@ -296,7 +296,7 @@ Status NVPTXCompiler::OptimizeHloPostLayoutAssignment(
 
   TF_RETURN_IF_ERROR(post_pipeline.Run(hlo_module).status());
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 // Linearize collective schedule under if online autotuning of convolutions is
@@ -324,14 +324,14 @@ Status NVPTXCompiler::AddConvAndGemmAutotuningPasses(
     pipeline->AddPass<GpuConvAlgorithmPicker>(autotune_config);
   }
   pipeline->AddPass<GemmAlgorithmPicker>(autotune_config);
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status NVPTXCompiler::AddTritonGemmAutotuningPasses(
     HloPassPipeline* pipeline, HloModule* hlo_module,
     AutotuneConfig& autotune_config, tsl::thread::ThreadPool* thread_pool) {
   pipeline->AddPass<TritonAutotuner>(autotune_config, thread_pool);
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status NVPTXCompiler::AddCustomKernelReplacementPasses(
@@ -339,7 +339,7 @@ Status NVPTXCompiler::AddCustomKernelReplacementPasses(
   if (debug_options.xla_gpu_enable_cub_radix_sort()) {
     pipeline->AddPass<GpuSortRewriter>();
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 namespace {
 // Try to load ptx from files defined in the FLAGS. If successful, return true.
@@ -694,8 +694,7 @@ StatusOr<NVPTXCompiler::LinkingMethod> NVPTXCompiler::ChooseLinkingMethod(
   // since we are fetching the ptxas version anyway. Catching the error
   // elsewhere might introduce unnecessary overhead.
   if (ptxas_version_tuple < std::array<int64_t, 3>{11, 8, 0}) {
-    return Status(absl::StatusCode::kInternal,
-                  "XLA requires ptxas version 11.8 or higher");
+    return absl::InternalError("XLA requires ptxas version 11.8 or higher");
   }
 
   static const std::optional<std::array<int64_t, 3>> nvlink_version =

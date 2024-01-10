@@ -43,6 +43,8 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/hlo/utils/hlo_live_range.h"
 #include "xla/map_util.h"
+#include "xla/service/allocation_block.h"
+#include "xla/service/hlo_value.h"
 #include "xla/service/memory_space_assignment/repacking.h"
 #include "xla/service/time_utils.h"
 #include "xla/status.h"
@@ -458,8 +460,8 @@ int64_t HeapSimulator::GetBufferSize(const HloValue* buffer) const {
   return it->second;
 }
 
-HeapSimulator::Result<HloValue> HeapSimulator::Finish() {
-  Result<HloValue> result = algorithm_->Finish();
+StatusOr<HeapSimulator::Result<HloValue>> HeapSimulator::Finish() {
+  TF_ASSIGN_OR_RETURN(Result<HloValue> result, algorithm_->Finish());
 
   // Post-process the result to add chunks for shared buffers.  An empty chunk
   // map means that either no buffers were allocated, or the heap was only
@@ -478,7 +480,8 @@ HeapSimulator::Result<HloValue> HeapSimulator::Finish() {
   }
 
   // Fragmentation is the difference between the actual and ideal sizes.
-  const Result<HloValue> no_frag_result = no_fragmentation_stats_->Finish();
+  TF_ASSIGN_OR_RETURN(const Result<HloValue> no_frag_result,
+                      no_fragmentation_stats_->Finish());
   result.fragmentation_size = result.heap_size - no_frag_result.heap_size;
 
   // Copy the debug trace we collected to the final result.
@@ -550,7 +553,7 @@ void NoFragmentationStatsHeap<BufferType>::Free(const BufferType* buffer,
 }
 
 template <typename BufferType>
-HeapSimulator::Result<BufferType>
+StatusOr<HeapSimulator::Result<BufferType>>
 NoFragmentationStatsHeap<BufferType>::Finish() {
   // The result.chunk_map is empty, since we only collect stats, and don't
   // actually compute chunk assignments.
@@ -1629,7 +1632,7 @@ GlobalDecreasingSizeBestFitHeap<BufferType>::SlicedAllocationFinder::
 }
 
 template <typename BufferType>
-HeapSimulator::Result<BufferType>
+StatusOr<HeapSimulator::Result<BufferType>>
 GlobalDecreasingSizeBestFitHeap<BufferType>::Finish() {
   std::vector<BufferInterval> sorted_buffer_intervals =
       GetSortedBufferIntervals();
@@ -1851,7 +1854,7 @@ void GlobalDecreasingSizeBestFitHeap<BufferType>::AddToChunkMap(
   DCHECK(emplace_result.second);
 }
 
-HeapSimulator::Result<HloValue>
+StatusOr<HeapSimulator::Result<HloValue>>
 ConstrainedGlobalDecreasingSizeBestFitHeap::Finish() {
   std::vector<BufferInterval> sorted_buffer_vec = GetSortedBufferIntervals();
   // Convert into std::list so that erase() is O(1).
@@ -1904,14 +1907,14 @@ ConstrainedGlobalDecreasingSizeBestFitHeap::Finish() {
 }
 
 template <typename BufferType>
-HeapSimulator::Result<BufferType>
+StatusOr<HeapSimulator::Result<BufferType>>
 ChooseBestHeapAlgorithm<BufferType>::Finish() {
   DCHECK(!algorithms_.empty());
   std::vector<Result> results(algorithms_.size());
   int64_t min_size = INT64_MAX;
   int min_size_index = -1;
   for (int i = 0; i < algorithms_.size(); ++i) {
-    results[i] = algorithms_[i]->Finish();
+    TF_ASSIGN_OR_RETURN(results[i], algorithms_[i]->Finish());
     if (results[i].heap_size < min_size) {
       min_size = results[i].heap_size;
       min_size_index = i;
@@ -1923,8 +1926,7 @@ ChooseBestHeapAlgorithm<BufferType>::Finish() {
 }
 
 template class GlobalDecreasingSizeBestFitHeap<HloValue>;
-template class GlobalDecreasingSizeBestFitHeap<
-    memory_space_assignment::MemorySpaceAssignmentRepacker::AllocationBlock>;
+template class GlobalDecreasingSizeBestFitHeap<AllocationBlock>;
 template class ChooseBestHeapAlgorithm<HloValue>;
 
 }  // namespace xla

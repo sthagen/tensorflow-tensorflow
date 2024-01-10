@@ -143,8 +143,8 @@ class IrEmitterUnnested : public IrEmitter {
       mlir::Operation* op,
       const absl::flat_hash_map<const mlir::Operation*, const HloInstruction*>&
           hlo_for_lmhlo);
-  Status EmitConditional(const HloInstruction* instr);
   Status EmitConvolutionThunk(mlir::Operation* op);
+  Status EmitConvolutionThunk(const HloCustomCallInstruction* instr);
   Status EmitGemmThunk(mlir::Operation* op);
   Status EmitGemmThunk(const HloCustomCallInstruction* instr);
 #if GOOGLE_CUDA || TF_HIPBLASLT
@@ -214,10 +214,12 @@ class IrEmitterUnnested : public IrEmitter {
                        const HloInstType* inst,
                        std::optional<bool> use_global_device_ids);
 
-  Status EmitNcclAsyncDone(Thunk::Kind kind, const HloInstruction* inst);
+  Status EmitNcclAsyncDone(Thunk::Kind kind, const HloInstruction* instr);
 
   template <typename ThunkType, typename OpT>
   Status EmitReplicaOrPartitionId(mlir::Operation* op);
+  template <typename ThunkType>
+  Status EmitReplicaOrPartitionId(const HloInstruction* instr);
 
   Status EmitCollectivePermute(mlir::Operation* op);
 
@@ -244,7 +246,7 @@ class IrEmitterUnnested : public IrEmitter {
     for (auto& thunk : result->thunks) {
       AddThunkToThunkSequence(std::move(thunk));
     }
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   // Load data from potentially unaligned address. If address is offset by

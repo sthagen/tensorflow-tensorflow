@@ -26,6 +26,7 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
 #include "absl/hash/hash.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
@@ -65,7 +66,7 @@ bool IsGlobalNcclConfig() {
 Status ToStatus(ncclResult_t s, const char* file, int64_t line,
                 const char* expr) {
   if (s == ncclSuccess) {
-    return OkStatus();
+    return absl::OkStatus();
   }
   return absl::InternalError(absl::StrFormat(
       "%s:%d: NCCL operation %s failed: %s."
@@ -168,13 +169,23 @@ struct NcclCliqueState {
 
 using NcclClique = Lockable<NcclCliqueState>;
 
+struct NcclCliques {
+  NcclClique& operator[](const NcclCliqueKey& key) {
+    absl::MutexLock lock(&mu);
+    return cliques[key];
+  }
+
+  absl::Mutex mu;
+  absl::node_hash_map<NcclCliqueKey, NcclClique> cliques ABSL_GUARDED_BY(mu);
+};
+
 std::shared_ptr<StatusOr<NcclClique::Lock>> AcquireNcclClique(
     RunId run_id, OpId op_id, NcclCliqueKey clique_key,
     const NcclUniqueIdCallback& unique_id_callback,
     size_t num_local_participants, bool may_skip_rendezvous) {
-  static auto& cliques = *new ThreadSafeMap<NcclCliqueKey, NcclClique>;
+  static auto& cliques = *new NcclCliques;
 
-  VLOG(2) << "AcquireNcclClique Rendezvous key (clique_key:"
+  VLOG(2) << "AcquireNcclClique Rendezvous key (clique_key: "
           << clique_key.ToString() << ", run" << run_id.ToString() << ", op"
           << op_id.value() << ")";
 
@@ -237,7 +248,7 @@ void TrackNcclCommunicatorHealth(NcclComm* comm) {
   // abort any uncompleted operations before destroying the communicator.
   auto check_nccl_async_error = [](NcclComm* lockable_comm) -> Status {
     ncclComm_t comm = *lockable_comm->Acquire();
-    if (comm == nullptr) return OkStatus();
+    if (comm == nullptr) return absl::OkStatus();
 
     ncclResult_t async_err;
     XLA_CUDA_RETURN_IF_ERROR(ncclCommGetAsyncError(comm, &async_err));

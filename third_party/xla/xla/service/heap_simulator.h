@@ -27,6 +27,9 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "xla/service/allocation_block.h"
+#include "xla/service/hlo_value.h"
+
 // TODO(b/210891274): Use btree_map after build issue in Windows is resolved.
 #if defined(__GNUC__) || defined(__clang__)
 #include "absl/container/btree_map.h"
@@ -232,7 +235,7 @@ class HeapSimulator {
   //  Two buffers belong to the same shared group.
   //  Eight of the buffer has no shared group assigned.
   bool InSameSharedGroup(const HloValue* left, const HloValue* right);
-  Result<HloValue> Finish();
+  StatusOr<Result<HloValue>> Finish();
 
   void FillDebugTrace(HeapSimulatorTrace::Event::Kind kind,
                       const HloValue* buffer, const HloInstruction* instruction,
@@ -312,7 +315,7 @@ class HeapAlgorithm {
 
   // Finish collects the buffer offset assignment results.  Finish may only be
   // called once, after all Alloc and Free calls.
-  virtual Result Finish() = 0;
+  virtual StatusOr<Result> Finish() = 0;
 };
 
 // NoFragmentationStatsHeap computes the heap size assuming no fragmentation;
@@ -336,7 +339,7 @@ class NoFragmentationStatsHeap : public HeapAlgorithm<BufferType> {
 
   void Free(const BufferType* buffer, int64_t size) override;
 
-  Result Finish() override;
+  StatusOr<Result> Finish() override;
 
  private:
   int64_t current_heap_size_ = 0;
@@ -739,7 +742,7 @@ class GlobalDecreasingSizeBestFitHeap : public HeapAlgorithm<BufferType> {
   void ShareWith(const BufferType* buffer, const BufferType* share_with,
                  int64_t size) override;
 
-  Result Finish() override;
+  StatusOr<Result> Finish() override;
 
   // Return a BufferIntervalCompare function that sort by spatial size. We don't
   // look at co-locates as they should have the same size.
@@ -878,7 +881,7 @@ class ConstrainedGlobalDecreasingSizeBestFitHeap
         size_limit_per_heap_(size_limit_per_heap) {}
   ~ConstrainedGlobalDecreasingSizeBestFitHeap() override {}
 
-  Result Finish() override;
+  StatusOr<Result> Finish() override;
 
  private:
   uint64_t size_limit_per_heap_;
@@ -916,15 +919,14 @@ class ChooseBestHeapAlgorithm : public HeapAlgorithm<BufferType> {
     }
   }
 
-  Result Finish() override;
+  StatusOr<Result> Finish() override;
 
  private:
   std::vector<std::unique_ptr<HeapAlgorithm<BufferType>>> algorithms_;
 };
 
 extern template class GlobalDecreasingSizeBestFitHeap<HloValue>;
-extern template class GlobalDecreasingSizeBestFitHeap<
-    memory_space_assignment::MemorySpaceAssignmentRepacker::AllocationBlock>;
+extern template class GlobalDecreasingSizeBestFitHeap<AllocationBlock>;
 extern template class ChooseBestHeapAlgorithm<HloValue>;
 
 }  // namespace xla
