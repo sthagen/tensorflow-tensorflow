@@ -22,19 +22,15 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <memory>
 #include <utility>
 #include <vector>
 
-#include "absl/base/thread_annotations.h"
-#include "absl/synchronization/mutex.h"
 #include "xla/executable_run_options.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/gpu_executable_run_options.h"
 #include "xla/service/gpu/thunk.h"
-#include "xla/status.h"
+#include "xla/service/lockable.h"
 #include "xla/statusor.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/lib/gtl/int_type.h"
@@ -57,7 +53,7 @@ namespace gpu {
 
 ncclRedOp_t ToNcclReduction(ReductionKind kind);
 
-StatusOr<std::pair<ncclDataType_t, int>> ToNcclDataTypeAndCountMultiplier(
+absl::StatusOr<std::pair<ncclDataType_t, int>> ToNcclDataTypeAndCountMultiplier(
     PrimitiveType element_type, Thunk::Kind reduction_op);
 
 bool IsGlobalNcclConfig();
@@ -93,40 +89,9 @@ size_t GetNumLocalParticipants(
     const std::vector<GlobalDeviceId>& participants,
     const std::vector<GlobalDeviceId>* local_devices);  // may be null
 
-StatusOr<const NcclUniqueIdCallback*> GetNcclUniqueIdCallback(
+absl::StatusOr<const NcclUniqueIdCallback*> GetNcclUniqueIdCallback(
     const NcclUniqueIdCallback* unique_id_callback,  // may be null
     bool is_local);
-
-// Represents a type that requires mutually exclusive access.
-template <typename T>
-class Lockable {
- public:
-  // RAII type that will release the exclusive lock when it is destroyed.
-  using Lock = std::unique_ptr<T, std::function<void(T*)>>;
-
-  Lockable() = default;
-  explicit Lockable(T value) : value_(std::move(value)) {}
-
-  Lockable(const Lockable&) = delete;
-  Lockable& operator=(const Lockable&) = delete;
-
-  Lock Acquire() {
-    absl::MutexLock lock(&mutex_);
-    mutex_.Await(absl::Condition(&is_unlocked_));
-    is_unlocked_ = false;
-
-    return {&value_, [this](T*) {
-              absl::MutexLock lock(&mutex_);
-              CHECK(!is_unlocked_);
-              is_unlocked_ = true;
-            }};
-  }
-
- private:
-  T value_;
-  absl::Mutex mutex_;
-  bool is_unlocked_ ABSL_GUARDED_BY(mutex_) = true;
-};
 
 TSL_LIB_GTL_DEFINE_INT_TYPE(OpId, int64_t);
 
@@ -134,7 +99,7 @@ struct NcclComm : public Lockable<ncclComm_t> {
   explicit NcclComm(ncclComm_t comm) : Lockable(comm) {}
 };
 
-StatusOr<NcclComm::Lock> AcquireNcclComm(
+absl::StatusOr<NcclComm::Lock> AcquireNcclComm(
     RunId run_id, OpId op_id, std::vector<GlobalDeviceId> participants,
     size_t num_local_participants,
     const NcclUniqueIdCallback& unique_id_callback, int32_t rank,
