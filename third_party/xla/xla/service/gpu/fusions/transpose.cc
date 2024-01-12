@@ -40,7 +40,6 @@ limitations under the License.
 #include "xla/service/gpu/hlo_fusion_analysis.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/ir_emitter_context.h"
-#include "xla/service/gpu/kernel_mapping_scheme.h"
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/target_util.h"
 #include "xla/service/llvm_ir/fused_ir_emitter.h"
@@ -69,7 +68,7 @@ TilingScheme ComputeTransposeTilingScheme(
   num_threads[order[2]] = kNumRows;
 
   return TilingScheme(
-      /*permuted_dims*/ permuted_dims,
+      /*dims_in_elems=*/permuted_dims,
       /*tile_sizes=*/tile_sizes,
       /*num_threads=*/num_threads,
       /*indexing_order=*/TilingScheme::LinearIndexingX,
@@ -158,14 +157,15 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
     if (const auto& tr = transposes[tile_idx]) {
       const auto& hero = *heroes[tile_idx];
       permutation = tr->permutation;
-      tiles[&hero] = AllocateShared(
-          builder, tiling_scheme_,
-          llvm_ir::PrimitiveTypeToIrType(
-              hero.operand(0)->shape().element_type(),
-              ir_emitter_context.llvm_module()),
-          {tiling_scheme_.GetBlockTileSizeFor(permutation[TilingScheme::DimX]),
-           tiling_scheme_.GetBlockTileSizeFor(TilingScheme::DimX) + 1},
-          absl::StrCat("tr_tile_", tile_idx));
+      const auto& block_tile_size = tiling_scheme_.GetBlockTileSize();
+      tiles[&hero] =
+          AllocateShared(builder, tiling_scheme_,
+                         llvm_ir::PrimitiveTypeToIrType(
+                             hero.operand(0)->shape().element_type(),
+                             ir_emitter_context.llvm_module()),
+                         {block_tile_size[permutation[TilingScheme::DimX]],
+                          block_tile_size[TilingScheme::DimX] + 1},
+                         absl::StrCat("tr_tile_", tile_idx));
     }
   }
 
@@ -195,18 +195,17 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
                   const HloInstruction& hero = *heroes[output_idx];
                   llvm_ir::ElementGenerator input_gen =
                       *fused_emitter.GetGenerator(*hero.operand(0));
-                  llvm_ir::IrArray::Index untiled_index = GetUnnormalizedIndex(
-                      index, hero.operand(0)->shape(), builder,
-                      tiling_scheme_.GetDimsInElems());
+                  llvm_ir::IrArray::Index untiled_index =
+                      GetUnnormalizedIndex(index, hero.operand(0)->shape(),
+                                           builder, tiling_scheme_.GetShape());
                   llvm::Value* value = *input_gen(untiled_index);
                   llvm::Value* addr = thread_id_info.GEPIntoSharedMemory(
                       builder, tiles[&hero], {y_loc, x_loc});
 
                   builder->CreateStore(value, addr);
                 } else {
-                  llvm_ir::IrArray::Index untiled_index =
-                      GetUnnormalizedIndex(index, root->shape(), builder,
-                                           tiling_scheme_.GetDimsInElems());
+                  llvm_ir::IrArray::Index untiled_index = GetUnnormalizedIndex(
+                      index, root->shape(), builder, tiling_scheme_.GetShape());
                   llvm_ir::ElementGenerator output_gen =
                       *fused_emitter.GetGenerator(*root);
                   llvm::Value* output_value = *output_gen(untiled_index);
@@ -274,7 +273,7 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
                   // index-as-transformed by the computation.
                   llvm_ir::IrArray::Index untiled_index = GetUnnormalizedIndex(
                       index, root->shape(), builder,
-                      Permute(tiling_scheme_.GetDimsInElems(), permutation));
+                      Permute(tiling_scheme_.GetShape(), permutation));
                   TF_ASSIGN_OR_RETURN(llvm::Value * generated,
                                       gen(untiled_index));
                   outputs[output_idx].EmitWriteArrayElement(untiled_index,
@@ -292,7 +291,7 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
 }
 
 LaunchDimensions TransposeFusion::launch_dimensions() const {
-  return LaunchDimensions(tiling_scheme_.GetNumberOfBlocksPhysical(),
+  return LaunchDimensions(tiling_scheme_.GetNumBlocksPhysical(),
                           tiling_scheme_.GetNumThreadsPerBlockPhysical());
 }
 

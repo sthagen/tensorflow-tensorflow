@@ -425,13 +425,11 @@ cc_library(
         "elemental_ir_emitter.h",
         "ir_emitter.h",
         "ir_emitter_nested.h",
-        "kernel_mapping_scheme.h",
     ],
     copts = if_cuda_is_configured(["-DGOOGLE_CUDA=1"]),
     visibility = ["//visibility:public"],
     deps = [
         ":backend_configs_cc",
-        ":hlo_fusion_analysis",
         ":hlo_to_ir_bindings",
         ":ir_emission_utils",
         ":ir_emitter_context",
@@ -454,7 +452,6 @@ cc_library(
         "//xla/service/llvm_ir:loop_emitter",
         "//xla/service/llvm_ir:math_ops",
         "//xla/service/llvm_ir:tuple_ops",
-        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1002,8 +999,8 @@ xla_cc_test(
 alias(
     name = "mock_nccl_utils",
     actual = if_google(
-        google_value = if_nccl(":_mock_nccl_utils_google", ":empty"),
-        oss_value = if_nccl(":_mock_nccl_utils_default", ":empty"),
+        google_value = ":_mock_nccl_utils_google",
+        oss_value = ":_mock_nccl_utils_default",
     ),
     visibility = ["//visibility:public"],
 )
@@ -3949,6 +3946,7 @@ xla_cc_test(
     name = "gpu_schedule_postprocessing_test",
     srcs = ["gpu_schedule_postprocessing_test.cc"],
     deps = [
+        ":backend_configs_cc",
         ":gpu_schedule_postprocessing",
         "//xla:util",
         "//xla/hlo/ir:hlo",
@@ -4093,10 +4091,7 @@ cc_library(
 cc_library(
     name = "hlo_fusion_analysis",
     srcs = ["hlo_fusion_analysis.cc"],
-    hdrs = [
-        "hlo_fusion_analysis.h",
-        "kernel_mapping_scheme.h",
-    ],
+    hdrs = ["hlo_fusion_analysis.h"],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     visibility = ["//visibility:public"],
     deps = [
@@ -4107,19 +4102,12 @@ cc_library(
         ":reduction_utils",
         "//xla:shape_util",
         "//xla:statusor",
-        "//xla:util",
         "//xla/hlo/ir:hlo",
-        "//xla/service/llvm_ir:loop_emitter",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:ir_headers",
-        "@local_tsl//tsl/platform:macros",
     ],
 )
 
@@ -4132,6 +4120,7 @@ xla_cc_test(
         ":hlo_fusion_analysis",
         ":hlo_traversal",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:device_description_proto_cc",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
         "@local_tsl//tsl/platform:statusor",
