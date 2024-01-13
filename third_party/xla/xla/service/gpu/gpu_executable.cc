@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/service/gpu/gpu_executable.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -32,6 +33,7 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
 #include "mlir/Parser/Parser.h"  // from @llvm-project
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/map_util.h"
@@ -48,6 +50,8 @@ limitations under the License.
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/thunk.h"
 #include "xla/service/hlo_parser.h"
+#include "xla/service/rendezvous.h"
+#include "xla/service/service_executable_run_options.h"
 #include "xla/service/shaped_buffer.h"
 #include "xla/service/stream_pool.h"
 #include "xla/service/xla_debug_info_manager.h"
@@ -198,6 +202,10 @@ absl::Status MaybeSyncAndProfile(const ServiceExecutableRunOptions* run_options,
                                  uint64_t start_nanos,
                                  se::Stream* stream_to_sync);
 
+absl::Status MaybeRendezvousAfterInitialization(
+    const ServiceExecutableRunOptions* run_options,
+    std::atomic<int64_t>* thunks_initialized);
+
 absl::Status ExecuteThunks(const std::string& module_name,
                            ModuleIdentifier module_id,
                            const ThunkSequence& thunk_sequence,
@@ -205,7 +213,8 @@ absl::Status ExecuteThunks(const std::string& module_name,
                            const ServiceExecutableRunOptions* run_options,
                            const BufferAllocations& buffer_allocations,
                            bool block_host_until_done,
-                           bool use_highest_priority_for_async_stream) {
+                           bool use_highest_priority_for_async_stream,
+                           std::atomic<int64_t>* thunks_initialized) {
   se::Stream* main_stream = run_options->stream();
   se::StreamExecutor* executor = main_stream->parent();
   stream_executor::StreamPriority stream_priority =
@@ -253,6 +262,10 @@ absl::Status ExecuteThunks(const std::string& module_name,
     TF_RETURN_IF_ERROR(thunk->Initialize(initialize_params));
   }
 
+  // Maybe join a round of rendezvous after thunk initialization.
+  TF_RETURN_IF_ERROR(
+      MaybeRendezvousAfterInitialization(run_options, thunks_initialized));
+
   for (const std::unique_ptr<Thunk>& thunk : thunk_sequence) {
     // Annotate execution of this op if tracing was enabled when we started
     // running this module.  If tracing is enabled *while* we're running the
@@ -270,6 +283,88 @@ absl::Status ExecuteThunks(const std::string& module_name,
   }
   return MaybeSyncAndProfile(run_options, start_nanos,
                              block_host_until_done ? main_stream : nullptr);
+}
+
+absl::Status MaybeRendezvousAfterInitialization(
+    const ServiceExecutableRunOptions* run_options,
+    std::atomic<int64_t>* thunks_initialized) {
+  // Thunk initialization can allocate new control data structures on device
+  // that can lead to deadlocks if other replicas are executing concurrently
+  // (i.e. this happens if we try to instantiate CUDA graph when other replica
+  // is executing NCCL kernels). If we detect that we are running in multi-gpu
+  // setup we synchronize after first initialization to make sure that all
+  // replicas completed initialization process before we start execution.
+  auto* gpu_opts = run_options->run_options().gpu_executable_run_options();
+  auto* device_assn = run_options->run_options().device_assignment();
+
+  // If we don't have Gpu executable options or device assignment it means we
+  // are running in a single Gpu config and don't need a rendezvous.
+  if (!gpu_opts || !device_assn) return absl::OkStatus();
+
+  // If `thunks_initialized` value is `-1` it means that all thunks are
+  // initialized and we can go ahead and execute all of them. All other values
+  // signal how many threads are executing rendezvous (they can be from
+  // different run ids).
+  if (thunks_initialized->load() < 0) return absl::OkStatus();
+
+  // We rely on CAS operations to make sure that all participants of
+  // potentially multiple concurrent XLA executions join the rendezvous or
+  // none of them join, because otherwise we will get a dead lock.
+  int64_t participant_id = thunks_initialized->load();
+  while (participant_id >= 0 && !thunks_initialized->compare_exchange_weak(
+                                    participant_id, participant_id + 1)) {
+  }
+
+  // If we exited a CAS loop with participant id less than 0 it means that some
+  // other thread completed initialization rendezvous.
+  if (participant_id < 0) return absl::OkStatus();
+
+  // Assume that all participants execute locally first, if we have a local
+  // device id to global device id map we will use it to get the real number of
+  // participating local devices.
+  int64_t num_local_participants =
+      device_assn->replica_count() * device_assn->computation_count();
+
+  // Find what local devices are part of the device assignment.
+  if (gpu_opts->gpu_global_device_ids()) {
+    auto d2l_map = device_assn->GetDeviceToLogicalIdMap();
+
+    num_local_participants = 0;
+    for (auto& [local_id, global_id] : *gpu_opts->gpu_global_device_ids()) {
+      num_local_participants += d2l_map.contains(global_id);
+    }
+
+    if (num_local_participants == 0) {
+      return absl::InternalError(
+          "Cound't find the number of local participants");
+    }
+  }
+
+  VLOG(1) << "Join thunks initialization rendezvous with "
+          << num_local_participants << " local participants"
+          << "; device_ordinal=" << run_options->device_ordinal();
+
+  RendezvousSingle(run_options->run_options().run_id(), num_local_participants,
+                   absl::Seconds(10), absl::Seconds(30));
+
+  // Reload participant_id and use CAS to decide if we are the one who
+  // should mark initialization completed.
+  participant_id = thunks_initialized->load();
+
+  // Check that no one completed initialization process without us, and the
+  // number of participants inside the critical section is greater than 0 (we
+  // are here, so it can't be 0).
+  CHECK_GT(participant_id, 0);  // NOLINT
+
+  // If we are the last one, we try to mark executable initialization as
+  // completed by writing `-1` into the flag.
+  while (!thunks_initialized->compare_exchange_weak(
+      participant_id, participant_id == 1 ? -1 : participant_id - 1)) {
+    // Check precondition for participant id after CAS failure reloaded it.
+    CHECK_GT(participant_id, 0);  // NOLINT
+  }
+
+  return absl::OkStatus();
 }
 
 absl::Status MaybeSyncAndProfile(const ServiceExecutableRunOptions* run_options,
@@ -433,7 +528,9 @@ absl::StatusOr<se::DeviceMemoryBase> GpuExecutable::BufferForAllocation(
     se::DeviceMemoryBase buffer_address;
     if (buffer_size > 0) {
       absl::StatusOr<se::OwningDeviceMemory> buffer =
-          memory_allocator->Allocate(device_ordinal, buffer_size);
+          memory_allocator->Allocate(device_ordinal, buffer_size,
+                                     /*retry_on_failure=*/true,
+                                     /*memory_space=*/allocation.color());
       if (!buffer.ok()) {
         return ResourceExhausted("%s\n%s\n", buffer.status().message(),
                                  buffer_assignment_->ToVerboseString(
@@ -657,7 +754,9 @@ absl::StatusOr<ExecutionOutput> GpuExecutable::ExecuteAsyncOnStreamImpl(
         int64_t allocation_size =
             ShapeUtil::ByteSizeOf(ShapeUtil::GetSubshape(output_shape_, index));
         absl::StatusOr<se::OwningDeviceMemory> allocated_buffer =
-            memory_allocator->Allocate(device_ordinal, allocation_size);
+            memory_allocator->Allocate(device_ordinal, allocation_size,
+                                       /*retry_on_failure=*/true,
+                                       /*memory_space=*/allocation->color());
         if (!allocated_buffer.ok()) {
           return ResourceExhausted("%s\n%s\n",
                                    allocated_buffer.status().message(),
@@ -753,7 +852,8 @@ absl::Status GpuExecutable::ExecuteThunksOrXlaRuntime(
         has_module() ? module_config()
                            .debug_options()
                            .xla_gpu_enable_highest_priority_async_stream()
-                     : false);
+                     : false,
+        &thunks_initialized_);
   }
 
   // Match IrEmitter's temp buffer allocation for kernel launches. See
@@ -796,7 +896,10 @@ absl::Status GpuExecutable::SetUpMlirAllocation(
     absl::flat_hash_map<ShapeIndex, GpuExecutable::OutputInfo>* output_info,
     Shape* output_shape) {
   for (int i = 0; i < buffer_sizes.size(); i++) {
-    allocations->emplace_back(i, buffer_sizes[i], 0);
+    // This code path is taken when using the non-thunk based runtime. Memory
+    // space is being set to 0 for all allocations. We need to copy over the
+    // value from BufferAssignment instead.
+    allocations->emplace_back(i, buffer_sizes[i], /*memory_space=*/0);
   }
 
   for (int i = 0; i < func.getNumArguments(); i++) {

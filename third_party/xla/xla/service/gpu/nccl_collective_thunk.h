@@ -38,6 +38,7 @@ limitations under the License.
 #include "xla/xla_data.pb.h"
 
 #if XLA_ENABLE_XCCL
+#include "xla/service/gpu/nccl_errors.h"
 #include "xla/service/gpu/nccl_utils.h"
 #endif  // XLA_ENABLE_XCCL
 
@@ -150,7 +151,7 @@ class NcclCollectiveThunk : public Thunk {
                                          ncclComm_t comm) = 0;
   virtual const NcclCollectiveConfig& config() const = 0;
   virtual AsyncStreamKind GetAsyncStreamKind() const {
-    return kAsyncStreamCollective;
+    return AsyncStreamKind::kCollective;
   }
 
  private:
@@ -235,6 +236,16 @@ absl::StatusOr<std::vector<DeviceBufferPair>> ConvertToDeviceBuffers(
     const BufferAllocations* buffer_allocations,
     const std::vector<NcclCollectiveThunk::Buffer>& buffers,
     const std::vector<PrimitiveType>& element_types);
+
+// When using ncclMemAlloc, register buffers with the communicator to enable
+// copyless collectives.
+// Registration is only needed when not using cudaGraphs. Remove this function
+// when cudagraphs + nccl is enabled.
+// See
+// https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html
+Status MaybeRegisterBuffers(int device_ordinal,
+                            const std::vector<DeviceBufferPair>& buffers,
+                            ncclComm_t comm);
 
 }  // namespace gpu
 }  // namespace xla

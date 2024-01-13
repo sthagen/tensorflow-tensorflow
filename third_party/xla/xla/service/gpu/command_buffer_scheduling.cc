@@ -104,9 +104,34 @@ bool IsCommand<HloOpcode::kWhile>(const HloInstruction* hlo,
          IsCommand(hlo->while_condition(), config);
 }
 
+// Conditional can be executed inside command buffers only if all regions of its
+// branches can be executed as command buffers.
+template <>
+bool IsCommand<HloOpcode::kConditional>(const HloInstruction* hlo,
+                                        const CommandBufferConfig& config) {
+  return config.contains(DebugOptions::WHILE) &&
+         absl::c_all_of(hlo->branch_computations(),
+                        [&](const HloComputation* comp) {
+                          return IsCommand(comp, config);
+                        });
+}
+
 static bool IsCommand(const HloCustomCallInstruction* hlo,
                       const CommandBufferConfig& config) {
-  return config.contains(DebugOptions::CUBLAS) && IsLegacyCublasMatmul(*hlo);
+  if (config.contains(DebugOptions::CUBLAS) && IsLegacyCublasMatmul(*hlo)) {
+    return true;
+  }
+
+  if (hlo->custom_call_target() == "cu_threefry2x32") {
+    if (hlo->operand_count() == 4) {
+      return true;
+    }
+    // This version of cu_threefy2x32 requires synchronization, which is not
+    // supported by command buffers.
+    DCHECK_EQ(hlo->operand_count(), 5);
+  }
+
+  return false;
 }
 
 static bool IsCommand(const HloInstruction* hlo,
@@ -122,6 +147,9 @@ static bool IsCommand(const HloInstruction* hlo,
 
   if (hlo->opcode() == HloOpcode::kWhile)
     return IsCommand<HloOpcode::kWhile>(hlo, config);
+
+  if (hlo->opcode() == HloOpcode::kConditional)
+    return IsCommand<HloOpcode::kConditional>(hlo, config);
 
   return false;
 }
@@ -156,10 +184,11 @@ static bool IsAsyncStartCommand(const HloInstruction* hlo,
 // Finds an async-done HLO operation corresponding on an async-start one.
 static HloInstruction* FindAsyncDoneCommand(const HloInstruction* start) {
   if (start->opcode() == HloOpcode::kAllReduceStart ||
-      start->opcode() == HloOpcode::kAllGatherStart ||
-      start->opcode() == HloOpcode::kAsyncStart) {
+      start->opcode() == HloOpcode::kAllGatherStart) {
     CHECK(start->users().size() == 1);  // NOLINT, checked by HLO verifier
     return start->users().front();
+  } else if (start->opcode() == HloOpcode::kAsyncStart) {
+    return start->async_chain_done();
   }
 
   return nullptr;
@@ -360,6 +389,12 @@ absl::StatusOr<CommandBuffer> CommandBufferScheduling::PrepareCommandBuffer(
     // Cloned instructions should call the same computations as original
     // instructions will be dead code eliminated.
     for (HloComputation* called_computation : inst->called_computations()) {
+      // Async computations can only be referenced by a single async chain at
+      // a time. Detach the current chain to let its copy bind to the
+      // computation.
+      if (called_computation->IsAsyncComputation()) {
+        called_computation->RemoveAsyncStart();
+      }
       ctx.MapComputation(called_computation, called_computation);
     }
 
