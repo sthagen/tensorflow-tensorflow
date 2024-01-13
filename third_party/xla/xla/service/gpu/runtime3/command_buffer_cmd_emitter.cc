@@ -28,7 +28,6 @@ limitations under the License.
 #include "xla/service/gpu/runtime3/command_buffer_cmd.h"
 #include "xla/service/gpu/runtime3/conditional_thunk.h"
 #include "xla/service/gpu/runtime3/copy_thunk.h"
-#include "xla/service/gpu/runtime3/custom_call_thunk.h"
 #include "xla/service/gpu/runtime3/kernel_thunk.h"
 #include "xla/service/gpu/runtime3/memset_thunk.h"
 #include "xla/service/gpu/runtime3/sequential_thunk.h"
@@ -143,28 +142,6 @@ static absl::StatusOr<Command> Convert(const NcclAllGatherStartThunk& thunk) {
   return std::make_unique<AllGatherCmd>(thunk.config(), thunk.buffers());
 }
 
-static StatusOr<Command> Convert(const CustomCallThunk& thunk) {
-  auto convert_slices =
-      [](const std::vector<std::optional<CustomCallThunk::Slice>>& slices) {
-        std::vector<std::optional<CustomCallCmd::Slice>> converted;
-        converted.reserve(slices.size());
-        for (const std::optional<CustomCallThunk::Slice>& slice : slices) {
-          if (slice.has_value()) {
-            CustomCallCmd::Slice converted_slice = {slice.value().slice,
-                                                    slice.value().shape};
-            converted.push_back(converted_slice);
-          } else {
-            converted.push_back(std::nullopt);
-          }
-        }
-        return converted;
-      };
-
-  return std::make_unique<CustomCallCmd>(
-      thunk.call_target(), convert_slices(thunk.operands()),
-      convert_slices(thunk.results()), thunk.opaque());
-}
-
 //===----------------------------------------------------------------------===//
 
 template <typename ThunkType>
@@ -191,28 +168,26 @@ static absl::Status AppendCommands(CommandBufferCmdSequence& cmd_sequence,
   switch (thunk.kind()) {
     case Thunk::Kind::kConditional:
       return append(Convert<ConditionalThunk>(thunk, force_barriers));
-    case Thunk::Kind::kKernel:
-      return append(Convert<KernelThunk>(thunk));
-    case Thunk::Kind::kCustomKernel:
-      return append(Convert<CustomKernelThunk>(thunk));
     case Thunk::Kind::kCopy:
       return append(Convert<DeviceToDeviceCopyThunk>(thunk));
-    case Thunk::Kind::kMemzero:
-      return append(Convert<MemzeroThunk>(thunk));
-    case Thunk::Kind::kMemset32BitValue:
-      return append(Convert<Memset32BitValueThunk>(thunk));
-    case Thunk::Kind::kWhile:
-      return append(Convert<WhileThunk>(thunk, force_barriers));
+    case Thunk::Kind::kCustomKernel:
+      return append(Convert<CustomKernelThunk>(thunk));
+    case Thunk::Kind::kKernel:
+      return append(Convert<KernelThunk>(thunk));
     case Thunk::Kind::kGemm:
       return append(Convert<GemmThunk>(thunk));
+    case Thunk::Kind::kMemset32BitValue:
+      return append(Convert<Memset32BitValueThunk>(thunk));
+    case Thunk::Kind::kMemzero:
+      return append(Convert<MemzeroThunk>(thunk));
+    case Thunk::Kind::kNcclAllGatherStart:
+      return append(Convert<NcclAllGatherStartThunk>(thunk));
     case Thunk::Kind::kNcclAllReduceStart:
       return append(Convert<NcclAllReduceStartThunk>(thunk));
     case Thunk::Kind::kNcclReduceScatterStart:
       return append(Convert<NcclReduceScatterStartThunk>(thunk));
-    case Thunk::Kind::kNcclAllGatherStart:
-      return append(Convert<NcclAllGatherStartThunk>(thunk));
-    case Thunk::Kind::kCustomCall:
-      return append(Convert<CustomCallThunk>(thunk));
+    case Thunk::Kind::kWhile:
+      return append(Convert<WhileThunk>(thunk, force_barriers));
 
     // Sequential thunk does not have any special semantics and we simply inline
     // all nested thunks into command buffer.
@@ -223,13 +198,13 @@ static absl::Status AppendCommands(CommandBufferCmdSequence& cmd_sequence,
 
     // Currently all collective operations recorded on the tracing stream and do
     // not need to have a separate done command.
+    case Thunk::Kind::kNcclAllGatherDone:
     case Thunk::Kind::kNcclAllReduceDone:
     case Thunk::Kind::kNcclReduceScatterDone:
-    case Thunk::Kind::kNcclAllGatherDone:
-      return absl::OkStatus();
+      return OkStatus();
 
     default:
-      return InternalError("Unsupported thunk kind: %s",
+      return Internal("Unsupported thunk kind: %s",
                            Thunk::KindToString(thunk.kind()));
   }
 }

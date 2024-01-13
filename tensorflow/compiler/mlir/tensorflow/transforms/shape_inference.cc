@@ -1218,11 +1218,6 @@ bool ShapeInference::InferShapeForXlaCallModule(XlaCallModuleOp op) {
     for (auto attr : op.getPlatforms().getAsRange<StringAttr>()) {
       platforms.push_back(attr.getValue().str());
     }
-    // Always use the first platform. The assumption is that shape inference
-    // results should be the same regardless of which platform is chosen.
-    // Very old versions of the op have an empty platforms attribute.
-    std::string loading_platform =
-        (platforms.empty() ? "CPU" : platforms.front());
 
     // It is a terrible idea to have local MLIR contexts so we need to
     // register extensions here, again.
@@ -1234,7 +1229,6 @@ bool ShapeInference::InferShapeForXlaCallModule(XlaCallModuleOp op) {
     auto l = tensorflow::XlaCallModuleLoader::Create(
         &xla_call_module_context_, op.getVersion(), op.getModule().str(),
         std::move(disabled_checks), std::move(platforms),
-        std::move(loading_platform),
         /*num_invocation_args=*/op.getArgs().size(),
         op.getHasTokenInputOutput());
     if (!l.ok()) {
@@ -1260,13 +1254,14 @@ bool ShapeInference::InferShapeForXlaCallModule(XlaCallModuleOp op) {
   if (!status.ok()) {
     llvm::errs() << "Failed during XlaCallModule shape refinement: "
                  << status.ToString();
+    // Do not return false here.
+    //
     // RefineDynamicShapes returns ok only when it produces full static shapes.
     // It may partially succeed by producing RankedTensor shapes with dynamic
     // dimensions. Such info is still useful for the downstream. We don't need
     // to abort here.
     // TODO(b/316639984): improve RefineDynamicShapes return values to include
     // these info.
-    return false;
   }
   mlir::ResultRange op_results = op.getResults();
   // The main_outputs may include tokens that are not among the op_results;
