@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/service/gpu/nccl_all_to_all_thunk.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <utility>
@@ -22,9 +23,16 @@ limitations under the License.
 
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/substitute.h"
+#include "mlir/IR/Value.h"  // from @llvm-project
+#include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/service/collective_ops_utils.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/nccl_collective_thunk.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "tsl/platform/errors.h"
 
 #if XLA_ENABLE_XCCL
 #include "xla/stream_executor/gpu/gpu_stream.h"
@@ -35,7 +43,8 @@ namespace gpu {
 
 using mlir::lmhlo_gpu::AllToAllStartOp;
 
-namespace impl {
+namespace {
+
 NcclAllToAllConfig GetNcclAllToAllConfig(AllToAllStartOp op) {
   NcclAllToAllConfig config;
   // FIXME(b/180174349): LMHLO AllToAll incorrectly has use_global_device_ids
@@ -45,42 +54,87 @@ NcclAllToAllConfig GetNcclAllToAllConfig(AllToAllStartOp op) {
   return config;
 }
 
-absl::Status CheckImplementable(AllToAllStartOp op) {
-  TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
-  std::optional<uint64_t> split_dim = op.getSplitDimension();
-  for (mlir::Value operand : op.getInputs()) {
-    TF_RETURN_IF_ERROR(IsValidOperand(operand, Thunk::kNcclAllToAll));
-    Shape shape = GetShape(operand);
-    if (split_dim &&
-        !ShapeUtil::IsEffectivelyMostMajorDimension(shape, *split_dim)) {
-      return tsl::errors::Unimplemented(
-          "all-to-all split dim %u is not the most major in input shape %s",
-          *split_dim, shape.ToString(/*print_layout=*/true));
-    }
-  }
-  return absl::OkStatus();
+NcclAllToAllConfig GetNcclAllToAllConfig(const HloAllToAllInstruction* instr) {
+  NcclAllToAllConfig config;
+  // FIXME(b/180174349): LMHLO AllToAll incorrectly has use_global_device_ids
+  // attribute and it should be removed.
+  config.config = GetNcclCollectiveConfig(instr, std::nullopt);
+  config.has_split_dimension = instr->split_dimension().has_value();
+  return config;
 }
-}  // namespace impl
+
+}  // namespace
 
 NcclAllToAllStartThunk::NcclAllToAllStartThunk(
     ThunkInfo thunk_info, AllToAllStartOp op,
     std::vector<NcclCollectiveThunk::Buffer> buffers)
     : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info,
                           op.getIsSync()),
-      config_(impl::GetNcclAllToAllConfig(op)),
+      config_(GetNcclAllToAllConfig(op)),
+      buffers_(std::move(buffers)) {
+  CHECK_EQ(config_.config.operand_count, buffers_.size());
+}
+
+NcclAllToAllStartThunk::NcclAllToAllStartThunk(
+    ThunkInfo thunk_info, const HloAllToAllInstruction* instr,
+    std::vector<NcclCollectiveThunk::Buffer> buffers)
+    : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info,
+                          IsSyncCollective(instr)),
+      config_(GetNcclAllToAllConfig(instr)),
       buffers_(std::move(buffers)) {
   CHECK_EQ(config_.config.operand_count, buffers_.size());
 }
 
 /*static*/ absl::Status NcclAllToAllStartThunk::CheckImplementable(
     AllToAllStartOp op, int64_t replica_count, int64_t partition_count) {
+  auto status = [&]() -> absl::Status {
+    TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
+    std::optional<uint64_t> split_dim = op.getSplitDimension();
+    for (mlir::Value operand : op.getInputs()) {
+      TF_RETURN_IF_ERROR(IsValidOperand(operand, Thunk::kNcclAllToAll));
+      Shape shape = GetShape(operand);
+      if (split_dim &&
+          !ShapeUtil::IsEffectivelyMostMajorDimension(shape, *split_dim)) {
+        return absl::UnimplementedError(absl::Substitute(
+            "all-to-all split dim $0 is not the most major in input shape $1",
+            *split_dim, shape.ToString(/*print_layout=*/true)));
+      }
+    }
+    return absl::OkStatus();
+  };
+  return AddOpDescription<NcclAllToAllStartThunk>(status(), op, replica_count,
+                                                  partition_count);
+}
+
+/*static*/ absl::Status NcclAllToAllStartThunk::CheckImplementable(
+    const HloAllToAllInstruction* instr, int64_t replica_count,
+    int64_t partition_count) {
+  auto status = [&instr]() -> absl::Status {
+    TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
+    std::optional<uint64_t> split_dim = instr->split_dimension();
+    for (HloInstruction* operand : instr->operands()) {
+      Shape shape = operand->shape();
+      TF_RETURN_IF_ERROR(IsValidOperand(shape, Thunk::kNcclAllToAll));
+      if (split_dim &&
+          !ShapeUtil::IsEffectivelyMostMajorDimension(shape, *split_dim)) {
+        return absl::UnimplementedError(absl::Substitute(
+            "all-to-all split dim $0 is not the most major in input shape $1",
+            *split_dim, shape.ToString(/*print_layout=*/true)));
+      }
+    }
+    return absl::OkStatus();
+  };
   return AddOpDescription<NcclAllToAllStartThunk>(
-      impl::CheckImplementable(op), op, replica_count, partition_count);
+      status(), instr, replica_count, partition_count);
 }
 
 /*static*/ CollectiveOpGroupMode NcclAllToAllStartThunk::GetGroupMode(
     AllToAllStartOp op) {
-  return impl::GetNcclAllToAllConfig(op).config.group_mode;
+  return GetNcclAllToAllConfig(op).config.group_mode;
+}
+/*static*/ CollectiveOpGroupMode NcclAllToAllStartThunk::GetGroupMode(
+    const HloAllToAllInstruction* instr) {
+  return GetNcclAllToAllConfig(instr).config.group_mode;
 }
 
 absl::Status NcclAllToAllStartThunk::RunNcclCollective(

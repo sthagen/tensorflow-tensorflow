@@ -47,18 +47,6 @@ namespace gpu {
 
 using mlir::lmhlo_gpu::CollectivePermuteStartOp;
 
-namespace {
-
-bool IsSyncCollective(const HloInstruction* instr) {
-  auto backend_config = instr->backend_config<xla::gpu::GpuBackendConfig>();
-  if (!backend_config.ok()) {
-    return false;
-  }
-  return backend_config->collective_backend_config().is_sync();
-}
-
-}  // namespace
-
 NcclCollectivePermuteStartThunk::NcclCollectivePermuteStartThunk(
     ThunkInfo thunk_info, CollectivePermuteStartOp op, int64_t replica_count,
     int64_t partition_count, const Buffer& buffer)
@@ -158,10 +146,12 @@ NcclCollectivePermuteStartThunk::NcclCollectivePermuteStartThunk(
 /*static*/ absl::Status NcclCollectivePermuteStartThunk::CheckImplementable(
     CollectivePermuteStartOp op, int64_t replica_count,
     int64_t partition_count) {
-  TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
+  auto status = [&]() -> absl::Status {
+    TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
+    return IsValidOperand(op.getOperand(), Thunk::kNcclCollectivePermute);
+  };
   return AddOpDescription<NcclCollectivePermuteStartThunk>(
-      IsValidOperand(op.getOperand(), Thunk::kNcclCollectivePermute), op,
-      replica_count, partition_count);
+      status(), op, replica_count, partition_count);
 }
 
 /*static*/ bool NcclCollectivePermuteStartThunk::IsDegenerate(

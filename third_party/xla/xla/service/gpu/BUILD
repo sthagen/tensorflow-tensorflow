@@ -891,6 +891,7 @@ tsl_gpu_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
@@ -901,6 +902,8 @@ tsl_gpu_library(
         "@local_tsl//tsl/platform:statusor",
     ] + if_cuda_is_configured([
         "@local_config_nccl//:nccl",
+    ]) + if_rocm_is_configured([
+        "@local_config_rocm//rocm:rccl",
     ]),
 )
 
@@ -1033,10 +1036,12 @@ tsl_gpu_library(
         "//xla:xla_data_proto_cc",
         "//xla/service:collective_ops_utils",
         "//xla/service:global_device_id",
+        "//xla/stream_executor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
+        "@local_tsl//tsl/concurrency:ref_count",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
@@ -3703,6 +3708,7 @@ cc_library(
         ":triton_autotuner",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base",
+        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/log",
@@ -4088,6 +4094,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:buffer_value",
+        "//xla/service:collective_ops_utils",
         "//xla/service:hlo_memory_scheduler",
         "//xla/service:hlo_pass_pipeline",
         "//xla/service:latency_hiding_scheduler",

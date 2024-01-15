@@ -19,6 +19,7 @@ limitations under the License.
 #include <iterator>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,7 @@ limitations under the License.
 #include "mlir/IR/AffineExpr.h"  // from @llvm-project
 #include "mlir/IR/AffineMap.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "xla/service/gpu/model/affine_map_printer.h"
 #include "xla/service/gpu/model/indexing_map.h"
 
 namespace xla {
@@ -56,12 +58,12 @@ constexpr int kNumTileParametersPerInputDim = 3;
 //
 // describes a symbolic tile. The documentation for
 // `RawSymbolicTileFromIndexingMap` explains what this means in details.
-bool AffineMapDescribesTile(const AffineMap& affine_map) {
-  int num_known_symbols =
+bool AffineMapDescribesTile(AffineMap affine_map) {
+  int64_t num_known_symbols =
       affine_map.getNumSymbols() -
       kNumTileParametersPerInputDim * affine_map.getNumDims();
-  for (const AffineExpr& result_expr : affine_map.getResults()) {
-    int num_hits = 0;
+  for (AffineExpr result_expr : affine_map.getResults()) {
+    int64_t num_hits = 0;
     result_expr.walk([&num_hits, &num_known_symbols](AffineExpr expr) {
       if (auto symbol_expr = llvm::dyn_cast<AffineSymbolExpr>(expr)) {
         num_hits += (symbol_expr.getPosition() < num_known_symbols);
@@ -89,17 +91,16 @@ struct RawSymbolicTile {
 // Helper to perform function applications as described in the documentation of
 // `RawSymbolicTileFromIndexingMap`.
 AffineMap SubstituteAllIndicesAndKnownSymbolsWithSameValue(
-    const AffineMap& affine_map, const AffineExpr& value,
-    int num_known_symbols) {
+    AffineMap affine_map, AffineExpr value, int64_t num_known_symbols) {
   MLIRContext* mlir_context = affine_map.getContext();
-  int num_input_dims = affine_map.getNumDims();
+  int64_t num_input_dims = affine_map.getNumDims();
   llvm::DenseMap<AffineExpr, AffineExpr> indices;
 
-  for (int i = 0; i < num_input_dims; ++i) {
+  for (int64_t i = 0; i < num_input_dims; ++i) {
     indices[getAffineDimExpr(i, mlir_context)] = value;
   }
 
-  for (int i = 0; i < num_known_symbols; ++i) {
+  for (int64_t i = 0; i < num_known_symbols; ++i) {
     indices[getAffineSymbolExpr(i, mlir_context)] = value;
   }
 
@@ -171,16 +172,16 @@ AffineMap SubstituteAllIndicesAndKnownSymbolsWithSameValue(
 // symbols, since they will have been replaced by constants.
 std::optional<RawSymbolicTile> RawSymbolicTileFromIndexingMap(
     const IndexingMap& indexing_map) {
-  const AffineMap& affine_map = indexing_map.affine_map;
+  AffineMap affine_map = indexing_map.affine_map;
   if (!AffineMapDescribesTile(affine_map)) {
     return std::nullopt;
   }
 
   MLIRContext* mlir_context = affine_map.getContext();
-  int num_known_symbols =
+  int64_t num_known_symbols =
       affine_map.getNumSymbols() -
       affine_map.getNumDims() * kNumTileParametersPerInputDim;
-  int num_results = affine_map.getNumResults();
+  int64_t num_results = affine_map.getNumResults();
 
   // offsets_expr = f'(0, ..., 0)[0, ..., 0]
   AffineMap f_prime_0 = SubstituteAllIndicesAndKnownSymbolsWithSameValue(
@@ -312,7 +313,7 @@ std::optional<RawSymbolicTile> RawSymbolicTileFromIndexingMap(
   // For each input dims we add kNumTileParametersPerInputDim = 3 symbols, as
   // well as a single dim. Symbols are ordered in (offset, size, stride)
   // triplets.
-  for (int dim = 0; dim < num_input_dims; ++dim) {
+  for (int64_t dim = 0; dim < num_input_dims; ++dim) {
     AffineExpr index = getAffineDimExpr(dim, mlir_context);
     AffineExpr offset =
         getAffineSymbolExpr(kNumTileParametersPerInputDim * dim, mlir_context);
@@ -324,7 +325,7 @@ std::optional<RawSymbolicTile> RawSymbolicTileFromIndexingMap(
     Range range = indexing_map.domain.dimension_ranges[dim];
     tile_domain.dimension_ranges.push_back(range);
 
-    for (int symbol_index = 0; symbol_index < kNumTileParametersPerInputDim;
+    for (int64_t symbol_index = 0; symbol_index < kNumTileParametersPerInputDim;
          ++symbol_index) {
       tile_domain.symbol_ranges.push_back(range);
     }
@@ -348,21 +349,32 @@ std::optional<RawSymbolicTile> RawSymbolicTileFromIndexingMap(
 
   return SymbolicTile(maybe_raw_symbolic_tile->offset_map,
                       maybe_raw_symbolic_tile->size_map,
-                      maybe_raw_symbolic_tile->stride_map, num_input_dims);
+                      maybe_raw_symbolic_tile->stride_map);
 }
 
-// TODO(b/319840243): improve pretty printing to indicate which symbols
-// represent offsets, sizes, and strides.
-std::ostream& operator<<(std::ostream& out, const SymbolicTile& symbolic_tile) {
+std::string SymbolicTile::ToString(const AffineMapPrinter& printer) const {
+  std::string s;
+  std::stringstream ss(s);
+  Print(ss, printer);
+  return ss.str();
+}
+
+void SymbolicTile::Print(std::ostream& out,
+                         const AffineMapPrinter& printer) const {
   out << "Symbolic tile with \n";
-  out << "\toffset_map: " << ToString(symbolic_tile.offset_map()) << "\n";
-  out << "\tsize_map: " << ToString(symbolic_tile.size_map()) << "\n";
-  out << "\tstride_map: " << ToString(symbolic_tile.stride_map()) << "\n";
-  return out;
+  out << "\toffset_map: ";
+  printer.Print(out, offset_map_);
+  out << "\n\tsize_map: ";
+  printer.Print(out, size_map_);
+  out << "\n\tstride_map: ";
+  printer.Print(out, stride_map_);
+  out << "\n";
 }
 
-std::string ToString(const SymbolicTile& symbolic_tile) {
-  return ToStringImpl(symbolic_tile);
+std::ostream& operator<<(std::ostream& out, const SymbolicTile& symbolic_tile) {
+  AffineMapPrinter printer;
+  symbolic_tile.Print(out, printer);
+  return out;
 }
 
 }  // namespace gpu
