@@ -861,6 +861,7 @@ tsl_gpu_library(
         ":backend_configs_cc",
         ":buffer_allocations",
         ":ir_emission_utils",
+        ":nccl_api",
         ":nccl_clique",
         ":nccl_clique_key",
         ":nccl_errors",
@@ -907,6 +908,15 @@ tsl_gpu_library(
         "@local_config_rocm//rocm:rccl",
     ]),
 )
+
+#===-------------------------------------------------------------------------------------------===//
+# NCCL integration
+#===-------------------------------------------------------------------------------------------===//
+
+# A lot of build complexity below is because NCCL dependency might not always be available and we
+# have `if_nccl` and `if_gpu_configured` that do not compose. NCCL header included directly in a few
+# targets (:nccl_types and :nccl_api) and all other targets should use these headers to launch
+# collective operations. This allows to minimize the spreading of #ifdef all over the XLA code base.
 
 # Empty library to implement nested dependency conditions.
 cc_library(
@@ -966,6 +976,49 @@ tsl_gpu_library(
     ]),
 )
 
+alias(
+    name = "nccl_api",
+    actual = if_nccl(":_nccl_api_impl", ":_nccl_api_stub"),
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "_nccl_api_impl",
+    srcs = if_cuda_is_configured(
+        ["nccl_api.cc"],
+        ["nccl_api_stub.cc"],
+    ),
+    hdrs = ["nccl_api.h"],
+    compatible_with = get_compatible_with_portable(),
+    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":nccl_clique_key",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@local_tsl//tsl/platform:logging",
+    ] + if_cuda_is_configured([
+        "@local_config_nccl//:nccl",
+    ]),
+)
+
+cc_library(
+    name = "_nccl_api_stub",
+    srcs = ["nccl_api_stub.cc"],
+    hdrs = ["nccl_api.h"],
+    compatible_with = get_compatible_with_portable(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":nccl_clique_key",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
 tsl_gpu_library(
     name = "_nccl_errors",
     srcs = ["nccl_errors.cc"],
@@ -988,8 +1041,7 @@ tsl_gpu_library(
     hdrs = ["nccl_clique.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":_nccl_errors",
-        ":_nccl_types",
+        ":nccl_api",
         ":nccl_clique_key",
         "//xla:debug_options_flags",
         "//xla:executable_run_options",
@@ -1001,7 +1053,6 @@ tsl_gpu_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
-        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1138,6 +1189,7 @@ cc_library(
         ":mock_nccl_sleep_kernel_cuda",
         ":mock_nccl_xml_google",
         ":nccl_collective_thunks",
+        ":nccl_api",
         ":nccl_errors",
         ":nccl_utils",
         ":nccl_clique_key",
