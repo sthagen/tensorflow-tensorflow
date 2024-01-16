@@ -4220,6 +4220,8 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
       switch (wrapped->opcode()) {
         case HloOpcode::kReduceScatter:
           return EmitNcclAsyncDone(Thunk::kNcclReduceScatterDone, instr);
+        case HloOpcode::kAllToAll:
+          return EmitNcclAsyncDone(Thunk::kNcclAllToAllDone, instr);
         default:
           return InternalError("Unsupported async done wrapped instruction: %s",
                                HloOpcodeString(wrapped->opcode()));
@@ -4234,6 +4236,11 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
                                HloReduceScatterInstruction>(
               Thunk::kNcclReduceScatter, instr, reduce_scatter,
               reduce_scatter->use_global_device_ids());
+        }
+        case HloOpcode::kAllToAll: {
+          auto* all_to_all = Cast<HloAllToAllInstruction>(wrapped);
+          return EmitNcclThunk<NcclAllToAllStartThunk, HloAllToAllInstruction>(
+              Thunk::kNcclAllToAll, instr, all_to_all, std::nullopt);
         }
         default:
           return InternalError(
