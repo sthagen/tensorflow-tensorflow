@@ -19,12 +19,13 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/gpu/nccl_api.h"
 #include "xla/service/gpu/nccl_collective_thunk.h"
-#include "xla/status.h"
+#include "xla/stream_executor/stream.h"
 
 namespace xla {
 namespace gpu {
@@ -73,12 +74,7 @@ class NcclAllGatherStartThunk : public NcclCollectiveThunk {
 };
 
 absl::Status RunAllGather(std::vector<DeviceBufferPair>& buffers,
-                          se::Stream& stream, ncclComm_t comm);
-
-inline absl::Status RunAllGather(std::vector<DeviceBufferPair>& buffers,
-                                 se::Stream& stream, NcclCommHandle comm) {
-  return RunAllGather(buffers, stream, reinterpret_cast<ncclComm_t>(comm));
-}
+                          se::Stream& stream, NcclApi::NcclCommHandle comm);
 
 }  // namespace gpu
 }  // namespace xla
