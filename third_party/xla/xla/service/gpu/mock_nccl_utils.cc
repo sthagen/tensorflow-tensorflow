@@ -58,7 +58,6 @@ limitations under the License.
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/gpu_executable_run_options.h"
-#include "xla/service/gpu/mock_nccl_sleep_kernel.h"
 #include "xla/service/gpu/mock_nccl_topo_config.h"
 #include "xla/service/gpu/mock_nccl_xml.h"
 #include "xla/service/gpu/nccl_api.h"
@@ -66,6 +65,7 @@ limitations under the License.
 #include "xla/service/gpu/nccl_clique_key.h"
 #include "xla/service/gpu/nccl_collective_thunk.h"
 #include "xla/service/gpu/nccl_p2p_thunk_common.h"
+#include "xla/service/gpu/sleep_kernel.h"
 #include "xla/service/gpu/thunk.h"
 #include "xla/service/rendezvous.h"
 #include "xla/shape_util.h"
@@ -348,8 +348,11 @@ absl::StatusOr<NcclComm::Lock> LockMockNcclComm(
 }
 
 absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
-                                    se::Stream& stream, ncclComm_t mock_comm,
+                                    se::Stream& stream,
+                                    NcclApi::NcclCommHandle comm,
                                     Thunk::Kind reduce_op) {
+  ncclComm_t mock_comm = reinterpret_cast<ncclComm_t>(comm);
+
   int device_ordinal = stream.parent()->device_ordinal();
   VLOG(3) << "Performing the mock nccl collective call from device ordinal: "
           << device_ordinal;
@@ -357,7 +360,7 @@ absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
   se::gpu::GpuStreamHandle gpu_stream = se::gpu::AsGpuStreamValue(&stream);
   ncclInfo info;
   TF_ASSIGN_OR_RETURN(info.coll, ToNcclFunctionType(reduce_op));
-  info.comm = mock_comm;
+  info.comm = reinterpret_cast<ncclComm_t>(mock_comm);
   info.stream = gpu_stream;
 
   int64_t total_element_count = 0;
@@ -401,7 +404,10 @@ absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
 
 absl::Status RunMockNcclAllToAll(bool has_split_dimension,
                                  std::vector<DeviceBufferPair>& buffers,
-                                 se::Stream& stream, ncclComm_t mock_comm) {
+                                 se::Stream& stream,
+                                 NcclApi::NcclCommHandle comm) {
+  ncclComm_t mock_comm = reinterpret_cast<ncclComm_t>(comm);
+
   se::StreamExecutor* executor = stream.parent();
   se::gpu::GpuStreamHandle gpu_stream = se::gpu::AsGpuStreamValue(&stream);
   int num_participants = mock_comm->nRanks;
@@ -514,8 +520,10 @@ absl::Status RunMockNcclAllToAll(bool has_split_dimension,
 
 absl::Status RunMockCollectivePermute(
     NcclP2PConfig::SourceTargetMapEntry source_target, DeviceBufferPair& buffer,
-    se::Stream& stream, ncclComm_t mock_comm, absl::string_view device_string,
-    int64_t current_id) {
+    se::Stream& stream, NcclApi::NcclCommHandle comm,
+    absl::string_view device_string, int64_t current_id) {
+  ncclComm_t mock_comm = reinterpret_cast<ncclComm_t>(comm);
+
   se::StreamExecutor* executor = stream.parent();
   int device_ordinal = stream.parent()->device_ordinal();
   VLOG(3) << "Performing collective permute from device ordinal: "
@@ -589,7 +597,7 @@ absl::Status RunMockCollectivePermute(
 
 namespace {
 void CheckNcclAsyncError(NcclComm& lockable_comm) {
-  NcclCommHandle comm = *lockable_comm.Acquire();
+  NcclApi::NcclCommHandle comm = *lockable_comm.Acquire();
   if (comm == nullptr) return;
 
   absl::Status status = NcclApi::CommGetAsyncError(comm);
@@ -807,8 +815,8 @@ absl::StatusOr<NcclComm::Lock> AcquireMockNcclComm(
     size_t num_initialized = [&] {
       absl::MutexLock lock(&state.mu);
       state.status.Update(status);
-      state.communicators[rank] =
-          std::make_unique<NcclComm>(reinterpret_cast<NcclCommHandle>(comm));
+      state.communicators[rank] = std::make_unique<NcclComm>(
+          reinterpret_cast<NcclApi::NcclCommHandle>(comm));
       return state.communicators.size();
     }();
 

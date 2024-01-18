@@ -879,6 +879,7 @@ cc_library(
         "//xla/service:collective_ops_utils",
         "//xla/service:global_device_id",
         "//xla/service:hlo_parser",
+        "//xla/service/gpu:gpu_executable_run_options",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:gpu_activation_header",
@@ -918,34 +919,6 @@ cc_library(
 # have `if_nccl` and `if_gpu_configured` that do not compose. NCCL header included directly in
 # :nccl_api target and all other targets should use this header to launch collective operations.
 # This allows to minimize the spreading of #ifdef all over the XLA code base.
-
-# Empty library to implement nested dependency conditions.
-cc_library(
-    name = "empty",
-    compatible_with = get_compatible_with_portable(),
-    visibility = ["//visibility:public"],
-)
-
-alias(
-    name = "nccl_clique",
-    actual = if_nccl(":_nccl_clique", ":empty"),
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "nccl_clique_key",
-    srcs = ["nccl_clique_key.cc"],
-    hdrs = ["nccl_clique_key.h"],
-    compatible_with = get_compatible_with_portable(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/service:global_device_id",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
-    ],
-)
 
 alias(
     name = "nccl_api",
@@ -1004,8 +977,23 @@ cc_library(
     ],
 )
 
-tsl_gpu_library(
-    name = "_nccl_clique",
+cc_library(
+    name = "nccl_clique_key",
+    srcs = ["nccl_clique_key.cc"],
+    hdrs = ["nccl_clique_key.h"],
+    compatible_with = get_compatible_with_portable(),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla/service:global_device_id",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "nccl_clique",
     srcs = ["nccl_clique.cc"],
     hdrs = ["nccl_clique.h"],
     visibility = ["//visibility:public"],
@@ -1033,26 +1021,15 @@ tsl_gpu_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
-    ] + if_cuda_is_configured([
-        "@local_config_nccl//:nccl",
-    ]) + if_rocm_is_configured([
-        "@local_config_rocm//rocm:rccl",
-    ]),
+    ],
 )
 
 cuda_library(
-    name = "mock_nccl_sleep_kernel_cuda",
-    srcs = if_cuda_is_configured(
-        [
-            "mock_nccl_sleep_kernel.cu.cc",
-        ],
-    ),
-    hdrs = if_cuda_is_configured(["mock_nccl_sleep_kernel.h"]),
-    compatible_with = [],
+    name = "sleep_kernel",
+    srcs = if_cuda_is_configured(["sleep_kernel.cu.cc"]),
+    hdrs = if_cuda_is_configured(["sleep_kernel.h"]),
     visibility = ["//visibility:public"],
-    deps = [
-        "@local_config_cuda//cuda:cuda_headers",
-    ],
+    deps = ["@local_config_cuda//cuda:cuda_headers"],
 )
 
 cc_library(
@@ -1095,6 +1072,13 @@ xla_cc_test(
     ]),
 )
 
+# Empty library to implement nested dependency conditions.
+cc_library(
+    name = "empty",
+    compatible_with = get_compatible_with_portable(),
+    visibility = ["//visibility:public"],
+)
+
 alias(
     name = "mock_nccl_utils",
     actual = if_nccl(
@@ -1121,12 +1105,12 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured([
         ":gpu_executable_run_options",
-        ":mock_nccl_sleep_kernel_cuda",
         ":mock_nccl_xml_google",
         ":nccl_collective_thunks",
         ":nccl_api",
         ":nccl_clique_key",
         ":nccl_clique",
+        ":sleep_kernel",
         ":thunk",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
@@ -2684,12 +2668,13 @@ xla_cc_test(
     srcs = ["gpu_sanitize_constant_names_test.cc"],
     deps = [
         ":gpu_sanitize_constant_names",
-        "//xla/service:hlo_module_config",
-        "//xla/service:hlo_parser",
+        "//xla:literal_util",
+        "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
     ],
 )
