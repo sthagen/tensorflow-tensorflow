@@ -1,4 +1,4 @@
-/* Copyright 2017 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2017 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,6 +50,9 @@ class AMDGPUCompiler : public GpuCompiler {
       HloPassPipeline* pipeline, HloModule* hlo_module,
       AutotuneConfig& autotune_config,
       tsl::thread::ThreadPool* thread_pool) override;
+
+  absl::Status AddCustomKernelReplacementPasses(
+      HloPassPipeline* pipeline, const DebugOptions& debug_options) override;
 
   absl::StatusOr<BackendCompileResult> CompileTargetBinary(
       const HloModuleConfig& module_config, llvm::Module* llvm_module,

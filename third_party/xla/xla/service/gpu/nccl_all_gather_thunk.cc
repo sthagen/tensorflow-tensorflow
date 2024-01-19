@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -57,8 +57,6 @@ NcclAllGatherConfig GetNcclAllGatherConfig(AllGatherStartOp op) {
 }
 
 absl::Status CheckImplementableInst(const HloAllGatherInstruction* inst) {
-  TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
-
   for (HloInstruction* operand : inst->operands()) {
     const Shape& shape = operand->shape();
 
@@ -76,7 +74,6 @@ absl::Status CheckImplementableInst(const HloAllGatherInstruction* inst) {
 }
 
 absl::Status CheckImplementable(AllGatherStartOp op) {
-  TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
   for (mlir::Value operand : op.getInputs()) {
     TF_RETURN_IF_ERROR(IsValidOperand(operand, Thunk::kNcclAllGather));
     Shape shape = GetShape(operand);
@@ -92,9 +89,9 @@ absl::Status CheckImplementable(AllGatherStartOp op) {
 }  // namespace impl
 
 NcclAllGatherStartThunk::NcclAllGatherStartThunk(
-    ThunkInfo thunk_info, AllGatherStartOp op,
+    ThunkInfo thunk_info, const NcclApi* nccl_api, AllGatherStartOp op,
     std::vector<NcclCollectiveThunk::Buffer> buffers)
-    : NcclCollectiveThunk(Thunk::kNcclAllGatherStart, thunk_info,
+    : NcclCollectiveThunk(Thunk::kNcclAllGatherStart, thunk_info, nccl_api,
                           op.getIsSync()),
       config_(impl::GetNcclAllGatherConfig(op)),
       buffers_(std::move(buffers)) {
@@ -102,9 +99,9 @@ NcclAllGatherStartThunk::NcclAllGatherStartThunk(
 }
 
 NcclAllGatherStartThunk::NcclAllGatherStartThunk(
-    ThunkInfo thunk_info, const HloAllGatherInstruction* inst,
-    std::vector<Buffer> buffers)
-    : NcclCollectiveThunk(Thunk::kNcclAllGatherStart, thunk_info,
+    ThunkInfo thunk_info, const NcclApi* nccl_api,
+    const HloAllGatherInstruction* inst, std::vector<Buffer> buffers)
+    : NcclCollectiveThunk(Thunk::kNcclAllGatherStart, thunk_info, nccl_api,
                           inst->backend_config<GpuBackendConfig>()
                               ->collective_backend_config()
                               .is_sync()),

@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ limitations under the License.
 #include "xla/mlir_hlo/lhlo/IR/lhlo_ops.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/gpu/nccl_api.h"
+#include "xla/service/gpu/nccl_collective_thunk.h"
 #include "xla/stream_executor/stream.h"
 #include "tsl/platform/errors.h"
 
@@ -41,16 +42,16 @@ NcclP2PConfig GetNcclP2PConfig(RecvOp op, int64_t replica_count,
 }
 
 absl::Status CheckImplementable(RecvOp op) {
-  TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
   return IsValidOperand(op.getOutputs()[0], Thunk::kNcclSend);
 }
 
 }  // namespace impl
 
-NcclRecvThunk::NcclRecvThunk(ThunkInfo thunk_info, RecvOp op,
-                             int64_t replica_count, int64_t partition_count,
-                             const Buffer& buffer)
-    : NcclCollectiveThunk(Thunk::kNcclRecv, thunk_info, /*is_sync=*/false),
+NcclRecvThunk::NcclRecvThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
+                             RecvOp op, int64_t replica_count,
+                             int64_t partition_count, const Buffer& buffer)
+    : NcclCollectiveThunk(Thunk::kNcclRecv, thunk_info, nccl_api,
+                          /*is_sync=*/false),
       config_(GetNcclP2PConfig(op, replica_count, partition_count)),
       buffer_(buffer) {}
 

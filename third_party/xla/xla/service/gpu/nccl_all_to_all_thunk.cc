@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -67,9 +67,9 @@ NcclAllToAllConfig GetNcclAllToAllConfig(const HloAllToAllInstruction* instr) {
 }  // namespace
 
 NcclAllToAllStartThunk::NcclAllToAllStartThunk(
-    ThunkInfo thunk_info, AllToAllStartOp op,
+    ThunkInfo thunk_info, const NcclApi* nccl_api, AllToAllStartOp op,
     std::vector<NcclCollectiveThunk::Buffer> buffers)
-    : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info,
+    : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info, nccl_api,
                           op.getIsSync()),
       config_(GetNcclAllToAllConfig(op)),
       buffers_(std::move(buffers)) {
@@ -77,9 +77,10 @@ NcclAllToAllStartThunk::NcclAllToAllStartThunk(
 }
 
 NcclAllToAllStartThunk::NcclAllToAllStartThunk(
-    ThunkInfo thunk_info, const HloAllToAllInstruction* instr,
+    ThunkInfo thunk_info, const NcclApi* nccl_api,
+    const HloAllToAllInstruction* instr,
     std::vector<NcclCollectiveThunk::Buffer> buffers)
-    : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info,
+    : NcclCollectiveThunk(Thunk::kNcclAllToAllStart, thunk_info, nccl_api,
                           IsSyncCollective(instr)),
       config_(GetNcclAllToAllConfig(instr)),
       buffers_(std::move(buffers)) {
@@ -89,7 +90,6 @@ NcclAllToAllStartThunk::NcclAllToAllStartThunk(
 /*static*/ absl::Status NcclAllToAllStartThunk::CheckImplementable(
     AllToAllStartOp op, int64_t replica_count, int64_t partition_count) {
   auto status = [&]() -> absl::Status {
-    TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
     std::optional<uint64_t> split_dim = op.getSplitDimension();
     for (mlir::Value operand : op.getInputs()) {
       TF_RETURN_IF_ERROR(IsValidOperand(operand, Thunk::kNcclAllToAll));
@@ -111,7 +111,6 @@ NcclAllToAllStartThunk::NcclAllToAllStartThunk(
     const HloAllToAllInstruction* instr, int64_t replica_count,
     int64_t partition_count) {
   auto status = [&instr]() -> absl::Status {
-    TF_RETURN_IF_ERROR(NcclCollectiveThunk::CheckImplementable());
     std::optional<uint64_t> split_dim = instr->split_dimension();
     for (HloInstruction* operand : instr->operands()) {
       Shape shape = operand->shape();

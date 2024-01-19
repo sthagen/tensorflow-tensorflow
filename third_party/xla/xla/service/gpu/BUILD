@@ -322,6 +322,7 @@ cc_library(
         ":kernel_reuse_cache",
         ":launch_dimensions",
         ":matmul_utils",
+        ":nccl_api",
         ":nccl_collective_thunks",
         ":parallel_loop_emitter",
         ":reduction_utils",
@@ -934,7 +935,7 @@ cc_library(
     ),
     hdrs = ["nccl_api.h"],
     compatible_with = get_compatible_with_portable(),
-    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),
+    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),  # TODO(ezhulenev): Remove!
     visibility = ["//visibility:public"],
     deps = [
         ":nccl_clique_key",
@@ -1100,7 +1101,7 @@ cc_library(
     ]),
     # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
     compatible_with = [],
-    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),
+    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),  # TODO(ezhulenev): Remove!
     tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured([
@@ -2308,8 +2309,8 @@ cc_library(
 
 cc_library(
     name = "gpu_sort_rewriter",
-    srcs = if_cuda_is_configured(["gpu_sort_rewriter.cc"]),
-    hdrs = if_cuda_is_configured(["gpu_sort_rewriter.h"]),
+    srcs = if_gpu_is_configured(["gpu_sort_rewriter.cc"]),
+    hdrs = if_gpu_is_configured(["gpu_sort_rewriter.h"]),
     visibility = ["//visibility:public"],
     deps = [
         ":cub_sort_thunk",
@@ -3806,6 +3807,7 @@ cc_library(
         ":gpu_conv_padding_legalization",
         ":gpu_conv_rewriter",
         ":gpu_layout_assignment",
+        ":gpu_sort_rewriter",
         ":reduction_degenerate_dim_remover",
         ":reduction_dimension_grouper",
         ":reduction_layout_normalizer",

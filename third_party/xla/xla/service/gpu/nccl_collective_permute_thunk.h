@@ -1,4 +1,4 @@
-/* Copyright 2021 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2021 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -45,12 +45,12 @@ class NcclCollectivePermuteStartThunk : public NcclCollectiveThunk {
   static CollectiveOpGroupMode GetGroupMode(
       const HloCollectivePermuteInstruction* instr);
 
-  NcclCollectivePermuteStartThunk(ThunkInfo thunk_info,
+  NcclCollectivePermuteStartThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
                                   mlir::lmhlo_gpu::CollectivePermuteStartOp op,
                                   int64_t replica_count,
                                   int64_t partition_count,
                                   const Buffer& buffer);
-  NcclCollectivePermuteStartThunk(ThunkInfo thunk_info,
+  NcclCollectivePermuteStartThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
                                   const HloCollectivePermuteInstruction* instr,
                                   int64_t replica_count,
                                   int64_t partition_count,

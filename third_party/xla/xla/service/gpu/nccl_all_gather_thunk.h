@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,11 +37,11 @@ struct NcclAllGatherConfig {
 // Thunk that performs a NCCL-based All-Gather among CUDA GPU-based replicas.
 class NcclAllGatherStartThunk : public NcclCollectiveThunk {
  public:
-  NcclAllGatherStartThunk(ThunkInfo thunk_info,
+  NcclAllGatherStartThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
                           mlir::lmhlo_gpu::AllGatherStartOp op,
                           std::vector<Buffer> buffers);
 
-  NcclAllGatherStartThunk(ThunkInfo thunk_info,
+  NcclAllGatherStartThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
                           const HloAllGatherInstruction* inst,
                           std::vector<Buffer> buffers);
 

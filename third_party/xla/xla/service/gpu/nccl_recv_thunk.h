@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,9 +39,9 @@ class NcclRecvThunk : public NcclCollectiveThunk {
   static CollectiveOpGroupMode GetGroupMode(mlir::lmhlo::RecvOp op);
   static const char* GetHloOpName() { return "recv"; }
 
-  NcclRecvThunk(ThunkInfo thunk_info, mlir::lmhlo::RecvOp op,
-                int64_t replica_count, int64_t partition_count,
-                const Buffer& buffer);
+  NcclRecvThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
+                mlir::lmhlo::RecvOp op, int64_t replica_count,
+                int64_t partition_count, const Buffer& buffer);
 
  protected:
   const NcclCollectiveConfig& config() const override { return config_.config; }

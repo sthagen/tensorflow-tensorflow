@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -849,7 +849,6 @@ absl::Status AllReduceCmd::Record(const RecordParams& params,
     return absl::InvalidArgumentError("AllReduceCmd requires nccl_params");
   }
 
-#ifdef XLA_ENABLE_XCCL
   // Today when recording collective operations into command buffers we always
   // use a sync mode and a stream id `0`, and enable clique optimization.
   TF_ASSIGN_OR_RETURN(
@@ -873,9 +872,6 @@ absl::Status AllReduceCmd::Record(const RecordParams& params,
           }));
 
   return command_buffer->AddNestedCommandBuffer(nested_buffer);
-#else
-  return absl::InternalError("XLA compiled without NCCL support");
-#endif
 }
 
 CommandBufferCmd::BufferUsageVector AllReduceCmd::buffers() {
@@ -919,7 +915,6 @@ absl::Status ReduceScatterCmd::Record(const RecordParams& params,
     return absl::InvalidArgumentError("ReduceScatterCmd requires nccl_params");
   }
 
-#ifdef XLA_ENABLE_XCCL
   // Today when recording collective operations into command buffers we always
   // use a sync mode and a stream id `0`, and enable clique optimization.
   TF_ASSIGN_OR_RETURN(
@@ -943,9 +938,6 @@ absl::Status ReduceScatterCmd::Record(const RecordParams& params,
           }));
 
   return command_buffer->AddNestedCommandBuffer(nested_buffer);
-#else
-  return absl::InternalError("XLA compiled without NCCL support");
-#endif
 }
 
 CommandBufferCmd::BufferUsageVector ReduceScatterCmd::buffers() {
@@ -986,7 +978,6 @@ absl::Status AllGatherCmd::Record(const RecordParams& params,
     return absl::InvalidArgumentError("AllGatherCmd requires nccl_params");
   }
 
-#ifdef XLA_ENABLE_XCCL
   // Today when recording collective operations into command buffers we always
   // use a sync mode and a stream id `0`, and enable clique optimization.
   TF_ASSIGN_OR_RETURN(
@@ -1009,9 +1000,6 @@ absl::Status AllGatherCmd::Record(const RecordParams& params,
           }));
 
   return command_buffer->AddNestedCommandBuffer(nested_buffer);
-#else
-  return absl::InternalError("XLA compiled without NCCL support");
-#endif
 }
 
 CommandBufferCmd::BufferUsageVector AllGatherCmd::buffers() {

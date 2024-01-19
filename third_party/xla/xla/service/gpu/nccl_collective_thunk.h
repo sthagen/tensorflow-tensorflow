@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -106,10 +106,15 @@ NcclCollectiveConfig GetNcclCollectiveConfigForMlir(
   return config;
 }
 
+//===----------------------------------------------------------------------===//
+// NcclCollectiveThunk
+//===----------------------------------------------------------------------===//
+
 // Thunk base class for NCCL collective operations.
 class NcclCollectiveThunk : public Thunk {
  public:
-  NcclCollectiveThunk(Kind kind, ThunkInfo thunk_info, bool is_sync);
+  NcclCollectiveThunk(Kind kind, ThunkInfo thunk_info, const NcclApi* nccl_api,
+                      bool is_sync);
 
   struct Buffer {
     int64_t element_count;
@@ -140,15 +145,6 @@ class NcclCollectiveThunk : public Thunk {
     absl::flat_hash_map<int, se::Event> done_events_ ABSL_GUARDED_BY(mu_);
   };
 
-  // Returns whether NCCL operations appear possible to perform; e.g. if we
-  // haven't done a build with the CUDA compiler enabled, we can't compile the
-  // NCCL header, and thus this will be false.
-  //
-  // When this is false, the ExecuteOnStream() call will simply return a status
-  // error.
-  static bool NcclIsEnabled();
-  static absl::Status CheckImplementable();
-
   // Logging support.
   static std::string GetDeviceString(const NcclExecuteParams& params);
 
@@ -170,11 +166,15 @@ class NcclCollectiveThunk : public Thunk {
     return xla::gpu::GetStreamId(IsAsync(), GetAsyncStreamKind());
   }
 
-#if XLA_ENABLE_XCCL
+  const NcclApi* nccl_api_;
+
   bool first_call_to_execute_ = true;
-#endif                                    // XLA_ENABLE_XCCL
   std::unique_ptr<AsyncExecutor> async_;  // null if not async.
 };
+
+//===----------------------------------------------------------------------===//
+// NcclCollectiveDoneThunk
+//===----------------------------------------------------------------------===//
 
 class NcclCollectiveDoneThunk : public Thunk {
  public:
@@ -221,18 +221,17 @@ absl::Status AddOpDescription(absl::Status status, OpT op,
           operand_count, str));
 }
 
+//===----------------------------------------------------------------------===//
+
 size_t GetNumLocalParticipants(
     const std::vector<GlobalDeviceId>& participants,
     const std::vector<GlobalDeviceId>* local_devices);  // may be null
 
-#if XLA_ENABLE_XCCL
-// TODO(hanbinyoon): Consider moving to nccl_utils.h when deprecating Thunks.
 absl::StatusOr<NcclComm::Lock> LockNcclComm(
     const NcclExecuteParams& params,
     const std::vector<ReplicaGroup>& replica_groups,
     CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id,
     bool enable_clique_optimization);
-#endif  // XLA_ENABLE_XCCL
 
 struct DeviceBufferPair {
   PrimitiveType element_type;
