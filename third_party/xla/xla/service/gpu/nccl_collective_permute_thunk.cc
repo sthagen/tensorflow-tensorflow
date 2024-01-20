@@ -29,6 +29,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/mlir_hlo/lhlo_gpu/IR/lhlo_gpu_ops.h"
 #include "xla/service/collective_ops_utils.h"
+#include "xla/service/global_device_id.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/nccl_api.h"
@@ -46,7 +47,7 @@ namespace gpu {
 using mlir::lmhlo_gpu::CollectivePermuteStartOp;
 
 NcclCollectivePermuteStartThunk::NcclCollectivePermuteStartThunk(
-    ThunkInfo thunk_info, const NcclApi* nccl_api, CollectivePermuteStartOp op,
+    ThunkInfo thunk_info, NcclApi* nccl_api, CollectivePermuteStartOp op,
     int64_t replica_count, int64_t partition_count, const Buffer& buffer)
     : NcclCollectiveThunk(Thunk::kNcclCollectivePermuteStart, thunk_info,
                           nccl_api, op.getIsSync()),
@@ -54,7 +55,7 @@ NcclCollectivePermuteStartThunk::NcclCollectivePermuteStartThunk(
       buffer_(buffer) {}
 
 NcclCollectivePermuteStartThunk::NcclCollectivePermuteStartThunk(
-    ThunkInfo thunk_info, const NcclApi* nccl_api,
+    ThunkInfo thunk_info, NcclApi* nccl_api,
     const HloCollectivePermuteInstruction* instr, int64_t replica_count,
     int64_t partition_count, const Buffer& buffer)
     : NcclCollectiveThunk(Thunk::kNcclCollectivePermuteStart, thunk_info,
@@ -211,11 +212,11 @@ absl::Status NcclCollectivePermuteStartThunk::RunNcclCollective(
                              config_.config.operand_element_type));
   TF_RET_CHECK(device_buffers.size() == 1) << "Expected one buffer pair.";
 
-  TF_ASSIGN_OR_RETURN(const GlobalDeviceId global_device_id,
-                      params.nccl_params.GetGlobalDeviceId());
+  GlobalDeviceId global_device_id = params.nccl_params.global_device_id();
+
   TF_ASSIGN_OR_RETURN(
       const DeviceAssignment::LogicalID current_logical_id,
-      params.nccl_params.device_assn->LogicalIdForDevice(global_device_id));
+      params.nccl_params.device_assn()->LogicalIdForDevice(global_device_id));
   const int64_t current_id =
       config_.config.group_mode == CollectiveOpGroupMode::kCrossReplica
           ? current_logical_id.replica_id
@@ -225,14 +226,14 @@ absl::Status NcclCollectivePermuteStartThunk::RunNcclCollective(
   const NcclP2PConfig::SourceTargetMapEntry source_target =
       NcclP2PConfig::GetSourceTarget(config_.id_to_source_target, current_id);
 
-  return ::xla::gpu::RunCollectivePermute(source_target, device_buffers[0],
-                                          stream, comm, device_string,
-                                          current_id);
+  return ::xla::gpu::RunCollectivePermute(nccl_api(), source_target,
+                                          device_buffers[0], stream, comm,
+                                          device_string, current_id);
 }
 
 absl::Status RunCollectivePermute(
-    NcclP2PConfig::SourceTargetMapEntry source_target, DeviceBufferPair& buffer,
-    se::Stream& stream, NcclApi::NcclCommHandle comm,
+    NcclApi* nccl_api, NcclP2PConfig::SourceTargetMapEntry source_target,
+    DeviceBufferPair& buffer, se::Stream& stream, NcclApi::NcclCommHandle comm,
     absl::string_view device_string, int64_t current_id) {
   // Determine the source and target IDs for this instance. The source ID is the
   // ID which will copy its data to this instance. The destination ID is the ID
@@ -275,25 +276,25 @@ absl::Status RunCollectivePermute(
   // GroupStart/End API is needed only if we will issue both send & recv calls.
   const bool is_nccl_group_needed = (target_id && source_id);
   if (is_nccl_group_needed) {
-    TF_RETURN_IF_ERROR(NcclApi::GroupStart());
+    TF_RETURN_IF_ERROR(nccl_api->GroupStart());
   }
 
   // Send source buffer to target peer if needed.
   if (target_id) {
-    TF_RETURN_IF_ERROR(NcclApi::Send(src_addr, buffer.element_type,
-                                     buffer.element_count, *target_id, comm,
-                                     &stream));
+    TF_RETURN_IF_ERROR(nccl_api->Send(src_addr, buffer.element_type,
+                                      buffer.element_count, *target_id, comm,
+                                      &stream));
   }
 
   // Receive data from the source peer to the destination buffer.
   if (source_id) {
-    TF_RETURN_IF_ERROR(NcclApi::Recv(dest_addr, buffer.element_type,
-                                     buffer.element_count, *source_id, comm,
-                                     &stream));
+    TF_RETURN_IF_ERROR(nccl_api->Recv(dest_addr, buffer.element_type,
+                                      buffer.element_count, *source_id, comm,
+                                      &stream));
   }
 
   if (is_nccl_group_needed) {
-    TF_RETURN_IF_ERROR(NcclApi::GroupEnd());
+    TF_RETURN_IF_ERROR(nccl_api->GroupEnd());
   }
 
   if (!source_id) {

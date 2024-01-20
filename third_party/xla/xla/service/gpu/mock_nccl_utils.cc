@@ -302,25 +302,24 @@ absl::StatusOr<NcclComm::Lock> LockMockNcclComm(
     CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id,
     bool enable_clique_optimization,
     GpuExecutableRunOptions::MockNcclTopoModel topo_model) {
-  TF_ASSIGN_OR_RETURN(GlobalDeviceId global_device_id,
-                      params.GetGlobalDeviceId());
+  GlobalDeviceId global_device_id = params.global_device_id();
 
   TF_ASSIGN_OR_RETURN(
       std::vector<GlobalDeviceId> participants,
-      GetParticipatingDevices(global_device_id, *params.device_assn,
+      GetParticipatingDevices(global_device_id, *params.device_assn(),
                               replica_groups, group_mode));
 
   if (IsGlobalNcclConfig() &&
-      (participants.size() != params.device_assn->replica_count())) {
+      (participants.size() != params.device_assn()->replica_count())) {
     return InvalidArgument(
         "Partial replica groups are not allowed when using NCCL_COMM_ID "
         "environment configuration.");
   }
 
   std::vector<GlobalDeviceId> local_devices;
-  if (params.gpu_global_device_ids) {
-    local_devices.reserve(params.gpu_global_device_ids->size());
-    for (const auto& entry : *params.gpu_global_device_ids) {
+  if (params.global_device_id_map()) {
+    local_devices.reserve(params.global_device_id_map()->size());
+    for (const auto& entry : *params.global_device_id_map()) {
       local_devices.push_back(entry.second);
     }
   } else {
@@ -328,10 +327,10 @@ absl::StatusOr<NcclComm::Lock> LockMockNcclComm(
   }
   TF_ASSIGN_OR_RETURN(
       const NcclCliqueIdCallback* clique_id_callback,
-      GetNcclCliqueIdCallback(params.nccl_clique_id_callback, true));
+      GetNcclCliqueIdCallback(params.nccl_clique_id_callback(), true));
 
   size_t num_local_participants = GetNumLocalParticipants(
-      participants, params.gpu_global_device_ids ? &local_devices : nullptr);
+      participants, params.global_device_id_map() ? &local_devices : nullptr);
 
   auto global_it = absl::c_find(participants, global_device_id);
   TF_RET_CHECK(global_it != participants.end());
@@ -341,13 +340,14 @@ absl::StatusOr<NcclComm::Lock> LockMockNcclComm(
     return absl::CancelledError("Only mock nccl call for gpu rank 0");
   }
 
-  return AcquireMockNcclComm(params.run_id, OpId(op_id),
+  return AcquireMockNcclComm(params.run_id(), OpId(op_id),
                              std::move(participants), std::move(local_devices),
                              num_local_participants, *clique_id_callback,
                              global_rank, stream_id, false, topo_model);
 }
 
-absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
+absl::Status RunMockNcclCollectives(NcclApi* nccl_api,
+                                    std::vector<DeviceBufferPair>& buffers,
                                     se::Stream& stream,
                                     NcclApi::NcclCommHandle comm,
                                     Thunk::Kind reduce_op) {
@@ -402,7 +402,7 @@ absl::Status RunMockNcclCollectives(std::vector<DeviceBufferPair>& buffers,
   return absl::OkStatus();
 }
 
-absl::Status RunMockNcclAllToAll(bool has_split_dimension,
+absl::Status RunMockNcclAllToAll(NcclApi* nccl_api, bool has_split_dimension,
                                  std::vector<DeviceBufferPair>& buffers,
                                  se::Stream& stream,
                                  NcclApi::NcclCommHandle comm) {
@@ -519,8 +519,8 @@ absl::Status RunMockNcclAllToAll(bool has_split_dimension,
 }
 
 absl::Status RunMockCollectivePermute(
-    NcclP2PConfig::SourceTargetMapEntry source_target, DeviceBufferPair& buffer,
-    se::Stream& stream, NcclApi::NcclCommHandle comm,
+    NcclApi* nccl_api, NcclP2PConfig::SourceTargetMapEntry source_target,
+    DeviceBufferPair& buffer, se::Stream& stream, NcclApi::NcclCommHandle comm,
     absl::string_view device_string, int64_t current_id) {
   ncclComm_t mock_comm = reinterpret_cast<ncclComm_t>(comm);
 
@@ -600,7 +600,7 @@ void CheckNcclAsyncError(NcclComm& lockable_comm) {
   NcclApi::NcclCommHandle comm = *lockable_comm.Acquire();
   if (comm == nullptr) return;
 
-  absl::Status status = NcclApi::CommGetAsyncError(comm);
+  absl::Status status = NcclApi::Default()->CommGetAsyncError(comm);
   if (!status.ok()) LOG(ERROR) << status;
 }
 
@@ -639,7 +639,7 @@ absl::StatusOr<ncclUniqueId> ToNcclUniqueId(const std::string& id_str) {
   return id;
 }
 
-std::shared_ptr<absl::StatusOr<NcclClique::Lock>> AcquireNcclClique(
+absl::StatusOr<std::shared_ptr<NcclClique::Lock>> AcquireNcclClique(
     RunId run_id, OpId op_id, NcclCliqueKey clique_key,
     const NcclCliqueIdCallback& clique_id_callback,
     size_t num_local_participants, bool may_skip_rendezvous) {
@@ -778,12 +778,12 @@ absl::StatusOr<NcclComm::Lock> AcquireMockNcclComm(
   // Ensure that this group of threads have exclusive access to the clique to
   // prevent threads from different groups locking communicators in the clique.
   NcclCliqueKey clique_key(std::move(participants), stream_id);
-  auto clique = AcquireNcclClique(
-      run_id, op_id, clique_key, clique_id_callback, 1,
-      enable_clique_optimization ||
-          stream_id == GetStreamId(true, AsyncStreamKind::kP2P));
-
-  if (!clique->ok()) return clique->status();
+  TF_ASSIGN_OR_RETURN(
+      auto clique,
+      AcquireNcclClique(
+          run_id, op_id, clique_key, clique_id_callback, 1,
+          enable_clique_optimization ||
+              stream_id == GetStreamId(true, AsyncStreamKind::kP2P)));
 
   struct AllCommunicators {
     absl::Mutex mu;
@@ -806,7 +806,7 @@ absl::StatusOr<NcclComm::Lock> AcquireMockNcclComm(
       });
   (void)check_async_error_thread;  // Silence unused variable warning.
 
-  NcclCliqueState& state = ***clique;
+  NcclCliqueState& state = **clique;
 
   if (!state.ready.HasBeenNotified()) {
     ncclComm_t comm = nullptr;

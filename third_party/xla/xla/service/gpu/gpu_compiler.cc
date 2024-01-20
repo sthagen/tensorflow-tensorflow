@@ -325,7 +325,7 @@ class GpuAotCompilationResult : public AotCompilationResult {
       const std::string& serialized) {
     XlaRuntimeGpuExecutableProto xla_runtime_gpu_executable;
     if (!xla_runtime_gpu_executable.ParseFromString(serialized)) {
-      return InternalError("Failed to parse serialized JitRtExecutableProto.");
+      return Internal("Failed to parse serialized JitRtExecutableProto.");
     }
     return std::make_unique<GpuAotCompilationResult>(
         xla_runtime_gpu_executable);
@@ -361,7 +361,7 @@ class GpuThunkAotCompilationResult : public AotCompilationResult {
   FromString(const std::string& serialized) {
     CompilationResultProto proto;
     if (!proto.ParseFromString(serialized)) {
-      return InternalError(
+      return Internal(
           "Failed to parse serialized GpuThunkAotCompilationResult.");
     }
     return std::make_unique<GpuThunkAotCompilationResult>(proto);
@@ -440,7 +440,7 @@ GpuThunkAotCompilationResult::LoadExecutable(
   auto llvm_module = std::make_unique<llvm::Module>("", llvm_context);
   auto* gpu_compiler = dynamic_cast<GpuCompiler*>(compiler);
   if (gpu_compiler == nullptr) {
-    return InternalError("Compiler is not a GpuCompiler.");
+    return Internal("Compiler is not a GpuCompiler.");
   }
   llvm_module->setTargetTriple(gpu_compiler->target_triple());
   llvm_module->setDataLayout(gpu_compiler->data_layout());
@@ -1656,13 +1656,9 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
                                    se::StreamExecutor* stream_exec,
                                    const CompileOptions& options,
                                    const HloModule* debug_module) {
-  // We disable this until b/319271534 is fixed due to errors during linking.
-  // This flag is intentionally not a command line argument for now.
-  //
-  // TODO(b/319271534): Re-enable once we use libnvjitlink.
-  constexpr bool kEnableLlvmModuleCompilationParallelism = false;
   MaybeOwningThreadPool thread_pool =
-      kEnableLlvmModuleCompilationParallelism
+      module_config.debug_options()
+              .xla_gpu_enable_llvm_module_compilation_parallelism()
           ? MaybeOwningThreadPool::GetOrCreate(
                 /*parallelism=*/module_config.debug_options()
                     .xla_gpu_force_compilation_parallelism(),
@@ -1768,10 +1764,10 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
       this->LinkModules(stream_exec, std::move(submodule_compile_results),
                         module_config.debug_options());
   if (!maybe_backend_result.ok()) {
-    LOG(ERROR) << "The CUDA linking API did not work. Please use "
-                  "XLA_FLAGS=--xla_gpu_force_compilation_parallelism=1 to "
-                  "bypass it, but expect to get longer compilation time due to "
-                  "the lack of multi-threading. Original error: "
+    LOG(ERROR) << "The CUDA linking API did not work. Please use XLA_FLAGS="
+                  "--xla_gpu_enable_llvm_module_compilation_parallelism=false "
+                  "to bypass it, but expect to get longer compilation time due "
+                  "to the lack of multi-threading. Original error: "
                << maybe_backend_result.status();
     return maybe_backend_result.status();
   }
@@ -1976,7 +1972,7 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     const auto* program = std::get_if<GpuExecutable::OwnedGpuRuntimeProgram>(
         &res.compile_module_results.executable);
     if (!program) {
-      return InternalError("Gpu runtime program was not provided");
+      return Internal("Gpu runtime program was not provided");
     }
 
     // TODO(ezhulenev): Unify AOT compilation with GpuRuntimeExecutable::Create
@@ -2011,8 +2007,8 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     auto jit_executable = runtime::JitExecutable::Instantiate(
         (*program)->module, (*program)->entry_point, opts);
     if (!jit_executable.ok())
-      return InternalError("Failed to compile XLA program: %s",
-                           jit_executable.status().message());
+      return Internal("Failed to compile XLA program: %s",
+                      jit_executable.status().message());
 
     // For static shapes we can always serialize only the default executable.
     runtime::Executable& executable = jit_executable->DefaultExecutable().get();
@@ -2020,7 +2016,7 @@ GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
     // Check if XLA runtime executable saved the compilation result.
     std::unique_ptr<llvm::MemoryBuffer> obj_file = executable.obj_file();
     if (!obj_file)
-      return InternalError("XLA runtime executable didn't save the obj file");
+      return Internal("XLA runtime executable didn't save the obj file");
 
     std::string data(obj_file->getBuffer().data(),
                      obj_file->getBuffer().size());

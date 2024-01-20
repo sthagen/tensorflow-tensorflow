@@ -47,9 +47,9 @@ absl::Status CheckImplementable(RecvOp op) {
 
 }  // namespace impl
 
-NcclRecvThunk::NcclRecvThunk(ThunkInfo thunk_info, const NcclApi* nccl_api,
-                             RecvOp op, int64_t replica_count,
-                             int64_t partition_count, const Buffer& buffer)
+NcclRecvThunk::NcclRecvThunk(ThunkInfo thunk_info, NcclApi* nccl_api, RecvOp op,
+                             int64_t replica_count, int64_t partition_count,
+                             const Buffer& buffer)
     : NcclCollectiveThunk(Thunk::kNcclRecv, thunk_info, nccl_api,
                           /*is_sync=*/false),
       config_(GetNcclP2PConfig(op, replica_count, partition_count)),
@@ -79,11 +79,11 @@ absl::Status NcclRecvThunk::RunNcclCollective(const ExecuteParams& params,
                              config_.config.operand_element_type));
   TF_RET_CHECK(device_buffers.size() == 1) << "Expected one buffer pair.";
 
-  TF_ASSIGN_OR_RETURN(const GlobalDeviceId global_device_id,
-                      params.nccl_params.GetGlobalDeviceId());
+  GlobalDeviceId global_device_id = params.nccl_params.global_device_id();
+
   TF_ASSIGN_OR_RETURN(
       const DeviceAssignment::LogicalID current_logical_id,
-      params.nccl_params.device_assn->LogicalIdForDevice(global_device_id));
+      params.nccl_params.device_assn()->LogicalIdForDevice(global_device_id));
   const int64_t current_id =
       config_.config.group_mode == CollectiveOpGroupMode::kCrossReplica
           ? current_logical_id.replica_id
@@ -93,11 +93,12 @@ absl::Status NcclRecvThunk::RunNcclCollective(const ExecuteParams& params,
   const NcclP2PConfig::SourceTargetMapEntry source_target =
       NcclP2PConfig::GetSourceTarget(config_.id_to_source_target, current_id);
 
-  return ::xla::gpu::RunRecv(source_target, device_buffers[0], stream, comm,
-                             device_string, current_id);
+  return ::xla::gpu::RunRecv(nccl_api(), source_target, device_buffers[0],
+                             stream, comm, device_string, current_id);
 }
 
-absl::Status RunRecv(NcclP2PConfig::SourceTargetMapEntry source_target,
+absl::Status RunRecv(NcclApi* nccl_api,
+                     NcclP2PConfig::SourceTargetMapEntry source_target,
                      DeviceBufferPair& buffer, se::Stream& stream,
                      NcclApi::NcclCommHandle comm,
                      absl::string_view device_string, int64_t current_id) {
@@ -116,9 +117,9 @@ absl::Status RunRecv(NcclP2PConfig::SourceTargetMapEntry source_target,
 
   // Receive data from the source peer to the destination buffer.
   if (source_id) {
-    TF_RETURN_IF_ERROR(NcclApi::Recv(dest_addr, buffer.element_type,
-                                     buffer.element_count, *source_id, comm,
-                                     &stream));
+    TF_RETURN_IF_ERROR(nccl_api->Recv(dest_addr, buffer.element_type,
+                                      buffer.element_count, *source_id, comm,
+                                      &stream));
 
   } else {
     // If there is no source peer, i.e. no sender to this instance, zero out

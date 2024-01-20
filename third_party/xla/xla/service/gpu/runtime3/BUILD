@@ -104,6 +104,7 @@ cc_library(
         "//xla/service/gpu:thunk",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -220,6 +221,7 @@ xla_test(
         "//xla/stream_executor/gpu:gpu_types_header",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -460,6 +462,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//xla/service:buffer_assignment",
+        "//xla/service:global_device_id",
         "//xla/service/gpu:thunk",
         "@com_google_absl//absl/status",
     ],
