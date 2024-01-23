@@ -89,6 +89,7 @@ xla_test(
     backends = ["gpu"],
     deps = [
         "//xla:array3d",
+        "//xla:array4d",
         "//xla:error_spec",
         "//xla:literal_util",
         "//xla:types",
@@ -117,6 +118,7 @@ cc_library(
         "//xla/service/gpu:target_util",
         "//xla/service/gpu:thunk",
         "//xla/service/gpu/model:indexing_analysis",
+        "//xla/service/gpu/model:indexing_map",
         "//xla/service/gpu/runtime3:kernel_thunk",
         "//xla/service/llvm_ir:ir_array",
         "//xla/service/llvm_ir:llvm_util",
