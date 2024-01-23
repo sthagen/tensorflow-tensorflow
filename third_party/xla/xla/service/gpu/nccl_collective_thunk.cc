@@ -196,19 +196,19 @@ NcclCollectiveThunk::NcclCollectiveThunk(Kind kind, ThunkInfo thunk_info,
       async_(is_sync ? std::make_unique<AsyncExecutor>() : nullptr) {}
 
 absl::StatusOr<NcclComm::Lock> LockNcclComm(
-    const NcclExecuteParams& params,
+    const Thunk::CollectiveExecuteParams& params,
     const std::vector<ReplicaGroup>& replica_groups,
     CollectiveOpGroupMode group_mode, int64_t op_id, int64_t stream_id,
     bool enable_clique_optimization) {
-  GlobalDeviceId global_device_id = params.global_device_id();
+  GlobalDeviceId global_device_id = params.global_device_id;
 
   TF_ASSIGN_OR_RETURN(
       std::vector<GlobalDeviceId> participants,
-      GetParticipatingDevices(global_device_id, *params.device_assn(),
+      GetParticipatingDevices(global_device_id, *params.device_assn,
                               replica_groups, group_mode));
 
   if (IsGlobalNcclConfig() &&
-      (participants.size() != params.device_assn()->replica_count())) {
+      (participants.size() != params.device_assn->replica_count())) {
     return InvalidArgument(
         "Partial replica groups are not allowed when using NCCL_COMM_ID "
         "environment configuration.");
@@ -219,25 +219,25 @@ absl::StatusOr<NcclComm::Lock> LockNcclComm(
   int rank = it - participants.begin();
 
   std::vector<GlobalDeviceId> local_devices;
-  if (params.global_device_id_map()) {
-    local_devices.reserve(params.global_device_id_map()->size());
-    for (const auto& entry : *params.global_device_id_map()) {
+  if (params.global_device_id_map) {
+    local_devices.reserve(params.global_device_id_map->size());
+    for (const auto& entry : *params.global_device_id_map) {
       local_devices.push_back(entry.second);
     }
   }
   size_t num_local_participants = GetNumLocalParticipants(
-      participants, params.global_device_id_map() ? &local_devices : nullptr);
+      participants, params.global_device_id_map ? &local_devices : nullptr);
 
   bool is_local = participants.size() == num_local_participants;
   TF_ASSIGN_OR_RETURN(
       const NcclCliqueIdCallback* clique_id_callback,
-      GetNcclCliqueIdCallback(params.nccl_clique_id_callback(), is_local));
+      GetNcclCliqueIdCallback(params.nccl_clique_id_callback, is_local));
 
 #ifdef GOOGLE_CUDA
   se::gpu::ScopedActivateExecutorContext scoped_context(params.stream_executor);
 #endif  // GOOGLE_CUDA
 
-  return AcquireNcclComm(params.run_id(), OpId(op_id), std::move(participants),
+  return AcquireNcclComm(params.run_id, OpId(op_id), std::move(participants),
                          num_local_participants, *clique_id_callback, rank,
                          stream_id, enable_clique_optimization);
 }
@@ -307,13 +307,40 @@ Status MaybeRegisterBuffers(NcclApi* nccl_api, int device_ordinal,
   return OkStatus();
 }
 
+absl::Status NcclCollectiveThunk::Prepare(const PrepareParams& params,
+                                          ResourceRequests& resource_requests) {
+  const CollectiveExecuteParams* collectives = params.collective_params;
+
+  TF_ASSIGN_OR_RETURN(
+      std::vector<GlobalDeviceId> participants,
+      GetParticipatingDevices(collectives->global_device_id,
+                              *collectives->device_assn,
+                              config().replica_groups, config().group_mode));
+
+  std::vector<GlobalDeviceId> local_devices;
+  if (collectives->global_device_id_map) {
+    local_devices.reserve(collectives->global_device_id_map->size());
+    for (const auto& entry : *collectives->global_device_id_map) {
+      local_devices.push_back(entry.second);
+    }
+  }
+
+  size_t num_local_participants = GetNumLocalParticipants(
+      participants,
+      collectives->global_device_id_map ? &local_devices : nullptr);
+
+  return resource_requests.AddClique(
+      NcclCliqueKey(std::move(participants), GetStreamId()),
+      num_local_participants);
+}
+
 Status NcclCollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
   VLOG(1) << absl::StreamFormat("Starting %s %s.", IsAsync() ? "async" : "sync",
                                 Thunk::KindToString(kind()));
   const int64_t stream_id = GetStreamId();
   TF_ASSIGN_OR_RETURN(
       NcclComm::Lock comm,
-      LockNcclComm(params.nccl_params, config().replica_groups,
+      LockNcclComm(params.collective_params, config().replica_groups,
                    config().group_mode, config().op_id, stream_id,
                    /*enable_clique_optimization=*/false));
 
@@ -347,14 +374,15 @@ Status NcclCollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
 }
 
 std::string NcclCollectiveThunk::GetDeviceString(
-    const NcclExecuteParams& nccl_params) {
-  GlobalDeviceId global_device_id = nccl_params.global_device_id();
+    const Thunk::CollectiveExecuteParams& collective_params) {
+  GlobalDeviceId global_device_id = collective_params.global_device_id;
   DeviceAssignment::LogicalID logical_id =
-      nccl_params.device_assn()->LogicalIdForDevice(global_device_id).value();
+      collective_params.device_assn->LogicalIdForDevice(global_device_id)
+          .value();
   return absl::StrFormat("(r%d, p%d) : GlobalID %d, ord %d",
                          logical_id.replica_id, logical_id.computation_id,
                          global_device_id.value(),
-                         nccl_params.local_device_ordinal());
+                         collective_params.local_device_ordinal);
 }
 
 absl::Status NcclCollectiveThunk::AsyncExecutor::Execute(

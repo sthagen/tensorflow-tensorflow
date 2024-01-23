@@ -246,6 +246,8 @@ limitations under the License.
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/numbers.h"
+#include "tsl/platform/path.h"
+#include "tsl/platform/protobuf.h"  // IWYU pragma: keep
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/threadpool.h"
 #include "tsl/profiler/lib/traceme.h"
@@ -1382,7 +1384,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 
 // Returns the TargetConfig, either from the module debug options, or from the
 // CompilationOptions, or if both of those are absent, from the attached GPU.
-absl::StatusOr<Compiler::TargetConfig> GetTargetConfig(
+/*static*/ absl::StatusOr<Compiler::TargetConfig> GpuCompiler::GetTargetConfig(
     const Compiler::CompileOptions& options, const DebugOptions& debug_opts,
     se::StreamExecutor* executor) {
   if (options.target_config.has_value()) {
@@ -1828,6 +1830,13 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   const DebugOptions& debug_opts = module->config().debug_options();
   TF_ASSIGN_OR_RETURN(TargetConfig gpu_target_config,
                       GetTargetConfig(options, debug_opts, stream_exec));
+
+  if (DumpingEnabledForHloModule(*module)) {
+    std::string textproto;
+    tsl::protobuf::TextFormat::PrintToString(gpu_target_config.ToProto(),
+                                             &textproto);
+    DumpToFileInDirOrStdout(*module, "", "gpu_target_config.pbtxt", textproto);
+  }
 
   if (!options.is_autotuning_compilation) {
     VLOG(1) << "Starting to compile HLO module " << module->name();

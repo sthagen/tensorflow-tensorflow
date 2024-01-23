@@ -131,20 +131,19 @@ xla_cc_test(
     ],
 )
 
-xla_cc_test(
+xla_test(
     name = "gemm_rewrite_test",
     srcs = ["gemm_rewrite_test.cc"],
+    backends = ["gpu"],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
         "TENSORFLOW_USE_ROCM=1",
     ]),
-    tags = tf_gpu_tests_tags(),
     deps = [
         ":gpu_codegen_test",
         "//xla:statusor",
         "//xla:test",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
-        "//xla/service:gpu_plugin",
         "//xla/service:hlo_module_config",
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
@@ -444,6 +443,18 @@ xla_test(
         "//xla/service:hlo_module_config",
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+xla_cc_test(
+    name = "concatenate_emitter_test",
+    srcs = ["concatenate_emitter_test.cc"],
+    tags = tf_cuda_tests_tags(),
+    deps = [
+        ":gpu_codegen_test",
+        "//xla/tests:hlo_test_base",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],

@@ -16,12 +16,15 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_EXPERIMENTAL_SHLO_INCLUDE_SHLO_H_
 #define TENSORFLOW_LITE_EXPERIMENTAL_SHLO_INCLUDE_SHLO_H_
 
-#include <absl/status/status.h>
-#include <absl/types/span.h>
-
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
+#include <utility>
 #include <vector>
+
+#include "absl/status/status.h"
+#include "absl/types/span.h"
 
 namespace stablehlo {
 

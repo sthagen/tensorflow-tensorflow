@@ -15,6 +15,7 @@ limitations under the License.
 #include "tensorflow/core/data/service/snapshot/prefetched_split_provider.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,31 +47,53 @@ PrefetchedSplitProvider::PrefetchedSplitProvider(
       num_write_threads_(num_write_threads),
       buffer_size_(num_write_threads_ * buffer_size_per_thread),
       split_provider_(std::move(split_provider)) {
-  thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
-      env_, tsl::ThreadOptions{}, "tf_data_prefetch_splits_thread",
-      num_write_threads_);
-  for (size_t i = 0; i < num_write_threads_; ++i) {
-    thread_pool_->Schedule([this]() { PrefetchLoop(); });
+  absl::Status status = InitDirs();
+  if (!status.ok()) {
+    UpdateStatus(std::move(status));
+    return;
   }
+  thread_pool_ = RunPrefetchThreads();
 }
 
-absl::StatusOr<std::optional<Tensor>> PrefetchedSplitProvider::GetSplit(
-    const std::string& target_split_path) ABSL_LOCKS_EXCLUDED(mu_) {
+PrefetchedSplitProvider::~PrefetchedSplitProvider() { Cancel(); }
+
+absl::StatusOr<std::optional<Tensor>> PrefetchedSplitProvider::GetNext(
+    const std::string& split_path) ABSL_LOCKS_EXCLUDED(mu_) {
   absl::MutexLock l(&mu_);
-  while (status_.ok() && finished_threads_ < num_write_threads_ &&
-         buffer_.empty()) {
+  while (status_.ok() &&
+         (buffer_.empty() || buffer_.begin()->index != split_index_to_read_) &&
+         (finished_threads_ < num_write_threads_ || reset_)) {
     ready_to_pop_.Wait(&mu_);
   }
   TF_RETURN_IF_ERROR(status_);
   if (buffer_.empty()) {
     return std::nullopt;
   }
+  if (buffer_.begin()->index != split_index_to_read_) {
+    return absl::InternalError(absl::StrCat(
+        "Failed to get tf.data snapshot split. Expected split ",
+        split_index_to_read_, ", got split ", buffer_.begin()->index,
+        ". This is likely a tf.data bug."));
+  }
 
-  SplitFile split_file = std::move(buffer_.front());
-  TF_RETURN_IF_ERROR(env_->RenameFile(split_file.filename, target_split_path));
-  buffer_.pop_front();
+  auto it = buffer_.begin();
+  SplitAndIndex split = std::move(*it);
+  buffer_.erase(it);
+  TF_RETURN_IF_ERROR(env_->RenameFile(split.SplitPath(directory_), split_path));
+  ++split_index_to_read_;
   ready_to_push_.Signal();
-  return std::move(split_file.split);
+  return std::move(split.split);
+}
+
+std::unique_ptr<tsl::thread::ThreadPool>
+PrefetchedSplitProvider::RunPrefetchThreads() {
+  auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(
+      env_, tsl::ThreadOptions{}, "tf_data_prefetch_splits_thread",
+      num_write_threads_);
+  for (size_t i = 0; i < num_write_threads_; ++i) {
+    thread_pool->Schedule([this]() { PrefetchLoop(); });
+  }
+  return thread_pool;
 }
 
 void PrefetchedSplitProvider::PrefetchLoop() ABSL_LOCKS_EXCLUDED(mu_) {
@@ -94,33 +117,38 @@ void PrefetchedSplitProvider::PrefetchLoop() ABSL_LOCKS_EXCLUDED(mu_) {
 bool PrefetchedSplitProvider::ShouldPrefetchSplit() const
     ABSL_LOCKS_EXCLUDED(mu_) {
   absl::MutexLock l(&mu_);
-  return status_.ok();
+  return status_.ok() && !reset_;
 }
 
 absl::StatusOr<bool> PrefetchedSplitProvider::PrefetchSplit()
     ABSL_LOCKS_EXCLUDED(mu_) {
-  TF_ASSIGN_OR_RETURN(std::optional<Tensor> split, GetSplitFromProvider());
+  TF_ASSIGN_OR_RETURN(std::optional<SplitAndIndex> split,
+                      GetSplitFromProvider());
   if (!split.has_value()) {
     return false;
   }
 
-  TF_ASSIGN_OR_RETURN(std::string split_path, GetUniqueFile());
-  TF_RETURN_IF_ERROR(AtomicallyWriteTFRecords(
-      split_path, {*split}, tsl::io::compression::kNone, env_));
+  // Writes the split without holding a mutex.
+  TF_RETURN_IF_ERROR(
+      AtomicallyWriteTFRecords(split->SplitPath(directory_), {split->split},
+                               tsl::io::compression::kNone, env_));
 
   absl::MutexLock l(&mu_);
-  buffer_.push_back({*std::move(split), std::move(split_path)});
+  buffer_.insert(std::move(*split));
   ready_to_pop_.Signal();
   return true;
 }
 
-absl::StatusOr<std::optional<Tensor>>
+absl::StatusOr<std::optional<PrefetchedSplitProvider::SplitAndIndex>>
 PrefetchedSplitProvider::GetSplitFromProvider() ABSL_LOCKS_EXCLUDED(mu_) {
   absl::MutexLock l(&mu_);
-  while (status_.ok() && buffer_.size() >= buffer_size_) {
+  while (status_.ok() && buffer_.size() >= buffer_size_ && !reset_) {
     ready_to_push_.Wait(&mu_);
   }
   TF_RETURN_IF_ERROR(status_);
+  if (reset_) {
+    return std::nullopt;
+  }
 
   Tensor split;
   bool end_of_splits = false;
@@ -128,17 +156,45 @@ PrefetchedSplitProvider::GetSplitFromProvider() ABSL_LOCKS_EXCLUDED(mu_) {
   if (end_of_splits) {
     return std::nullopt;
   }
-  return split;
+  return SplitAndIndex{split, split_index_to_write_++};
 }
 
-absl::StatusOr<std::string> PrefetchedSplitProvider::GetUniqueFile() const {
-  std::string filename = tsl::io::JoinPath(directory_, "split_");
-  if (!env_->CreateUniqueFileName(&filename, ".tfrecord")) {
-    return absl::InternalError(
-        absl::StrCat("Failed to prefetch tf.data service split to ", filename,
-                     ": Unable to open temporary file."));
+absl::Status PrefetchedSplitProvider::Reset() ABSL_LOCKS_EXCLUDED(mu_) {
+  {
+    absl::MutexLock l(&mu_);
+    reset_ = true;
+    ready_to_push_.SignalAll();
+    ready_to_pop_.SignalAll();
   }
-  return filename;
+  thread_pool_.reset();
+  TF_RETURN_IF_ERROR(split_provider_->Reset());
+
+  absl::MutexLock l(&mu_);
+  TF_RETURN_IF_ERROR(status_);
+  reset_ = false;
+  split_index_to_read_ = 0;
+  split_index_to_write_ = 0;
+  finished_threads_ = 0;
+  buffer_.clear();
+  TF_RETURN_IF_ERROR(InitDirs());
+  thread_pool_ = RunPrefetchThreads();
+  return absl::OkStatus();
+}
+
+void PrefetchedSplitProvider::Cancel() {
+  // Finishes the in-flight threads.
+  UpdateStatus(
+      absl::CancelledError("tf.data prefetched split provider is shut down."));
+  thread_pool_.reset();
+}
+
+absl::Status PrefetchedSplitProvider::InitDirs() {
+  if (env_->FileExists(directory_).ok()) {
+    int64_t undeleted_files, undeleted_dirs;
+    TF_RETURN_IF_ERROR(
+        env_->DeleteRecursively(directory_, &undeleted_files, &undeleted_dirs));
+  }
+  return env_->RecursivelyCreateDir(directory_);
 }
 
 void PrefetchedSplitProvider::UpdateStatus(absl::Status status)

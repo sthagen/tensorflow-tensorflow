@@ -13,24 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <absl/status/status.h>
-
-#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <numeric>
-#include <optional>
 #include <type_traits>
 #include <version>
 
-#include "include/shlo.h"
-#include "src/bf16.h"
-#include "src/f16.h"
-#include "src/storage.h"
-#include "src/util.h"
+#include "absl/status/status.h"
+#include "tensorflow/lite/experimental/shlo/include/shlo.h"
+#include "tensorflow/lite/experimental/shlo/src/bf16.h"
+#include "tensorflow/lite/experimental/shlo/src/f16.h"
+#include "tensorflow/lite/experimental/shlo/src/storage.h"
+#include "tensorflow/lite/experimental/shlo/src/util.h"
 
 namespace stablehlo {
 

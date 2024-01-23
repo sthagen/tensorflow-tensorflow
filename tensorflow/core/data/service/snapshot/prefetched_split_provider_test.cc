@@ -37,6 +37,7 @@ limitations under the License.
 #include "tensorflow/core/data/snapshot_utils.h"
 #include "tensorflow/core/framework/dataset.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tsl/lib/core/status_test_util.h"
 #include "tsl/lib/io/compression.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
@@ -49,6 +50,8 @@ namespace tensorflow {
 namespace data {
 namespace {
 
+using ::testing::ElementsAreArray;
+using ::testing::IsSupersetOf;
 using ::testing::UnorderedElementsAreArray;
 using ::tsl::testing::IsOkAndHolds;
 using ::tsl::testing::StatusIs;
@@ -111,7 +114,7 @@ absl::StatusOr<std::vector<T>> GetSplits(
     std::string target_split_path =
         tsl::io::JoinPath(test_dir, absl::StrCat("split_", i));
     TF_ASSIGN_OR_RETURN(std::optional<Tensor> split,
-                        prefetched_split_provider.GetSplit(target_split_path));
+                        prefetched_split_provider.GetNext(target_split_path));
     if (!split.has_value()) {
       return splits;
     }
@@ -154,10 +157,56 @@ TEST_P(PrefetchedSplitProviderParamTest, GetSplits) {
       std::move(split_provider), test_dirs[0], tsl::Env::Default(),
       NumWriteThreads(), BufferSizePerThread());
   EXPECT_THAT(GetSplits<int64_t>(prefetched_split_provider, test_dirs[1]),
-              IsOkAndHolds(UnorderedElementsAreArray(Range(NumElements()))));
+              IsOkAndHolds(ElementsAreArray(Range(NumElements()))));
 }
 
 TEST_P(PrefetchedSplitProviderParamTest, ConcurrentGetSplits) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<SplitProvider> split_provider,
+                          RangeSplitProvider(NumElements()));
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<std::string> test_dirs,
+                          TestDirs(/*num_dirs=*/1 + NumClients()));
+  PrefetchedSplitProvider prefetched_split_provider(
+      std::move(split_provider), test_dirs[0], tsl::Env::Default(),
+      NumWriteThreads(), BufferSizePerThread());
+
+  absl::Mutex mu;  // Protects `splits`.
+  std::vector<int64_t> splits;
+  std::vector<std::unique_ptr<tsl::Thread>> client_threads;
+  for (int i = 0; i < NumClients(); ++i) {
+    client_threads.push_back(absl::WrapUnique(tsl::Env::Default()->StartThread(
+        /*thread_options=*/{}, /*name=*/absl::StrCat("Client_", i),
+        [i, &prefetched_split_provider, &splits, &test_dirs, &mu]() {
+          TF_ASSERT_OK_AND_ASSIGN(
+              std::vector<int64_t> splits_per_thread,
+              GetSplits<int64_t>(prefetched_split_provider, test_dirs[1 + i]));
+          EXPECT_TRUE(absl::c_is_sorted(splits_per_thread));
+          absl::MutexLock l(&mu);
+          absl::c_move(splits_per_thread, std::back_inserter(splits));
+        })));
+  }
+
+  client_threads.clear();
+  EXPECT_THAT(splits, UnorderedElementsAreArray(Range(NumElements())));
+}
+
+TEST_P(PrefetchedSplitProviderParamTest, Reset) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<SplitProvider> split_provider,
+                          RangeSplitProvider(NumElements()));
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<std::string> test_dirs,
+                          TestDirs(/*num_dirs=*/2));
+  PrefetchedSplitProvider prefetched_split_provider(
+      std::move(split_provider), test_dirs[0], tsl::Env::Default(),
+      NumWriteThreads(), BufferSizePerThread());
+
+  // The split provider produces elements from the beginning after being reset.
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_THAT(GetSplits<int64_t>(prefetched_split_provider, test_dirs[1]),
+                IsOkAndHolds(ElementsAreArray(Range(NumElements()))));
+    TF_EXPECT_OK(prefetched_split_provider.Reset());
+  }
+}
+
+TEST_P(PrefetchedSplitProviderParamTest, ConcurrentGetSplitsAndReset) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<SplitProvider> split_provider,
                           RangeSplitProvider(NumElements()));
   TF_ASSERT_OK_AND_ASSIGN(std::vector<std::string> test_dirs,
@@ -181,8 +230,11 @@ TEST_P(PrefetchedSplitProviderParamTest, ConcurrentGetSplits) {
         })));
   }
 
+  TF_EXPECT_OK(prefetched_split_provider.Reset());
   client_threads.clear();
-  EXPECT_THAT(splits, UnorderedElementsAreArray(Range(NumElements())));
+  // The result should be `Range(NumElements())` plus a few extra splits read
+  // before the split provider was reset.
+  EXPECT_THAT(splits, IsSupersetOf(Range(NumElements())));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -193,16 +245,36 @@ INSTANTIATE_TEST_SUITE_P(
         /*NumWriteThreads*/ ::testing::Values(1, 10),
         /*BufferSizePerThread*/ ::testing::Values(1, 10000)));
 
-TEST(PrefetchedSplitProviderTest, DirectoryDoesNotExist) {
+TEST(PrefetchedSplitProviderTest, Cancellation) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<SplitProvider> split_provider,
-                          RangeSplitProvider(10));
+                          RangeSplitProvider(999999));
   TF_ASSERT_OK_AND_ASSIGN(std::vector<std::string> test_dirs,
-                          TestDirs(/*num_dirs=*/1));
-  PrefetchedSplitProvider prefetched_split_provider(std::move(split_provider),
-                                                    "/directory/does/not/exist",
-                                                    tsl::Env::Default());
-  EXPECT_THAT(GetSplits<int64_t>(prefetched_split_provider, test_dirs[0]),
-              StatusIs(absl::StatusCode::kNotFound));
+                          TestDirs(/*num_dirs=*/2));
+  PrefetchedSplitProvider prefetched_split_provider(
+      std::move(split_provider), test_dirs[0], tsl::Env::Default(),
+      /*num_write_threads=*/2, /*buffer_size_per_thread=*/1);
+
+  std::unique_ptr<tsl::Thread> client_thread =
+      absl::WrapUnique(tsl::Env::Default()->StartThread(
+          /*thread_options=*/{}, /*name=*/"client_thread",
+          [&prefetched_split_provider, &test_dirs]() {
+            EXPECT_THAT(
+                GetSplits<int64_t>(prefetched_split_provider, test_dirs[1]),
+                StatusIs(absl::StatusCode::kCancelled));
+          }));
+
+  prefetched_split_provider.Cancel();
+  client_thread.reset();
+}
+
+TEST(PrefetchedSplitProviderTest, ShutdownWithUnreadSplits) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<SplitProvider> split_provider,
+                          RangeSplitProvider(100));
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<std::string> test_dirs,
+                          TestDirs(/*num_dirs=*/2));
+  PrefetchedSplitProvider prefetched_split_provider(
+      std::move(split_provider), test_dirs[0], tsl::Env::Default());
+  TF_EXPECT_OK(prefetched_split_provider.Reset());
 }
 
 }  // namespace

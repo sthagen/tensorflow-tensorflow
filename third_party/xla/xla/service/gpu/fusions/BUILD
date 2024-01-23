@@ -139,6 +139,7 @@ cc_library(
     hdrs = ["fusions.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":concatenate",
         ":copy",
         ":custom",
         ":fusion_emitter",
@@ -204,6 +205,7 @@ xla_cc_test(
         "//xla/service/gpu:gpu_device_info_for_tests",
         "//xla/service/gpu:hlo_fusion_analysis",
         "//xla/service/gpu/model:affine_map_printer",
+        "//xla/service/gpu/model:indexing_test_utils",
         "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
@@ -412,6 +414,35 @@ cc_library(
 )
 
 cc_library(
+    name = "concatenate",
+    srcs = ["concatenate.cc"],
+    hdrs = ["concatenate.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":fusion_emitter",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/service/gpu:ir_emission_utils",
+        "//xla/service/gpu:ir_emitter",
+        "//xla/service/gpu:ir_emitter_context",
+        "//xla/service/gpu:launch_dimensions",
+        "//xla/service/gpu:parallel_loop_emitter",
+        "//xla/service/gpu/model:indexing_map",
+        "//xla/service/llvm_ir:fused_ir_emitter",
+        "//xla/service/llvm_ir:ir_array",
+        "//xla/service/llvm_ir:loop_emitter",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/status",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:ir_headers",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
     name = "transpose",
     srcs = ["transpose.cc"],
     hdrs = ["transpose.h"],
@@ -484,6 +515,8 @@ xla_cc_test(
         ":input_slices",
         "//xla/service/gpu:gpu_device_info_for_tests",
         "//xla/service/gpu:hlo_fusion_analysis",
+        "//xla/service/gpu/model:affine_map_printer",
+        "//xla/service/gpu/model:indexing_test_utils",
         "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
