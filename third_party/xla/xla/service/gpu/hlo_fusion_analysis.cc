@@ -26,6 +26,7 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -165,6 +166,29 @@ absl::StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
 }
 
 // static
+absl::string_view HloFusionAnalysis::GetEmitterFusionKindString(
+    EmitterFusionKind kind) {
+  switch (kind) {
+    case EmitterFusionKind::kLoop:
+      return "loop";
+    case EmitterFusionKind::kCustomFusion:
+      return "custom";
+    case EmitterFusionKind::kTriton:
+      return "triton";
+    case EmitterFusionKind::kReduction:
+      return "reduction";
+    case EmitterFusionKind::kTranspose:
+      return "transpose";
+    case EmitterFusionKind::kConcatenate:
+      return "concatenate";
+    case EmitterFusionKind::kInputSlices:
+      return "input_slices";
+    case EmitterFusionKind::kScatter:
+      return "scatter";
+  }
+}
+
+// static
 absl::StatusOr<HloFusionAnalysis> HloFusionAnalysis::Create(
     const HloFusionInstruction* fusion,
     const se::DeviceDescription* device_info) {
@@ -211,9 +235,14 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
 
   if (input_output_info_.has_4_bit_input ||
       input_output_info_.has_4_bit_output) {
-    // Only loop fusions currently can handle int4 inputs/outputs, due to the
-    // special handling with IrArray needed to deal with two values occupying a
-    // single byte.
+    // Only loop and input slice fusions currently can handle int4
+    // inputs/outputs, due to the special handling with IrArray needed to deal
+    // with two values occupying a single byte.
+    if (fusion_roots_.size() > 1 &&
+        IsInputFusibleNonStridedSlices(fusion_roots_) &&
+        AllSliceInputsAreCompatible(fusion_roots_)) {
+      return EmitterFusionKind::kInputSlices;
+    }
     return EmitterFusionKind::kLoop;
   }
 
@@ -233,9 +262,9 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
       }
       if (!IsRealReductionHero(*root, *hero)) {
         // Needs to have a compatible shape to the reduce operand.
-        if (!ShapeUtil::ReshapeIsBitcast(root->shape(),
-                                         first_reduce_hero->operand(0)->shape(),
-                                         /*ignore_element_type=*/true)) {
+        if (!ShapeUtil::IsReshapeOrTransposeBitcast(
+                root->shape(), hero_operand_shape,
+                /*ignore_element_type=*/true)) {
           valid_shapes = false;
           break;
         }
