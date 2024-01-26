@@ -58,7 +58,8 @@ else
     ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --config=nonccl"
 
     if is_linux_cpu_arm64_job ; then
-        ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --action_env PYTHON_BIN_PATH=/usr/bin/python3.9 --python_path=/usr/bin/python3.9"
+        TAGS_FILTER="$TAGS_FILTER,-no_aarch64"
+        ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --action_env PYTHON_BIN_PATH=/usr/bin/python3.10 --python_path=/usr/bin/python3.10"
     else
         RBE_FLAGS="--config=rbe_linux_cpu"
     fi
@@ -69,6 +70,7 @@ docker exec xla bazel \
         test \
         --build_tag_filters=$TAGS_FILTER  \
         --test_tag_filters=$TAGS_FILTER \
+        --test_output=errors \
         --keep_going \
         --features=layering_check \
         --profile=/tf/pkg/profile.json.gz \
