@@ -36,6 +36,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/collective_ops_utils.h"
+#include "xla/service/computation_placer.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
@@ -52,6 +53,7 @@ limitations under the License.
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
+#include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/types.h"  // IWYU pragma: keep
 #include "xla/util.h"
@@ -259,6 +261,124 @@ std::vector<bool> CommandBufferCmdSequence::barriers() const {
   absl::c_transform(commands_, std::back_inserter(barriers),
                     [](auto& command) { return command.requires_barrier; });
   return barriers;
+}
+//===----------------------------------------------------------------------===//
+// ComputationId
+//===----------------------------------------------------------------------===//
+
+// TODO(ezhulenev): PTX kernel should be replaced with CUDA C++ kernel but
+// today we accidentally try to build them without CUDA support. We need to
+// clean our build and testing infrastructure first.
+
+// PTX kernel compiled from:
+//
+// __global__ void memset32(int64_t n, uint32_t value, uint32_t* dst)
+// {
+//   int i = blockIdx.x*blockDim.x + threadIdx.x;
+//   if (i < n) dst[i] = value;
+// }
+//
+// Easiest way to get PTX from C++ is to use https://godbolt.org.
+inline constexpr std::string_view kMemset32Kernel = R"(
+.version 8.0
+.target sm_50
+.address_size 64
+
+.visible .entry memset32(
+        .param .u64 memset32_param_0,
+        .param .u32 memset32_param_1,
+        .param .u64 memset32_param_2
+)
+{
+        .reg .pred      %p<2>;
+        .reg .b32       %r<6>;
+        .reg .b64       %rd<7>;
+        .loc    1 3 0
+
+        ld.param.u64    %rd3, [memset32_param_0];
+        ld.param.u32    %r1, [memset32_param_1];
+        ld.param.u64    %rd2, [memset32_param_2];
+        .loc    1 5 3
+        mov.u32         %r2, %ctaid.x;
+        mov.u32         %r3, %ntid.x;
+        mov.u32         %r4, %tid.x;
+        mad.lo.s32      %r5, %r2, %r3, %r4;
+        .loc    1 6 3
+        cvt.s64.s32     %rd1, %r5;
+        setp.ge.s64     %p1, %rd1, %rd3;
+        @%p1 bra        $L__BB0_2;
+
+        .loc    1 5 3
+        cvta.to.global.u64      %rd4, %rd2;
+        .loc    1 6 3
+        shl.b64         %rd5, %rd1, 2;
+        add.s64         %rd6, %rd4, %rd5;
+        st.global.u32   [%rd6], %r1;
+
+$L__BB0_2:
+        .loc    1 7 1
+        ret;
+
+})";
+
+ComputationIdCmd::ComputationIdCmd(BufferAllocation::Slice dest, Kind kind)
+    : dest_(dest), kind_(kind) {}
+
+CommandBufferCmd::BufferUsageVector ComputationIdCmd::buffers() {
+  return {{dest_, MemoryAccess::kWrite}};
+}
+
+absl::Status ComputationIdCmd::Initialize(se::StreamExecutor* executor,
+                                          Thunk::ExecutableSource source) {
+  {
+    absl::MutexLock lock(&mutex_);
+    if (memset_kernels_.contains(executor)) return absl::OkStatus();
+  }
+
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<se::Kernel> kernel,
+      CreateKernel("memset32", 3, kMemset32Kernel, /*cubin_data=*/{}, executor,
+                   /*shared_mem_bytes=*/0));
+
+  absl::MutexLock lock(&mutex_);
+  memset_kernels_.emplace(executor, std::move(kernel));
+  return absl::OkStatus();
+}
+
+absl::Status ComputationIdCmd::Record(const RecordParams& params,
+                                      se::CommandBuffer* command_buffer) {
+  se::DeviceMemoryBase dst = params.buffer_allocations->GetDeviceAddress(dest_);
+
+  GlobalDeviceId global_device_id = params.collective_params->global_device_id;
+  TF_ASSIGN_OR_RETURN(const DeviceAssignment::LogicalID logical_id,
+                      params.collective_params->device_assn->LogicalIdForDevice(
+                          global_device_id));
+
+  uint32_t value = kind_ == Kind::kReplica ? logical_id.replica_id
+                                           : logical_id.computation_id;
+
+  VLOG(5) << "ComputationIdCmd"
+          << ": kind=" << (kind_ == Kind::kReplica ? "replica" : "partition")
+          << "; value=" << value;
+  VLOG(5) << "  Id: " << dest_ << " (" << dst.opaque() << ")";
+
+  se::Kernel* memset_kernel = [&] {
+    absl::MutexLock lock(&mutex_);
+    return memset_kernels_[params.executor].get();
+  }();
+
+  if (memset_kernel == nullptr) {
+    return absl::InternalError(
+        "Memset kernel not loaded on a command buffer executor");
+  }
+
+  auto* memset32 = static_cast<
+      se::TypedKernel<int64_t, uint32_t, se::DeviceMemory<uint32_t>>*>(
+      memset_kernel);
+
+  return command_buffer->Launch(*memset32, se::ThreadDim(1), se::BlockDim(1),
+                                /*n=*/int64_t{1}, value,
+                                se::DeviceMemory<uint32_t>(dst));
 }
 
 //===----------------------------------------------------------------------===//
@@ -598,6 +718,11 @@ absl::Status ForCmd::Record(const RecordParams& params,
   se::DeviceMemoryBase loop_counter =
       params.buffer_allocations->GetDeviceAddress(loop_counter_);
 
+  VLOG(5) << "ForCmd: num_iterations=" << num_iterations_
+          << "; body_commands=" << body_commands_.size();
+  VLOG(5) << "  loop_counter: " << loop_counter_ << " ("
+          << loop_counter.opaque() << ")";
+
   return command_buffer->For(params.executor, num_iterations_,
                              se::DeviceMemory<int32_t>(loop_counter),
                              ConditionBuilder(&body_commands_, &params));
@@ -632,6 +757,10 @@ absl::Status WhileCmd::Record(const RecordParams& params,
                               se::CommandBuffer* command_buffer) {
   se::DeviceMemoryBase pred =
       params.buffer_allocations->GetDeviceAddress(pred_);
+
+  VLOG(5) << "WhileCmd: cond_commands=" << cond_commands_.size()
+          << " body_commands=" << body_commands_.size();
+  VLOG(5) << "  pred: " << pred_ << " (" << pred.opaque() << ")";
 
   return command_buffer->While(params.executor, se::DeviceMemory<bool>(pred),
                                ConditionBuilder(&cond_commands_, &params),
@@ -765,8 +894,10 @@ Status CustomCallCmd::Record(const RecordParams& params,
         continue;
       }
 
-      if (!slice->slice.allocation())
-        return InternalError("custom call input missing buffer allocation");
+      if (!slice->slice.allocation()) {
+        return absl::InternalError(
+            "custom call input missing buffer allocation");
+      }
 
       buffers.push_back(
           params.buffer_allocations->GetDeviceAddress(slice->slice).opaque());
