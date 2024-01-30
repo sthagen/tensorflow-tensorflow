@@ -279,32 +279,6 @@ class StreamExecutor {
   // will be reflected in "free".
   bool DeviceMemoryUsage(int64_t* free, int64_t* total) const;
 
-  absl::Status GetFusedMatmulRunners(
-      bool use_cudnn_frontend, dnn::DataType input_type,
-      dnn::DataType bias_type, dnn::DataType output_type, Stream* stream,
-      bool trans_a, bool trans_b, uint64_t m, uint64_t n, uint64_t k,
-      int64_t lda, int64_t ldb, int64_t ldc,
-      dnn::ActivationMode activation_mode, bool use_fallback,
-      const NumericOptions& numeric_options,
-      std::vector<std::unique_ptr<const dnn::FusedMatmulRunner>>*
-          out_exec_plans);
-
-  // Returns the list of supported algorithms for the forward convolution
-  // operation.
-  bool GetMIOpenConvolveAlgorithms(
-      dnn::ConvolutionKind kind, dnn::DataType element_type, Stream* stream,
-      const dnn::BatchDescriptor& input_descriptor, DeviceMemoryBase input_data,
-      const dnn::FilterDescriptor& filter_descriptor,
-      DeviceMemoryBase filter_data,
-      const dnn::BatchDescriptor& output_descriptor,
-      DeviceMemoryBase output_data,
-      const dnn::ConvolutionDescriptor& convolution_descriptor,
-      ScratchAllocator* scratch_allocator,
-      std::vector<dnn::ProfileResult>* out_algorithms);
-
-  // Returns the list of supported algorithms for rnn operation.
-  bool GetRnnAlgorithms(std::vector<dnn::AlgorithmDesc>* out_algorithms);
-
   // Get the list of supported algorithms for BLAS gemm.
   bool GetBlasGemmAlgorithms(Stream* stream,
                              std::vector<blas::AlgorithmType>* out_algorithms);

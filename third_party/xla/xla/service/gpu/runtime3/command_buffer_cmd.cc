@@ -29,6 +29,7 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/functional/function_ref.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
@@ -42,12 +43,12 @@ limitations under the License.
 #include "xla/service/gpu/kernels/custom_kernel.h"
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/matmul_utils.h"
-#include "xla/service/gpu/nccl_all_gather_thunk.h"
 #include "xla/service/gpu/nccl_all_reduce_thunk.h"
 #include "xla/service/gpu/nccl_api.h"
 #include "xla/service/gpu/nccl_clique.h"
 #include "xla/service/gpu/nccl_clique_key.h"
 #include "xla/service/gpu/nccl_collective_thunk.h"
+#include "xla/service/gpu/runtime3/nccl_all_gather_thunk.h"
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/thunk.h"
 #include "xla/stream_executor/command_buffer.h"
@@ -105,6 +106,27 @@ static std::vector<se::CommandBuffer::Builder> ConditionBuilders(
     builders.push_back(ConditionBuilder(&cmd, params));
   }
   return builders;
+}
+
+//===----------------------------------------------------------------------===//
+// CommandBufferCmd
+//===----------------------------------------------------------------------===//
+
+CommandBufferCmd::State* CommandBufferCmd::StateManager::GetOrNull(
+    const CommandBufferCmd* cmd) {
+  if (auto it = state_.find(cmd); it != state_.end()) {
+    return it->second.get();
+  }
+  return nullptr;
+}
+
+CommandBufferCmd::State* CommandBufferCmd::StateManager::GetOrCreate(
+    const CommandBufferCmd* cmd,
+    absl::FunctionRef<std::unique_ptr<State>()> create) {
+  if (auto it = state_.find(cmd); it != state_.end()) {
+    return it->second.get();
+  }
+  return state_.try_emplace(cmd, create()).first->second.get();
 }
 
 //===----------------------------------------------------------------------===//

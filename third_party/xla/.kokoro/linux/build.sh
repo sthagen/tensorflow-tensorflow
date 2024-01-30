@@ -30,12 +30,17 @@ function is_linux_cpu_arm64_job() {
   [[ "$KOKORO_JOB_NAME" =~ tensorflow/xla/linux/arm64/.*cpu.* ]]
 }
 
-# Pull the container (in case it was updated since the instance started) and
-# store its SHA in the Sponge log.
-docker pull "$DOCKER_IMAGE"
-echo "TF_INFO_DOCKER_IMAGE,$DOCKER_IMAGE" >> "$KOKORO_ARTIFACTS_DIR/custom_sponge_config.csv"
-echo "TF_INFO_DOCKER_SHA,$(docker pull "$DOCKER_IMAGE" | sed -n '/Digest:/s/Digest: //g p')" >> "$KOKORO_ARTIFACTS_DIR/custom_sponge_config.csv"
+function pull_docker_image_with_retries() {
+  # Pull the container (in case it was updated since the instance started) and
+  # store its SHA in the Sponge log.
+  docker pull "$DOCKER_IMAGE" || sleep 15
+  docker pull "$DOCKER_IMAGE" || sleep 15
+  docker pull "$DOCKER_IMAGE"
+  echo "TF_INFO_DOCKER_IMAGE,$DOCKER_IMAGE" >> "$KOKORO_ARTIFACTS_DIR/custom_sponge_config.csv"
+  echo "TF_INFO_DOCKER_SHA,$(docker pull "$DOCKER_IMAGE" | sed -n '/Digest:/s/Digest: //g p')" >> "$KOKORO_ARTIFACTS_DIR/custom_sponge_config.csv"
+}
 
+pull_docker_image_with_retries
 # Start a container in the background
 docker run --name xla -w /tf/xla -itd --rm \
     -v "$KOKORO_ARTIFACTS_DIR/github/xla:/tf/xla" \
@@ -59,7 +64,7 @@ else
 
     if is_linux_cpu_arm64_job ; then
         TAGS_FILTER="$TAGS_FILTER,-no_aarch64"
-        ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --action_env PYTHON_BIN_PATH=/usr/bin/python3.10 --python_path=/usr/bin/python3.10"
+        ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --config=tf_public_cache_push --action_env PYTHON_BIN_PATH=/usr/bin/python3.10 --python_path=/usr/bin/python3.10"
     else
         RBE_FLAGS="--config=rbe_linux_cpu"
     fi
