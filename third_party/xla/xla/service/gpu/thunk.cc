@@ -62,14 +62,14 @@ absl::StatusOr<NcclComm::Lock> Thunk::CollectiveCliques::GetComm(
   }
 
   // Check that clique has a communicator for our rank.
-  auto communicator = (*clique->second)->communicators.find(rank);
-  if (communicator == (*clique->second)->communicators.end()) {
+  auto communicator = (*clique->second)->comm(rank);
+  if (!communicator.has_value()) {
     return absl::InternalError(absl::StrCat("Communicator for rank ", rank,
                                             " not found in a NCCL clique ",
                                             clique_key.ToString()));
   }
 
-  return communicator->second.Acquire();
+  return (*communicator)->Acquire();
 }
 
 //===----------------------------------------------------------------------===//
@@ -204,7 +204,9 @@ Thunk::ExecuteParams::ExecuteParams(
     CASE(kNcclAllToAllStart);
     CASE(kNcclAllToAllDone);
     CASE(kNcclSend);
+    CASE(kNcclSendDone);
     CASE(kNcclRecv);
+    CASE(kNcclRecvDone);
     CASE(kFft);
     CASE(kGemm);
     CASE(kInfeed);

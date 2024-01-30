@@ -1284,7 +1284,7 @@ xla_cc_test(
 xla_cc_test(
     name = "cpu_instruction_fusion_test",
     srcs = ["cpu_instruction_fusion_test.cc"],
-    tags = ["no_aarch64"],
+    tags = ["no_arm64"],
     deps = [
         ":cpu_instruction_fusion",
         "//xla:shape_util",
@@ -1556,7 +1556,7 @@ xla_cc_test(
     name = "vectorized_reduce_with_no_vector_registers_test",
     size = "small",
     srcs = ["vectorized_reduce_with_no_vector_registers_test.cc"],
-    tags = ["no_aarch64"],
+    tags = ["no_arm64"],
     deps = [
         ":cpu_compiler",
         ":cpu_transfer_manager",
@@ -1650,6 +1650,7 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@local_tsl//tsl/platform:blocking_counter",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:platform_port",
     ] + mkl_deps(),
 )
@@ -1720,6 +1721,8 @@ cc_library(
         "//xla/service:hlo_pass",
         "//xla/service:pattern_matcher",
         "@com_google_absl//absl/algorithm:container",
+        "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:platform_port",
     ] + mkl_deps(),
 )
 
@@ -1741,6 +1744,8 @@ cc_library(
         "//xla/service:hlo_creation_utils",
         "//xla/service:hlo_pass",
         "//xla/service:pattern_matcher",
+        "@com_google_absl//absl/algorithm:container",
+        "@local_tsl//tsl/platform:platform_port",
     ] + mkl_deps(),
 )
 

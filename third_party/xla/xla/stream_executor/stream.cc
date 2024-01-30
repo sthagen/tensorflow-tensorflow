@@ -26,6 +26,7 @@ limitations under the License.
 #include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "Eigen/Core"  // from @eigen_archive
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/numeric_options.h"
@@ -33,6 +34,7 @@ limitations under the License.
 #include "xla/stream_executor/platform/port.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_internal.h"
+#include "xla/stream_executor/temporary_device_memory.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/stacktrace.h"
 
@@ -255,8 +257,7 @@ Stream::Stream(StreamExecutor *parent)
     : parent_(parent),
       implementation_(parent->implementation()->GetStreamImplementation()),
       allocated_(false),
-      status_(absl::InternalError("Uninitialized stream")),
-      temporary_memory_manager_(this) {
+      status_(absl::InternalError("Uninitialized stream")) {
   VLOG_CALL(PARAM(parent));
 }
 
@@ -269,7 +270,6 @@ Stream::~Stream() {
     LOG(WARNING) << "Error blocking host until done in stream destructor: "
                  << status;
   }
-  temporary_memory_manager_.ForceDeallocateAll();
 
   if (allocated_) {
     parent_->DeallocateStream(this);
@@ -499,26 +499,6 @@ Stream &Stream::ThenBatchNormalizationBackward(
 
   } else {
     SetErrorAndLogNoDnnSupport();
-  }
-  return *this;
-}
-
-Stream &Stream::ThenConvolve(
-    const dnn::BatchDescriptor &input_descriptor,
-    const DeviceMemory<float> &input_data,
-    const dnn::FilterDescriptor &filter_descriptor,
-    const DeviceMemory<float> &filter_data,
-    const dnn::ConvolutionDescriptor &convolution_descriptor,
-    const dnn::BatchDescriptor &output_descriptor,
-    DeviceMemory<float> *output) {
-  if (ok()) {
-    CheckError(ConvolveWithAlgorithm(
-                   dnn::ConvolutionKind::FORWARD, input_descriptor, input_data,
-                   filter_descriptor, filter_data, output_descriptor, *output,
-                   convolution_descriptor,
-                   /*scratch_allocator=*/nullptr, dnn::AlgorithmConfig(),
-                   /*output_profile_result=*/nullptr)
-                   .ok());
   }
   return *this;
 }
@@ -1701,8 +1681,6 @@ absl::Status Stream::BlockHostUntilDone() {
     return status;
   }
 
-  temporary_memory_manager_.DeallocateFinalizedTemporaries();
-
   absl::Status error = parent_->BlockHostUntilDone(this);
   CheckError(error.ok());
 
@@ -1722,6 +1700,21 @@ void Stream::CheckStatus(absl::Status status) {
   LOG(ERROR) << status;
   absl::MutexLock lock(&mu_);
   status_ = status;
+}
+
+absl::StatusOr<std::unique_ptr<TemporaryDeviceMemoryBase>>
+Stream::AllocateArrayBase(uint64_t element_count, uint64_t element_size) {
+  uint64_t byte_size = element_count * element_size;
+  DeviceMemoryBase device_memory = parent()->AllocateArray<uint8_t>(byte_size);
+  if (device_memory == nullptr) {
+    return absl::ResourceExhaustedError(absl::StrCat(
+        "could not allocate temporary memory of ", byte_size, " bytes"));
+  }
+
+  VLOG(1) << absl::StreamFormat(
+      "stream %p allocated temporary device memory at %p (size %u) in ", this,
+      device_memory.opaque(), byte_size);
+  return std::make_unique<TemporaryDeviceMemoryBase>(this, device_memory);
 }
 
 }  // namespace stream_executor

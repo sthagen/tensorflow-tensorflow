@@ -427,10 +427,10 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/protobuf:dnn_proto_cc",
     ] + if_gpu_is_configured([
-        ":gpublas_lt_matmul_thunk",
         ":ir_emitter_triton",
         "//xla/service/gpu/runtime3:cholesky_thunk",
         "//xla/service/gpu/runtime3:cub_sort_thunk",
+        "//xla/service/gpu/runtime3:gpublas_lt_matmul_thunk",
         "//xla/service/gpu/runtime3:triangular_solve_thunk",
     ]),
 )
@@ -990,6 +990,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/concurrency:ref_count",
+        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -1027,6 +1028,7 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1804,26 +1806,6 @@ cc_library(
 )
 
 cc_library(
-    name = "gpublas_lt_matmul_thunk",
-    srcs = if_gpu_is_configured(["gpublas_lt_matmul_thunk.cc"]),
-    hdrs = if_gpu_is_configured(["gpublas_lt_matmul_thunk.h"]),
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
-    visibility = ["//visibility:public"],
-    deps = if_gpu_is_configured([
-        ":matmul_utils",
-        ":thunk",
-        "//xla/service:buffer_assignment",
-        "//xla:status",
-        "//xla/stream_executor:device_memory",
-        "//xla/stream_executor",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:statusor",
-    ]),
-)
-
-cc_library(
     name = "gemm_algorithm_picker",
     srcs = if_gpu_is_configured(["gemm_algorithm_picker.cc"]),
     hdrs = if_gpu_is_configured(["gemm_algorithm_picker.h"]),
@@ -2485,7 +2467,7 @@ xla_cc_test(
     name = "instruction_fusion_test",
     srcs = ["instruction_fusion_test.cc"],
     tags = [
-        "no_aarch64",
+        "no_arm64",
         "nomsan",
     ],
     deps = [

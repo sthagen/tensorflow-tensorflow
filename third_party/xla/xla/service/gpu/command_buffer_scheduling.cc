@@ -122,13 +122,9 @@ static bool IsCommand(const HloCustomCallInstruction* hlo,
   }
 
   if (config.contains(DebugOptions::CUSTOM_CALL)) {
-    if (hlo->custom_call_target() == "cu_threefry2x32") {
-      if (hlo->operand_count() == 4) {
-        return true;
-      }
-      // This version of cu_threefy2x32 requires synchronization, which is not
-      // supported by command buffers.
-      DCHECK_EQ(hlo->operand_count(), 5);
+    if (hlo->custom_call_target() == "triton_kernel_call" ||
+        hlo->custom_call_target() == "cu_threefry2x32") {
+      return true;
     }
   }
 
@@ -466,7 +462,7 @@ absl::StatusOr<HloComputation*> CommandBufferScheduling::RewriteCommandBuffer(
     HloComputation* parent, const HloInstructionSequence& seq,
     CommandBuffer command_buffer) {
   if (command_buffer.results.empty())
-    return absl::InternalError("command buffer rsults must be not empty");
+    return absl::InternalError("command buffer results must not be empty");
 
   // If we have more than one result we return them as tuple, and get individual
   // values using `get-tuple-element` instructions. Otherwise we simply return
