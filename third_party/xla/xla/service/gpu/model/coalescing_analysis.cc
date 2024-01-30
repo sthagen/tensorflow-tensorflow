@@ -92,18 +92,18 @@ bool IsReadCoalesced(const HloInstruction* operand, const HloInstruction* instr,
     if (!indexing_map.has_value()) return false;
 
     auto normalized_indexing_map = indexing_map;
-    if (output_physical_to_logical_map.has_value()) {
+    if (!output_physical_to_logical_map.GetAffineMap().isIdentity()) {
       normalized_indexing_map = ComposeIndexingMaps(
           normalized_indexing_map, output_physical_to_logical_map);
     }
-    if (input_logical_to_physical_map.has_value()) {
+    if (!input_logical_to_physical_map.GetAffineMap().isIdentity()) {
       normalized_indexing_map = ComposeIndexingMaps(
           input_logical_to_physical_map, normalized_indexing_map);
     }
     // First version is naive, we just check that the affine maps of input and
     // output have the same minor dimension.
-    is_coalesced &=
-        normalized_indexing_map->affine_map.isMinorIdentityWithBroadcasting();
+    is_coalesced &= normalized_indexing_map->GetAffineMap()
+                        .isMinorIdentityWithBroadcasting();
   }
   return is_coalesced;
 }

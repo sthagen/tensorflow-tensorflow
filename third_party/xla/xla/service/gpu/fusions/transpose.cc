@@ -88,8 +88,7 @@ TilingScheme ComputeTransposeTilingScheme(
       /*dims_in_elems=*/tiled_shape,
       /*tile_sizes=*/tile_sizes,
       /*num_threads=*/num_threads,
-      /*vector_size=*/1,
-      /*scaling_factor=*/1);
+      /*vector_size=*/1);
 }
 
 Vector3 TileToInoutPermutation(Vector3 permutation) {
@@ -97,21 +96,6 @@ Vector3 TileToInoutPermutation(Vector3 permutation) {
   // Note: this is also the tile to output permutation because we swap the
   // last two components.
   return permutation[2] == 1 ? Vector3{0, 1, 2} : Vector3{1, 0, 2};
-}
-
-llvm::GlobalVariable* AllocateShared(
-    llvm::IRBuilder<>* builder, const TilingScheme& tiling_scheme,
-    llvm::Type* element_type,
-    absl::Span<int64_t const> dimensions_major_to_minor,
-    absl::string_view buffer_name) {
-  CHECK(!dimensions_major_to_minor.empty());
-  llvm::Type* ty = element_type;
-  for (auto dim : llvm::reverse(dimensions_major_to_minor)) {
-    ty = llvm::ArrayType::get(ty, dim);
-  }
-  ty = llvm::ArrayType::get(ty, tiling_scheme.GetThreadIdScalingFactor());
-  return llvm_ir::AllocateSharedMemoryTile(
-      builder->GetInsertBlock()->getModule(), ty, buffer_name);
 }
 
 void MaybeEmitFenceForAMDGPU(llvm::IRBuilder<>* builder,
@@ -211,39 +195,39 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
                             std::array<llvm::Value*, 3> tile_dimensions) {
     // Copy input parameter values to shared memory buffers:
     // tile[thread_id_y, thread_id_x] = input[index]
-    EmitTile(
-        builder, tiling_scheme_, thread_id_info, tile_dimensions,
-        [&](std::array<llvm::Value*, 3> index_in_tile) {
-          auto index =
-              PermuteIndex(tile_start_index.AddOffset(index_in_tile, builder),
-                           tile_to_inout);
-          for (const auto& tr : transposes) {
-            auto input_gen = *fused_emitter.GetGenerator(*tr.instr->operand(0));
-            auto input_index = GetUnnormalizedIndex(
-                index, tr.instr->operand(0)->shape(), builder, input_shape);
-            llvm::Value* value = *input_gen(input_index);
-            tiles[tr.instr].Store(value, index_in_tile, builder);
-          }
+    EmitTile(builder, tiling_scheme_, thread_id_info, tile_dimensions,
+             [&](std::array<llvm::Value*, 3> index_in_tile) {
+               auto index = PermuteIndex(
+                   tile_start_index.AddOffset(index_in_tile, builder),
+                   tile_to_inout);
+               for (const auto& tr : transposes) {
+                 auto input_gen =
+                     *fused_emitter.GetGenerator(*tr.instr->operand(0));
+                 auto input_index = index.SourceIndexOfBitcast(
+                     tr.instr->operand(0)->shape(), builder);
+                 llvm::Value* value = *input_gen(input_index);
+                 tiles[tr.instr].Store(value, index_in_tile, builder);
+               }
 
-          // Compute all extra output values before writing them. This
-          // avoids overwriting aliased input/output values before all reads
-          // occurred.
-          std::vector<std::tuple<llvm_ir::IrArray, llvm_ir::IrArray::Index,
-                                 llvm::Value*>>
-              scheduled_writes;
-          for (const auto& [output_idx, root] : extra_outputs) {
-            llvm_ir::IrArray::Index extra_output_index = GetUnnormalizedIndex(
-                index, root->shape(), builder, input_shape);
-            auto output_gen = *fused_emitter.GetGenerator(*root);
-            llvm::Value* output_value = *output_gen(extra_output_index);
-            scheduled_writes.emplace_back(outputs[output_idx],
-                                          extra_output_index, output_value);
-          }
+               // Compute all extra output values before writing them. This
+               // avoids overwriting aliased input/output values before all
+               // reads occurred.
+               std::vector<std::tuple<llvm_ir::IrArray, llvm_ir::IrArray::Index,
+                                      llvm::Value*>>
+                   scheduled_writes;
+               for (const auto& [output_idx, root] : extra_outputs) {
+                 auto extra_output_index =
+                     index.SourceIndexOfBitcast(root->shape(), builder);
+                 auto output_gen = *fused_emitter.GetGenerator(*root);
+                 llvm::Value* output_value = *output_gen(extra_output_index);
+                 scheduled_writes.emplace_back(
+                     outputs[output_idx], extra_output_index, output_value);
+               }
 
-          for (const auto& [output, idx, value] : scheduled_writes) {
-            output.EmitWriteArrayElement(idx, value, builder);
-          }
-        });
+               for (const auto& [output, idx, value] : scheduled_writes) {
+                 output.EmitWriteArrayElement(idx, value, builder);
+               }
+             });
 
     EmitSyncThreads(builder, ir_emitter_context);
 
@@ -291,9 +275,8 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
 
               // Both for emission and writing it should be
               // index-as-transformed by the computation.
-              llvm_ir::IrArray::Index untiled_index =
-                  GetUnnormalizedIndex(index, root->shape(), builder,
-                                       Permute(input_shape, permutation));
+              auto untiled_index =
+                  index.SourceIndexOfBitcast(root->shape(), builder);
               TF_ASSIGN_OR_RETURN(llvm::Value * generated, gen(untiled_index));
               scheduled_writes.emplace_back(outputs[output_idx], untiled_index,
                                             generated);
@@ -313,8 +296,8 @@ absl::Status TransposeFusion::EmitKernel(IrEmitterContext& ir_emitter_context,
 }
 
 LaunchDimensions TransposeFusion::launch_dimensions() const {
-  return LaunchDimensions(tiling_scheme_.GetNumBlocksPhysical(),
-                          tiling_scheme_.GetNumThreadsPerBlockPhysical());
+  return LaunchDimensions(tiling_scheme_.GetNumBlocks(),
+                          tiling_scheme_.GetNumThreadsPerBlock());
 }
 
 }  // namespace gpu
