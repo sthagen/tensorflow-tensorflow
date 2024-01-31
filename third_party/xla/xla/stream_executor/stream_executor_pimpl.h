@@ -283,34 +283,6 @@ class StreamExecutor {
   bool GetBlasGemmAlgorithms(Stream* stream,
                              std::vector<blas::AlgorithmType>* out_algorithms);
 
-  // Create an RNN descriptor based on model shapes and configurations.
-  // The caller retains the ownership of the descriptor.
-  absl::StatusOr<std::unique_ptr<dnn::RnnDescriptor>> createRnnDescriptor(
-      int num_layers, int hidden_size, int input_size, int cell_size,
-      int batch_size, dnn::RnnInputMode input_mode,
-      dnn::RnnDirectionMode direction_mode, dnn::RnnMode rnn_mode,
-      dnn::DataType data_type, const dnn::AlgorithmConfig& algorithm_config,
-      const NumericOptions& numeric_options, float dropout, uint64_t seed,
-      ScratchAllocator* state_allocator, bool use_padded_io);
-
-  // Create a RNN sequence descriptor that specifies either the input or output
-  // sequence. The caller retains the ownership of the returned descriptor.
-  absl::StatusOr<std::unique_ptr<dnn::RnnSequenceTensorDescriptor>>
-  createRnnSequenceTensorDescriptor(int max_seq_length, int batch_size,
-                                    int data_size, dnn::DataType data_type);
-
-  absl::StatusOr<std::unique_ptr<dnn::RnnSequenceTensorDescriptor>>
-  createRnnSequenceTensorDescriptor(int max_seq_length, int batch_size,
-                                    int data_size,
-                                    const absl::Span<const int>& seq_lengths,
-                                    bool time_major, dnn::DataType data_type);
-
-  // Create an RNN state descriptor that specifies the input or hidden state.
-  // The caller retains the ownership of the returned descriptor.
-  absl::StatusOr<std::unique_ptr<dnn::RnnStateTensorDescriptor>>
-  createRnnStateTensorDescriptor(int num_layer, int batch_size, int data_size,
-                                 dnn::DataType data_type);
-
   // Returns the device ordinal that this StreamExecutor was initialized with.
   // Meaningless before initialization.
   int device_ordinal() const { return device_ordinal_; }

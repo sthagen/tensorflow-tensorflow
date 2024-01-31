@@ -2761,7 +2761,7 @@ absl::Status MIOpenSupport::DoCtcLoss(
 }
 
 absl::StatusOr<std::unique_ptr<dnn::RnnDescriptor>>
-MIOpenSupport::createRnnDescriptor(
+MIOpenSupport::CreateRnnDescriptor(
     int num_layers, int hidden_size, int input_size, int cell_size,
     int batch_size, dnn::RnnInputMode input_mode,
     dnn::RnnDirectionMode direction_mode, dnn::RnnMode rnn_mode,
@@ -2796,7 +2796,7 @@ MIOpenSupport::createRnnDescriptor(
 }
 
 absl::StatusOr<std::unique_ptr<dnn::RnnSequenceTensorDescriptor>>
-MIOpenSupport::createRnnSequenceTensorDescriptor(int seq_length, int batch_size,
+MIOpenSupport::CreateRnnSequenceTensorDescriptor(int seq_length, int batch_size,
                                                  int data_size,
                                                  dnn::DataType data_type) {
   std::unique_ptr<MIOpenRnnSequenceTensorDescriptor> seq_desc(
@@ -2810,7 +2810,7 @@ MIOpenSupport::createRnnSequenceTensorDescriptor(int seq_length, int batch_size,
 }
 
 absl::StatusOr<std::unique_ptr<dnn::RnnStateTensorDescriptor>>
-MIOpenSupport::createRnnStateTensorDescriptor(int num_layer, int batch_size,
+MIOpenSupport::CreateRnnStateTensorDescriptor(int num_layer, int batch_size,
                                               int data_size,
                                               dnn::DataType data_type) {
   std::unique_ptr<MIOpenRnnStateTensorDescriptor> state_desc(
