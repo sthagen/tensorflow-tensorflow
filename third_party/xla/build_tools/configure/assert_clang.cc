@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,17 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_CUPTI_WRAPPER_H_
-#define TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_CUPTI_WRAPPER_H_
-
-#include "xla/backends/profiler/gpu/cupti_wrapper.h"
-
-namespace tensorflow {
-namespace profiler {
-
-using xla::profiler::CuptiWrapper;  // NOLINT
-
-}  // namespace profiler
-}  // namespace tensorflow
-
-#endif  // TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_CUPTI_WRAPPER_H_
+#ifndef __clang__
+#error "__clang__ not defined!"
+#endif  // #ifdef __clang__

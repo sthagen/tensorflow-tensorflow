@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,21 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_NVTX_UTILS_H_
-#define TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_NVTX_UTILS_H_
-
-#include <stack>
-
-#include "absl/strings/string_view.h"
-#include "xla/backends/profiler/gpu/nvtx_utils.h"
-#include "tensorflow/core/platform/macros.h"
-
-namespace tensorflow {
-namespace profiler {
-
-using xla::profiler::NVTXRangeTracker;  // NOLINT
-
-}  // namespace profiler
-}  // namespace tensorflow
-
-#endif  // TENSORFLOW_CORE_PROFILER_BACKENDS_GPU_NVTX_UTILS_H_
+#if !defined(__clang__) || !defined(__CUDA__)
+#error "__clang__ or __CUDA__ not defined!"
+#endif  // #if !defined(__clang__) || !defined(__CUDA__)

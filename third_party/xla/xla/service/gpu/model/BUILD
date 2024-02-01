@@ -141,10 +141,7 @@ xla_cc_test(
 cc_library(
     name = "gpu_hlo_cost_analysis",
     srcs = ["gpu_hlo_cost_analysis.cc"],
-    hdrs = [
-        "gpu_hlo_cost_analysis.h",
-        "hlo_op_profiles_data.h",
-    ],
+    hdrs = ["gpu_hlo_cost_analysis.h"],
     compatible_with = get_compatible_with_portable(),
     visibility = ["//visibility:public"],
     deps = [
@@ -338,9 +335,11 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:hlo_traversal",
         "//xla/service/gpu:matmul_utils",
+        "//xla/service/gpu/fusions:tiling_util",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
@@ -450,7 +449,10 @@ tf_proto_library(
 cc_library(
     name = "hlo_op_profiles",
     srcs = ["hlo_op_profiles.cc"],
-    hdrs = ["hlo_op_profiles.h"],
+    hdrs = [
+        "hlo_op_profiles.h",
+        "hlo_op_profiles_data.h",
+    ],
     compatible_with = get_compatible_with_portable(),
     visibility = ["//visibility:public"],
     deps = [
