@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
+#include "stablehlo/experimental/transforms/Passes.h"  // from @stablehlo
 #include "tensorflow/compiler/mlir/lite/common/tfl_pass_config.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_config.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_passes.h"
@@ -143,6 +144,18 @@ void AddPreQuantizationStableHloToTfPasses(
   pass_manager.addPass(
       mlir::odml::CreateLegalizeTFXlaCallModuleToStablehloPass());
 
+  // Add CHLO to StableHLO Decompositions:
+  // This is needed since we are relying on XlaCallModule uses MHLO
+  // specific features like mhlo::ErfOp which aren't supported
+  // in StableHLO, but we have CHLO->StableHLO decompositions to legalize.
+  pass_manager.addPass(
+      mlir::stablehlo::experimental::createChloRecomposeOpsPass());
+  pass_manager.addNestedPass<mlir::func::FuncOp>(
+      mlir::mhlo::createChloLegalizeToHloBasisOpsPass());
+  pass_manager.addNestedPass<mlir::func::FuncOp>(
+      mlir::mhlo::createChloLegalizeToHloPass());
+  pass_manager.addPass(mlir::mhlo::createHloLegalizeToStablehloPass());
+
   // The following two passes find specific uniform quantization patterns in
   // StableHLO and converts them to TFLite ops that accept or produce uniform
   // quantized types. They only target a specific set of models that contain
@@ -156,7 +169,7 @@ void AddPreQuantizationStableHloToTfPasses(
   // no quantization patterns are found, it is a no-op.
   pass_manager.addPass(mlir::odml::CreateComposeUniformQuantizedTypePass());
   pass_manager.addNestedPass<mlir::func::FuncOp>(
-      mlir::odml::CreateUniformQuantizedStablehloToTflPass());
+      mlir::odml::CreateUniformQuantizedStableHloToTflPass());
 
   pass_manager.addPass(mlir::mhlo::createStablehloLegalizeToHloPass());
   // Legalize jax random to tflite custom op.
@@ -213,7 +226,7 @@ void AddPostQuantizationStableHloToTfPasses(
     // quantized types do not go through the TF dialect which doesn't support
     // quantized types.
     pass_manager.addNestedPass<mlir::func::FuncOp>(
-        mlir::odml::CreateUniformQuantizedStablehloToTflPass());
+        mlir::odml::CreateUniformQuantizedStableHloToTflPass());
 
     // StableHLO -> MHLO
     pass_manager.addPass(mlir::mhlo::createStablehloLegalizeToHloPass());

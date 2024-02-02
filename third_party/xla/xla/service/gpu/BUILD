@@ -868,6 +868,7 @@ cc_library(
         "nccl_recv_thunk.h",
         "nccl_send_thunk.h",
     ],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     visibility = ["//visibility:public"],
     deps = [
         ":backend_configs_cc",
@@ -895,7 +896,9 @@ cc_library(
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:gpu_activation_header",
+        "//xla/stream_executor/gpu:gpu_driver_header",
         "//xla/stream_executor/gpu:gpu_stream",
+        "//xla/stream_executor/gpu:gpu_types_header",
         "//xla/translate/hlo_to_mhlo:hlo_utils",
         "//xla/translate/mhlo_to_hlo:attribute_exporter",
         "//xla/translate/mhlo_to_hlo:type_to_shape",
@@ -1242,6 +1245,7 @@ cc_library(
         ":non_atomically_upgradeable_rw_lock",
         ":stream_executor_util",
         ":thunk",
+        "//xla:executable_run_options",
         "//xla:shape_tree",
         "//xla:shape_util",
         "//xla:status",
@@ -2490,6 +2494,51 @@ tf_proto_library(
         "//xla/stream_executor:device_description_proto",
     ],
     visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "fusion_process_dump",
+    srcs = ["fusion_process_dump.cc"],
+    hdrs = ["fusion_process_dump.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":fusion_process_dump_proto_cc",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_graph_dumper",
+        "//xla/stream_executor:stream_executor_headers",
+        "//xla/tools:hlo_module_loader",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "fusion_process_dump_test",
+    srcs = ["fusion_process_dump_test.cc"],
+    deps = [
+        ":fusion_process_dump",
+        ":fusion_process_dump_proto_cc",
+        ":gpu_device_info_for_tests",
+        "//xla:test",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_parser",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
+    ],
 )
 
 cc_library(

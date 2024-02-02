@@ -48,7 +48,7 @@ profiler = _xla.profiler
 
 # Just an internal arbitrary increasing number to help with backward-compatible
 # changes. In JAX, reference this via jax._src.lib.xla_extension_version.
-_version = 236
+_version = 237
 
 # Version number for MLIR:Python components.
 mlir_api_version = 55
@@ -217,6 +217,9 @@ def generate_pjrt_gpu_plugin_options(
   allocator = os.getenv('XLA_PYTHON_CLIENT_ALLOCATOR', 'default').lower()
   memory_fraction = os.getenv('XLA_PYTHON_CLIENT_MEM_FRACTION', '')
   preallocate = os.getenv('XLA_PYTHON_CLIENT_PREALLOCATE', '')
+  collective_memory_size = os.getenv(
+      'XLA_PYTHON_CLIENT_COLLECTIVE_MEM_SIZE_MB', ''
+  )
   if allocator not in ('default', 'platform', 'bfc', 'cuda_async'):
     raise ValueError(
         'XLA_PYTHON_CLIENT_ALLOCATOR env var must be "default", "platform", '
@@ -227,6 +230,8 @@ def generate_pjrt_gpu_plugin_options(
     options['memory_fraction'] = float(memory_fraction)
   if preallocate:
     options['preallocate'] = preallocate not in ('false', 'False', '0')
+  if collective_memory_size:
+    options['collective_memory_size'] = int(collective_memory_size) * (1 << 20)
   return options
 
 

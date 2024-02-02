@@ -121,7 +121,7 @@ TEST_F(IndexingAnalysisTest, ComputeGroupedOutputToInputIndexing) {
   auto grouped_indexing = ComputeGroupedOutputToInputIndexing(
       fusion_adaptor, /*output_id=*/0, &mlir_context_);
   EXPECT_THAT(grouped_indexing,
-              Optional(UnorderedElementsAre(
+              UnorderedElementsAre(
                   Pair(root, ElementsAre(MatchIndexingMap(R"(
                     (d0, d1) -> (d0, d1)
                     domain:
@@ -145,7 +145,7 @@ TEST_F(IndexingAnalysisTest, ComputeGroupedOutputToInputIndexing) {
                         domain:
                         d0 in [0, 999]
                         d1 in [0, 999]
-                      )"))))));
+                      )")))));
 }
 
 TEST_F(IndexingAnalysisTest, PhysicalLayoutTestOutputPermutation) {
@@ -1604,21 +1604,22 @@ TEST_F(IndexingAnalysisTest, UnsupportedOps) {
     }
   )";
   auto input_indexing = GetOutputToInputIndexingForEntryComputation(ir);
-  EXPECT_THAT(input_indexing.indexing_maps,
-              ElementsAre(ElementsAre(std::nullopt), ElementsAre(std::nullopt),
-                          ElementsAre(std::nullopt)));
+  EXPECT_THAT(
+      input_indexing.indexing_maps,
+      ElementsAre(ElementsAre(UndefinedMap()), ElementsAre(UndefinedMap()),
+                  ElementsAre(UndefinedMap())));
 
   auto output_indexing_0 = GetInputToOutputIndexingForEntryComputation(ir, 0);
   EXPECT_THAT(output_indexing_0.indexing_maps,
-              ElementsAre(ElementsAre(std::nullopt)));
+              ElementsAre(ElementsAre(UndefinedMap())));
 
   auto output_indexing_1 = GetInputToOutputIndexingForEntryComputation(ir, 1);
   EXPECT_THAT(output_indexing_1.indexing_maps,
-              ElementsAre(ElementsAre(std::nullopt)));
+              ElementsAre(ElementsAre(UndefinedMap())));
 
   auto output_indexing_2 = GetInputToOutputIndexingForEntryComputation(ir, 2);
   EXPECT_THAT(output_indexing_2.indexing_maps,
-              ElementsAre(ElementsAre(std::nullopt)));
+              ElementsAre(ElementsAre(UndefinedMap())));
 }
 
 TEST_F(IndexingAnalysisTest, FusionWithUnsupportedOp) {
@@ -1647,8 +1648,8 @@ TEST_F(IndexingAnalysisTest, FusionWithUnsupportedOp) {
                             d0 in [0, 4]
                             d1 in [0, 4]
                           )"),
-                                               std::nullopt),
-                          ElementsAre(std::nullopt)));
+                                               UndefinedMap()),
+                          ElementsAre(UndefinedMap())));
 }
 
 TEST_F(IndexingAnalysisTest, TilingIndexing) {
@@ -1659,7 +1660,7 @@ TEST_F(IndexingAnalysisTest, TilingIndexing) {
               MatchIndexingString(R"(
         (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
           (d3 floordiv 64) * 8 + s0,
-          (d3 mod 64) * 4 + (d0 floordiv 4) mod 4,
+          (d3 mod 64) * 4 + d0 floordiv 4,
           d0 mod 4 + s2 * 4
         )
         domain:

@@ -342,7 +342,7 @@ TEST_F(GpuKernelTilingTest, ColumnReductionWithLayoutChangeTiled) {
                      /*match_optimized_ir=*/true);
 
   // Check that the kernel runs correctly.
-  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{0.001}));
+  EXPECT_TRUE(RunAndCompare(kHloString, ErrorSpec{0.001}));
 }
 
 TEST_F(GpuKernelTilingTest, RowReductionWithLayoutChangeTiled) {
@@ -366,7 +366,7 @@ TEST_F(GpuKernelTilingTest, RowReductionWithLayoutChangeTiled) {
       ParseAndReturnVerifiedModule(kHloString, ConfigWithoutLayoutAssignment())
           .value();
   auto expected_ir = R"(
-; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|fusion)}}
+; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|.*fusion)}}
 ; CHECK: call SHUFFLE
 ; CHECK: }
 )";
@@ -375,7 +375,7 @@ TEST_F(GpuKernelTilingTest, RowReductionWithLayoutChangeTiled) {
                      /*match_optimized_ir=*/true);
 
   // Check that the kernel runs correctly.
-  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{0.001}));
+  EXPECT_TRUE(RunAndCompare(kHloString, ErrorSpec{0.001}));
 }
 
 TEST_F(GpuKernelTilingTest, RowReductionTwoRowsPerWarp) {
@@ -400,7 +400,7 @@ TEST_F(GpuKernelTilingTest, RowReductionTwoRowsPerWarp) {
       ParseAndReturnVerifiedModule(kHloString, ConfigWithoutLayoutAssignment())
           .value();
   auto expected_ir = R"(
-; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|fusion)}}
+; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|.*fusion)}}
 ; CHECK: %[[TID_X:.*]] = tail call i32 TIDX()
 ; CHECK: %[[TID_LOGICAL:.*]] = and i32 %[[TID_X]], 15
 ; CHECK: call SHUFFLE
@@ -439,7 +439,7 @@ TEST_F(GpuKernelTilingTest, RowReductionFourRowsPerWarp) {
       ParseAndReturnVerifiedModule(kHloString, ConfigWithoutLayoutAssignment())
           .value();
   auto expected_ir = R"(
-; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|fusion)}}
+; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|.*fusion)}}
 ; CHECK: %[[TID_X:.*]] = tail call i32 TIDX()
 ; CHECK: %[[TID_LOGICAL:.*]] = and i32 %[[TID_X]], 7
 ; CHECK: call SHUFFLE
@@ -476,7 +476,7 @@ TEST_F(GpuKernelTilingTest,
       ParseAndReturnVerifiedModule(kHloString, ConfigWithoutLayoutAssignment())
           .value();
   const char *expected_ir = R"(
-; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|fusion)}}
+; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|.*fusion)}}
 ; CHECK: store float %{{.*}}, ptr addrspace(1)
 ; CHECK: }
 )";
@@ -554,7 +554,7 @@ TEST_F(GpuKernelTilingTest,
       ParseAndReturnVerifiedModule(kHloString, ConfigWithoutLayoutAssignment())
           .value();
   auto expected_ir = R"(
-; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|fusion)}}
+; CHECK-LABEL: define KERNEL_ANNOTATION @{{(wrapped_reduce|.*fusion)}}
 ; CHECK-NOT: call SHUFFLE
 ; CHECK: }
 )";

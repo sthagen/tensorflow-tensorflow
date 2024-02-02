@@ -48,7 +48,6 @@ limitations under the License.
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/platform/port.h"
 #include "xla/stream_executor/stream_executor_pimpl.h"
-#include "xla/stream_executor/temporary_device_memory.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/thread_annotations.h"
@@ -159,12 +158,6 @@ class Stream {
   // TODO(b/112196569): The semantics of failed sub-streams is error-prone.
   void ReturnSubStream(Stream *sub_stream) TF_LOCKS_EXCLUDED(mu_);
 
-  // Allocate temporary memories. The stream will deallocate them when blocked
-  // or destroyed.
-  template <typename T>
-  absl::StatusOr<std::unique_ptr<TemporaryDeviceMemory<T>>>
-  AllocateTemporaryArray(uint64_t element_count);
-
   // Entrains onto the stream of operations: a kernel launch with the given
   // (variadic) parameters for the invocation. These arguments can be things
   // like DeviceMemory or primitive types such as int. What arguments you may
@@ -231,91 +224,6 @@ class Stream {
   // DNN support
   //
   // See DnnSupport::* for comments on the following methods.
-
-  Stream &ThenBatchNormalizationForward(
-      const DeviceMemory<float> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &offset,
-      const DeviceMemory<float> &estimated_mean,
-      const DeviceMemory<float> &estimated_variance,
-      const DeviceMemory<float> &side_input, const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      const double exponential_average_factor,
-      dnn::ActivationMode activation_mode, DeviceMemory<float> *y,
-      DeviceMemory<float> *batch_mean, DeviceMemory<float> *batch_var,
-      DeviceMemory<float> *saved_mean, DeviceMemory<float> *saved_inv_var,
-      bool is_training, ScratchAllocator *reserve_space_allocator,
-      ScratchAllocator *workspace_allocator);
-
-  Stream &ThenBatchNormalizationBackward(
-      const DeviceMemory<float> &y_backprop, const DeviceMemory<float> &x,
-      const DeviceMemory<float> &scale, const DeviceMemory<float> &offset,
-      const DeviceMemory<float> &mean, const DeviceMemory<float> &inv_var,
-      const DeviceMemory<float> &y, const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      dnn::ActivationMode activation_mode, DeviceMemory<float> *x_backprop,
-      DeviceMemory<float> *scale_backprop, DeviceMemory<float> *offset_backprop,
-      DeviceMemory<float> *side_input_backprop,
-      DeviceMemory<uint8_t> *reserve_space_data,
-      ScratchAllocator *workspace_allocator);
-
-  Stream &ThenBatchNormalizationForward(
-      const DeviceMemory<Eigen::half> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &offset,
-      const DeviceMemory<float> &estimated_mean,
-      const DeviceMemory<float> &estimated_variance,
-      const DeviceMemory<Eigen::half> &side_input,
-      const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      const double exponential_average_factor,
-      dnn::ActivationMode activation_mode, DeviceMemory<Eigen::half> *y,
-      DeviceMemory<float> *batch_mean, DeviceMemory<float> *batch_var,
-      DeviceMemory<float> *saved_mean, DeviceMemory<float> *saved_inv_var,
-      bool is_training, ScratchAllocator *reserve_space_allocator,
-      ScratchAllocator *workspace_allocator);
-
-  Stream &ThenBatchNormalizationBackward(
-      const DeviceMemory<Eigen::half> &y_backprop,
-      const DeviceMemory<Eigen::half> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &offset, const DeviceMemory<float> &mean,
-      const DeviceMemory<float> &inv_var, const DeviceMemory<Eigen::half> &y,
-      const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      dnn::ActivationMode activation_mode,
-      DeviceMemory<Eigen::half> *x_backprop,
-      DeviceMemory<float> *scale_backprop, DeviceMemory<float> *offset_backprop,
-      DeviceMemory<Eigen::half> *side_input_backprop,
-      DeviceMemory<uint8_t> *reserve_space_data,
-      ScratchAllocator *workspace_allocator);
-
-  Stream &ThenBatchNormalizationForward(
-      const DeviceMemory<Eigen::bfloat16> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &offset,
-      const DeviceMemory<float> &estimated_mean,
-      const DeviceMemory<float> &estimated_variance,
-      const DeviceMemory<Eigen::bfloat16> &side_input,
-      const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      const double exponential_average_factor,
-      dnn::ActivationMode activation_mode, DeviceMemory<Eigen::bfloat16> *y,
-      DeviceMemory<float> *batch_mean, DeviceMemory<float> *batch_var,
-      DeviceMemory<float> *saved_mean, DeviceMemory<float> *saved_inv_var,
-      bool is_training, ScratchAllocator *reserve_space_allocator,
-      ScratchAllocator *workspace_allocator);
-
-  Stream &ThenBatchNormalizationBackward(
-      const DeviceMemory<Eigen::bfloat16> &y_backprop,
-      const DeviceMemory<Eigen::bfloat16> &x, const DeviceMemory<float> &scale,
-      const DeviceMemory<float> &offset, const DeviceMemory<float> &mean,
-      const DeviceMemory<float> &inv_var,
-      const DeviceMemory<Eigen::bfloat16> &y,
-      const dnn::BatchDescriptor &x_desc,
-      const dnn::BatchDescriptor &scale_offset_desc, const double epsilon,
-      dnn::ActivationMode activation_mode,
-      DeviceMemory<Eigen::bfloat16> *x_backprop,
-      DeviceMemory<float> *scale_backprop, DeviceMemory<float> *offset_backprop,
-      DeviceMemory<Eigen::bfloat16> *side_input_backprop,
-      DeviceMemory<uint8_t> *reserve_space_data,
-      ScratchAllocator *workspace_allocator);
 
   template <typename InputType, typename OutputType>
   absl::Status ConvolveWithAlgorithm(
@@ -800,16 +708,6 @@ class Stream {
 
   template <typename T>
   using DeviceMemorySlice = absl::Span<DeviceMemory<T> *const>;
-
-  // See BlasSupport::DoBlasGemmBatched.
-  Stream &ThenBlasGemmBatched(blas::Transpose transa, blas::Transpose transb,
-                              uint64_t m, uint64 n, uint64 k, float alpha,
-                              DeviceMemorySlice<float> a, int lda,
-                              DeviceMemorySlice<float> b, int ldb, float beta,
-                              DeviceMemorySlice<float> c, int ldc,
-                              int batch_count,
-                              const NumericOptions &numeric_options,
-                              blas::CallContext context);
 
   Stream &ThenBlasGemmBatchedWithScratch(
       blas::Transpose transa, blas::Transpose transb, uint64_t m, uint64 n,
@@ -1329,13 +1227,6 @@ class Stream {
                     "without DNN support";
   }
 
-  // Allocates an array without type parameterization, so that the
-  // implementation can live in the source file. Without this base allocation
-  // method, we incur a circular dependency between the StreamExecutor
-  // definition and this class' definition.
-  absl::StatusOr<std::unique_ptr<TemporaryDeviceMemoryBase>> AllocateArrayBase(
-      uint64_t element_count, uint64 element_size);
-
   // The StreamExecutor that supports the operation of this stream.
   StreamExecutor *parent_;
 
@@ -1433,17 +1324,6 @@ inline absl::Status Stream::ThenLaunch(
   TF_RETURN_IF_ERROR(parent_->Launch(this, thread_dims, block_dims,
                                      cluster_dims, kernel, *kernel_args));
   return absl::OkStatus();
-}
-
-template <typename T>
-inline absl::StatusOr<std::unique_ptr<TemporaryDeviceMemory<T>>>
-Stream::AllocateTemporaryArray(uint64_t element_count) {
-  TF_ASSIGN_OR_RETURN(
-      std::unique_ptr<TemporaryDeviceMemoryBase> temporary_memory,
-      AllocateArrayBase(element_count, sizeof(T)));
-
-  return std::unique_ptr<TemporaryDeviceMemory<T>>(
-      reinterpret_cast<TemporaryDeviceMemory<T> *>(temporary_memory.release()));
 }
 
 template <>

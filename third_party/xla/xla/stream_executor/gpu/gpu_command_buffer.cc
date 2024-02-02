@@ -32,6 +32,7 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/types/span.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
@@ -126,12 +127,14 @@ GpuCommandBuffer::~GpuCommandBuffer() {
     VLOG(5) << "Destroy GPU command buffer executable graph " << exec_ << " "
             << "(remaining alive executable graphs: " << NotifyExecDestroyed()
             << ")";
-    auto st = GpuDriver::DestroyGraphExec(exec_);
-    CHECK(st.ok()) << "Failed to destroy GPU graph exec: " << st.message();
+    if (auto status = GpuDriver::DestroyGraphExec(exec_); !status.ok()) {
+      LOG(ERROR) << "Failed to destroy GPU graph exec: " << status.message();
+    }
   }
   if (graph_ != nullptr && is_owned_graph_) {
-    auto st = GpuDriver::DestroyGraph(graph_);
-    CHECK(st.ok()) << "Failed to destroy GPU graph: " << st.message();
+    if (auto status = GpuDriver::DestroyGraph(graph_); !status.ok()) {
+      LOG(ERROR) << "Failed to destroy GPU graph: " << status.message();
+    }
   }
 }
 
@@ -846,7 +849,21 @@ absl::Status GpuCommandBuffer::Finalize() {
                    << "; alive executable graphs: " << AliveExecs();
 
       TF_RETURN_IF_ERROR(GpuDriver::DeviceGraphMemTrim(parent_->device()));
-      TF_RETURN_IF_ERROR(GpuDriver::GraphInstantiate(&exec_, graph_, flags));
+
+      auto retry = GpuDriver::GraphInstantiate(&exec_, graph_, flags);
+      if (retry.code() == absl::StatusCode::kResourceExhausted) {
+        return absl::ResourceExhaustedError(absl::StrFormat(
+            "CUDA driver ran out of memory trying to instantiate CUDA graph "
+            "with %d nodes and %d conditionals (total of %d alive CUDA graphs "
+            "in the process). You can try to (a) Give more memory to CUDA "
+            "driver by reducing XLA_PYTHON_CLIENT_MEM_FRACTION (b) Disable "
+            "CUDA graph with 'XLA_FLAGS=--xla_gpu_enable_command_buffer=' "
+            "(empty set). Original error: %s",
+            nodes_.size(), conditional_command_buffers_.size(), AliveExecs(),
+            retry.message()));
+      } else {
+        TF_RETURN_IF_ERROR(retry);
+      }
     }
 
     uint64_t end_nanos = tsl::Env::Default()->NowNanos();

@@ -313,6 +313,7 @@ cc_library(
     hdrs = ["float_normalization.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":call_graph",
         ":float_support",
         ":hlo_dce",
         ":hlo_pass",
@@ -7070,6 +7071,7 @@ xla_cc_test(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:test",
