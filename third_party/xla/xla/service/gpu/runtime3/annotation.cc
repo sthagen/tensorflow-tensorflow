@@ -13,17 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/runtime/annotation.h"
+#include "xla/service/gpu/runtime3/annotation.h"
 
 #include <cstddef>
+#include <cstring>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <utility>
 
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
+#include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_opcode.h"
+#include "tsl/platform/errors.h"
+#include "tsl/profiler/lib/nvtx_utils.h"
 
 namespace xla::gpu {
-
 namespace {
+
 nvtxStringHandle_t RegisterString(const char* str) {
 #if GOOGLE_CUDA
   auto domain = tsl::profiler::nvtx::GetNVTXDomain();
@@ -90,16 +100,17 @@ class OpNamePrefixVisitor : public ConstDfsHloVisitorWithDefault {
   absl::Status DefaultAction(const HloInstruction* inst) final {
     auto const& op_name = inst->metadata().op_name();
     if (!op_name.empty()) {
-      prefix = prefix ? LongestPrefix(*prefix, op_name) : op_name;
+      prefix_ = prefix_ ? LongestPrefix(*prefix_, op_name) : op_name;
     }
     return absl::OkStatus();
   }
+
   std::string_view longest_op_name_prefix() const {
-    return prefix.value_or(std::string_view{});
+    return prefix_.value_or("");
   }
 
  private:
-  std::optional<std::string_view> prefix{};
+  std::optional<std::string_view> prefix_;
 };
 
 std::string_view GetLongestOpNamePrefix(const HloModule& mod) {
@@ -134,14 +145,14 @@ std::string MakeTitle(const HloModule& mod, std::string_view longest_prefix) {
 }
 }  // namespace
 
-ModuleAnnotation::ModuleAnnotation(const std::string& module_name)
-    : title_str{absl::StrFormat("XlaModule:#hlo_module=%s", module_name)},
-      title{RegisterString(title_str.c_str())} {}
+ModuleAnnotation::ModuleAnnotation(std::string_view module_name)
+    : title_str(absl::StrFormat("XlaModule:#hlo_module=%s", module_name)),
+      title(RegisterString(title_str.c_str())) {}
 
 ModuleAnnotation::ModuleAnnotation(const HloModule& mod)
-    : longest_prefix{GetLongestOpNamePrefix(mod)},
-      title_str{MakeTitle(mod, longest_prefix)},
-      title{RegisterString(title_str.c_str())} {}
+    : longest_prefix(GetLongestOpNamePrefix(mod)),
+      title_str(MakeTitle(mod, longest_prefix)),
+      title(RegisterString(title_str.c_str())) {}
 
 std::string_view ModuleAnnotation::longest_op_name_prefix() const {
   return longest_prefix;
@@ -181,9 +192,9 @@ std::string MakeKernelName(std::string_view prefix,
 
 KernelAnnotation::KernelAnnotation(const ModuleAnnotation& module_annotation,
                                    const HloInstruction& inst)
-    : title_str{MakeKernelName(module_annotation.longest_op_name_prefix(),
-                               inst)},
-      title{RegisterString(title_str.c_str())} {}
+    : title_str(
+          MakeKernelName(module_annotation.longest_op_name_prefix(), inst)),
+      title(RegisterString(title_str.c_str())) {}
 
 std::string_view KernelAnnotation::Title() const { return title_str; }
 
@@ -191,8 +202,8 @@ nvtxStringHandle_t KernelAnnotation::NvtxRegisteredTitle() const {
   return title;
 }
 
-ModuleAnnotations::ModuleAnnotations(const std::string& module_name)
-    : top_level{module_name} {}
+ModuleAnnotations::ModuleAnnotations(std::string_view module_name)
+    : top_level(module_name) {}
 
 ModuleAnnotations::ModuleAnnotations(const HloModule& mod) : top_level{mod} {
   // loop through `mod` and populate `kernels` (string -> KernelAnnotation map)
@@ -222,4 +233,25 @@ ModuleAnnotations::ModuleAnnotations(const HloModule& mod) : top_level{mod} {
     }
   }
 }
+
+//===----------------------------------------------------------------------===//
+// Scoped RAII helper to set and restore thread local module annotations
+//===----------------------------------------------------------------------===//
+
+namespace {
+thread_local const ModuleAnnotations* current_annotations = nullptr;
+}  // namespace
+
+ScopedModuleAnnotations::ScopedModuleAnnotations(
+    const ModuleAnnotations* annotations)
+    : restore_(std::exchange(current_annotations, annotations)) {}
+
+ScopedModuleAnnotations::~ScopedModuleAnnotations() {
+  std::exchange(current_annotations, restore_);
+}
+
+const ModuleAnnotations* GetCurrentModuleAnnotations() {
+  return current_annotations;
+}
+
 }  // namespace xla::gpu

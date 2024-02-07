@@ -25,7 +25,6 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
-#include "absl/cleanup/cleanup.h"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
@@ -47,7 +46,7 @@ limitations under the License.
 #include "xla/service/gpu/nccl_clique.h"
 #include "xla/service/gpu/nccl_clique_key.h"
 #include "xla/service/gpu/non_atomically_upgradeable_rw_lock.h"
-#include "xla/service/gpu/runtime/tracing.h"
+#include "xla/service/gpu/runtime3/annotation.h"
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/thunk.h"
 #include "xla/service/hlo_parser.h"
@@ -280,9 +279,8 @@ absl::Status MaybeSyncAndProfile(
     std::optional<se::gpu::GpuTimer> execution_timer,
     se::Stream* stream_to_sync);
 
-absl::Status MaybeRendezvousAfterInitialization(
-    const ServiceExecutableRunOptions* run_options,
-    RendezvousSingleFlag& thunks_initialized);
+absl::Status RendezvousAfterInitialization(
+    const ServiceExecutableRunOptions* run_options);
 
 absl::flat_hash_set<ExecutionStreamId> ExtractAdditionalComputeStreamIds(
     const HloModule& module) {
@@ -310,7 +308,6 @@ absl::Status ExecuteThunks(
     const ServiceExecutableRunOptions* run_options,
     const BufferAllocations& buffer_allocations, bool block_host_until_done,
     bool use_highest_priority_for_async_stream,
-    RendezvousSingleFlag& thunks_initialized,
     absl::flat_hash_set<ExecutionStreamId> additional_compute_stream_ids) {
   se::Stream* main_stream = run_options->stream();
   se::StreamExecutor* executor = main_stream->parent();
@@ -409,8 +406,7 @@ absl::Status ExecuteThunks(
   // only in presence of collective cliques which means that we have collective
   // operations in the XLA operations that tend to cause deadlocks.
   if (!collective_cliques.empty()) {
-    TF_RETURN_IF_ERROR(
-        MaybeRendezvousAfterInitialization(run_options, thunks_initialized));
+    TF_RETURN_IF_ERROR(RendezvousAfterInitialization(run_options));
   }
 
   // Prepare parameters for thunks execution.
@@ -456,9 +452,8 @@ bool operator==(const InitializationKey& a, const InitializationKey& b) {
 }
 }  // namespace
 
-absl::Status MaybeRendezvousAfterInitialization(
-    const ServiceExecutableRunOptions* run_options,
-    RendezvousSingleFlag& thunks_initialized) {
+absl::Status RendezvousAfterInitialization(
+    const ServiceExecutableRunOptions* run_options) {
   // Thunk initialization can allocate new control data structures on device
   // that can lead to deadlocks if other replicas are executing concurrently
   // (i.e. this happens if we try to instantiate CUDA graph when other replica
@@ -471,9 +466,6 @@ absl::Status MaybeRendezvousAfterInitialization(
   // If we don't have Gpu executable options or device assignment it means we
   // are running in a single Gpu config and don't need a rendezvous.
   if (!gpu_opts || !device_assn) return absl::OkStatus();
-
-  // Return if thunk initialization was already completed.
-  if (thunks_initialized.IsCompleted()) return absl::OkStatus();
 
   // Assume that all participants execute locally first, if we have a local
   // device id to global device id map we will use it to get the real number of
@@ -500,15 +492,21 @@ absl::Status MaybeRendezvousAfterInitialization(
           << num_local_participants << " local participants"
           << "; device_ordinal=" << run_options->device_ordinal();
 
+  tsl::profiler::TraceMe trace([&] {
+    return tsl::profiler::TraceMeEncode(
+        "RendezvousAfterInitialization",
+        {{"run_id", run_options->run_options().run_id().ToInt()},
+         {"num_local_participants", num_local_participants}});
+  });
+
   auto rendezvous_key = InitializationKey{run_options->run_options().run_id()};
   auto rendezvous_name = absl::StrFormat(
       "thunk initialization completion for device ordinal %d; run_id=%d",
       run_options->device_ordinal(),
       run_options->run_options().run_id().ToInt());
 
-  RendezvousSingle(thunks_initialized, rendezvous_name, rendezvous_key,
-                   num_local_participants, absl::Seconds(10),
-                   absl::Seconds(30));
+  RendezvousSingle(rendezvous_name, rendezvous_key, num_local_participants,
+                   absl::Seconds(10), absl::Seconds(30));
 
   return absl::OkStatus();
 }
@@ -937,10 +935,7 @@ absl::Status GpuExecutable::ExecuteThunksOrXlaRuntime(
       CheckCompatibilityWithServiceExecutableRunOptions(run_options));
 
   ScopedAnnotation annotation([&] { return module_annotations_.top_level; });
-  absl::Cleanup annotations_cleanup =
-      [previous = SetCurrentModuleAnnotations(&module_annotations_)] {
-        SetCurrentModuleAnnotations(previous);
-      };
+  ScopedModuleAnnotations module_annotations(&module_annotations_);
 
   ModuleIdentifier unique_id = has_module() ? module().unique_id() : -1;
 
@@ -960,7 +955,7 @@ absl::Status GpuExecutable::ExecuteThunksOrXlaRuntime(
                            .debug_options()
                            .xla_gpu_enable_highest_priority_async_stream()
                      : false,
-        thunks_initialized_flag_, additional_compute_stream_ids);
+        additional_compute_stream_ids);
   }
 
   return FailedPrecondition("Expected XLA gpu executable is not supplied.");
