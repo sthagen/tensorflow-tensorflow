@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,15 +12,20 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include "tensorflow/compiler/mlir/quantization/stablehlo/cc/config.h"
 
-#include "xla/service/gpu/runtime/topk_kernel.cu.h"
+namespace stablehlo::quantization {
 
-namespace xla::gpu {
+QuantizationConfig PopulateDefaults(
+    const QuantizationConfig& user_provided_config) {
+  QuantizationConfig config = user_provided_config;
 
-template void* GetTopKKernelForK<float, 1>(int n);
-template void* GetTopKKernelForK<float, 2>(int n);
-template void* GetTopKKernelForK<float, 4>(int n);
-template void* GetTopKKernelForK<float, 8>(int n);
-template void* GetTopKKernelForK<float, 16>(int n);
+  PipelineConfig& pipeline_config = *config.mutable_pipeline_config();
+  if (!pipeline_config.has_unpack_quantized_types()) {
+    pipeline_config.set_unpack_quantized_types(true);
+  }
 
-}  // namespace xla::gpu
+  return config;
+}
+
+}  // namespace stablehlo::quantization

@@ -1,4 +1,4 @@
-/* Copyright 2015 The OpenXLA Authors.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,17 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// The StreamExecutor is a single-device abstraction for:
-//
-// * Loading/launching data-parallel-kernels
-// * Invoking pre-canned high-performance library routines (like matrix
-//   multiply)
+#include "Eigen/Core"  // from @eigen_archive
+#include "xla/service/gpu/kernels/topk_kernel.cu.h"
 
-#ifndef XLA_STREAM_EXECUTOR_STREAM_EXECUTOR_H_
-#define XLA_STREAM_EXECUTOR_STREAM_EXECUTOR_H_
+namespace xla::gpu {
 
-#include "xla/stream_executor/multi_platform_manager.h"
-#include "xla/stream_executor/stream.h"
-#include "xla/stream_executor/stream_executor_pimpl.h"  // IWYU pragma: export
+template void* GetTopKKernelForK<Eigen::bfloat16, 1>(int n);
+template void* GetTopKKernelForK<Eigen::bfloat16, 2>(int n);
+template void* GetTopKKernelForK<Eigen::bfloat16, 4>(int n);
+template void* GetTopKKernelForK<Eigen::bfloat16, 8>(int n);
+template void* GetTopKKernelForK<Eigen::bfloat16, 16>(int n);
 
-#endif  // XLA_STREAM_EXECUTOR_STREAM_EXECUTOR_H_
+}  // namespace xla::gpu
