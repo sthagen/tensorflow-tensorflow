@@ -220,53 +220,6 @@ class Stream {
   // must extend past the point at which it is marked complete!
   Stream &ThenRecordEvent(Event *event);
 
-  ////////////////
-  // DNN support
-  //
-  // See DnnSupport::* for comments on the following methods.
-
-  template <typename InputT, typename ScaleT, typename SideInputT,
-            typename BiasT, typename OutputT>
-  absl::Status FusedConvolveWithAlgorithm(
-      const dnn::BatchDescriptor &conv_input_descriptor,
-      const DeviceMemory<InputT> &conv_input_data, ScaleT conv_input_scale,
-      const dnn::FilterDescriptor &filter_descriptor,
-      const DeviceMemory<InputT> &filter_data,
-      const dnn::ConvolutionDescriptor &convolution_descriptor,
-      const DeviceMemory<SideInputT> &side_input_data, ScaleT side_input_scale,
-      const dnn::BatchDescriptor &bias_descriptor,
-      const DeviceMemory<BiasT> &biases, dnn::ActivationMode activation_mode,
-      const dnn::BatchDescriptor &output_descriptor,
-      DeviceMemory<OutputT> *output, ScratchAllocator *scratch_allocator,
-      const dnn::AlgorithmConfig &algorithm_config,
-      dnn::ProfileResult *output_profile_result) {
-    if (dnn::DnnSupport *dnn = parent_->AsDnn()) {
-      return dnn->DoFusedConvolve(
-          this, dnn::ToDataType<InputT>::value,
-          dnn::ToDataType<SideInputT>::value, dnn::ToDataType<BiasT>::value,
-          dnn::ToDataType<OutputT>::value, conv_input_descriptor,
-          conv_input_data, conv_input_scale, filter_descriptor, filter_data,
-          convolution_descriptor, side_input_data, side_input_scale,
-          bias_descriptor, biases, activation_mode, output_descriptor, *output,
-          scratch_allocator, algorithm_config, output_profile_result);
-    }
-    return absl::UnimplementedError("DNN library is not found.");
-  }
-
-  absl::Status CudnnReorderConvolutionFilterAndBias(
-      const dnn::FilterDescriptor &filter_descriptor,
-      const DeviceMemory<int8_t> &filter_input,
-      DeviceMemory<int8_t> *filter_output,
-      std::optional<const DeviceMemory<float>> bias_input,
-      std::optional<DeviceMemory<float>> bias_output) {
-    if (dnn::DnnSupport *dnn = parent_->AsDnn()) {
-      return dnn->CudnnReorderConvolutionFilterAndBias(
-          this, filter_descriptor, filter_input, filter_output,
-          std::move(bias_input), std::move(bias_output));
-    }
-    return absl::UnimplementedError("DNN library is not found.");
-  }
-
   /////////////////
   // BLAS support
 
@@ -530,15 +483,6 @@ class Stream {
   // by 4). The location must not be null.
   Stream &ThenMemset32(DeviceMemoryBase *location, uint32_t pattern,
                        uint64_t size);
-
-  // Enqueue onto the stream a operation that transforms a tensor.
-  // See DnnSupport::DoTransformTensor for more details.
-  Stream &ThenTransformTensor(const dnn::BatchDescriptor &input_desc,
-                              dnn::DataType input_type,
-                              const DeviceMemoryBase &input_data,
-                              const dnn::BatchDescriptor &output_desc,
-                              dnn::DataType output_type, float scale,
-                              DeviceMemoryBase *output_data);
 
   // (Synchronously) block the host code waiting for the operations
   // entrained on the stream (enqueued to this point in program

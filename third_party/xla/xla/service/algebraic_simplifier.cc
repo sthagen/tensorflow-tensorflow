@@ -4640,27 +4640,19 @@ Status AlgebraicSimplifierVisitor::HandleCompare(HloInstruction* compare) {
     HloInstruction* b;
     if (Match(lhs, m::Maximum(m::Op(&a), m::Op(&b)))) {
       if (rhs == a) {  // Gt(Max(a,b), a) -> Gt(b,a)
-        TF_ASSIGN_OR_RETURN(auto new_compare,
-                            MakeCompareHlo(ComparisonDirection::kGt, b, a,
-                                           &compare->metadata()));
-        return ReplaceInstruction(compare, new_compare);
+        TF_RETURN_IF_ERROR(compare->ReplaceOperandWith(0, b));
+        MarkAsChanged();
       } else if (rhs == b) {  // Gt(Max(a,b), b) -> Gt(a,b)
-        TF_ASSIGN_OR_RETURN(auto new_compare,
-                            MakeCompareHlo(ComparisonDirection::kGt, a, b,
-                                           &compare->metadata()));
-        return ReplaceInstruction(compare, new_compare);
+        TF_RETURN_IF_ERROR(compare->ReplaceOperandWith(0, a));
+        MarkAsChanged();
       }
     } else if (Match(rhs, m::Minimum(m::Op(&a), m::Op(&b)))) {
       if (lhs == a) {  // Gt(a, Min(a,b)) -> Gt(a,b)
-        TF_ASSIGN_OR_RETURN(auto new_compare,
-                            MakeCompareHlo(ComparisonDirection::kGt, a, b,
-                                           &compare->metadata()));
-        return ReplaceInstruction(compare, new_compare);
+        TF_RETURN_IF_ERROR(compare->ReplaceOperandWith(1, b));
+        MarkAsChanged();
       } else if (lhs == b) {  // Gt(b, Min(a,b)) -> Gt(b,a)
-        TF_ASSIGN_OR_RETURN(auto new_compare,
-                            MakeCompareHlo(ComparisonDirection::kGt, b, a,
-                                           &compare->metadata()));
-        return ReplaceInstruction(compare, new_compare);
+        TF_RETURN_IF_ERROR(compare->ReplaceOperandWith(1, a));
+        MarkAsChanged();
       }
     }
   }

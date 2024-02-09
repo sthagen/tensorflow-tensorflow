@@ -107,6 +107,12 @@ bool HasTPUDevice(mlir::ModuleOp module) {
       });
 }
 
+bool HasDevice(mlir::ModuleOp module) {
+  mlir::TF::RuntimeDevices devices;
+  if (failed(GetDevicesFromOp(module.getOperation(), &devices))) return false;
+  return !devices.device_names().empty();
+}
+
 bool IsReplicatedGraph(mlir::ModuleOp module) {
   auto walk_result = module.walk([&](mlir::Operation* op) {
     // TODO(b/223677572): Once the scope for new compilation and replication
@@ -148,8 +154,7 @@ bool IsSingleCoreTPUGraph(mlir::ModuleOp module) {
 }
 
 bool RunReplicatedBridge(mlir::ModuleOp module) {
-  if (HasTPUDevice(module) && IsReplicatedGraph(module)) return true;
-  return IsSingleCoreTPUGraph(module);
+  return IsReplicatedGraph(module) || IsSingleCoreTPUGraph(module);
 }
 
 bool HasTPUPartitionedCallOpInModule(mlir::ModuleOp module) {
@@ -293,6 +298,11 @@ Status MlirBridgePass::Run(const std::string& function_name,
         1);
   }
 
+  if (!HasDevice(module)) {
+    LOG(INFO) << "No devices in " << function_name << "\n";
+    return absl::OkStatus();
+  }
+
   if (HasTPUPartitionedCallOpInModule(module)) {
     VLOG(1) << "Skipping MLIR TF2XLA Bridge. This is an inference graph, "
                "Session V1 Bridge should be used during execution of "
@@ -333,7 +343,7 @@ Status MlirBridgePass::Run(const std::string& function_name,
 
     TF_RETURN_IF_ERROR(
         tensorflow::tf2xla::v2::RunFunctionTf2xlaClusteringBridge(
-            module, tf2xla::v2::DeviceType::XLA_TPU_JIT, fallback_enabled,
+            module, /*run_replicated_bridge*/ true, fallback_enabled,
             function_name));
 
     TF_RETURN_IF_ERROR(
@@ -343,7 +353,7 @@ Status MlirBridgePass::Run(const std::string& function_name,
     VLOG(1) << "Running GPU/CPU Bridge";
     TF_RETURN_IF_ERROR(
         tensorflow::tf2xla::v2::RunFunctionTf2xlaClusteringBridge(
-            module, tf2xla::v2::DeviceType::XLA_GPU_JIT, fallback_enabled,
+            module, /*run_replicated_bridge*/ false, fallback_enabled,
             function_name));
 
     TF_RETURN_IF_ERROR(
