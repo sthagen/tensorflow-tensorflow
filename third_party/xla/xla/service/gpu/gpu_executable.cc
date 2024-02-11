@@ -46,7 +46,7 @@ limitations under the License.
 #include "xla/service/gpu/gpu_executable_run_options.h"
 #include "xla/service/gpu/nccl_clique.h"
 #include "xla/service/gpu/nccl_clique_key.h"
-#include "xla/service/gpu/runtime3/annotation.h"
+#include "xla/service/gpu/runtime/annotation.h"
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/thunk.h"
 #include "xla/service/hlo_parser.h"
@@ -272,10 +272,10 @@ class ResourceRequests : public Thunk::ResourceRequests {
           const NcclCliqueIdCallback* clique_id_callback,
           GetNcclCliqueIdCallback(params.nccl_clique_id_callback, is_local));
 
-      TF_ASSIGN_OR_RETURN(std::shared_ptr<NcclClique::Lock> clique,
-                          AcquireNcclClique(params.run_id, OpId(0), clique_key,
-                                            *clique_id_callback, *rank,
-                                            num_local_participants, false));
+      TF_ASSIGN_OR_RETURN(
+          std::shared_ptr<NcclClique::Lock> clique,
+          AcquireNcclClique(params.run_id, clique_key, *clique_id_callback,
+                            *rank, num_local_participants, false));
 
       cliques_map[clique_key] = std::move(clique);
     }
