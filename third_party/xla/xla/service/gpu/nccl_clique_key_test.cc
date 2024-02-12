@@ -1,4 +1,4 @@
-/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_TSL_PLATFORM_GIF_H_
-#define TENSORFLOW_TSL_PLATFORM_GIF_H_
+#include "xla/service/gpu/nccl_clique_key.h"
 
-#include "gif_lib.h"  // from @gif
+#include "xla/service/global_device_id.h"
+#include "tsl/platform/test.h"
 
-#endif  // TENSORFLOW_TSL_PLATFORM_GIF_H_
+namespace xla::gpu {
+
+TEST(NcclCliqueKeyTest, LargerCliqueGoFirst) {
+  GlobalDeviceId id0 = GlobalDeviceId(0);
+  GlobalDeviceId id1 = GlobalDeviceId(1);
+  GlobalDeviceId id2 = GlobalDeviceId(2);
+  GlobalDeviceId id3 = GlobalDeviceId(3);
+
+  NcclCliqueKey key0({id0, id1}, 0);
+  NcclCliqueKey key1({id1, id2, id3}, 0);
+
+  EXPECT_LT(key0, key1);
+  EXPECT_GT(key1, key0);
+}
+
+}  // namespace xla::gpu

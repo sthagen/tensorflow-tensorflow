@@ -21,13 +21,9 @@ limitations under the License.
 #ifndef XLA_STREAM_EXECUTOR_STREAM_H_
 #define XLA_STREAM_EXECUTOR_STREAM_H_
 
-#include <complex>
 #include <cstdint>
-#include <functional>
 #include <memory>
-#include <optional>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -35,7 +31,6 @@ limitations under the License.
 #include "absl/base/thread_annotations.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
-#include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/device_memory.h"
@@ -48,7 +43,6 @@ limitations under the License.
 #include "xla/stream_executor/platform/port.h"
 #include "xla/stream_executor/stream_executor_pimpl.h"
 #include "tsl/platform/errors.h"
-#include "tsl/platform/statusor.h"
 #include "tsl/platform/thread_annotations.h"
 
 namespace stream_executor {
@@ -62,21 +56,6 @@ template <typename ElemT>
 class DeviceMemory;
 
 class StreamExecutor;
-
-namespace detail {
-
-// Helper to return if `T` is the same type as `First` or any or `Rest`.
-template <typename T>
-constexpr bool is_any_of() {
-  return false;
-}
-
-template <typename T, typename First, typename... Rest>
-constexpr bool is_any_of() {
-  return std::is_same_v<T, First> || is_any_of<T, Rest...>();
-}
-
-}  // namespace detail
 
 // Represents a stream of dependent computations on a GPU device.
 //
@@ -229,25 +208,6 @@ class Stream {
                           beta, c, ldc, numeric_options, context);
   }
 
-  // TODO(reedwm): Update all callers to pass correct NumericOptions.
-  template <typename InputType, typename OutputType, typename ConstantType>
-  absl::Status ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
-                            uint64_t m, uint64 n, uint64 k, ConstantType alpha,
-                            const DeviceMemory<InputType> &a, int lda,
-                            const DeviceMemory<InputType> &b, int ldb,
-                            ConstantType beta, DeviceMemory<OutputType> *c,
-                            int ldc, blas::CallContext context) {
-    blas::BlasSupport *blas = parent()->AsBlas();
-    if (!blas) {
-      return absl::InternalError(
-          "Attempting to perform BLAS operation using "
-          "StreamExecutor without BLAS support");
-    }
-
-    return blas->BlasGemm(this, transa, transb, m, n, k, alpha, a, lda, b, ldb,
-                          beta, c, ldc, NumericOptions{}, context);
-  }
-
   template <typename InputType, typename OutputType>
   absl::Status ThenBlasGemmWithAlgorithm(
       blas::Transpose transa, blas::Transpose transb, uint64_t m, uint64 n,
@@ -258,24 +218,6 @@ class Stream {
       blas::CallContext context) {
     OutputType alpha{1};
     OutputType beta{0};
-    return ThenBlasGemmWithAlgorithm(transa, transb, m, n, k, alpha, a, lda, b,
-                                     ldb, beta, c, ldc, computation_type,
-                                     algorithm, NumericOptions{},
-                                     output_profile_result, context);
-  }
-
-  template <typename InputType, typename OutputType, typename ConstantType>
-  absl::Status ThenBlasGemmWithAlgorithm(
-      blas::Transpose transa, blas::Transpose transb, uint64_t m, uint64 n,
-      uint64_t k, ConstantType alpha, const DeviceMemory<InputType> &a, int lda,
-      const DeviceMemory<InputType> &b, int ldb, ConstantType beta,
-      DeviceMemory<OutputType> *c, int ldc,
-      blas::ComputationType computation_type, blas::AlgorithmType algorithm,
-      const NumericOptions &numeric_options,
-      blas::ProfileResult *output_profile_result, blas::CallContext context) {
-    TF_RETURN_IF_ERROR(
-        CheckTypesForExtendedBlas<InputType, OutputType, ConstantType>(
-            computation_type));
 
     blas::BlasSupport *blas = parent()->AsBlas();
     if (!blas) {
@@ -283,65 +225,10 @@ class Stream {
           "Attempting to perform BLAS operation using "
           "StreamExecutor without BLAS support");
     }
-
-    void *alpha_ptr = &alpha;
-    void *beta_ptr = &beta;
-    float alpha_storage, beta_storage;
-    UpcastHalfToFloat<ConstantType>(&alpha_ptr, &beta_ptr, &alpha_storage,
-                                    &beta_storage);
-
-    absl::Status st = blas->DoBlasGemmWithAlgorithm(
-        this, transa, transb, m, n, k, alpha_ptr, a,
-        blas::ToDataType<InputType>::value, lda, b,
-        blas::ToDataType<InputType>::value, ldb, beta_ptr, c,
-        blas::ToDataType<OutputType>::value, ldc, computation_type, algorithm,
-        numeric_options, output_profile_result, context);
-
-    if (output_profile_result) {
-      // The error is recorded in the profile.
-      return absl::OkStatus();
-    }
-    return st;
-  }
-
-  template <typename T>
-  using DeviceMemorySlice = absl::Span<DeviceMemory<T> *const>;
-
-  template <typename InputType, typename OutputType, typename ConstantType>
-  absl::Status ThenBlasGemmStridedBatched(
-      blas::Transpose transa, blas::Transpose transb, uint64_t m, uint64 n,
-      uint64_t k, ConstantType alpha, const DeviceMemory<InputType> &a, int lda,
-      int64_t stride_a, const DeviceMemory<InputType> &b, int ldb,
-      int64_t stride_b, ConstantType beta, DeviceMemory<OutputType> *c, int ldc,
-      int64_t stride_c, int batch_count, const NumericOptions &numeric_options,
-      blas::CallContext context) {
-    static_assert(
-        detail::is_any_of<InputType, int8_t, float, Eigen::half,
-                          Eigen::bfloat16, double, std::complex<float>,
-                          std::complex<double>>(),
-        "Unsupported input type");
-    static_assert(std::is_same_v<ConstantType, InputType> ||
-                      (detail::is_any_of<InputType, int8_t, Eigen::half,
-                                         Eigen::bfloat16>() &&
-                       std::is_same_v<ConstantType, float>),
-                  "Mismatched input and alpha/beta types");
-    blas::BlasSupport *blas = parent()->AsBlas();
-    if (!blas) {
-      return absl::InternalError(
-          "Attempting to perform BLAS operation using "
-          "StreamExecutor without BLAS support");
-    }
-
-    void *alpha_ptr = &alpha;
-    void *beta_ptr = &beta;
-    float alpha_storage, beta_storage;
-    UpcastHalfToFloat<ConstantType>(&alpha_ptr, &beta_ptr, &alpha_storage,
-                                    &beta_storage);
-
-    return blas->DoBlasGemmStridedBatched(
-        this, transa, transb, m, n, k, blas::ToDataType<InputType>::value,
-        alpha_ptr, a, lda, stride_a, b, ldb, stride_b, beta_ptr, c, ldc,
-        stride_c, batch_count, numeric_options, context);
+    return blas->BlasGemmWithAlgorithm(
+        this, transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc,
+        computation_type, algorithm, NumericOptions{}, output_profile_result,
+        context);
   }
 
   // Entrain onto the stream: a memcpy to a host destination from a GPU source
@@ -464,48 +351,6 @@ class Stream {
   std::variant<StreamPriority, int> priority() const;
 
  private:
-  // Checks whether types match before a call to extended BLAS version.
-  template <typename ABType, typename CType, typename ScaleType>
-  absl::Status CheckTypesForExtendedBlas(
-      blas::ComputationType computation_type) {
-    static_assert(
-        detail::is_any_of<ABType, Eigen::half, Eigen::bfloat16, float, double,
-                          int8_t, std::complex<float>, std::complex<double>>(),
-        "The only buffer types supported are: Eigen::half, float, "
-        "double, int8, std::complex<float> and std::complex<double>");
-    static_assert(
-        std::is_same_v<ScaleType, CType> ||
-            (std::is_same_v<ScaleType, float> &&
-             detail::is_any_of<CType, Eigen::half, Eigen::bfloat16>()),
-        "Mismatched alpha/beta and output types");
-
-    bool valid_computation_type = [computation_type] {
-      switch (computation_type) {
-        case blas::ComputationType::kF16:
-          return std::is_same_v<CType, Eigen::half>;
-        case blas::ComputationType::kF32:
-          return detail::is_any_of<CType, Eigen::half, Eigen::bfloat16, float,
-                                   std::complex<float>>();
-        case blas::ComputationType::kF64:
-          return detail::is_any_of<CType, double, std::complex<double>>();
-        case blas::ComputationType::kI32:
-          return std::is_same_v<CType, int32_t>;
-        case blas::ComputationType::kF16AsF32:   // fall-through
-        case blas::ComputationType::kBF16AsF32:  // fall-through
-        case blas::ComputationType::kTF32AsF32:
-          return detail::is_any_of<CType, float, std::complex<float>>();
-      }
-    }();
-
-    if (!valid_computation_type) {
-      return absl::InternalError(absl::StrCat(
-          "Invalid computation type ",
-          blas::ComputationTypeString(computation_type), " for output type: ",
-          blas::DataTypeString(blas::ToDataType<CType>::value)));
-    }
-    return absl::OkStatus();
-  }
-
   bool InErrorState() const TF_LOCKS_EXCLUDED(mu_) {
     absl::ReaderMutexLock lock(&mu_);
     return !status_.ok();
@@ -544,29 +389,6 @@ class Stream {
   // be reused.
   std::vector<std::pair<std::unique_ptr<Stream>, bool>> sub_streams_
       ABSL_GUARDED_BY(mu_);
-
-  // Non-extended BLAS interface requires alpha/beta to be floats when input
-  // type is Eigen::half. However, for consistency purposes it is convenient
-  // for the interface to accept Eigen::half.
-  template <typename T>
-  void UpcastHalfToFloat(void **alpha_ptr, void **beta_ptr,
-                         float *alpha_storage, float *beta_storage) {
-    if (std::is_same<T, Eigen::half>::value) {
-      *alpha_storage =
-          static_cast<float>(*reinterpret_cast<Eigen::half *>(*alpha_ptr));
-      *beta_storage =
-          static_cast<float>(*reinterpret_cast<Eigen::half *>(*beta_ptr));
-      *alpha_ptr = alpha_storage;
-      *beta_ptr = beta_storage;
-    } else if (std::is_same<T, Eigen::bfloat16>::value) {
-      *alpha_storage =
-          static_cast<float>(*reinterpret_cast<Eigen::bfloat16 *>(*alpha_ptr));
-      *beta_storage =
-          static_cast<float>(*reinterpret_cast<Eigen::bfloat16 *>(*beta_ptr));
-      *alpha_ptr = alpha_storage;
-      *beta_ptr = beta_storage;
-    }
-  }
 
   Stream(const Stream &) = delete;
   void operator=(const Stream &) = delete;

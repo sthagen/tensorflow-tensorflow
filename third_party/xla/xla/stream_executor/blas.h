@@ -1,3 +1,4 @@
+#include "tsl/platform/errors.h"
 /* Copyright 2015 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -471,6 +472,72 @@ class BlasSupport {
     return DoBlasGemm(stream, transa, transb, m, n, k,
                       blas::ToDataType<InputType>::value, alpha_ptr, a, lda, b,
                       ldb, beta_ptr, c, ldc, numeric_options, context);
+  }
+
+  template <typename InputType, typename OutputType, typename ConstantType>
+  absl::Status BlasGemmWithAlgorithm(
+      Stream *stream, blas::Transpose transa, blas::Transpose transb,
+      uint64_t m, uint64 n, uint64_t k, ConstantType alpha,
+      const DeviceMemory<InputType> &a, int lda,
+      const DeviceMemory<InputType> &b, int ldb, ConstantType beta,
+      DeviceMemory<OutputType> *c, int ldc,
+      blas::ComputationType computation_type, blas::AlgorithmType algorithm,
+      const NumericOptions &numeric_options,
+      blas::ProfileResult *output_profile_result, blas::CallContext context) {
+    TF_RETURN_IF_ERROR(
+        CheckTypesForExtendedBlas<InputType, OutputType, ConstantType>(
+            computation_type));
+
+    void *alpha_ptr = &alpha;
+    void *beta_ptr = &beta;
+    float alpha_storage, beta_storage;
+    UpcastHalfToFloat<ConstantType>(&alpha_ptr, &beta_ptr, &alpha_storage,
+                                    &beta_storage);
+
+    absl::Status st = DoBlasGemmWithAlgorithm(
+        stream, transa, transb, m, n, k, alpha_ptr, a,
+        blas::ToDataType<InputType>::value, lda, b,
+        blas::ToDataType<InputType>::value, ldb, beta_ptr, c,
+        blas::ToDataType<OutputType>::value, ldc, computation_type, algorithm,
+        numeric_options, output_profile_result, context);
+
+    if (output_profile_result) {
+      // The error is recorded in the profile.
+      return absl::OkStatus();
+    }
+    return st;
+  }
+
+  template <typename InputType, typename OutputType, typename ConstantType>
+  absl::Status BlasGemmStridedBatched(
+      Stream *stream, blas::Transpose transa, blas::Transpose transb,
+      uint64_t m, uint64 n, uint64_t k, ConstantType alpha,
+      const DeviceMemory<InputType> &a, int lda, int64_t stride_a,
+      const DeviceMemory<InputType> &b, int ldb, int64_t stride_b,
+      ConstantType beta, DeviceMemory<OutputType> *c, int ldc, int64_t stride_c,
+      int batch_count, const NumericOptions &numeric_options,
+      blas::CallContext context) {
+    static_assert(
+        detail::is_any_of<InputType, int8_t, float, Eigen::half,
+                          Eigen::bfloat16, double, std::complex<float>,
+                          std::complex<double>>(),
+        "Unsupported input type");
+    static_assert(std::is_same_v<ConstantType, InputType> ||
+                      (detail::is_any_of<InputType, int8_t, Eigen::half,
+                                         Eigen::bfloat16>() &&
+                       std::is_same_v<ConstantType, float>),
+                  "Mismatched input and alpha/beta types");
+
+    void *alpha_ptr = &alpha;
+    void *beta_ptr = &beta;
+    float alpha_storage, beta_storage;
+    UpcastHalfToFloat<ConstantType>(&alpha_ptr, &beta_ptr, &alpha_storage,
+                                    &beta_storage);
+
+    return DoBlasGemmStridedBatched(
+        stream, transa, transb, m, n, k, blas::ToDataType<InputType>::value,
+        alpha_ptr, a, lda, stride_a, b, ldb, stride_b, beta_ptr, c, ldc,
+        stride_c, batch_count, numeric_options, context);
   }
 
   // Solves a triangular matrix equation.
