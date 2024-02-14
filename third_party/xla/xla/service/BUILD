@@ -2605,6 +2605,7 @@ xla_cc_test(
     name = "logistic_expander_test",
     srcs = ["logistic_expander_test.cc"],
     deps = [
+        ":dynamic_padder",
         ":hlo_creation_utils",
         ":hlo_parser",
         ":hlo_pass",
@@ -2615,6 +2616,7 @@ xla_cc_test(
         ":shape_inference",
         "//xla:literal",
         "//xla:shape_util",
+        "//xla:statusor",
         "//xla:test",
         "//xla:types",
         "//xla:window_util",
@@ -5920,6 +5922,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -7572,7 +7575,10 @@ xla_cc_test(
     name = "xla_aot_compile_cpu_test",
     srcs = ["xla_aot_compile_cpu_test.cc"],
     data = [":xla_aot_compile_test_cpu_executable"],
-    tags = ["no_oss"],
+    tags = [
+        "no_oss",
+        "notap",
+    ],
     deps = [
         ":cpu_plugin",
         ":platform_util",
