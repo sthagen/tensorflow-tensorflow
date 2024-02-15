@@ -28,6 +28,7 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
@@ -108,7 +109,9 @@ class Stream {
 
   // Initialize the stream. This must be performed before entraining any other
   // operations.
+  ABSL_DEPRECATED("Use absl::Status Stream::Initialize instead.")
   Stream &Init() TF_LOCKS_EXCLUDED(mu_);
+  absl::Status Initialize();
 
   // Get or create a sub-stream from this stream. If there is any sub-stream in
   // the pool that can be reused then just return this sub-stream.  Otherwise
@@ -187,26 +190,6 @@ class Stream {
 
   /////////////////
   // BLAS support
-
-  template <typename InputType, typename OutputType>
-  absl::Status ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
-                            uint64_t m, uint64 n, uint64 k,
-                            const DeviceMemory<InputType> &a, int lda,
-                            const DeviceMemory<InputType> &b, int ldb,
-                            DeviceMemory<OutputType> *c, int ldc,
-                            const NumericOptions &numeric_options,
-                            blas::CallContext context) {
-    InputType alpha{1.0};
-    InputType beta{0.0};
-    blas::BlasSupport *blas = parent()->AsBlas();
-    if (!blas) {
-      return absl::InternalError(
-          "Attempting to perform BLAS operation using "
-          "StreamExecutor without BLAS support");
-    }
-    return blas->BlasGemm(this, transa, transb, m, n, k, alpha, a, lda, b, ldb,
-                          beta, c, ldc, numeric_options, context);
-  }
 
   template <typename InputType, typename OutputType>
   absl::Status ThenBlasGemmWithAlgorithm(
