@@ -38,6 +38,7 @@ limitations under the License.
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/buffer_allocations.h"
+#include "xla/service/gpu/nccl_api.h"
 #include "xla/service/gpu/nccl_clique.h"
 #include "xla/service/gpu/nccl_clique_key.h"
 #include "xla/service/service_executable_run_options.h"
@@ -182,8 +183,8 @@ class Thunk {
     CollectiveCliques() = default;
     explicit CollectiveCliques(CliquesMap cliques_map);
 
-    absl::StatusOr<NcclComm::Lock> GetComm(const NcclCliqueKey& clique_key,
-                                           int32_t rank) const;
+    absl::StatusOr<NcclApi::NcclCommHandle> GetComm(
+        const NcclCliqueKey& clique_key, int32_t rank) const;
 
     // Returns the number of communicators in a collective clique. Returns error
     // if we do not have an acquired clique for a given key.
@@ -213,6 +214,8 @@ class Thunk {
     // A mapping from local device ordinals to global device IDs.
     using GlobalDeviceIdMap = std::map<int32_t, GlobalDeviceId>;
 
+    se::StreamExecutor* executor;
+
     // XLA execution run id allows us to distinguish collective operations
     // from different concurrent executions and avoid deadlocks.
     RunId run_id;
@@ -226,8 +229,9 @@ class Thunk {
 
    private:
     CollectiveExecuteParams(
-        RunId run_id, int64_t local_device_ordinal,
-        GlobalDeviceId global_device_id, const DeviceAssignment* device_assn,
+        se::StreamExecutor* executor, RunId run_id,
+        int64_t local_device_ordinal, GlobalDeviceId global_device_id,
+        const DeviceAssignment* device_assn,
         const GlobalDeviceIdMap* global_device_id_map,
         const NcclCliqueIdCallback* nccl_clique_id_callback);
   };
