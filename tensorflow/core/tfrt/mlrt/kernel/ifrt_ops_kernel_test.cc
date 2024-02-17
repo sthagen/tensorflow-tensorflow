@@ -35,6 +35,7 @@ limitations under the License.
 #include "xla/python/ifrt/client.h"
 #include "xla/python/ifrt/test_util.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/platform/protobuf.h"  // IWYU pragma: keep
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow/core/runtime_fallback/kernel/kernel_fallback_compat_request_state.h"
@@ -58,12 +59,15 @@ limitations under the License.
 #include "tsl/platform/status_matchers.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/threadpool.h"
+#include "tsl/platform/tstring.h"
 #include "tfrt/host_context/concurrent_work_queue.h"  // from @tf_runtime
 #include "tfrt/host_context/resource_context.h"  // from @tf_runtime
 
 namespace tensorflow {
 namespace tf_mlrt {
 namespace {
+using tensorflow::test::AsScalar;
+using tensorflow::test::ExpectEqual;
 
 static absl::string_view kVariableName = "test_variable";
 
@@ -78,8 +82,6 @@ Eigen::ThreadPoolDevice GetThreadPoolDevice() {
                                  kMaxParallelism);
 }
 
-// redundant_ifrt_load_variable_op: if true, add an additional
-// tf.IfrtLoadVariableOp in the executable.
 mlrt::bc::Buffer CreateExecutableForIfrtLoadVariableOp(
     bool redundant_ifrt_load_variable_op = false) {
   mlrt::bc::Buffer buffer;
@@ -88,15 +90,16 @@ mlrt::bc::Buffer CreateExecutableForIfrtLoadVariableOp(
   auto executable_ctor = mlrt::bc::New<mlrt::bc::Executable>(&allocator);
 
   mlrt::testing::SymbolTable kernels;
-  std::vector<std::string> kernel_names = {"tf_mlrt.ifrt_load_variable",
-                                           "return"};
+  std::vector<std::string> kernel_names = {
+      "tf_mlrt.createop", "tf_mlrt.executeop", "tf_mlrt.ifrt_load_variable",
+      "return"};
 
   executable_ctor.construct_kernel_names(kernel_names.size())
       .Assign(kernel_names);
   kernels.Def(kernel_names);
 
   mlrt::testing::AttributeTable attributes(
-      executable_ctor.construct_attributes(2));
+      executable_ctor.construct_attributes(6));
 
   tensorflow::ifrt_serving::VariableDeviceShardingConfigProto sharding_config;
   sharding_config.add_device_ids(0);
@@ -108,6 +111,44 @@ mlrt::bc::Buffer CreateExecutableForIfrtLoadVariableOp(
   attributes.Add("sharding_config", serialized_sharding_config);
   attributes.Add("variable_name", kVariableName);
 
+  attributes.Add("var_handle_op_node_def",
+                 R"pb(name: "VarHandleOp"
+                      op: "VarHandleOp"
+                      device: "/job:localhost/replica:0/task:0/device:CPU:0"
+                      attr {
+                        key: "container"
+                        value { s: "test" }
+                      }
+                      attr {
+                        key: "shared_name"
+                        value { s: "y" }
+                      }
+                      attr {
+                        key: "dtype"
+                        value { type: DT_INT32 }
+                      }
+                      attr {
+                        key: "shape"
+                        value { shape { dim { size: 1 } } }
+                      }
+                 )pb");
+
+  attributes.Add("var_handle_op_key", 0);
+
+  attributes.Add("assign_variable_op_node_def",
+                 R"pb(name: "AssignVariableOp"
+                      op: "AssignVariableOp"
+                      input: "dummy_resource"
+                      input: "dummy_tensor"
+                      device: "/job:localhost/replica:0/task:0/device:CPU:0"
+                      attr {
+                        key: "dtype"
+                        value { type: DT_INT32 }
+                      }
+                 )pb");
+
+  attributes.Add("assign_variable_op_key", 1);
+
   auto functions_ctor = executable_ctor.construct_functions(1);
 
   {
@@ -117,24 +158,76 @@ mlrt::bc::Buffer CreateExecutableForIfrtLoadVariableOp(
     mlrt::testing::SymbolTable regs;
 
     function_ctor.construct_input_regs(1).Assign({regs.Def("input_tensor")});
+    function_ctor.construct_output_regs(1).Assign({regs.Def("output_tensor")});
 
-    const int kNumKernels = 2 + (redundant_ifrt_load_variable_op ? 1 : 0);
+    const int kNumKernels = 6 + (redundant_ifrt_load_variable_op ? 1 : 0);
     auto kernels_ctor = function_ctor.construct_kernels(kNumKernels);
     int kernel_index = 0;
 
     {
+      // Create VarHandleOp
+      auto createop_ctor = kernels_ctor.ConstructAt(kernel_index);
+      createop_ctor.set_code(kernels.Use("tf_mlrt.createop"));
+      createop_ctor.construct_arguments(0);
+      createop_ctor.construct_results(0);
+      createop_ctor.construct_attributes(2).Assign(
+          {attributes.GetHandle("var_handle_op_node_def"),
+           attributes.GetHandle("var_handle_op_key")});
+      kernel_index++;
+    }
+    {
+      // Create AssignVariableOp
+      auto createop_ctor = kernels_ctor.ConstructAt(kernel_index);
+      createop_ctor.set_code(kernels.Use("tf_mlrt.createop"));
+      createop_ctor.construct_arguments(0);
+      createop_ctor.construct_results(0);
+      createop_ctor.construct_attributes(2).Assign(
+          {attributes.GetHandle("assign_variable_op_node_def"),
+           attributes.GetHandle("assign_variable_op_key")});
+      kernel_index++;
+    }
+    {
+      // Execute VarHandleOp
+      auto executeop_ctor = kernels_ctor.ConstructAt(kernel_index);
+      executeop_ctor.set_code(kernels.Use("tf_mlrt.executeop"));
+      executeop_ctor.construct_arguments(0);
+      executeop_ctor.construct_results(1).Assign({regs.Def("variable_handle")});
+      executeop_ctor.construct_attributes(2).Assign(
+          {attributes.GetHandle("var_handle_op_node_def"),
+           attributes.GetHandle("var_handle_op_key")});
+      executeop_ctor.construct_last_uses(1).Assign({0});
+      kernel_index++;
+    }
+
+    {
+      // Execute AssignVariableOp
+      auto executeop_ctor = kernels_ctor.ConstructAt(kernel_index);
+      executeop_ctor.set_code(kernels.Use("tf_mlrt.executeop"));
+      executeop_ctor.construct_arguments(2).Assign(
+          regs.Use({"variable_handle", "input_tensor"}));
+      executeop_ctor.construct_results(0);
+      executeop_ctor.construct_attributes(2).Assign(
+          {attributes.GetHandle("assign_variable_op_node_def"),
+           attributes.GetHandle("assign_variable_op_key")});
+      executeop_ctor.construct_last_uses(2).Assign({0, 0});
+      kernel_index++;
+    }
+
+    {
       auto kernel_ctor = kernels_ctor.ConstructAt(kernel_index);
       kernel_ctor.set_code(kernels.Use("tf_mlrt.ifrt_load_variable"));
+      kernel_ctor.construct_results(1).Assign({regs.Use("output_tensor")});
+      kernel_ctor.construct_arguments(1).Assign({regs.Use("variable_handle")});
       kernel_ctor.construct_attributes(2).Assign(
           {attributes.GetHandle("sharding_config"),
            attributes.GetHandle("variable_name")});
-      kernel_ctor.construct_arguments(1).Assign({regs.Use("input_tensor")});
       kernel_ctor.construct_last_uses(1).Assign({1});
       kernel_index++;
     }
     if (redundant_ifrt_load_variable_op) {
       auto kernel_ctor = kernels_ctor.ConstructAt(kernel_index);
       kernel_ctor.set_code(kernels.Use("tf_mlrt.ifrt_load_variable"));
+      kernel_ctor.construct_results(1).Assign({regs.Def("dummy")});
       kernel_ctor.construct_attributes(2).Assign(
           {attributes.GetHandle("sharding_config"),
            attributes.GetHandle("variable_name")});
@@ -142,10 +235,10 @@ mlrt::bc::Buffer CreateExecutableForIfrtLoadVariableOp(
       kernel_ctor.construct_last_uses(1).Assign({1});
       kernel_index++;
     }
-
     {
       auto kernel_ctor = kernels_ctor.ConstructAt(kernel_index);
       kernel_ctor.set_code(kernels.Use("return"));
+      kernel_ctor.construct_arguments(1).Assign({regs.Use("output_tensor")});
       kernel_index++;
     }
     DCHECK_EQ(kernel_index, kNumKernels);
@@ -239,6 +332,9 @@ TEST(KernelTest, IfrtLoadVariableOp) {
                    ->GetLoadedVariableRegistry()
                    .GetLoadedVariable(kVariableName)
                    .status());
+
+  ExpectEqual(results[0].Get<tfrt_stub::FallbackTensor>().tensor(),
+              AsScalar(tsl::tstring(kVariableName)));
 }
 
 TEST(KernelTest, DuplicateIfrtLoadVariableOpShallSucceed) {
@@ -325,6 +421,9 @@ TEST(KernelTest, DuplicateIfrtLoadVariableOpShallSucceed) {
                    ->GetLoadedVariableRegistry()
                    .GetLoadedVariable(kVariableName)
                    .status());
+
+  ExpectEqual(results[0].Get<tfrt_stub::FallbackTensor>().tensor(),
+              AsScalar(tsl::tstring(kVariableName)));
 }
 
 }  // namespace
