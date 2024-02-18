@@ -971,7 +971,6 @@ cc_library(
     ),
     hdrs = ["nccl_api.h"],
     compatible_with = get_compatible_with_portable(),
-    defines = if_gpu_is_configured(["XLA_ENABLE_XCCL"]),  # TODO(ezhulenev): Remove!
     deps = [
         ":nccl_clique_key",
         "//xla:shape_util",
@@ -980,6 +979,7 @@ cc_library(
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:gpu_activation",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1066,7 +1066,6 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:btree",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/hash",
@@ -1079,6 +1078,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:hash",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -1165,7 +1165,6 @@ cc_library(
     ]),
     # Override tsl_gpu_library()'s internal default value of ["//buildenv/target:gce"].
     compatible_with = [],
-    defines = if_cuda_is_configured(["XLA_ENABLE_XCCL"]),  # TODO(ezhulenev): Remove!
     tags = ["manual"],
     visibility = ["//visibility:private"],
     deps = if_cuda_is_configured([
