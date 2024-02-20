@@ -55,6 +55,7 @@ cc_library(
         "//xla:shape_util",
         "//xla/service:gpu_plugin",
         "//xla/service/gpu:gpu_executable",
+        "//xla/stream_executor:platform_manager",
         "//xla/tests:filecheck",
         "//xla/tests:llvm_irgen_test_base",
         "//xla/tests:verified_hlo_module",
@@ -80,6 +81,17 @@ xla_cc_test(
     deps = [
         ":gpu_codegen_test",
         "//xla:literal_util",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+xla_test(
+    name = "float_conversions_test",
+    srcs = ["float_conversions_test.cc"],
+    backends = ["gpu"],
+    deps = [
+        ":gpu_codegen_test",
+        "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
 )
@@ -657,14 +669,11 @@ lit_test_suite(
         [
             "add_preds.hlo",
             "calling_convention.hlo",
-            "concat.hlo",
             "copy.hlo",
             "dynamic_update_slice_inplace.hlo",
             "element_wise_row_vectorization.hlo",
             "fused_scatter.hlo",
-            "fused_slice_different_operands.hlo",
             "fused_slice.hlo",
-            "fusion.hlo",
             "kernel_reuse.hlo",
             "launch_dimensions.hlo",
             "pad_to_static.hlo",
@@ -772,6 +781,7 @@ xla_cc_test(
         "//xla:shape_util",
         "//xla:types",
         "//xla:xla_proto_cc",
+        "//xla/stream_executor:platform_manager",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",

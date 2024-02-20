@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project  // NOLINT: Required to register quantization dialect.
 #include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinAttributeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
@@ -72,6 +73,9 @@ using ::mlir::quant::QuantizedType;
 using ::mlir::quant::UniformQuantizedPerAxisType;
 using ::mlir::quant::UniformQuantizedType;
 
+const char* kPaddingSame = "SAME";
+const char* kPaddingValid = "VALID";
+
 #define GEN_PASS_DEF_UNIFORMQUANTIZEDSTABLEHLOTOTFLPASS
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h.inc"
 
@@ -82,6 +86,7 @@ class UniformQuantizedStableHloToTflPass
   void runOnOperation() override;
 };
 
+// TODO: b/323645515 - Refactor reference functions.
 // Bias scales for matmul-like ops should be input scale * filter scale. Here it
 // is assumed that the input is per-tensor quantized and filter is per-channel
 // quantized.
@@ -177,7 +182,8 @@ TFL::QConstOp CreateTflConstOpForFilter(
 // transformation). The quantization scale for the bias is input scale *
 // filter scale. `filter_const_op` is used to retrieve the filter scales and
 // the size of the bias constant.
-// TODO - b/309896242: Support bias fusion legalization.
+// TODO - b/309896242: Support bias fusion legalization and spatial dimension
+// check when `stride` is not 1.
 TFL::QConstOp CreateTflConstOpForDummyBias(
     const Location loc, const double input_scale, TFL::QConstOp filter_const_op,
     PatternRewriter& rewriter, bool is_per_channel, MLIRContext& ctx) {
@@ -784,6 +790,10 @@ class RewriteQuantizedConvolutionOp
  public:
   using OpRewritePattern<stablehlo::ConvolutionOp>::OpRewritePattern;
   LogicalResult match(stablehlo::ConvolutionOp op) const override {
+    const bool has_i32_output = IsI32F32UniformQuantizedPerAxisType(
+        op.getResult().getType().cast<TensorType>().getElementType());
+    const bool fuse_bias_constant =
+        FindUserOfType<stablehlo::AddOp>(op) && has_i32_output;
     stablehlo::ConvDimensionNumbersAttr dimension_numbers =
         op.getDimensionNumbers();
 
@@ -821,6 +831,27 @@ class RewriteQuantizedConvolutionOp
       return failure();
     }
 
+    // TODO: b/309896242 - Lift the assumptions on adjacent ops below
+    // as we cover more dynamic fused pattern legalization.
+    if (fuse_bias_constant) {
+      Operation* add_op = FindUserOfType<stablehlo::AddOp>(op);
+      if (add_op == nullptr) {
+        LLVM_DEBUG(llvm::dbgs() << "Failed to find AddOp for bias fusion.\n");
+        return failure();
+      }
+      Operation* broadcast_in_dim_op = add_op->getOperand(1).getDefiningOp();
+      if (!isa<stablehlo::BroadcastInDimOp>(broadcast_in_dim_op)) {
+        LLVM_DEBUG(llvm::dbgs() << "Failed to find broadcasted bias.\n");
+        return failure();
+      }
+      Operation* bias_const_op =
+          broadcast_in_dim_op->getOperand(0).getDefiningOp();
+      if (!isa<stablehlo::ConstantOp>(bias_const_op)) {
+        LLVM_DEBUG(llvm::dbgs() << "Failed to find bias constant.\n");
+        return failure();
+      }
+    }
+
     return success();
   }
 
@@ -828,6 +859,8 @@ class RewriteQuantizedConvolutionOp
                PatternRewriter& rewriter) const override {
     const bool has_i32_output = IsI32F32UniformQuantizedPerAxisType(
         op.getResult().getType().cast<TensorType>().getElementType());
+    stablehlo::ConvDimensionNumbersAttr dimension_numbers =
+        op.getDimensionNumbers();
 
     Value filter_value = op.getOperand(1);
     Operation* filter_op = filter_value.getDefiningOp();
@@ -868,58 +901,30 @@ class RewriteQuantizedConvolutionOp
         filter_op->getLoc(), /*output=*/TypeAttr::get(new_filter_result_type),
         new_filter_value_attr);
 
-    const SmallVector<double> bias_scales = GetBiasScales(
-        /*input_scale=*/op.getOperand(0)
-            .getType()
-            .cast<TensorType>()
-            .getElementType()
-            .cast<UniformQuantizedType>()
-            .getScale(),
-        /*filter_scales=*/new_filter_quantized_type.getScales());
-
     Operation* uniform_quantize_op;
-
     const bool fuse_bias_constant =
         FindUserOfType<stablehlo::AddOp>(op) && has_i32_output;
     if (has_i32_output) {
       if (fuse_bias_constant) {
-        Operation* add_op;
-        add_op = FindUserOfType<stablehlo::AddOp>(op);
+        Operation* add_op = FindUserOfType<stablehlo::AddOp>(op);
         uniform_quantize_op = FindUserOfType<TFL::QuantizeOp>(add_op);
       } else {
         uniform_quantize_op = FindUserOfType<TFL::QuantizeOp>(op);
       }
     }
+
     const int64_t num_output_features = new_filter_result_type.getShape()[0];
     const SmallVector<int64_t, 1> bias_shape = {num_output_features};
-    auto bias_quantized_type = CreateI32F32UniformQuantizedPerAxisType(
-        op.getLoc(), *op.getContext(), std::move(bias_scales),
-        new_filter_quantized_type.getZeroPoints(),
-        /*quantization_dimension=*/0);
-    auto bias_type = RankedTensorType::getChecked(op.getLoc(), bias_shape,
-                                                  bias_quantized_type);
 
-    // TODO: b/309896242 - Add proper bias constant addition instead of
-    // dummy value. Currently, adding the bias constant as described in the
-    // bug results in a numeric error where all output is constant regardless
-    // of input. This requires further numerics diff investigation.
-    // Create a bias constant. It should have values of 0.
-    auto bias_value_type = RankedTensorType::getChecked(op.getLoc(), bias_shape,
-                                                        rewriter.getI32Type());
-    // Create a bias filled with zeros. Mimics the behavior of no bias add.
-    DenseIntElementsAttr bias_value = DenseIntElementsAttr::get(
-        bias_value_type, APInt(/*numBits=*/32, /*value=*/0, /*isSigned=*/true));
-    TFL::QConstOp bias =
-        rewriter.create<TFL::QConstOp>(op.getLoc(),
-                                       /*output=*/TypeAttr::get(bias_type),
-                                       /*value=*/bias_value);
+    TFL::QConstOp bias = GetBiasOp(op, rewriter, new_filter_result_type,
+                                   new_filter_quantized_type, bias_shape,
+                                   has_i32_output, fuse_bias_constant);
 
     // Determine the attributes for the TFL::Conv2DOp.
-    // TODO: b/294808863 - Use `padding = "SAME"` if the padding attribute
-    // matches the semantics.
+
     Value input_value = op.getOperand(0);
     if (const DenseIntElementsAttr padding_attr = op.getPaddingAttr();
-        !IsPaddingValid(padding_attr)) {
+        !HasProperPadding(op, dimension_numbers, padding_attr)) {
       // Add an extra tfl.pad_op if there are explicit padding values. This
       // extra pad op will allow us to always set the `padding` attribute of
       // the newly created tfl.conv_2d op as "VALID".
@@ -960,7 +965,10 @@ class RewriteQuantizedConvolutionOp
         /*dilation_h_factor=*/rewriter.getI32IntegerAttr(dilation_h_factor),
         /*dilation_w_factor=*/rewriter.getI32IntegerAttr(dilation_w_factor),
         /*fused_activation_function=*/rewriter.getStringAttr("NONE"),
-        /*padding=*/rewriter.getStringAttr("VALID"),
+        /*padding=*/
+        rewriter.getStringAttr(UseSamePadding(op, dimension_numbers)
+                                   ? kPaddingSame
+                                   : kPaddingValid),
         /*stride_h=*/rewriter.getI32IntegerAttr(stride_h),
         /*stride_w=*/rewriter.getI32IntegerAttr(stride_w));
   }
@@ -1152,12 +1160,34 @@ class RewriteQuantizedConvolutionOp
     return new_filter_constant_value_attr;
   }
 
-  // Determines if the padding attribute corresponds to "VALID"
+  bool UseSamePadding(
+      Operation* op,
+      stablehlo::ConvDimensionNumbersAttr dimension_numbers) const {
+    // TODO: b/294808863 - Account for dynamic shapes.
+    const ArrayRef<int64_t> input_shape =
+        op->getOperand(0).getType().cast<ShapedType>().getShape();
+    const ArrayRef<int64_t> output_shape =
+        op->getResult(0).getType().cast<ShapedType>().getShape();
+    const ArrayRef<int64_t> input_spatial_dim_inds =
+        dimension_numbers.getInputSpatialDimensions();
+    const ArrayRef<int64_t> output_spatial_dim_inds =
+        dimension_numbers.getOutputSpatialDimensions();
+    return (input_shape[input_spatial_dim_inds[0]] ==
+                output_shape[output_spatial_dim_inds[0]] &&
+            input_shape[input_spatial_dim_inds[1]] ==
+                output_shape[output_spatial_dim_inds[1]]);
+  }
+
+  // Determines if the padding attribute corresponds to "VALID" or "SAME".
+  // If not, the input's shape should be adjusted with explicit `tfl.pad` op.
   // (https://www.tensorflow.org/api_docs/python/tf/nn).
-  bool IsPaddingValid(const DenseIntElementsAttr& padding_attr) const {
+  bool HasProperPadding(Operation* op,
+                        stablehlo::ConvDimensionNumbersAttr dimension_numbers,
+                        const DenseIntElementsAttr& padding_attr) const {
     // If padding_attr is empty, it defaults to splat 0s.
-    return !padding_attr || (padding_attr.isSplat() &&
-                             padding_attr.getSplatValue<int64_t>() == 0);
+    return UseSamePadding(op, dimension_numbers) ||
+           (!padding_attr || (padding_attr.isSplat() &&
+                              padding_attr.getSplatValue<int64_t>() == 0));
   }
 
   // Returns the stride amount for the height and width, respectively.
@@ -1185,6 +1215,55 @@ class RewriteQuantizedConvolutionOp
     // It is guaranteed from the spec that it has two values:
     // https://github.com/openxla/stablehlo/blob/main/docs/spec.md#convolution.
     return {lhs_dilation_attr_value[0], lhs_dilation_attr_value[1]};
+  }
+
+  TFL::QConstOp GetBiasOp(
+      stablehlo::ConvolutionOp op, PatternRewriter& rewriter,
+      const RankedTensorType new_filter_result_type,
+      const UniformQuantizedPerAxisType new_filter_quantized_type,
+      const SmallVector<int64_t, 1> bias_shape, const bool has_i32_output,
+      const bool fuse_bias_constant) const {
+    const SmallVector<double> bias_scales = GetBiasScales(
+        /*input_scale=*/op.getOperand(0)
+            .getType()
+            .cast<TensorType>()
+            .getElementType()
+            .cast<UniformQuantizedType>()
+            .getScale(),
+        /*filter_scales=*/new_filter_quantized_type.getScales());
+
+    const auto bias_quantized_type = CreateI32F32UniformQuantizedPerAxisType(
+        op.getLoc(), *op.getContext(), std::move(bias_scales),
+        new_filter_quantized_type.getZeroPoints(),
+        /*quantization_dimension=*/0);
+    const auto bias_type = RankedTensorType::getChecked(op.getLoc(), bias_shape,
+                                                        bias_quantized_type);
+    TFL::QConstOp bias;
+    if (fuse_bias_constant && has_i32_output) {
+      Operation* add_op = FindUserOfType<stablehlo::AddOp>(op);
+      // TODO: b/309896242 - Lift the assumptions on adjacent ops below
+      // as we cover more dynamic fused pattern legalization.
+      Operation* broadcast_in_dim_op = add_op->getOperand(1).getDefiningOp();
+      Operation* bias_const_op =
+          broadcast_in_dim_op->getOperand(0).getDefiningOp();
+      const ElementsAttr bias_constant_value =
+          cast<stablehlo::ConstantOp>(bias_const_op).getValue();
+      bias = rewriter.create<TFL::QConstOp>(op.getLoc(),
+                                            /*output=*/TypeAttr::get(bias_type),
+                                            /*value=*/bias_constant_value);
+    } else {
+      // Create a bias constant. It should have values of 0.
+      const auto bias_value_type = RankedTensorType::getChecked(
+          op.getLoc(), bias_shape, rewriter.getI32Type());
+      // Create a bias filled with zeros. Mimics the behavior of no bias add.
+      const auto bias_value = DenseIntElementsAttr::get(
+          bias_value_type,
+          APInt(/*numBits=*/32, /*value=*/0, /*isSigned=*/true));
+      bias = rewriter.create<TFL::QConstOp>(op.getLoc(),
+                                            /*output=*/TypeAttr::get(bias_type),
+                                            /*value=*/bias_value);
+    }
+    return bias;
   }
 };
 

@@ -48,9 +48,10 @@ class CoalescingTest : public HloTestBase {
     auto fusion = dynamic_cast<KernelFusionInterface*>(emitter.value().get());
     EXPECT_TRUE(emitter.ok());
 
-    CoalescingAnalysis coalescing_analysis(
-        root, analysis.GetEmitterFusionKind(), fusion, &mlir_context_,
-        /*use_heuristic=*/false);
+    CoalescingAnalysis coalescing_analysis(root, root->operands(),
+                                           analysis.GetEmitterFusionKind(),
+                                           fusion, &mlir_context_,
+                                           /*use_heuristic=*/false);
 
     std::vector<bool> results;
     for (const HloInstruction* operand : root->operands()) {
