@@ -4275,8 +4275,10 @@ class Subgraph {
         CheckTensorFloat32OrQUInt8Type(delegate, logging_context, output_tensor,
                                        node->outputs->data[0], node_index));
     int expected_output_dims = 4;
+    uint32_t flags = 0;
     if (!reducer_params->keep_dims) {
       expected_output_dims -= num_reduction_axes;
+      flags = XNN_FLAG_KEEP_DIMS;
     }
     TF_LITE_ENSURE_STATUS(CheckTensorShape(
         logging_context, output_tensor, expected_output_dims,
@@ -4284,7 +4286,6 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, node->outputs->data[0], node_index));
 
-    uint32_t flags = 0;
     const float output_min = -std::numeric_limits<float>::infinity();
     const float output_max = +std::numeric_limits<float>::infinity();
 
@@ -4441,6 +4442,7 @@ class Subgraph {
         logging_context, output_tensor, node->outputs->data[0], node_index));
 
     if (subgraph != nullptr) {
+      uint32_t flags = reducer_params->keep_dims ? XNN_FLAG_KEEP_DIMS : 0;
       xnn_status status = xnn_status_success;
       switch (num_reduction_axes) {
         case 1:
@@ -4450,7 +4452,7 @@ class Subgraph {
               /*output_max=*/+std::numeric_limits<float>::infinity(),
               /*input_id=*/input_output_tensors.at(node->inputs->data[0]),
               /*output_id=*/input_output_tensors.at(node->outputs->data[0]),
-              /*flags=*/0);
+              flags);
           break;
         case 2:
           status = xnn_define_global_average_pooling_2d(
@@ -4459,7 +4461,7 @@ class Subgraph {
               /*output_max=*/+std::numeric_limits<float>::infinity(),
               /*input_id=*/input_output_tensors.at(node->inputs->data[0]),
               /*output_id=*/input_output_tensors.at(node->outputs->data[0]),
-              /*flags=*/0);
+              flags);
           break;
         default:
           break;
