@@ -30,6 +30,7 @@ limitations under the License.
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/platform.h"
+#include "tsl/lib/gtl/int_type.h"
 #include "tsl/platform/errors.h"
 
 namespace stream_executor {
@@ -51,6 +52,47 @@ class CommandBuffer {
  public:
   // Builder constructs nested command buffers owned by a parent command buffer.
   using Builder = std::function<absl::Status(CommandBuffer*)>;
+
+  // Execution scope enables fine-grained synchronization scopes inside
+  // commands buffers. Implementation is very backend-specific and for CUDA/ROCM
+  // backends it's implemented as DAG edges. By default all commands launched in
+  // the `kDefaulExecutionScope` execution scope.
+  //
+  // Example #1: independent execution scopes and independent barriers
+  //
+  // ExecutionScope #0       ExecutionScope #1
+  //
+  //          A                        D
+  //          B                        E
+  // ----- barrier -----      ----- barrier -----
+  //          C                        F
+  //
+  //   (1) Commands A and B can run concurrently and must complete before C.
+  //   (2) Commands D and E can run concurrently and must complete before F.
+  //   (3) There is no syncrhonization between execution scopes, and commands
+  //       from different execution scopes can execute concurrently with each
+  //       other as long as they satisfy constraints of their respective
+  //       execution scopes.
+  //
+  // Example #2: dependencies between scopes and inter-scope barriers
+  //
+  // ExecutionScope #0       ExecutionScope #1
+  //
+  //          A                        D
+  //          B                        E
+  // ----------------- barrier ------------------
+  //          C                        F
+  //
+  //   (1) Commands A and B can run concurrently and must complete before
+  //       C and F.
+  //   (2) Commands D and E can run concurrently and must complete before
+  //       C and F.
+  //   (3) Commands C and F can run concurrently.
+  //   (4) All commands before a shared barrier (in both excecution scopes)
+  //       should complete before any command after a berrier starts execution.
+  //
+  TSL_LIB_GTL_DEFINE_INT_TYPE(ExecutionScopeId, int64_t);
+  static constexpr auto kDefaulExecutionScope = ExecutionScopeId(0);
 
   CommandBuffer() = default;
   virtual ~CommandBuffer() = default;
@@ -126,9 +168,16 @@ class CommandBuffer {
   // Command buffer API
   //===--------------------------------------------------------------------===//
 
-  // Adds an execution barrier to a command buffer: all commands added before a
-  // barrier will complete before any of the commands added after a barrier.
-  virtual absl::Status Barrier(StreamExecutor* executor) = 0;
+  // Adds an execution barrier to a given execution scope: all commands added
+  // before a barrier in a the execution scope will complete before any of the
+  // commands added after a barrier in the same execution scope.
+  virtual absl::Status Barrier(StreamExecutor* executor,
+                               ExecutionScopeId execution_scope_id) = 0;
+
+  // Adds an execution barrier to the default execution scope.
+  absl::Status Barrier(StreamExecutor* executor) {
+    return Barrier(executor, kDefaulExecutionScope);
+  }
 
   // Adds a kernel launch command to the command buffer.
   virtual absl::Status Launch(const ThreadDim& threads, const BlockDim& blocks,
@@ -149,10 +198,19 @@ class CommandBuffer {
                                             const DeviceMemoryBase& src,
                                             uint64_t size) = 0;
 
-  // Adds a memset node to the command buffer.
+  // Supported bit patterns for memset commands.
   using BitPattern = std::variant<uint8_t, uint16_t, uint32_t>;
-  virtual absl::Status Memset(DeviceMemoryBase* dst, BitPattern bit_pattern,
+
+  // Adds a memset command to the given execution scope.
+  virtual absl::Status Memset(ExecutionScopeId execution_scope_id,
+                              DeviceMemoryBase* dst, BitPattern bit_pattern,
                               size_t num_elements) = 0;
+
+  // Adds a memset command to the default execution scope.
+  absl::Status Memset(DeviceMemoryBase* dst, BitPattern bit_pattern,
+                      size_t num_elements) {
+    return Memset(kDefaulExecutionScope, dst, bit_pattern, num_elements);
+  }
 
   //--------------------------------------------------------------------------//
   // Command buffer memory allocation API
