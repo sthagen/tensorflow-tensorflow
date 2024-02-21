@@ -214,14 +214,6 @@ class Stream {
   // array slice. Checks that the destination size can accommodate the host
   // slice size.
   template <typename T>
-  ABSL_DEPRECATED("Use absl::Status returning method instead.")
-  Stream &ThenMemcpyD2H(const DeviceMemory<T> &gpu_src,
-                        absl::Span<T> host_dst) {
-    auto host_size = host_dst.size() * sizeof(T);
-    CHECK(gpu_src.size() == 0 || host_size >= gpu_src.size());
-    return ThenMemcpy(host_dst.begin(), gpu_src, host_size);
-  }
-  template <typename T>
   absl::Status MemcpyD2H(const DeviceMemory<T> &gpu_src,
                          absl::Span<T> host_dst) {
     auto host_size = host_dst.size() * sizeof(T);
@@ -234,14 +226,6 @@ class Stream {
   // Alternative interface for memcpying from host to device that takes an
   // array slice. Checks that the destination size can accommodate the host
   // slice size.
-  template <typename T>
-  ABSL_DEPRECATED("Use absl::Status returning method instead.")
-  Stream &ThenMemcpyH2D(absl::Span<const T> host_src,
-                        DeviceMemory<T> *gpu_dst) {
-    auto host_size = host_src.size() * sizeof(T);
-    CHECK(gpu_dst->size() == 0 || gpu_dst->size() >= host_size);
-    return ThenMemcpy(gpu_dst, host_src.begin(), host_size);
-  }
   template <typename T>
   absl::Status MemcpyH2D(absl::Span<const T> host_src,
                          DeviceMemory<T> *gpu_dst) {
@@ -260,15 +244,6 @@ class Stream {
                      uint64_t size);
   absl::Status Memcpy(DeviceMemoryBase *gpu_dst,
                       const DeviceMemoryBase &gpu_src, uint64_t size);
-
-  // Calls to the device-to-device copy overload of ThenMemcpy -- useful for
-  // ensuring that the host pointer isn't getting confused accidentally with a
-  // device pointer if you're not doing metaprogramming against the API.
-  ABSL_DEPRECATED("Use absl::Status returning method instead.")
-  Stream &ThenMemcpyD2D(DeviceMemoryBase *gpu_dst,
-                        const DeviceMemoryBase &gpu_src, uint64_t size) {
-    return ThenMemcpy(gpu_dst, gpu_src, size);
-  }
   absl::Status MemcpyD2D(DeviceMemoryBase *gpu_dst,
                          const DeviceMemoryBase &gpu_src, uint64_t size) {
     return Memcpy(gpu_dst, gpu_src, size);
@@ -283,9 +258,6 @@ class Stream {
   // Entrain onto the stream: a memset of a 32-bit pattern at a GPU location of
   // size bytes, where bytes must be evenly 32-bit sized (i.e. evenly divisible
   // by 4). The location must not be null.
-  ABSL_DEPRECATED("Use absl::Status returning method instead.")
-  Stream &ThenMemset32(DeviceMemoryBase *location, uint32_t pattern,
-                       uint64_t size);
   absl::Status Memset32(DeviceMemoryBase *location, uint32_t pattern,
                         uint64_t size);
 

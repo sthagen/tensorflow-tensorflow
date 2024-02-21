@@ -12,14 +12,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_SERVING_DEVICE_SELECTOR_POLICIES_H_
-#define TENSORFLOW_CORE_COMMON_RUNTIME_SERVING_DEVICE_SELECTOR_POLICIES_H_
+#ifndef TENSORFLOW_TSL_FRAMEWORK_SERVING_DEVICE_SELECTOR_POLICIES_H_
+#define TENSORFLOW_TSL_FRAMEWORK_SERVING_DEVICE_SELECTOR_POLICIES_H_
 
 #include <atomic>
 
-#include "tensorflow/core/common_runtime/serving_device_selector.h"
+#include "tsl/framework/serving_device_selector.h"
 
-namespace tensorflow {
+namespace tsl {
 
 enum class ServingDeviceSelectorPolicy {
   kRoundRobin,
@@ -37,6 +37,6 @@ class RoundRobinPolicy : public ServingDeviceSelector::Policy {
   std::atomic<uint64_t> ordinal_;
 };
 
-}  // namespace tensorflow
+}  // namespace tsl
 
-#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_SERVING_DEVICE_SELECTOR_POLICIES_H_
+#endif  // TENSORFLOW_TSL_FRAMEWORK_SERVING_DEVICE_SELECTOR_POLICIES_H_

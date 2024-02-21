@@ -76,8 +76,16 @@ using AddI32Ptrs3 = TypedKernel<internal::Ptrs3<int32_t>>;
 static constexpr auto nested = CommandBuffer::Mode::kNested;    // NOLINT
 static constexpr auto primary = CommandBuffer::Mode::kPrimary;  // NOLINT
 
+static std::vector<GpuGraphNodeHandle> Deps(GpuGraphNodeHandle node) {
+  if (auto deps = GpuDriver::GraphNodeGetDependencies(node); deps.ok()) {
+    return *deps;
+  }
+  return {GpuGraphNodeHandle(0xDEADBEEF)};
+}
+
 template <typename... GpuGraphNodeHandles>
-static std::vector<GpuGraphNodeHandle> Deps(GpuGraphNodeHandles... handle) {
+static std::vector<GpuGraphNodeHandle> ExpectedDeps(
+    GpuGraphNodeHandles... handle) {
   return {handle...};
 }
 
@@ -101,9 +109,9 @@ TEST(GpuCommandBufferTest, LaunchSingleKernel) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemset32(&b, 2, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 2, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // Create a command buffer with a single kernel launch.
   auto cmd_buffer = CommandBuffer::Create(executor).value();
@@ -114,14 +122,14 @@ TEST(GpuCommandBufferTest, LaunchSingleKernel) {
 
   // Copy `c` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected = {3, 3, 3, 3};
   ASSERT_EQ(dst, expected);
 
   // Prepare argument for graph update: d = 0
   DeviceMemory<int32_t> d = executor->AllocateArray<int32_t>(length, 0);
-  stream.ThenMemZero(&d, byte_length);
+  TF_ASSERT_OK(stream.MemZero(&d, byte_length));
 
   // Update command buffer to write into `d` buffer.
   TF_ASSERT_OK(cmd_buffer->Update());
@@ -132,7 +140,7 @@ TEST(GpuCommandBufferTest, LaunchSingleKernel) {
 
   // Copy `d` data back to host.
   std::fill(dst.begin(), dst.end(), 42);
-  stream.ThenMemcpy(dst.data(), d, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), d, byte_length));
   ASSERT_EQ(dst, expected);
 }
 
@@ -174,9 +182,9 @@ TEST(CudaCommandBufferTest, TraceSingleKernel) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemset32(&b, 2, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 2, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // Use an array of device memory base pointers as argument to test packing.
   KernelArgsDeviceMemoryArray args({a, b, c}, 0);
@@ -194,7 +202,7 @@ TEST(CudaCommandBufferTest, TraceSingleKernel) {
 
   // Copy data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected = {3, 3, 3, 3};
   ASSERT_EQ(dst, expected);
@@ -219,9 +227,9 @@ TEST(GpuCommandBufferTest, LaunchNestedCommandBuffer) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemset32(&b, 2, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 2, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // Create a command buffer with a single kernel launch.
   auto primary_cmd = CommandBuffer::Create(executor).value();
@@ -234,14 +242,14 @@ TEST(GpuCommandBufferTest, LaunchNestedCommandBuffer) {
 
   // Copy `c` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected = {3, 3, 3, 3};
   ASSERT_EQ(dst, expected);
 
   // Prepare argument for graph update: d = 0
   DeviceMemory<int32_t> d = executor->AllocateArray<int32_t>(length, 0);
-  stream.ThenMemZero(&d, byte_length);
+  TF_ASSERT_OK(stream.MemZero(&d, byte_length));
 
   // Update command buffer to write into `d` buffer by creating a new nested
   // command buffer.
@@ -255,7 +263,7 @@ TEST(GpuCommandBufferTest, LaunchNestedCommandBuffer) {
 
   // Copy `d` data back to host.
   std::fill(dst.begin(), dst.end(), 42);
-  stream.ThenMemcpy(dst.data(), d, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), d, byte_length));
   ASSERT_EQ(dst, expected);
 }
 
@@ -274,7 +282,7 @@ TEST(GpuCommandBufferTest, MemcpyDeviceToDevice) {
   DeviceMemory<int32_t> a = executor->AllocateArray<int32_t>(length, 0);
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
 
-  stream.ThenMemset32(&a, 42, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&a, 42, byte_length));
 
   // Create a command buffer with a single a to b memcpy command.
   auto cmd_buffer = CommandBuffer::Create(executor).value();
@@ -285,7 +293,7 @@ TEST(GpuCommandBufferTest, MemcpyDeviceToDevice) {
 
   // Copy `b` data back to host.
   std::vector<int32_t> dst(4, 0);
-  stream.ThenMemcpy(dst.data(), a, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), a, byte_length));
 
   std::vector<int32_t> expected = {42, 42, 42, 42};
   ASSERT_EQ(dst, expected);
@@ -296,13 +304,13 @@ TEST(GpuCommandBufferTest, MemcpyDeviceToDevice) {
   TF_ASSERT_OK(cmd_buffer->Finalize());
 
   // Clear destination to test that command buffer actually copied memory.
-  stream.ThenMemset32(&a, 0, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&a, 0, byte_length));
 
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
 
   // Copy `a` data back to host.
   std::fill(dst.begin(), dst.end(), 0);
-  stream.ThenMemcpy(dst.data(), a, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), a, byte_length));
   ASSERT_EQ(dst, expected);
 }
 
@@ -328,7 +336,7 @@ TEST(GpuCommandBufferTest, Memset) {
 
   // Copy `a` data back to host.
   std::vector<int32_t> dst(4, 0);
-  stream.ThenMemcpy(dst.data(), a, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), a, byte_length));
 
   std::vector<int32_t> expected = {42, 42, 42, 42};
   ASSERT_EQ(dst, expected);
@@ -342,7 +350,7 @@ TEST(GpuCommandBufferTest, Memset) {
 
   // Copy `d` data back to host.
   std::fill(dst.begin(), dst.end(), 0);
-  stream.ThenMemcpy(dst.data(), a, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), a, byte_length));
 
   expected = {43, 43, 43, 43};
   ASSERT_EQ(dst, expected);
@@ -365,7 +373,7 @@ TEST(GpuCommandBufferTest, Barriers) {
   auto transfer_buffers = [&]() -> std::vector<int32_t> {
     std::vector<int32_t> dst(buffers.size(), 0);
     for (size_t i = 0; i < buffers.size(); ++i) {
-      stream.ThenMemcpy(dst.data() + i, buffers[i], sizeof(int32_t));
+      TF_CHECK_OK(stream.Memcpy(dst.data() + i, buffers[i], sizeof(int32_t)));
     }
     return dst;
   };
@@ -402,34 +410,34 @@ TEST(GpuCommandBufferTest, Barriers) {
   // Check the command buffer structure.
   GpuCommandBuffer* gpu_cmd_buffer = GpuCommandBuffer::Cast(cmd_buffer.get());
   ASSERT_EQ(gpu_cmd_buffer->nodes().size(), 6);
-  ASSERT_EQ(gpu_cmd_buffer->barriers().size(), 5);
+  ASSERT_EQ(gpu_cmd_buffer->barriers().size(), 6);
 
   auto nodes = gpu_cmd_buffer->nodes();
   auto barriers = gpu_cmd_buffer->barriers();
 
-  // First barrier reuses first memset node.
-  EXPECT_FALSE(barriers[0].is_barrier_node);
-  EXPECT_EQ(barriers[0].handle, nodes[0].handle);
+  // First barrier does not have any dependencies.
+  EXPECT_TRUE(barriers[0].is_barrier_node);
+  EXPECT_TRUE(Deps(barriers[0].handle).empty());
 
-  // Second and third barriers reuse second memset node.
+  // Second barrier reuses first memset node.
   EXPECT_FALSE(barriers[1].is_barrier_node);
+  EXPECT_EQ(barriers[1].handle, nodes[0].handle);
+
+  // Third and fourth barriers reuse second memset node.
   EXPECT_FALSE(barriers[2].is_barrier_node);
-  EXPECT_EQ(barriers[1].handle, nodes[1].handle);
+  EXPECT_FALSE(barriers[3].is_barrier_node);
   EXPECT_EQ(barriers[2].handle, nodes[1].handle);
+  EXPECT_EQ(barriers[3].handle, nodes[1].handle);
 
-  // Fourth and fifth barriers are empty barrier nodes.
-  EXPECT_TRUE(barriers[3].is_barrier_node);
+  // Fifth and sixth barriers are barrier nodes.
   EXPECT_TRUE(barriers[4].is_barrier_node);
+  EXPECT_TRUE(barriers[5].is_barrier_node);
 
-  // Check fourth barrier dependencies
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto deps3, GpuDriver::GraphNodeGetDependencies(barriers[3].handle));
-  EXPECT_EQ(deps3, Deps(nodes[2].handle, nodes[3].handle));
+  EXPECT_EQ(Deps(barriers[4].handle),
+            ExpectedDeps(nodes[2].handle, nodes[3].handle));
 
-  // Check fifth barrier dependencies
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto deps4, GpuDriver::GraphNodeGetDependencies(barriers[4].handle));
-  EXPECT_EQ(deps4, Deps(nodes[4].handle, nodes[5].handle));
+  EXPECT_EQ(Deps(barriers[5].handle),
+            ExpectedDeps(nodes[4].handle, nodes[5].handle));
 
   // Update command buffer to use a new bit pattern.
   TF_ASSERT_OK(cmd_buffer->Update());
@@ -499,13 +507,11 @@ TEST(GpuCommandBufferTest, IndependentExecutionScopes) {
   EXPECT_TRUE(barriers0[0].is_barrier_node);
   EXPECT_TRUE(barriers1[0].is_barrier_node);
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto deps0, GpuDriver::GraphNodeGetDependencies(barriers0[0].handle));
-  EXPECT_EQ(deps0, Deps(nodes0[0].handle, nodes0[1].handle));
+  EXPECT_EQ(Deps(barriers0[0].handle),
+            ExpectedDeps(nodes0[0].handle, nodes0[1].handle));
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto deps1, GpuDriver::GraphNodeGetDependencies(barriers1[0].handle));
-  EXPECT_EQ(deps1, Deps(nodes1[0].handle, nodes1[1].handle));
+  EXPECT_EQ(Deps(barriers1[0].handle),
+            ExpectedDeps(nodes1[0].handle, nodes1[1].handle));
 
   // Update command buffer to use a new bit pattern.
   TF_ASSERT_OK(cmd_buffer->Update());
@@ -513,6 +519,100 @@ TEST(GpuCommandBufferTest, IndependentExecutionScopes) {
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
 
   expected = {43, 44, 45, 46};
+  ASSERT_EQ(transfer_buffers(), expected);
+}
+
+TEST(GpuCommandBufferTest, ExecutionScopeBarriers) {
+  Platform* platform = GpuPlatform();
+  StreamExecutor* executor = platform->ExecutorForDevice(0).value();
+
+  Stream stream(executor);
+  TF_ASSERT_OK(stream.Initialize());
+
+  CommandBuffer::ExecutionScopeId s0 = CommandBuffer::ExecutionScopeId(0);
+  CommandBuffer::ExecutionScopeId s1 = CommandBuffer::ExecutionScopeId(1);
+  CommandBuffer::ExecutionScopeId s2 = CommandBuffer::ExecutionScopeId(2);
+
+  // Allocate device buffers for memset operations.
+  std::vector<DeviceMemory<int32_t>> buffers;
+  for (size_t i = 0; i < 7; ++i) {
+    buffers.push_back(executor->AllocateArray<int32_t>(1, 0));
+  }
+
+  // Transfer buffers data back to host.
+  auto transfer_buffers = [&]() -> std::vector<int32_t> {
+    std::vector<int32_t> dst(buffers.size(), 0);
+    for (size_t i = 0; i < buffers.size(); ++i) {
+      stream.ThenMemcpy(dst.data() + i, buffers[i], sizeof(int32_t));
+    }
+    return dst;
+  };
+
+  auto record = [&](CommandBuffer* cmd_buffer, uint32_t bit_pattern) {
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s0, &buffers[0], bit_pattern + 0, 1));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s0, &buffers[1], bit_pattern + 1, 1));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s1, &buffers[2], bit_pattern + 2, 1));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s1, &buffers[3], bit_pattern + 3, 1));
+    // This will synchronize scopes 0 and 1 and also create an empty scope 2.
+    TF_RETURN_IF_ERROR(cmd_buffer->Barrier(executor, {s0, s1, s2}));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s0, &buffers[4], bit_pattern + 4, 1));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s1, &buffers[5], bit_pattern + 5, 1));
+    TF_RETURN_IF_ERROR(cmd_buffer->Memset(s2, &buffers[6], bit_pattern + 6, 1));
+    return cmd_buffer->Finalize();
+  };
+
+  // Create a command buffer with a DAG of memset commands.
+  auto cmd_buffer = CommandBuffer::Create(executor).value();
+  TF_ASSERT_OK(record(cmd_buffer.get(), 42));
+  TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
+
+  std::vector<int32_t> expected = {42, 43, 44, 45, 46, 47, 48};
+  ASSERT_EQ(transfer_buffers(), expected);
+
+  // Check the command buffer structure.
+  GpuCommandBuffer* gpu_cmd_buffer = GpuCommandBuffer::Cast(cmd_buffer.get());
+
+  auto nodes0 = gpu_cmd_buffer->nodes(s0);
+  auto nodes1 = gpu_cmd_buffer->nodes(s1);
+  auto nodes2 = gpu_cmd_buffer->nodes(s2);
+  auto barriers0 = gpu_cmd_buffer->barriers(s0);
+  auto barriers1 = gpu_cmd_buffer->barriers(s1);
+  auto barriers2 = gpu_cmd_buffer->barriers(s2);
+
+  ASSERT_EQ(nodes0.size(), 3);
+  ASSERT_EQ(nodes1.size(), 3);
+  ASSERT_EQ(nodes2.size(), 1);
+  ASSERT_EQ(barriers0.size(), 2);
+  ASSERT_EQ(barriers1.size(), 2);
+  ASSERT_EQ(barriers2.size(), 2);
+
+  // All barriers are real barrier nodes.
+  EXPECT_TRUE(barriers0[0].is_barrier_node && barriers0[1].is_barrier_node);
+  EXPECT_TRUE(barriers1[0].is_barrier_node && barriers1[1].is_barrier_node);
+  EXPECT_TRUE(barriers2[0].is_barrier_node && barriers2[1].is_barrier_node);
+
+  // All scopes share a broadcasted barrier.
+  EXPECT_TRUE(barriers0[1].handle == barriers1[1].handle);
+  EXPECT_TRUE(barriers1[1].handle == barriers2[1].handle);
+
+  EXPECT_EQ(Deps(barriers0[0].handle),
+            ExpectedDeps(nodes0[0].handle, nodes0[1].handle));
+
+  EXPECT_EQ(Deps(barriers1[0].handle),
+            ExpectedDeps(nodes1[0].handle, nodes1[1].handle));
+
+  EXPECT_TRUE(Deps(barriers2[0].handle).empty());
+
+  EXPECT_EQ(Deps(barriers2[1].handle),
+            ExpectedDeps(barriers0[0].handle, barriers1[0].handle,
+                         barriers2[0].handle));
+
+  // Update command buffer to use a new bit pattern.
+  TF_ASSERT_OK(cmd_buffer->Update());
+  TF_ASSERT_OK(record(cmd_buffer.get(), 43));
+  TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
+
+  expected = {43, 44, 45, 46, 47, 48, 49};
   ASSERT_EQ(transfer_buffers(), expected);
 }
 
@@ -542,10 +642,10 @@ TEST(GpuCommandBufferTest, ConditionalIf) {
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
   constexpr bool kTrue = true;
-  stream.ThenMemcpy(&pred, &kTrue, 1);
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemset32(&b, 2, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kTrue, 1));
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 2, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // if (pred == true) c = a + b
   CommandBuffer::Builder then_builder = [&](CommandBuffer* then_cmd) {
@@ -561,30 +661,30 @@ TEST(GpuCommandBufferTest, ConditionalIf) {
 
   // Copy `c` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected = {3, 3, 3, 3};
   ASSERT_EQ(dst, expected);
 
   // Reset predicate to false and clear output buffer.
   constexpr bool kFalse = false;
-  stream.ThenMemcpy(&pred, &kFalse, 1);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kFalse, 1));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // Submit the same command buffer, but this time it should not execute
   // conditional branch as conditional handle should be updated to false.
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
 
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
   std::vector<int32_t> zeroes = {0, 0, 0, 0};
   ASSERT_EQ(dst, zeroes);
 
   // Prepare argument for graph update: d = 0
   DeviceMemory<int32_t> d = executor->AllocateArray<int32_t>(length, 0);
-  stream.ThenMemZero(&d, byte_length);
+  TF_ASSERT_OK(stream.MemZero(&d, byte_length));
 
   // Set predicate buffer to true to run conditional command buffer.
-  stream.ThenMemcpy(&pred, &kTrue, 1);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kTrue, 1));
 
   // if (pred == true) d = a + b (write to a new location).
   then_builder = [&](CommandBuffer* then_cmd) {
@@ -600,7 +700,7 @@ TEST(GpuCommandBufferTest, ConditionalIf) {
 
   // Copy `d` data back to host.
   std::fill(dst.begin(), dst.end(), 42);
-  stream.ThenMemcpy(dst.data(), d, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), d, byte_length));
   ASSERT_EQ(dst, expected);
 }
 
@@ -636,10 +736,10 @@ TEST(GpuCommandBufferTest, ConditionalIfElse) {
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
   constexpr bool kTrue = true;
-  stream.ThenMemcpy(&pred, &kTrue, 1);
-  stream.ThenMemset32(&a, 2, byte_length);
-  stream.ThenMemset32(&b, 3, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kTrue, 1));
+  TF_ASSERT_OK(stream.Memset32(&a, 2, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 3, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // if (pred == true) c = a + b
   CommandBuffer::Builder then_builder = [&](CommandBuffer* then_cmd) {
@@ -661,27 +761,27 @@ TEST(GpuCommandBufferTest, ConditionalIfElse) {
 
   // Copy `c` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected_add = {5, 5, 5, 5};
   ASSERT_EQ(dst, expected_add);
 
   // Reset predicate to false.
   constexpr bool kFalse = false;
-  stream.ThenMemcpy(&pred, &kFalse, 1);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kFalse, 1));
 
   // Submit the same command buffer, but this time it should execute `else`
   // branch and multiply inputs.
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
   TF_ASSERT_OK(stream.BlockHostUntilDone());
 
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
   std::vector<int32_t> expected_mul = {6, 6, 6, 6};
   ASSERT_EQ(dst, expected_mul);
 
   // Prepare argument for graph update: d = 0
   DeviceMemory<int32_t> d = executor->AllocateArray<int32_t>(length, 0);
-  stream.ThenMemZero(&d, byte_length);
+  TF_ASSERT_OK(stream.MemZero(&d, byte_length));
 
   // if (pred == false) d = a * b (write to a new location).
   else_builder = [&](CommandBuffer* else_cmd) {
@@ -698,7 +798,7 @@ TEST(GpuCommandBufferTest, ConditionalIfElse) {
 
   // Copy `d` data back to host.
   std::fill(dst.begin(), dst.end(), 42);
-  stream.ThenMemcpy(dst.data(), d, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), d, byte_length));
   ASSERT_EQ(dst, expected_mul);
 }
 
@@ -733,10 +833,10 @@ TEST(GpuCommandBufferTest, ConditionalCase) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
   DeviceMemory<int32_t> c = executor->AllocateArray<int32_t>(length, 0);
 
-  stream.ThenMemset32(&index, 0, sizeof(int32_t));
-  stream.ThenMemset32(&a, 2, byte_length);
-  stream.ThenMemset32(&b, 3, byte_length);
-  stream.ThenMemZero(&c, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&index, 0, sizeof(int32_t)));
+  TF_ASSERT_OK(stream.Memset32(&a, 2, byte_length));
+  TF_ASSERT_OK(stream.Memset32(&b, 3, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&c, byte_length));
 
   // if (index == 0) c = a + b
   CommandBuffer::Builder branch0 = [&](CommandBuffer* branch0_cmd) {
@@ -758,38 +858,38 @@ TEST(GpuCommandBufferTest, ConditionalCase) {
 
   // Copy `c` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
 
   std::vector<int32_t> expected_add = {5, 5, 5, 5};
   ASSERT_EQ(dst, expected_add);
 
   // Set index to `1`
-  stream.ThenMemset32(&index, 1, sizeof(int32_t));
+  TF_ASSERT_OK(stream.Memset32(&index, 1, sizeof(int32_t)));
 
   // Submit the same command buffer, but this time it should multiply inputs.
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
   TF_ASSERT_OK(stream.BlockHostUntilDone());
 
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
   std::vector<int32_t> expected_mul = {6, 6, 6, 6};
   ASSERT_EQ(dst, expected_mul);
 
   // Set index to `-1` (out of bound index value).
-  stream.ThenMemset32(&index, -1, sizeof(int32_t));
+  TF_ASSERT_OK(stream.Memset32(&index, -1, sizeof(int32_t)));
 
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
   TF_ASSERT_OK(stream.BlockHostUntilDone());
 
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
   ASSERT_EQ(dst, expected_mul);
 
   // Set index to `2` (out of bound index value).
-  stream.ThenMemset32(&index, 2, sizeof(int32_t));
+  TF_ASSERT_OK(stream.Memset32(&index, 2, sizeof(int32_t)));
 
   TF_ASSERT_OK(executor->Submit(&stream, *cmd_buffer));
   TF_ASSERT_OK(stream.BlockHostUntilDone());
 
-  stream.ThenMemcpy(dst.data(), c, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), c, byte_length));
   ASSERT_EQ(dst, expected_mul);
 }
 
@@ -818,9 +918,9 @@ TEST(GpuCommandBufferTest, ConditionalFor) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
 
   // Set loop counter to 100 to check that command buffer resets it.
-  stream.ThenMemset32(&loop_counter, 100, sizeof(int32_t));
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemZero(&b, byte_length);
+  TF_ASSERT_OK(stream.Memset32(&loop_counter, 100, sizeof(int32_t)));
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&b, byte_length));
 
   // Loop body: b = a + b
   CommandBuffer::Builder body_builder = [&](CommandBuffer* body_cmd) {
@@ -839,7 +939,7 @@ TEST(GpuCommandBufferTest, ConditionalFor) {
 
   // Copy `b` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), b, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), b, byte_length));
 
   std::vector<int32_t> expected = {10, 10, 10, 10};
   ASSERT_EQ(dst, expected);
@@ -880,10 +980,10 @@ TEST(GpuCommandBufferTest, ConditionalWhile) {
   DeviceMemory<int32_t> b = executor->AllocateArray<int32_t>(length, 0);
 
   static constexpr bool kFalse = false;
-  stream.ThenMemcpy(&pred, &kFalse, 1);
-  stream.ThenMemset32(&loop_counter, 0, sizeof(int32_t));
-  stream.ThenMemset32(&a, 1, byte_length);
-  stream.ThenMemZero(&b, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(&pred, &kFalse, 1));
+  TF_ASSERT_OK(stream.Memset32(&loop_counter, 0, sizeof(int32_t)));
+  TF_ASSERT_OK(stream.Memset32(&a, 1, byte_length));
+  TF_ASSERT_OK(stream.MemZero(&b, byte_length));
 
   int32_t num_iters = 10;
 
@@ -907,7 +1007,7 @@ TEST(GpuCommandBufferTest, ConditionalWhile) {
 
   // Copy `b` data back to host.
   std::vector<int32_t> dst(4, 42);
-  stream.ThenMemcpy(dst.data(), b, byte_length);
+  TF_ASSERT_OK(stream.Memcpy(dst.data(), b, byte_length));
 
   std::vector<int32_t> expected = {10, 10, 10, 10};
   ASSERT_EQ(dst, expected);

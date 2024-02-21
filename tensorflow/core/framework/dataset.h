@@ -1041,6 +1041,10 @@ class IteratorBase : public Checkpointable {
   // this iterator.
   virtual const string& prefix() const = 0;
 
+  // Returns a string identifying the iterator, e.g. "ParallelMapDatasetV2:<id>"
+  // or "ParallelMapDatasetV2:<user defined name>".
+  virtual const string& name() const = 0;
+
   // Indicates whether the iterator is compatible with symbolic checkpointing.
   virtual bool SymbolicCheckpointCompatible() const { return false; }
 
@@ -1437,6 +1441,8 @@ class DatasetBaseIterator : public IteratorBase {
 
   const string& prefix() const override { return params_.prefix; }
 
+  const string& name() const override { return dataset()->metadata().name(); }
+
   // Returns a name to be used for the TraceMe event.
   //
   // NOTE: TraceMe supports passing key-value pairs of "arguments" using the
@@ -1458,6 +1464,16 @@ class DatasetBaseIterator : public IteratorBase {
     VLOG(2) << "Attempting to save checkpoints on iterator (prefix: "
             << prefix() << ") from " << dataset()->DebugString();
     return IteratorBase::Save(ctx, writer);
+  }
+
+  // Returns a copy of the `status` where the error message is prepended with
+  // dataset name and the iterator prefix.
+  Status AddErrorContext(const Status& status) const {
+    return Status(status.code(),
+                  strings::StrCat("Error in user-defined function passed to ",
+                                  dataset()->metadata().name(),
+                                  " transformation with iterator: ", prefix(),
+                                  ": ", status.message()));
   }
 
  protected:
@@ -1564,16 +1580,6 @@ class DatasetBaseIterator : public IteratorBase {
   // currently between a `RecordStart` and a `RecordStop`.
   bool IsRecording(IteratorContext* ctx) {
     return node_ && node_->is_recording();
-  }
-
-  // Returns a copy of the `status` where the error message is prepended with
-  // dataset name and the iterator prefix.
-  Status AddErrorContext(const Status& status) {
-    return Status(status.code(),
-                  strings::StrCat("Error in user-defined function passed to ",
-                                  dataset()->metadata().name(),
-                                  " transformation with iterator: ", prefix(),
-                                  ": ", status.message()));
   }
 
  private:
