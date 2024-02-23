@@ -38,6 +38,7 @@ limitations under the License.
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
+#include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
@@ -113,7 +114,7 @@ LogicalResult GetConstantSplatValue(Value value, SplatValueType& splat_value) {
 
 // Checks for attributes with no value and sets the default value according to
 // the convolution op definition.
-void setDefaultConvAttributes(mhlo::ConvolutionOp& conv_op,
+void SetDefaultConvAttributes(mhlo::ConvolutionOp& conv_op,
                               ConversionPatternRewriter& rewriter) {
   auto dnums = conv_op.getDimensionNumbers();
   int32_t input_spatial_dims =
@@ -145,7 +146,7 @@ class ConvertNdConvOp : public OpConversionPattern<mhlo::ConvolutionOp> {
   LogicalResult matchAndRewrite(
       mhlo::ConvolutionOp conv_op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const final {
-    setDefaultConvAttributes(conv_op, rewriter);
+    SetDefaultConvAttributes(conv_op, rewriter);
     if (!IsSupportedConvOp(conv_op)) {
       return failure();
     }
@@ -469,7 +470,7 @@ class Convert1DConvOp : public OpConversionPattern<mhlo::ConvolutionOp> {
   LogicalResult matchAndRewrite(
       mhlo::ConvolutionOp conv_op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const final {
-    setDefaultConvAttributes(conv_op, rewriter);
+    SetDefaultConvAttributes(conv_op, rewriter);
     // Check that input is a supported 1d convolution.
     if (!ConvertNdConvOp<1>::IsSupportedConvOp(conv_op) ||
         conv_op->getNumResults() != 1)
@@ -661,6 +662,322 @@ class Convert1DConvOp : public OpConversionPattern<mhlo::ConvolutionOp> {
 using Convert2DConvOp = ConvertNdConvOp<2>;
 using Convert3DConvOp = ConvertNdConvOp<3>;
 
+// Utility function to check for supported non-trivial convolutions with
+// lhs_dilation>1 and window_strides=1.
+LogicalResult IsSupportedNonTrivialConvOp(mhlo::ConvolutionOp conv_op,
+                                          ConversionPatternRewriter& rewriter) {
+  if (!conv_op.getLhs().getType().cast<ShapedType>().hasStaticShape() ||
+      !conv_op.getRhs().getType().cast<ShapedType>().hasStaticShape() ||
+      !conv_op.getType().cast<ShapedType>().hasStaticShape())
+    return rewriter.notifyMatchFailure(conv_op, "requires static shape");
+  mhlo::ConvDimensionNumbersAttr dnums = conv_op.getDimensionNumbers();
+
+  auto lhs_dilation = conv_op.getLhsDilation().value();
+  if (lhs_dilation.isSplat() && lhs_dilation.getSplatValue<int64_t>() == 1)
+    return rewriter.notifyMatchFailure(conv_op,
+                                       "requires non-trivial lhs_dilation");
+
+  if (conv_op.getWindowStrides()
+          .value()
+          .getType()
+          .cast<ShapedType>()
+          .getRank() != 1)
+    return rewriter.notifyMatchFailure(
+        conv_op, "requires window_strides to equal to one");
+
+  int num_spatial_dims = dnums.getInputSpatialDimensions().size();
+  if (num_spatial_dims != 2)
+    return rewriter.notifyMatchFailure(conv_op, "doesn't support more than 2D");
+
+  if (llvm::any_of(conv_op.getPadding().value().getValues<int64_t>(),
+                   [](int64_t v) { return v < 0; })) {
+    return rewriter.notifyMatchFailure(conv_op,
+                                       "doesn't support negative pads");
+  }
+
+  return success();
+}
+
+DenseIntElementsAttr GetI64ElementsAttr(ArrayRef<int64_t> values,
+                                        Builder* builder) {
+  RankedTensorType ty = RankedTensorType::get(
+      {static_cast<int64_t>(values.size())}, builder->getIntegerType(64));
+  return DenseIntElementsAttr::get(ty, values);
+}
+
+class ConvertToResizeBilinearOpOrDepthwiseTransposedConvOp
+    : public OpConversionPattern<mhlo::ConvolutionOp> {
+ public:
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult matchAndRewrite(
+      mhlo::ConvolutionOp conv_op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const final {
+    SetDefaultConvAttributes(conv_op, rewriter);
+
+    // IsSupportedNonTrivialConvOp checks for supported lhs_dilation values.
+    if (IsSupportedNonTrivialConvOp(conv_op, rewriter).failed()) {
+      return rewriter.notifyMatchFailure(
+          conv_op,
+          "doesn't support conversion to ResizeBilinearOp or "
+          "ConvBackpropInputOp");
+    }
+
+    // tf.ResizeBilinearOp is perferred than tf.Conv2DBackpropInputOp since
+    // the former has better portability, especially in inference use cases.
+    bool align_corners;
+    llvm::SmallVector<int, 2> output_sizes;
+    if (MatchToResizeBilinearOp(conv_op, align_corners, output_sizes, rewriter)
+            .succeeded()) {
+      CreateResizeBilinearOp(conv_op, output_sizes, align_corners, rewriter);
+      return success();
+    }
+
+    // These checks narrow down the support to depthwise transpose conv2d.
+    mhlo::ConvDimensionNumbersAttr dnums = conv_op.getDimensionNumbers();
+    const int input_feature_dimension = dnums.getInputFeatureDimension();
+    const int input_channels =
+        conv_op.getLhs().getType().cast<ShapedType>().getDimSize(
+            input_feature_dimension);
+    int feature_group_count = conv_op.getFeatureGroupCount();
+    const int kernel_input_feature_dimension =
+        dnums.getKernelInputFeatureDimension();
+    const int kernel_input_channels =
+        conv_op.getRhs().getType().cast<ShapedType>().getDimSize(
+            kernel_input_feature_dimension);
+    const int kernel_output_feature_dimension =
+        dnums.getKernelOutputFeatureDimension();
+    const int kernel_output_channels =
+        conv_op.getRhs().getType().cast<ShapedType>().getDimSize(
+            kernel_output_feature_dimension);
+
+    // To support a depthwise convolution, we need-
+    // 1. feature_group_count != 1 (except when input_channels==1)
+    // 2. feature_group_count == input_channels
+    // 3. kernel_input_channels == 1
+    // 4. kernel_output_channels % kernel_input_channels == 0
+    if (feature_group_count == 1) {
+      return rewriter.notifyMatchFailure(conv_op,
+                                         "Not a depthwise convolution");
+    }
+
+    if (input_channels != feature_group_count) {
+      return rewriter.notifyMatchFailure(
+          conv_op, "Not a detphwise transposed convolution");
+    }
+
+    if ((kernel_output_channels % feature_group_count != 0) ||
+        (kernel_input_channels != 1)) {
+      return rewriter.notifyMatchFailure(
+          conv_op, "Not a supported detphwise transposed convolution");
+    }
+
+    // This needs to be checked because the TFLite runtime generated incorrect
+    // results for depthwise transpose convolutions with non-1 channel
+    // multiplier.
+    if ((kernel_output_channels / feature_group_count) != 1) {
+      return rewriter.notifyMatchFailure(
+          conv_op,
+          "Unsupported detphwise transpose convolution with non-1 channel "
+          "multiplier");
+    }
+
+    // Slicing with dynamic offsets (helper method advised)
+    auto create_slice = [&](mlir::Value tensor, int depth_idx, int channel_idx,
+                            bool is_kernel = false) -> mlir::Value {
+      std::vector<int64_t> tensor_shape =
+          tensor.getType().cast<ShapedType>().getShape().vec();
+
+      // Calculate offsets based on depth_idx, channel_idx and tensor_shape
+      std::vector<int64_t> start_indices(tensor_shape.size(), 0);
+      std::vector<int64_t> limit_indices = tensor_shape;
+      const std::vector<int64_t> strides(tensor_shape.size(), 1);
+      start_indices[channel_idx] = depth_idx;
+      if (is_kernel) {
+        // kernel can have a channel_multiplier that needs to be accounted for
+        limit_indices[channel_idx] =
+            depth_idx + (kernel_output_channels / feature_group_count);
+      } else {
+        limit_indices[channel_idx] = depth_idx + 1;
+      }
+      return rewriter.create<mhlo::SliceOp>(
+          conv_op.getLoc(), tensor,
+          GetI64ElementsAttr(start_indices, &rewriter),
+          GetI64ElementsAttr(limit_indices, &rewriter),
+          GetI64ElementsAttr(strides, &rewriter));
+    };
+
+    // Storage for smaller convolution results
+    std::vector<mlir::Value> conv_results;
+
+    // Iterative Slicing and Convolutions
+    for (int i = 0; i < feature_group_count; ++i) {
+      auto sliced_input =
+          create_slice(conv_op.getLhs(), i, input_feature_dimension);
+      auto sliced_kernel = create_slice(conv_op.getRhs(), i,
+                                        kernel_output_feature_dimension, true);
+
+      // Calculate convolution output_type based on sliced_input and
+      // sliced_kernel
+      auto output_type = conv_op->getResult(0).getType().cast<ShapedType>();
+      std::vector<int64_t> new_output_shape = output_type.getShape().vec();
+      new_output_shape[dnums.getOutputFeatureDimension()] /=
+          feature_group_count;
+      auto new_output_type =
+          RankedTensorType::get(new_output_shape, output_type.getElementType());
+
+      // Create a Smaller Convolution (Ensure compatibility)
+      auto conv_result = rewriter.create<mhlo::ConvolutionOp>(
+          conv_op.getLoc(), new_output_type, sliced_input, sliced_kernel,
+          conv_op.getWindowStridesAttr(), conv_op.getPaddingAttr(),
+          conv_op.getLhsDilationAttr(), conv_op.getRhsDilationAttr(),
+          conv_op.getWindowReversalAttr(), conv_op.getDimensionNumbers(), 1, 1,
+          conv_op.getPrecisionConfigAttr());
+
+      conv_results.push_back(conv_result);
+    }
+
+    auto final_output = rewriter.create<mhlo::ConcatenateOp>(
+        conv_op.getLoc(), conv_results,
+        rewriter.getI64IntegerAttr(dnums.getOutputFeatureDimension()));
+    rewriter.replaceOp(conv_op, final_output.getResult());
+    return mlir::success();
+  }
+
+ private:
+  void CreateResizeBilinearOp(mhlo::ConvolutionOp conv_op,
+                              llvm::ArrayRef<int32_t> output_sizes,
+                              bool align_corners,
+                              ConversionPatternRewriter& rewriter) const {
+    Value output_sizes_attr = rewriter.create<TF::ConstOp>(
+        conv_op.getLoc(),
+        DenseIntElementsAttr::get(
+            RankedTensorType::get({static_cast<int64_t>(output_sizes.size())},
+                                  rewriter.getI32Type()),
+            output_sizes));
+    // The value of half_pixel_centers couldn't be inferred from the IR and XLA
+    // only support half_pixel_centers=True as in 01/11/2022. Here
+    // half_pixel_centers=False is hardcoded.
+    Value output = rewriter.create<TF::ResizeBilinearOp>(
+        conv_op.getLoc(), conv_op.getType(), conv_op.getLhs(),
+        output_sizes_attr,
+        /*align_corners=*/rewriter.getBoolAttr(align_corners),
+        /*half_pixel_centers=*/rewriter.getBoolAttr(false));
+    rewriter.replaceOp(conv_op, {output});
+  }
+
+  LogicalResult MatchToResizeBilinearOp(
+      mhlo::ConvolutionOp conv_op, bool& align_corners,
+      llvm::SmallVector<int, 2>& output_sizes,
+      ConversionPatternRewriter& rewriter) const {
+    mhlo::ConvDimensionNumbersAttr dnums = conv_op.getDimensionNumbers();
+
+    int feature_group_count = conv_op.getFeatureGroupCount();
+    const int input_feature_dimension = dnums.getInputFeatureDimension();
+    const int input_channels =
+        conv_op.getLhs().getType().cast<ShapedType>().getDimSize(
+            input_feature_dimension);
+
+    // Check for Group Convolution parameters
+    if (feature_group_count != 1 && feature_group_count != input_channels) {
+      // Group convolution is not supported yet.
+      return rewriter.notifyMatchFailure(conv_op,
+                                         "doesn't support group convolution");
+    }
+
+    auto input_spatial_dimensions = dnums.getInputSpatialDimensions();
+    auto kernel_spatial_dimensions = dnums.getKernelSpatialDimensions();
+    auto output_spatial_dimensions = dnums.getOutputSpatialDimensions();
+    if (input_spatial_dimensions.size() != 2 ||
+        output_spatial_dimensions.size() != 2 ||
+        kernel_spatial_dimensions.size() != 2 ||
+        input_spatial_dimensions[0] != output_spatial_dimensions[0] ||
+        input_spatial_dimensions[1] != output_spatial_dimensions[1])
+      return rewriter.notifyMatchFailure(
+          conv_op, "can only be converted to 2D resize op");
+
+    auto lhs_dilation = conv_op.getLhsDilation().value();
+    auto rhs_dilation = conv_op.getRhsDilation().value();
+    auto window_strides = conv_op.getWindowStrides().value();
+    auto padding = conv_op.getPadding().value();
+    if (lhs_dilation.getNumElements() != 2 || !rhs_dilation.isSplat() ||
+        rhs_dilation.getSplatValue<int64_t>() != 1 ||
+        window_strides.getNumElements() != 2 || padding.getNumElements() != 4)
+      return rewriter.notifyMatchFailure(
+          conv_op, "resize op requires [2] dilations and [2,2] padding");
+    auto lhs_dilation_values = lhs_dilation.getValues<int64_t>();
+    auto window_strides_values = window_strides.getValues<int64_t>();
+    auto padding_values = padding.getValues<int64_t>();
+
+    // Cast the dimension sizes to int.
+    auto lhs_type = conv_op.getLhs().getType().cast<ShapedType>();
+    llvm::SmallVector<int> input_sizes = {
+        static_cast<int>(lhs_type.getDimSize(input_spatial_dimensions[0])),
+        static_cast<int>(lhs_type.getDimSize(input_spatial_dimensions[1]))};
+    output_sizes = {static_cast<int>(conv_op.getType().getDimSize(
+                        output_spatial_dimensions[0])),
+                    static_cast<int>(conv_op.getType().getDimSize(
+                        output_spatial_dimensions[1]))};
+
+    // This is based on method in compiler/tf2xla/kernels/image_resize_ops.cc
+    auto can_convert_to_bilinear = [](bool align_corners, int64_t dilation,
+                                      int64_t padding, int64_t stride,
+                                      int64_t input_spatial,
+                                      int64_t output_spatial) {
+      int64_t input_spatial_size =
+          align_corners ? input_spatial - 1 : input_spatial;
+      int64_t output_spatial_size =
+          align_corners ? output_spatial - 1 : output_spatial;
+
+      int64_t gcd =
+          tensorflow::MathUtil::GCD(static_cast<uint64_t>(input_spatial_size),
+                                    static_cast<uint64_t>(output_spatial_size));
+      if ((input_spatial_size % gcd != 0) ||
+          (input_spatial_size / gcd != stride) || (dilation - 1 != padding)) {
+        return false;
+      }
+
+      return true;
+    };
+
+    // Only of the lhs_dilation must be 1, then the non-1 dimension is the
+    // resize dimension.
+    if (lhs_dilation_values[0] != 1 && lhs_dilation_values[1] == 1) {
+      if (can_convert_to_bilinear(
+              /*align_corners=*/true, lhs_dilation_values[0], padding_values[0],
+              window_strides_values[0], input_sizes[0], output_sizes[0])) {
+        align_corners = true;
+        return success();
+      }
+      if (can_convert_to_bilinear(
+              /*align_corners=*/false, lhs_dilation_values[0],
+              padding_values[0], window_strides_values[0], input_sizes[0],
+              output_sizes[0])) {
+        align_corners = false;
+        return success();
+      }
+    }
+
+    if (lhs_dilation_values[0] == 1 && lhs_dilation_values[1] != 1) {
+      if (can_convert_to_bilinear(
+              /*align_corners=*/true, lhs_dilation_values[1], padding_values[2],
+              window_strides_values[1], input_sizes[1], output_sizes[1])) {
+        align_corners = true;
+        return success();
+      }
+      if (can_convert_to_bilinear(
+              /*align_corners=*/false, lhs_dilation_values[1],
+              padding_values[2], window_strides_values[1], input_sizes[1],
+              output_sizes[1])) {
+        align_corners = false;
+        return success();
+      }
+    }
+
+    return rewriter.notifyMatchFailure(conv_op,
+                                       "can not be converted to resize op");
+  }
+};
+
 class ConvertNonTrivialConvOp
     : public OpConversionPattern<mhlo::ConvolutionOp> {
  public:
@@ -670,21 +987,18 @@ class ConvertNonTrivialConvOp
   LogicalResult matchAndRewrite(
       mhlo::ConvolutionOp conv_op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const final {
-    setDefaultConvAttributes(conv_op, rewriter);
-    if (IsSupportedConvOp(conv_op, rewriter).failed()) {
+    SetDefaultConvAttributes(conv_op, rewriter);
+    if (IsSupportedNonTrivialConvOp(conv_op, rewriter).failed()) {
       return rewriter.notifyMatchFailure(
-          conv_op,
-          "doesn't support to convert to ConvBackpropInputOp or "
-          "ResizeBilinearOp");
+          conv_op, "doesn't support to convert to ConvBackpropInputOp");
     }
-    // tf.ResizeBilinearOp is perferred than tf.Conv2DBackpropInputOp since
-    // the former has better portability, especially in inference use cases.
-    bool align_corners;
-    llvm::SmallVector<int, 2> output_sizes;
-    if (MatchResizeOp(conv_op, align_corners, output_sizes, rewriter)
-            .succeeded()) {
-      CreateResizeBilinearOp(conv_op, output_sizes, align_corners, rewriter);
-      return success();
+
+    int feature_group_count = conv_op.getFeatureGroupCount();
+    // For depthwise and group convolutions, feature_group_count != 1
+    if (feature_group_count != 1) {
+      // Depthwise or Group convolution is not supported yet.
+      return rewriter.notifyMatchFailure(
+          conv_op, "group or depthwise convolution is not supported");
     }
 
     // Constructs strides array from lhs_dilation.
@@ -725,7 +1039,7 @@ class ConvertNonTrivialConvOp
                                         padding_array)) {
       padding = "VALID";
     } else {
-      if (!IsSamePadding(conv_op, num_spatial_dims, strides)) {
+      if (!IsSamePaddingForTransposedConv(conv_op, num_spatial_dims, strides)) {
         return rewriter.notifyMatchFailure(
             conv_op, "requires padding to be SAME or VALID");
       }
@@ -883,8 +1197,9 @@ class ConvertNonTrivialConvOp
     return true;
   }
 
-  bool IsSamePadding(mhlo::ConvolutionOp conv_op, size_t num_spatial_dims,
-                     ArrayRef<int64_t> strides) const {
+  bool IsSamePaddingForTransposedConv(mhlo::ConvolutionOp conv_op,
+                                      size_t num_spatial_dims,
+                                      ArrayRef<int64_t> strides) const {
     auto dnums = conv_op.getDimensionNumbers();
     SmallVector<int64_t, 4> padding(
         conv_op.getPadding().value().getValues<int64_t>().begin(),
@@ -925,170 +1240,6 @@ class ConvertNonTrivialConvOp
     int64_t num_spatial_dims = dnums.getKernelSpatialDimensions().size();
     return dnums.getKernelInputFeatureDimension() == num_spatial_dims + 1 &&
            dnums.getKernelOutputFeatureDimension() == num_spatial_dims;
-  }
-
-  LogicalResult IsSupportedConvOp(mhlo::ConvolutionOp conv_op,
-                                  ConversionPatternRewriter& rewriter) const {
-    if (!conv_op.getLhs().getType().cast<ShapedType>().hasStaticShape() ||
-        !conv_op.getRhs().getType().cast<ShapedType>().hasStaticShape() ||
-        !conv_op.getType().cast<ShapedType>().hasStaticShape())
-      return rewriter.notifyMatchFailure(conv_op, "requires static shape");
-    mhlo::ConvDimensionNumbersAttr dnums = conv_op.getDimensionNumbers();
-    const int input_feature_dimension = dnums.getInputFeatureDimension();
-    const int input_channels =
-        conv_op.getLhs().getType().cast<ShapedType>().getDimSize(
-            input_feature_dimension);
-    int feature_group_count = conv_op.getFeatureGroupCount();
-
-    if (feature_group_count != 1 && feature_group_count != input_channels) {
-      // Group convolution is not supported yet.
-      return rewriter.notifyMatchFailure(conv_op,
-                                         "doesn't support group convolution");
-    }
-
-    auto lhs_dilation = conv_op.getLhsDilation().value();
-    if (lhs_dilation.isSplat() && lhs_dilation.getSplatValue<int64_t>() == 1)
-      return rewriter.notifyMatchFailure(conv_op,
-                                         "requires non-trivial lhs_dilation");
-
-    if (conv_op.getWindowStrides()
-            .value()
-            .getType()
-            .cast<ShapedType>()
-            .getRank() != 1)
-      return rewriter.notifyMatchFailure(
-          conv_op, "requires window_strides to equal to one");
-
-    int num_spatial_dims = dnums.getInputSpatialDimensions().size();
-    if (num_spatial_dims != 2)
-      return rewriter.notifyMatchFailure(conv_op,
-                                         "doesn't support more than 2D");
-
-    if (llvm::any_of(conv_op.getPadding().value().getValues<int64_t>(),
-                     [](int64_t v) { return v < 0; })) {
-      return rewriter.notifyMatchFailure(conv_op,
-                                         "doesn't support negative pads");
-    }
-
-    return success();
-  }
-
-  void CreateResizeBilinearOp(mhlo::ConvolutionOp conv_op,
-                              llvm::ArrayRef<int32_t> output_sizes,
-                              bool align_corners,
-                              ConversionPatternRewriter& rewriter) const {
-    Value output_sizes_attr = rewriter.create<TF::ConstOp>(
-        conv_op.getLoc(),
-        DenseIntElementsAttr::get(
-            RankedTensorType::get({static_cast<int64_t>(output_sizes.size())},
-                                  rewriter.getI32Type()),
-            output_sizes));
-    // The value of half_pixel_centers couldn't be inferred from the IR and XLA
-    // only support half_pixel_centers=True as in 01/11/2022. Here
-    // half_pixel_centers=False is hardcoded.
-    Value output = rewriter.create<TF::ResizeBilinearOp>(
-        conv_op.getLoc(), conv_op.getType(), conv_op.getLhs(),
-        output_sizes_attr,
-        /*align_corners=*/rewriter.getBoolAttr(align_corners),
-        /*half_pixel_centers=*/rewriter.getBoolAttr(false));
-    rewriter.replaceOp(conv_op, {output});
-  }
-
-  LogicalResult MatchResizeOp(mhlo::ConvolutionOp conv_op, bool& align_corners,
-                              llvm::SmallVector<int, 2>& output_sizes,
-                              ConversionPatternRewriter& rewriter) const {
-    mhlo::ConvDimensionNumbersAttr dnums = conv_op.getDimensionNumbers();
-    auto input_spatial_dimensions = dnums.getInputSpatialDimensions();
-    auto kernel_spatial_dimensions = dnums.getKernelSpatialDimensions();
-    auto output_spatial_dimensions = dnums.getOutputSpatialDimensions();
-    if (input_spatial_dimensions.size() != 2 ||
-        output_spatial_dimensions.size() != 2 ||
-        kernel_spatial_dimensions.size() != 2 ||
-        input_spatial_dimensions[0] != output_spatial_dimensions[0] ||
-        input_spatial_dimensions[1] != output_spatial_dimensions[1])
-      return rewriter.notifyMatchFailure(
-          conv_op, "can only be converted to 2D resize op");
-
-    auto lhs_dilation = conv_op.getLhsDilation().value();
-    auto rhs_dilation = conv_op.getRhsDilation().value();
-    auto window_strides = conv_op.getWindowStrides().value();
-    auto padding = conv_op.getPadding().value();
-    if (lhs_dilation.getNumElements() != 2 || !rhs_dilation.isSplat() ||
-        rhs_dilation.getSplatValue<int64_t>() != 1 ||
-        window_strides.getNumElements() != 2 || padding.getNumElements() != 4)
-      return rewriter.notifyMatchFailure(
-          conv_op, "resize op requires [2] dilations and [2,2] padding");
-    auto lhs_dilation_values = lhs_dilation.getValues<int64_t>();
-    auto window_strides_values = window_strides.getValues<int64_t>();
-    auto padding_values = padding.getValues<int64_t>();
-
-    // Cast the dimension sizes to int.
-    auto lhs_type = conv_op.getLhs().getType().cast<ShapedType>();
-    llvm::SmallVector<int> input_sizes = {
-        static_cast<int>(lhs_type.getDimSize(input_spatial_dimensions[0])),
-        static_cast<int>(lhs_type.getDimSize(input_spatial_dimensions[1]))};
-    output_sizes = {static_cast<int>(conv_op.getType().getDimSize(
-                        output_spatial_dimensions[0])),
-                    static_cast<int>(conv_op.getType().getDimSize(
-                        output_spatial_dimensions[1]))};
-
-    // This is based on method in compiler/tf2xla/kernels/image_resize_ops.cc
-    auto can_convert_to_bilinear = [](bool align_corners, int64_t dilation,
-                                      int64_t padding, int64_t stride,
-                                      int64_t input_spatial,
-                                      int64_t output_spatial) {
-      int64_t input_spatial_size =
-          align_corners ? input_spatial - 1 : input_spatial;
-      int64_t output_spatial_size =
-          align_corners ? output_spatial - 1 : output_spatial;
-
-      int64_t gcd =
-          tensorflow::MathUtil::GCD(static_cast<uint64_t>(input_spatial_size),
-                                    static_cast<uint64_t>(output_spatial_size));
-      if ((input_spatial_size % gcd != 0) ||
-          (input_spatial_size / gcd != stride) || (dilation - 1 != padding)) {
-        return false;
-      }
-
-      return true;
-    };
-
-    // Only of the lhs_dilation must be 1, then the non-1 dimension is the
-    // resize dimension.
-    if (lhs_dilation_values[0] != 1 && lhs_dilation_values[1] == 1) {
-      if (can_convert_to_bilinear(
-              /*align_corners=*/true, lhs_dilation_values[0], padding_values[0],
-              window_strides_values[0], input_sizes[0], output_sizes[0])) {
-        align_corners = true;
-        return success();
-      }
-      if (can_convert_to_bilinear(
-              /*align_corners=*/false, lhs_dilation_values[0],
-              padding_values[0], window_strides_values[0], input_sizes[0],
-              output_sizes[0])) {
-        align_corners = false;
-        return success();
-      }
-    }
-
-    if (lhs_dilation_values[0] == 1 && lhs_dilation_values[1] != 1) {
-      if (can_convert_to_bilinear(
-              /*align_corners=*/true, lhs_dilation_values[1], padding_values[2],
-              window_strides_values[1], input_sizes[1], output_sizes[1])) {
-        align_corners = true;
-        return success();
-      }
-      if (can_convert_to_bilinear(
-              /*align_corners=*/false, lhs_dilation_values[1],
-              padding_values[2], window_strides_values[1], input_sizes[1],
-              output_sizes[1])) {
-        align_corners = false;
-        return success();
-      }
-    }
-
-    return rewriter.notifyMatchFailure(conv_op,
-                                       "can not be converted to resize op");
   }
 };
 
@@ -3961,6 +4112,7 @@ void PopulateLegalizeHloToTfPatterns(RewritePatternSet* patterns,
                                      MLIRContext* context) {
   patterns
       ->add<ConvertAvgPoolOp, Convert2DConvOp, Convert3DConvOp, Convert1DConvOp,
+            ConvertToResizeBilinearOpOrDepthwiseTransposedConvOp,
             ConvertNonTrivialConvOp, ConvertDynamicSliceOp,
             ConvertDynamicUpdateSliceOp, ConvertGatherOp, ConvertIfOp,
             ConvertMaxPoolOp, ConvertPopulationCountOp, ConvertSliceOp,

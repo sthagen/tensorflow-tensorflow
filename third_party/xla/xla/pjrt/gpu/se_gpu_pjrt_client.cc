@@ -103,6 +103,7 @@ limitations under the License.
 
 #include "xla/service/gpu/gpu_executable_run_options.h"
 #include "xla/statusor.h"
+#include "xla/stream_executor/integrations/device_mem_allocator.h"
 #include "xla/stream_executor/integrations/tf_allocator_adapter.h"
 #include "xla/util.h"
 
@@ -276,7 +277,10 @@ class AsyncHostToDeviceTransferManager
         CleanUp(buffer_index, std::move(event), stream,
                 /*is_last_transfer=*/true, std::move(on_done));
       };
-      stream->ThenDoHostCallback(std::move(cleanup));
+      auto status = stream->DoHostCallback(std::move(cleanup));
+      if (!status.ok()) {
+        LOG(ERROR) << "DoHostCallback failed: " << status;
+      }
     };
     se_client->thread_pool()->Schedule(
         ([ptr = new absl::AnyInvocable<void()>(std::move(transfer_h2d))]() {
@@ -545,7 +549,10 @@ PjRtFuture<absl::Status> StreamExecutorGpuClient::CopyRawSubBufferToHost(
   if (transfer_size != 0) {
     // D2H request holds a non-owned pointer into sub_buffer base address
     // that needs to outlive the transfer until the stream callback is invoked.
-    stream->ThenMemcpy(dst, *sub_buffer, transfer_size);
+    auto status = stream->Memcpy(dst, *sub_buffer, transfer_size);
+    if (!status.ok()) {
+      return PjRtFuture<absl::Status>(status);
+    }
   }
 
   auto usage_event =
@@ -558,7 +565,7 @@ PjRtFuture<absl::Status> StreamExecutorGpuClient::CopyRawSubBufferToHost(
                         /*reference_held=*/false);
 
   auto promise = PjRtFuture<absl::Status>::CreatePromise();
-  local_device->ThenExecuteCallback(
+  auto callback_status = local_device->ThenExecuteCallback(
       stream.get(), [promise, free_sub_range = sub_buffer.release(),
                      free_stream = stream.release(), local_device]() mutable {
         auto stream = std::unique_ptr<se::Stream>(free_stream);
@@ -566,6 +573,9 @@ PjRtFuture<absl::Status> StreamExecutorGpuClient::CopyRawSubBufferToHost(
         local_device->ReturnStreamToPool(std::move(stream));
         promise.Set(OkStatus());
       });
+  if (!callback_status.ok()) {
+    return PjRtFuture<absl::Status>(callback_status);
+  }
 
   return PjRtFuture<Status>(
       std::move(promise),
@@ -849,6 +859,16 @@ GetStreamExecutorGpuDeviceAllocator(
                             ordinal_and_device.second->compute_stream(),
                             /*memory_space=*/1);
   }
+
+  for (const auto& ordinal_and_device : addressable_devices) {
+    auto host_allocator =
+        GetGpuHostAllocator(ordinal_and_device.second->executor());
+    allocators.emplace_back(std::move(host_allocator),
+                            ordinal_and_device.second->compute_stream(),
+                            /*memory_space=*/
+                            static_cast<int>(se::MemoryType::kHost));
+  }
+
   return std::make_unique<se::MultiDeviceAdapter>(platform,
                                                   std::move(allocators));
 }

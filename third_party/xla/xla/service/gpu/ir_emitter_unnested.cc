@@ -165,6 +165,7 @@ limitations under the License.
 #include "xla/statusor.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/gpu/gpu_blas_lt.h"
+#include "xla/stream_executor/integrations/device_mem_allocator.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/translate/hlo_to_mhlo/hlo_utils.h"
 #include "xla/translate/mhlo_to_hlo/attribute_exporter.h"
@@ -688,14 +689,18 @@ absl::Status IrEmitterUnnested::EmitCommandBufferThunk(
   std::unique_ptr<ThunkSequence> thunk_sequence =
       ir_emitter->ConsumeThunkSequence();
 
-  // Linearize all commands in a sequence by forcing barriers between all
+  // Maybe serialize all commands in a sequence by forcing barriers between all
   // recorded commands. This guarantees that we execute all device operations
   // in the exact same order as a thunk sequence.
-  bool force_barriers = !ir_emitter_context_->debug_options()
-                             .xla_gpu_graph_enable_concurrent_region();
+  CommandBufferCmdSequence::SynchronizationMode synchronization_mode =
+      ir_emitter_context_->debug_options()
+              .xla_gpu_graph_enable_concurrent_region()
+          ? CommandBufferCmdSequence::SynchronizationMode::kAutomatic
+          : CommandBufferCmdSequence::SynchronizationMode::kSerialize;
 
   TF_ASSIGN_OR_RETURN(CommandBufferCmdSequence cmd_sequence,
-                      ConvertToCommands(*thunk_sequence, force_barriers));
+                      ConvertToCommands(*thunk_sequence, synchronization_mode));
+
   AddThunkToThunkSequence(std::make_unique<CommandBufferThunk>(
       std::move(cmd_sequence), Thunk::ThunkInfo::WithProfileAnnotation(instr),
       std::move(*thunk_sequence)));
@@ -1700,8 +1705,11 @@ absl::Status IrEmitterUnnested::EmitTriangularSolveCustomCall(
   if (thunks.size() == 1) {
     AddThunkToThunkSequence(std::move(thunks[0]));
   } else {
-    AddThunkToThunkSequence(std::make_unique<SequentialThunk>(
-        Thunk::ThunkInfo::WithProfileAnnotation(instr), std::move(thunks)));
+    auto thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(instr);
+    // Don't repeat the annotation from inside thunks
+    thunk_info.profile_annotation = {};
+    AddThunkToThunkSequence(
+        std::make_unique<SequentialThunk>(thunk_info, std::move(thunks)));
   }
   return absl::OkStatus();
 }
@@ -2541,8 +2549,8 @@ absl::Status IrEmitterUnnested::EmitWaitForStreamsThunk(
     const HloInstruction* inst, GpuBackendConfig& gpu_config,
     bool is_async_done) {
   std::vector<ExecutionStreamId> wait_on_streams;
-  ExecutionStreamId source_stream_id = Thunk::GetMainComputeStreamId();
-  // If it's for an async done, then we need to sychronize on the execution
+  ExecutionStreamId source_stream_id = Thunk::kDefaultExecutionStreamId;
+  // If it's for an async done, then we need to synchronize on the execution
   // stream of the instruction from main compute stream
   if (is_async_done) {
     wait_on_streams.push_back(
@@ -2550,7 +2558,7 @@ absl::Status IrEmitterUnnested::EmitWaitForStreamsThunk(
   } else if (gpu_config.wait_on_operation_queues().size() == 0) {
     // If wait on queue is empty, we just synchronize on the main compute
     // stream from the execution stream.
-    wait_on_streams.push_back(Thunk::GetMainComputeStreamId());
+    wait_on_streams.push_back(Thunk::kDefaultExecutionStreamId);
     source_stream_id = gpu_config.operation_queue_id();
   } else {
     // Else, we synchronize on all specified
@@ -2732,6 +2740,63 @@ static std::optional<GlobalDeviceId> DeviceConstraint(
   return std::nullopt;
 }
 
+absl::Status IrEmitterUnnested::EmitCopyStartThunk(
+    const HloCopyStartInstruction* instr) {
+  // copy-start has a tuple shape: {host, device, context},
+  // or {device, host, context}.
+  // Only the destination shape is needed to get the output buffer.
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice dst_buffer,
+                      GetAllocationSliceForHlo(instr,
+                                               /*ShapeIndex=*/{0}));
+
+  const HloInstruction* src = instr->operand(0);
+  const Shape& input_shape = src->shape();
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice src_buffer,
+                      GetAllocationSliceForHlo(src, {}));
+  Shape shape = instr->shape();
+  CHECK(shape.IsTuple());
+
+  if (shape.mutable_tuple_shapes(0)->has_layout() &&
+      shape.mutable_tuple_shapes(0)->mutable_layout()->memory_space() ==
+          static_cast<int>(stream_executor::MemoryType::kHost)) {
+    VLOG(3) << "Device to Host: host memory space "
+            << static_cast<int>(stream_executor::MemoryType::kHost);
+    auto thunk = std::make_unique<DeviceToHostCopyThunk>(
+        Thunk::ThunkInfo::WithProfileAnnotation(instr),
+        /*source_buffer=*/src_buffer,
+        /*destination_buffer=*/dst_buffer,
+        /*mem_size=*/ShapeUtil::ByteSizeOf(input_shape));
+    AddThunkToThunkSequence(std::move(thunk));
+    return absl::OkStatus();
+  }
+  if (shape.mutable_tuple_shapes(1)->has_layout() &&
+      shape.mutable_tuple_shapes(1)->mutable_layout()->memory_space() ==
+          static_cast<int>(stream_executor::MemoryType::kHost)) {
+    VLOG(3) << "Host to Device from the host memory space "
+            << static_cast<int>(stream_executor::MemoryType::kHost);
+    ;
+    auto thunk = std::make_unique<HostToDeviceCopyThunk>(
+        Thunk::ThunkInfo::WithProfileAnnotation(instr),
+        /*source_buffer=*/src_buffer,
+        /*destination_buffer=*/dst_buffer,
+        /*mem_size=*/ShapeUtil::ByteSizeOf(input_shape));
+    AddThunkToThunkSequence(std::move(thunk));
+    return absl::OkStatus();
+  }
+
+  // Disabled the generation of memcpy D2D as only H2D and D2H are useful
+  // for memory offload now.
+
+  auto thunk = std::make_unique<DeviceToDeviceCopyThunk>(
+      Thunk::ThunkInfo::WithProfileAnnotation(instr),
+      /*source_buffer=*/src_buffer,
+      /*destination_buffer=*/dst_buffer,
+      /*mem_size=*/ShapeUtil::ByteSizeOf(input_shape));
+  AddThunkToThunkSequence(std::move(thunk));
+
+  return absl::OkStatus();
+}
+
 absl::Status IrEmitterUnnested::EmitSendThunk(const HloSendInstruction* instr) {
   if (!instr->channel_id().has_value())
     return absl::InternalError("Unknown send instruction channel id");
@@ -2830,7 +2895,6 @@ absl::Status IrEmitterUnnested::EmitRecvDoneThunk(
 
 absl::Status IrEmitterUnnested::EmitHloInstruction(
     const HloInstruction* instr) {
-  // TODO(anlunx): Support other instruction opcodes.
   switch (instr->opcode()) {
     case HloOpcode::kAllGatherDone:
       return EmitNcclAsyncDone(Thunk::kNcclAllGatherDone, instr);
@@ -3020,6 +3084,8 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
       return EmitSort(Cast<HloSortInstruction>(instr));
     case HloOpcode::kWhile:
       return EmitWhile(instr);
+    case HloOpcode::kCopyStart:
+      return EmitCopyStartThunk(Cast<HloCopyStartInstruction>(instr));
 
     // HLO module is already scheduled, so instructions for ordering are noops.
     case HloOpcode::kAddDependency:
@@ -3030,6 +3096,7 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
     case HloOpcode::kGetTupleElement:
     case HloOpcode::kParameter:
     case HloOpcode::kTuple:
+    case HloOpcode::kCopyDone:
       return absl::OkStatus();
     default:
       return Internal("Unsupported instruction opcode: %s",

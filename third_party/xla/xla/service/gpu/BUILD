@@ -387,6 +387,7 @@ cc_library(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor/gpu:gpu_blas_lt",
+        "//xla/stream_executor/integrations:device_mem_allocator",
         "//xla/translate/hlo_to_mhlo:hlo_utils",
         "//xla/translate/mhlo_to_hlo:attribute_exporter",
         "//xla/translate/mhlo_to_hlo:location_exporter",
@@ -690,6 +691,7 @@ cc_library(
         ":matmul_utils",
         ":split_k_gemm_rewriter",
         ":stream_executor_util",
+        ":cudnn_fusion_compiler",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -1296,7 +1298,6 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/cleanup",
-        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
@@ -3030,6 +3031,34 @@ xla_cc_test(
     ],
 )
 
+cc_library(
+    name = "cudnn_fusion_compiler",
+    srcs = if_cuda_is_configured(["cudnn_fusion_compiler.cc"]),
+    hdrs = if_cuda_is_configured(["cudnn_fusion_compiler.h"]),
+    deps = if_cuda_is_configured([
+        ":autotuner_util",
+        ":ir_emission_utils",
+        ":kernel_reuse_cache",
+        "//xla/service/gpu:triton_fusion_analysis",
+        "//xla/service:hlo_pass",
+        "//xla/stream_executor/cuda:cudnn_frontend_helpers",
+        "//xla/stream_executor/cuda:cudnn_plugin",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@cudnn_frontend_archive//:cudnn_frontend",
+        "@local_config_cuda//cuda:cudnn_header",
+    ]) + [
+        ":backend_configs_cc",
+        ":matmul_utils",
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/stream_executor:stream_executor_headers",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 tf_proto_library(
     name = "executable_proto",
     srcs = ["executable.proto"],
@@ -3289,6 +3318,7 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",
+        ":gpu_constants",
         ":hlo_traversal",
         ":ir_emission_utils",
         "//xla:shape_util",
@@ -3646,6 +3676,37 @@ xla_test(
 )
 
 xla_cc_test(
+    name = "gpu_offloading_test",
+    srcs = ["gpu_offloading_test.cc"],
+    tags = tf_cuda_tests_tags(),
+    deps = [
+        ":horizontal_loop_fusion",
+        ":metrics",
+        "//xla:autotune_results_proto_cc",
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_matchers",
+        "//xla/service:gpu_plugin",
+        "//xla/service:hlo_cost_analysis",
+        "//xla/service:hlo_memory_scheduler",
+        "//xla/service:hlo_rematerialization",
+        "//xla/service:hlo_rematerialization_test_utils",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
+        "//xla/service:xla_debug_info_manager",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:scoped_mock_log",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
     name = "auto_sharding_gpu_compiler_test",
     srcs = ["auto_sharding_gpu_compiler_test.cc"],
     tags = tf_cuda_tests_tags() + ["no_oss"],  # TODO(b/277355322): Make autosharding work in OSS
@@ -3718,6 +3779,7 @@ cc_library(
         ":target_constants",
         ":triangular_solve_rewriter",
         ":triton_autotuner",
+        ":cudnn_fusion_compiler",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",

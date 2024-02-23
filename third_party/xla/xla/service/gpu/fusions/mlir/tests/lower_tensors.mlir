@@ -35,7 +35,7 @@ module {
 // CHECK:        func.func @tensorarg(%[[ARG0:.*]]: !llvm.ptr
 // CHECK-SAME:        {xla.invariant, xla.slice_index = 0 : i64}, %[[ARG1:.*]]: index) -> f32 {
 // CHECK-DAG:       %[[C2:.*]] = arith.constant 2.000000e+00
-// CHECK-DAG:       %[[IDX:.*]] = arith.index_castui %[[ARG1]] : index to i64
+// CHECK-DAG:       %[[IDX:.*]] = arith.index_castui %[[ARG1]] : index to i32
 // CHECK-DAG:       %[[PTR:.*]] = llvm.getelementptr inbounds %[[ARG0]][%[[IDX]]]
 // CHECK-DAG:       %[[V2:.*]] = llvm.load %[[PTR]] invariant
 // CHECK:           %[[RET:.*]] = call @add(%[[C2]], %[[V2]])
@@ -72,7 +72,7 @@ module {
 // CHECK:      @layout(%[[ARG0:.*]]: !llvm.ptr,
 // CHECK-SAME:     %[[X:.*]]: index, %[[Y:.*]]: index
 // CHECK:        %[[IDX:.*]] = affine.apply #[[MAP]](%[[X]], %[[Y]])
-// CHECK:        %[[IDX_CAST:.*]] = arith.index_castui %[[IDX]]
+// CHECK:        %[[IDX_CAST:.*]] = arith.index_castui %[[IDX]] : index to i32
 // CHECK:        %[[PTR:.*]] = llvm.getelementptr inbounds %[[ARG0]][%[[IDX_CAST]]]
 // CHECK:        llvm.load %[[PTR]]
 
@@ -110,7 +110,7 @@ module {
 // CHECK-DAG:   %[[C1:.*]] = arith.constant 1 : index
 // CHECK-DAG:   %[[C2:.*]] = arith.constant 2 : index
 // CHECK:       scf.for %[[I:.*]] = %[[C0]] to %[[C2]] step %[[C1]] {
-// CHECK:         %[[CAST:.*]] = arith.index_castui %[[I]]
+// CHECK:         %[[CAST:.*]] = arith.index_castui %[[I]] : index to i32
 // CHECK:         %[[PTR:.*]] = llvm.getelementptr inbounds %[[ARG0]][%[[CAST]]]
 // CHECK:         llvm.store {{.*}}, %[[PTR]]
 // CHECK:       %[[INBOUNDS:.*]] = arith.cmpi
@@ -118,3 +118,77 @@ module {
 // CHECK:         llvm.store
 // CHECK-NEXT:  }
 // CHECK-NEXT:  return
+
+// -----
+
+module {
+  func.func @large_tensor(
+      %arg0: tensor<1024x1024x1024x6xf32>,
+      %arg1: index) -> f32 {
+    %v = tensor.extract %arg0[%arg1, %arg1, %arg1, %arg1] : tensor<1024x1024x1024x6xf32>
+    func.return %v : f32
+  }
+}
+
+// CHECK: @large_tensor
+// CHECK: arith.index_castui {{.*}} : index to i64
+
+// -----
+
+module {
+  // This example is a bit silly, in real life there wouldn't be a loop (the
+  // loop body would be executed by different threads). We're just doing it this
+  // way so control flow with shared memory is tested as well.
+  func.func @transpose_shared(%in: tensor<32x32xf32>,
+                              %out: tensor<32x32xf32>) -> tensor<32x32xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    %shared = xla_gpu.allocate_shared : tensor<32x32xf32>
+    %loaded_tile = scf.for %i = %c0 to %c32 step %c1
+        iter_args(%tile = %shared) -> tensor<32x32xf32> {
+      %inner_loaded_tile = scf.for %j = %c0 to %c32 step %c1
+          iter_args(%inner_tile = %tile) -> tensor<32x32xf32> {
+        %v = tensor.extract %in[%i, %j] : tensor<32x32xf32>
+        %inserted = tensor.insert %v into %inner_tile[%i, %j]
+            : tensor<32x32xf32>
+        scf.yield %inserted : tensor<32x32xf32>
+      }
+      scf.yield %inner_loaded_tile : tensor<32x32xf32>
+    }
+
+    %synced = xla_gpu.sync_threads %shared
+        : (tensor<32x32xf32>) -> (tensor<32x32xf32>)
+    %written_tile = scf.for %i = %c0 to %c32 step %c1
+        iter_args(%written = %out) -> tensor<32x32xf32> {
+      %inner_written_tile = scf.for %j = %c0 to %c32 step %c1
+          iter_args(%inner_written = %written) -> tensor<32x32xf32> {
+        %v = tensor.extract %shared[%j, %i] : tensor<32x32xf32>
+        %inserted = tensor.insert %v into %inner_written[%i, %j]
+            : tensor<32x32xf32>
+        scf.yield %inserted : tensor<32x32xf32>
+      }
+      scf.yield %inner_written_tile : tensor<32x32xf32>
+    }
+
+    return %written_tile : tensor<32x32xf32>
+  }
+}
+
+// CHECK:      llvm.mlir.global private @[[SHARED:shared_.*]]()
+// CHECK-SAME:     {addr_space = 3 : i32} : !llvm.array<1024 x f32>
+// CHECK:      @transpose_shared
+// CHECK:        %[[ADDR:.*]] = llvm.mlir.addressof @[[SHARED]] : !llvm.ptr<3>
+// CHECK:        %[[CAST:.*]] = llvm.addrspacecast %[[ADDR]]
+// CHECK-SAME:       : !llvm.ptr<3> to !llvm.ptr
+// CHECK:        scf.for
+// CHECK:          scf.for
+// CHECK:            %[[ELEM_ADDR:.*]] = llvm.getelementptr inbounds %[[CAST]]
+// CHECK:            llvm.store {{.*}} %[[ELEM_ADDR]]
+// CHECK:        xla_gpu.sync_threads
+// CHECK:        scf.for
+// CHECK:          scf.for
+// CHECK:            %[[ELEM_ADDR:.*]] = llvm.getelementptr inbounds %[[CAST]]
+// CHECK:            llvm.load %[[ELEM_ADDR]]
+
