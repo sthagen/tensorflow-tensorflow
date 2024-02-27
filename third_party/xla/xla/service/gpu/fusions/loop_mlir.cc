@@ -36,6 +36,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/gpu/fusions/mlir/computation_partitioner.h"
 #include "xla/service/gpu/fusions/mlir/elemental_hlo_to_mlir.h"
+#include "xla/service/gpu/fusions/mlir/ir/xla_gpu_ops.h"
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/shape.h"
 #include "xla/status_macros.h"
@@ -102,16 +103,12 @@ absl::Status MlirLoopFusion::EmitMlir(
   const auto& root_graph = root_computation.GetRootSubgraph();
 
   auto subgraph_to_mlir_fn = computations.DeclareFunctions(module);
-  auto call_target_lookup = [&](const HloInstruction* instr) {
-    return subgraph_to_mlir_fn[&computations
-                                    .FindPartitionedComputation(instr->parent())
-                                    .FindSubgraph(instr)];
-  };
-
+  auto call_targets =
+      computations.CreateCallTargetProvider(subgraph_to_mlir_fn);
   for (const auto& comp : computations.partitioned_computations()) {
     for (const auto& subgraph : comp.subgraphs()) {
       TF_RETURN_IF_ERROR(mlir_converter::SubgraphToMlirFunction(
-          comp, subgraph, subgraph_to_mlir_fn[&subgraph], call_target_lookup));
+          comp, subgraph, subgraph_to_mlir_fn[&subgraph], call_targets));
     }
   }
 
@@ -131,8 +128,11 @@ absl::Status MlirLoopFusion::EmitMlir(
       auto result_tensors,
       EmitLoopNest(
           builder, output_tensor_args, *indexing,
-          [&](mlir::ValueRange output_tensors, mlir::ValueRange output_indices)
+          [&](mlir::ValueRange output_tensors, mlir::ValueRange dim_values,
+              mlir::ValueRange symbol_values)
               -> absl::StatusOr<llvm::SmallVector<mlir::Value>> {
+            auto output_indices = mlir_converter::ApplyAffineMap(
+                indexing->GetAffineMap(), dim_values, symbol_values, builder);
             auto root_fn = subgraph_to_mlir_fn[&root_graph];
 
             // Generate the operands for the root function: input tensors +
@@ -142,8 +142,7 @@ absl::Status MlirLoopFusion::EmitMlir(
             absl::c_copy(output_indices, std::back_inserter(operands));
 
             auto result_scalars =
-                builder.create<mlir::func::CallOp>(root_fn, operands)
-                    .getResults();
+                builder.create<PureCallOp>(root_fn, operands).getResults();
 
             llvm::SmallVector<mlir::Value> result_tensors;
             result_tensors.reserve(output_tensor_args.size());
@@ -156,7 +155,6 @@ absl::Status MlirLoopFusion::EmitMlir(
             }
             return result_tensors;
           }));
-
   builder.create<mlir::func::ReturnOp>(result_tensors);
 
   return absl::OkStatus();

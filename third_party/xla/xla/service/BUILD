@@ -2378,6 +2378,7 @@ cc_library(
         ":hlo_creation_utils",
         ":hlo_module_config",
         ":hlo_pass",
+        ":host_memory_offload_annotations_hdr",
         ":pattern_matcher",
         ":shape_inference",
         "//xla:comparison_util",
@@ -2438,6 +2439,7 @@ xla_cc_test(
         ":hlo_parser",
         ":hlo_pass",
         ":hlo_pass_pipeline",
+        ":host_memory_offload_annotations_hdr",
         ":layout_assignment",
         ":pattern_matcher",
         ":pattern_matcher_gmock",
@@ -3112,16 +3114,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "sparse_util",
-    srcs = ["sparse_util.cc"],
-    hdrs = ["sparse_util.h"],
-    deps = [
-        "//xla:shape_util",
-        "//xla/hlo/ir:hlo",
-    ],
-)
-
 xla_cc_test(
     name = "space_to_batch_converter_test",
     size = "small",
@@ -3359,7 +3351,6 @@ cc_library(
     hdrs = ["dot_decomposer.h"],
     deps = [
         ":hlo_pass",
-        ":sparse_util",
         "//xla:permutation_util",
         "//xla:shape_util",
         "//xla:status_macros",

@@ -3071,8 +3071,6 @@ class Subgraph {
     // Check dimensions
     int axis = concat_params->axis;
     if (axis < 0) axis += NumDimensions(&output_tensor);
-    int sum_axis = 0;
-
     if (output_tensor.type == kTfLiteUInt8) {
       const int32_t zero_point =
           tensors[node->outputs->data[0]].params.zero_point;
@@ -3110,27 +3108,6 @@ class Subgraph {
 
       TF_LITE_ENSURE_EQ(logging_context, NumDimensions(&input_tensor),
                         NumDimensions(&output_tensor));
-
-      for (int d = 0; d < NumDimensions(&output_tensor); d++) {
-        // All dimensions must match except the 'axis'.
-        if (d == axis) {
-          continue;
-        }
-        const TfLiteTensor& input_tensor = tensors[node->inputs->data[i]];
-        TF_LITE_ENSURE_STATUS(CheckTensorsDimensionMatch(
-            logging_context, input_tensor, output_tensor, d, node_index,
-            "CONCATENATE"));
-      }
-      sum_axis += SizeOfDimension(&input_tensor, axis);
-    }
-
-    if (SizeOfDimension(&output_tensor, axis) != sum_axis) {
-      TF_LITE_MAYBE_KERNEL_LOG(
-          logging_context,
-          "mismatch in axis dimension %d (%d != %d) in output and input"
-          "tensors of CONCATENATE operator #%d",
-          axis, SizeOfDimension(&output_tensor, axis), sum_axis, node_index);
-      return kTfLiteError;
     }
 
     if (subgraph != nullptr) {
@@ -5850,6 +5827,9 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, input_tensor, node->inputs->data[0], node_index));
 
+    TF_LITE_ENSURE_STATUS(
+        CheckTensorFloat32OrQUInt8Type(delegate, logging_context, input_tensor,
+                                       node->inputs->data[0], node_index));
     const TfLiteTensor& perm_tensor = tensors[node->inputs->data[1]];
     TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
         logging_context, perm_tensor, node->inputs->data[1],
@@ -5860,7 +5840,7 @@ class Subgraph {
     const TfLiteTensor& output_tensor = tensors[node->outputs->data[0]];
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, node->outputs->data[0], node_index));
-    const int dims_count = NumDimensions(&input_tensor);
+    const int dims_count = NumElements(&perm_tensor);
     std::array<size_t, XNN_MAX_TENSOR_DIMS> perm;
     std::copy(&perm_data[0], &perm_data[dims_count], perm.begin());
     if (subgraph != nullptr) {
