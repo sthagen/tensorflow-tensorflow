@@ -29,13 +29,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "nanobind/nanobind.h"
-#include "nanobind/stl/optional.h"     // IWYU pragma: keep
-#include "nanobind/stl/pair.h"         // IWYU pragma: keep
-#include "nanobind/stl/shared_ptr.h"   // IWYU pragma: keep
-#include "nanobind/stl/string.h"       // IWYU pragma: keep
-#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
-#include "nanobind/stl/vector.h"       // IWYU pragma: keep
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
@@ -44,6 +37,13 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
+#include "third_party/nanobind/include/nanobind/nanobind.h"
+#include "third_party/nanobind/include/nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "third_party/nanobind/include/nanobind/stl/pair.h"  // IWYU pragma: keep
+#include "third_party/nanobind/include/nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
+#include "third_party/nanobind/include/nanobind/stl/string.h"  // IWYU pragma: keep
+#include "third_party/nanobind/include/nanobind/stl/string_view.h"  // IWYU pragma: keep
+#include "third_party/nanobind/include/nanobind/stl/vector.h"  // IWYU pragma: keep
 #include "xla/pjrt/exceptions.h"
 #include "xla/python/nb_class_ptr.h"
 #include "tsl/platform/logging.h"
@@ -137,14 +137,20 @@ std::shared_ptr<PyTreeRegistry> DefaultPyTreeRegistry() {
     keys.push_back(nb::borrow<nb::object>(key));
   }
 
-  std::stable_sort(
-      keys.begin(), keys.end(), [](const nb::object& a, const nb::object& b) {
-        int cmp = PyObject_RichCompareBool(a.ptr(), b.ptr(), Py_LT);
-        if (cmp == -1) {
-          throw nb::python_error();
-        }
-        return cmp;
-      });
+  try {
+    std::stable_sort(
+        keys.begin(), keys.end(), [](const nb::object& a, const nb::object& b) {
+          int cmp = PyObject_RichCompareBool(a.ptr(), b.ptr(), Py_LT);
+          if (cmp == -1) {
+            throw nb::python_error();
+          }
+          return cmp;
+        });
+  } catch (nb::python_error& e) {
+    nb::raise_from(e, PyExc_ValueError,
+                   "Comparator raised exception while sorting pytree "
+                   "dictionary keys.");
+  }
   return keys;
 }
 

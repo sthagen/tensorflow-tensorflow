@@ -16,12 +16,14 @@ limitations under the License.
 
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
@@ -94,6 +96,38 @@ absl::flat_hash_map<const HloInstruction*, int> PartitionGraphByIndexing(
 }
 
 }  // namespace
+
+std::string PartitionedComputation::Subgraph::ToString() const {
+  std::ostringstream ss;
+  ss << "SUBGRAPH " << name << " {\n";
+  for (auto instr : instructions_post_order) {
+    ss << "  ";
+    if (absl::c_linear_search(roots, instr)) {
+      ss << "ROOT ";
+    }
+    ss << instr->ToString() << "\n";
+  }
+  ss << "}";
+  return ss.str();
+}
+
+std::string PartitionedComputation::ToString() const {
+  std::ostringstream ss;
+  ss << "PartitionedComputation " << computation_->name() << ":";
+  for (const Subgraph& subgraph : subgraphs_) {
+    ss << "\n" << subgraph.ToString();
+  }
+  return ss.str();
+}
+
+std::string PartitionedComputations::ToString() const {
+  std::ostringstream ss;
+  ss << "PartitionedComputations:";
+  for (const auto& partitioned_computation : partitioned_computations_) {
+    ss << "\n" << partitioned_computation.ToString();
+  }
+  return ss.str();
+}
 
 PartitionedComputation::PartitionedComputation(
     const HloComputation* computation,
@@ -234,6 +268,29 @@ PartitionedComputations::PartitionedComputations(
   }
 }
 
+PartitionedComputations::PartitionedComputations(
+    const HloComputation* fusion,
+    const absl::flat_hash_set<const HloInstruction*>&
+        isolated_and_injected_instructions)
+    : PartitionedComputations(
+          fusion,
+          [&]() {
+            absl::flat_hash_set<const HloInstruction*> operands;
+            for (auto* instruction : isolated_and_injected_instructions) {
+              operands.insert(instruction->operands().begin(),
+                              instruction->operands().end());
+            }
+            return [&isolated_and_injected_instructions,
+                    operands](const HloInstruction* instruction) {
+              return isolated_and_injected_instructions.contains(instruction) ||
+                     operands.contains(instruction);
+            };
+          }(),
+          [&](const HloInstruction* instruction, int operand_index) {
+            return isolated_and_injected_instructions.contains(
+                instruction->operand(operand_index));
+          }) {}
+
 absl::flat_hash_map<const PartitionedComputation::Subgraph*, mlir::func::FuncOp>
 PartitionedComputations::DeclareFunctions(mlir::ModuleOp module) const {
   absl::flat_hash_map<const PartitionedComputation::Subgraph*,
@@ -253,12 +310,16 @@ PartitionedComputations::DeclareFunctions(mlir::ModuleOp module) const {
   return mapping;
 }
 
+const PartitionedComputation::Subgraph& PartitionedComputations::FindSubgraph(
+    const HloInstruction* instr) const {
+  return FindPartitionedComputation(instr->parent()).FindSubgraph(instr);
+}
+
 CallTargetProvider PartitionedComputations::CreateCallTargetProvider(
     const absl::flat_hash_map<const PartitionedComputation::Subgraph*,
                               mlir::func::FuncOp>& subgraph_to_func) const {
   return [&, this](const HloInstruction* instr) {
-    return subgraph_to_func.at(
-        &FindPartitionedComputation(instr->parent()).FindSubgraph(instr));
+    return subgraph_to_func.at(&FindSubgraph(instr));
   };
 }
 
@@ -322,9 +383,12 @@ mlir::func::FuncOp CreateSubgraphMlirFunction(
     }
   }
   auto ty = b.getFunctionType(parameter_types, result_types);
-  return b.create<mlir::func::FuncOp>(
+  auto func_op = b.create<mlir::func::FuncOp>(
       subgraph.name, ty,
       /*attrs=*/llvm::ArrayRef<mlir::NamedAttribute>{}, arg_attrs);
+  // Needed so that the function can potentially be inlined in-place.
+  func_op.setPrivate();
+  return func_op;
 }
 
 }  // namespace mlir_converter

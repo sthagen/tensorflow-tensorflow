@@ -186,12 +186,13 @@ cc_library(
         "//xla:status",
         "//xla:status_macros",
         "//xla:statusor",
-        "//xla:types",
         "//xla:xla_data_proto_cc",
         "//xla/pjrt:exceptions",
         "//xla/python/ifrt",
+        "//xla/python/pjrt_ifrt",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/platform:protobuf",
         "@pybind11",
         "@pybind11_abseil//pybind11_abseil:absl_casters",
@@ -209,6 +210,7 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = [":friends"],
     deps = [
+        "//third_party/nanobind",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/synchronization",
@@ -245,17 +247,18 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = [":friends"],
     deps = [
+        ":nb_class_ptr",
         ":python_ref_manager",
         # placeholder for index annotation deps
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "//third_party/nanobind",
         "@local_config_python//:python_headers",  # buildcleaner: keep
         "//xla/pjrt:exceptions",
         "@local_tsl//tsl/platform",
         "@local_tsl//tsl/platform:logging",
-        "@pybind11",
     ],
 )
 
@@ -284,7 +287,6 @@ cc_library(
     name = "py_client",
     srcs = [
         "py_array.cc",
-        "py_buffer.cc",
         "py_client.cc",
         "py_compile_only_client.cc",
         "py_device_list.cc",
@@ -295,7 +297,6 @@ cc_library(
     ],
     hdrs = [
         "py_array.h",
-        "py_buffer.h",
         "py_client.h",
         "py_compile_only_client.h",
         "py_device_list.h",
@@ -338,6 +339,8 @@ cc_library(
         "@com_google_absl//absl/types:variant",
         "//xla:comparison_util",
         "//xla:shape_util",
+        "//xla:status",
+        "//xla:status_macros",
         "//xla:statusor",
         "//xla:types",
         "//xla:util",
@@ -452,11 +455,13 @@ cc_library(
         ":py_client",
         ":python_ref_manager",
         ":traceback",
+        ":types",
         ":util",
-        "//xla:types",
         "//xla:util",
+        "//xla/pjrt:exceptions",
         "//xla/pjrt:pjrt_client",
         "//xla/pjrt:pjrt_compiler",
+        "//xla/python/pjrt_ifrt",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -833,6 +838,7 @@ cc_library(
         ":xplane_to_profile_instructions",
         # placeholder for index annotation deps
         "@com_google_absl//absl/strings",
+        "//third_party/nanobind",
         "//xla:status",
         "//xla/backends/profiler:profiler_backends",
         "//xla/backends/profiler/cpu:python_tracer",
@@ -842,14 +848,14 @@ cc_library(
         "//xla/pjrt:status_casters",
         "//xla/pjrt/c:pjrt_c_api_hdrs",
         "//xla/pjrt/c:pjrt_c_api_profiler_extension_hdrs",
-        "//xla/python/profiler/internal:traceme_wrapper",
+        "@local_tsl//tsl/platform:macros",
         "@local_tsl//tsl/profiler/lib:profiler_factory",
         "@local_tsl//tsl/profiler/lib:profiler_interface",
         "@local_tsl//tsl/profiler/lib:profiler_session",
+        "@local_tsl//tsl/profiler/lib:traceme",
         "@local_tsl//tsl/profiler/rpc:profiler_server_impl",
         "@local_tsl//tsl/profiler/rpc/client:capture_profile",
         "@local_tsl//tsl/profiler/rpc/client:profiler_client_impl",
-        "@pybind11",
     ] + select({
         ":gpu_enabled": [
             "//xla/backends/profiler/gpu:device_tracer",
@@ -913,12 +919,14 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = ["//visibility:private"],
     deps = [
+        ":nb_helpers",
         # placeholder for index annotation deps
         "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+        "//third_party/nanobind",
         "//xla/pjrt:lru_cache",
-        "@pybind11",
     ],
 )
 
@@ -1135,6 +1143,7 @@ cc_library(
         "@local_tsl//tsl/platform/cloud:gcs_file_system",
         "@local_tsl//tsl/python/lib/core:numpy",
         "@pybind11",
+        "@pybind11_abseil//pybind11_abseil:absl_casters",
     ] + select({
         # gloo transport only builds on linux
         "@local_tsl//tsl:macos": [],
@@ -1216,4 +1225,16 @@ cc_library(
     copts = ["-fexceptions"],
     features = ["-use_header_modules"],
     deps = ["//third_party/nanobind"],
+)
+
+cc_library(
+    name = "nb_helpers",
+    srcs = ["nb_helpers.cc"],
+    hdrs = ["nb_helpers.h"],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        "//third_party/nanobind",
+        "@local_config_python//:python_headers",
+    ],
 )

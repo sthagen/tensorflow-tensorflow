@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -34,10 +35,10 @@ limitations under the License.
 #include "mlir/Interfaces/DataLayoutInterfaces.h"  // from @llvm-project
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
-#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/gpu/fusions/concatenate.h"
 #include "xla/service/gpu/fusions/mlir/computation_partitioner.h"
 #include "xla/service/gpu/fusions/mlir/elemental_hlo_to_mlir.h"
+#include "xla/service/gpu/fusions/mlir/ir/xla_gpu_ops.h"
 #include "xla/service/gpu/hlo_fusion_analysis.h"
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/model/indexing_map.h"
@@ -53,14 +54,7 @@ namespace gpu {
   if (analysis.fusion_roots().size() != 1) return false;
   auto* root = analysis.fusion_roots()[0];
 
-  // Concatenate should the root of the fusion. Epilogue is not yet supported.
-  if (root->opcode() != HloOpcode::kConcatenate) return false;
-
   for (auto operand : root->operands()) {
-    // Concatenate operands should not be parameters, only function call are
-    // supported right now.
-    if (operand->opcode() == HloOpcode::kParameter) return false;
-
     // Different operands shapes are not yet supported.
     if (operand->shape() != root->operand(0)->shape()) return false;
   }
@@ -93,25 +87,31 @@ absl::Status MlirConcatenateFusion::EmitMlir(
     const HloFusionInstruction& fusion) const {
   CHECK(IsSupported(analysis_));
 
+  auto concat = analysis_.fusion_heroes()[0];
+
   mlir_converter::PartitionedComputations computations(
-      fusion.fused_instructions_computation());
+      fusion.fused_instructions_computation(),
+      /*isolated_and_injected_instructions=*/
+      {concat});
 
   const auto& root_computation = computations.FindPartitionedComputation(
       fusion.fused_instructions_computation());
   const auto& root_graph = root_computation.GetRootSubgraph();
+  const auto& hero_graph = root_computation.FindSubgraph(concat);
 
   auto subgraph_to_mlir_fn = computations.DeclareFunctions(module);
-  subgraph_to_mlir_fn.extract(&root_graph).mapped().erase();
+  subgraph_to_mlir_fn.extract(&hero_graph).mapped().erase();
 
-  auto call_target_lookup = [&](const HloInstruction* instr) {
-    return subgraph_to_mlir_fn[&computations
-                                    .FindPartitionedComputation(instr->parent())
-                                    .FindSubgraph(instr)];
-  };
+  // Concatenate is inlined in the entry function. This is needed for
+  // mlir_converter::ProvideParameter to correctly get parameter value.
+  subgraph_to_mlir_fn[&hero_graph] = entry_function;
+
+  auto call_target_lookup =
+      computations.CreateCallTargetProvider(subgraph_to_mlir_fn);
 
   for (const auto& comp : computations.partitioned_computations()) {
     for (const auto& subgraph : comp.subgraphs()) {
-      if (&subgraph == &root_graph) {
+      if (&subgraph == &hero_graph) {
         continue;
       }
 
@@ -129,7 +129,6 @@ absl::Status MlirConcatenateFusion::EmitMlir(
   auto output_tensor_args =
       entry_function.getArguments().drop_front(num_inputs);
 
-  auto concat = analysis_.fusion_heroes()[0];
 
   int64_t concat_dim = concat->concatenate_dimension();
   int64_t operand_offset = 0;
@@ -140,39 +139,47 @@ absl::Status MlirConcatenateFusion::EmitMlir(
   auto thread_id_to_input_map = *ComputeThreadIdToInputIndexing(
       /*root_index=*/0, /*hero_operand_index=*/0, module.getContext());
 
-  for (auto operand : concat->operands()) {
-    auto operand_fn =
-        subgraph_to_mlir_fn[&root_computation.FindSubgraph(operand)];
-
+  for (auto [operand_index, operand] : llvm::enumerate(concat->operands())) {
     auto loop_nest_body_builder = [&](mlir::ValueRange output_tensors,
                                       mlir::ValueRange dim_values,
                                       mlir::ValueRange symbol_values)
         -> absl::StatusOr<llvm::SmallVector<mlir::Value>> {
-      auto output_indices =
+      auto input_indices =
           mlir_converter::ApplyAffineMap(thread_id_to_input_map.GetAffineMap(),
                                          dim_values, symbol_values, builder);
 
-      llvm::SmallVector<mlir::Value> operands(
-          entry_function.getArguments().take_front(num_inputs));
-      absl::c_copy(output_indices, std::back_inserter(operands));
+      TF_ASSIGN_OR_RETURN(auto result_scalars,
+                          mlir_converter::ProvideParameter(
+                              root_computation, concat, operand_index,
+                              input_indices, call_target_lookup, builder));
 
-      auto result_scalars =
-          builder.create<mlir::func::CallOp>(operand_fn, operands).getResults();
-
-      llvm::SmallVector<mlir::Value> shifted_output_indices(output_indices);
+      llvm::SmallVector<mlir::Value> output_indices(input_indices);
 
       auto operand_offset_val = builder.create<mlir::arith::ConstantOp>(
           builder.getIndexAttr(operand_offset));
-      shifted_output_indices[concat_dim] = builder.create<mlir::arith::AddIOp>(
+      output_indices[concat_dim] = builder.create<mlir::arith::AddIOp>(
           output_indices[concat_dim], operand_offset_val);
+
+      if (&root_graph != &hero_graph) {
+        // Concatenate is not the root of the computation. Call epilogue
+        // function.
+        auto epilogue_fn = subgraph_to_mlir_fn[&root_graph];
+
+        llvm::SmallVector<mlir::Value> operands = input_tensors;
+        absl::c_copy(output_indices, std::back_inserter(operands));
+        absl::c_copy(result_scalars, std::back_inserter(operands));
+
+        result_scalars =
+            builder.create<PureCallOp>(epilogue_fn, operands).getResults();
+      }
 
       llvm::SmallVector<mlir::Value> result_tensors;
       result_tensors.reserve(output_tensor_args.size());
       for (auto [tensor, value] : llvm::zip(output_tensors, result_scalars)) {
-        result_tensors.push_back(builder
-                                     .create<mlir::tensor::InsertOp>(
-                                         value, tensor, shifted_output_indices)
-                                     .getResult());
+        result_tensors.push_back(
+            builder
+                .create<mlir::tensor::InsertOp>(value, tensor, output_indices)
+                .getResult());
       }
       return result_tensors;
     };

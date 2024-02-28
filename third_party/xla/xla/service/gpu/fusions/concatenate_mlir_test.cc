@@ -15,52 +15,31 @@ limitations under the License.
 
 #include "xla/service/gpu/fusions/concatenate_mlir.h"
 
+#include <memory>
+
 #include <gtest/gtest.h>
-#include "llvm/Support/raw_ostream.h"
-#include "mlir/Dialect/Affine/IR/AffineOps.h"  // from @llvm-project
-#include "mlir/Dialect/Func/Extensions/InlinerExtension.h"  // from @llvm-project
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/GPU/IR/GPUDialect.h"  // from @llvm-project
-#include "mlir/Dialect/Math/IR/Math.h"  // from @llvm-project
-#include "mlir/Dialect/MemRef/Transforms/Passes.h"  // from @llvm-project
-#include "mlir/Dialect/SCF/IR/SCF.h"  // from @llvm-project
-#include "mlir/Dialect/Tensor/IR/Tensor.h"  // from @llvm-project
-#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/Pass/PassManager.h"  // from @llvm-project
-#include "xla/hlo/ir/hlo_casting_utils.h"
-#include "xla/hlo/ir/hlo_instructions.h"
-#include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
-#include "xla/service/gpu/gpu_device_info_for_tests.h"
+#include "absl/log/log.h"
+#include "xla/error_spec.h"
+#include "xla/service/gpu/fusions/mlir/mlir_fusion_emitter.h"
+#include "xla/service/gpu/fusions/mlir_emitter_test_base.h"
 #include "xla/service/gpu/hlo_fusion_analysis.h"
-#include "xla/stream_executor/device_description.h"
 #include "xla/tests/filecheck.h"
-#include "xla/tests/hlo_test_base.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace gpu {
 namespace {
 
-class MlirConcatenateFusionTest : public HloTestBase {
+class MlirConcatenateFusionTest : public MlirEmitterTestBase {
  public:
-  MlirConcatenateFusionTest() {
-    context_.loadDialect<mlir::tensor::TensorDialect, mlir::func::FuncDialect,
-                         mlir::affine::AffineDialect, mlir::arith::ArithDialect,
-                         mlir::math::MathDialect, mlir::scf::SCFDialect,
-                         mlir::mhlo::MhloDialect, mlir::gpu::GPUDialect>();
-    mlir::DialectRegistry registry;
-    mlir::func::registerInlinerExtension(registry);
-    context_.appendDialectRegistry(registry);
+  std::unique_ptr<MlirFusionEmitterBase> GetEmitter(
+      const HloFusionAnalysis& analysis) override {
+    return std::make_unique<MlirConcatenateFusion>(analysis);
   }
-
-  stream_executor::DeviceDescription device_info_ =
-      TestGpuDeviceInfo::RTXA6000DeviceInfo();
-  mlir::MLIRContext context_;
 };
 
 TEST_F(MlirConcatenateFusionTest, StandAloneConcatenate) {
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(R"(
+  auto kHloString = R"(
     HloModule module
 
   fused_computation {
@@ -74,17 +53,60 @@ TEST_F(MlirConcatenateFusionTest, StandAloneConcatenate) {
     param1 = f32[128] parameter(1)
     ROOT fusion = f32[256] fusion(param0, param1), calls=fused_computation, kind=kLoop
   }
-  )"));
+  )";
 
-  auto* root = module->entry_computation()->root_instruction();
-  auto analysis = AnalyzeFusion(*root, device_info_);
-
-  // TODO: Add support for parameter operands.
-  EXPECT_FALSE(MlirConcatenateFusion::IsSupported(analysis));
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
 }
 
-TEST_F(MlirConcatenateFusionTest, ConcatenateElementwise) {
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(R"(
+TEST_F(MlirConcatenateFusionTest, PrologueEpilogue) {
+  auto kHloString = R"(
+    HloModule module
+
+  fused_computation {
+    param0 = f32[128] parameter(0)
+    param1 = f32[128] parameter(1)
+    log = f32[128] log(param0)
+    exp = f32[128] exponential(param1)
+    concat = f32[256] concatenate(log, exp), dimensions={0}
+    ROOT neg = f32[256] negate(concat)
+  }
+
+  ENTRY main {
+    param0 = f32[128] parameter(0)
+    param1 = f32[128] parameter(1)
+    ROOT fusion = f32[256] fusion(param0, param1), calls=fused_computation, kind=kLoop
+  }
+  )";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto ir, EmitIR(kHloString));
+
+  ASSERT_TRUE(RunFileCheck(ir, R"(
+// CHECK-LABEL: fused_computation
+// CHECK: %[[C_128:.*]] = arith.constant 128
+// CHECK: %[[THREAD_ID:.*]] = gpu.thread_id x
+
+// CHECK: %[[VAL_1_1:.*]] = xla_gpu.pure_call @fused_computation_log({{.*}}, %[[THREAD_ID]])
+// CHECK: %[[VAL_1_2:.*]] = xla_gpu.pure_call @fused_computation_neg({{.*}}, %[[THREAD_ID]], %[[VAL_1_1]])
+// CHECK: %[[INSERTED_1:.*]] = tensor.insert %[[VAL_1_2:.*]] into {{.*}}[%[[THREAD_ID]]]
+
+// CHECK: %[[VAL_2_1:.*]] = xla_gpu.pure_call @fused_computation_exp({{.*}}, %[[THREAD_ID]])
+// CHECK: %[[INDEX_2:.*]] = arith.addi %[[THREAD_ID]], %[[C_128]]
+// CHECK: %[[VAL_2_2:.*]] = xla_gpu.pure_call @fused_computation_neg({{.*}}, %[[INDEX_2]], %[[VAL_2_1]])
+// CHECK: %[[INSERTED_2:.*]] = tensor.insert %[[VAL_2_2:.*]] into {{.*}}[%[[INDEX_2]]]
+
+// CHECK: return %[[INSERTED_2]]
+
+// CHECK: func.func private @fused_computation_log
+// CHECK: func.func private @fused_computation_exp
+// CHECK: func.func private @fused_computation_neg
+)")
+                  .value());
+
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
+}
+
+TEST_F(MlirConcatenateFusionTest, Prologue) {
+  auto kHloString = R"(
     HloModule module
 
   fused_computation {
@@ -100,38 +122,50 @@ TEST_F(MlirConcatenateFusionTest, ConcatenateElementwise) {
     param1 = f32[128] parameter(1)
     ROOT fusion = f32[256] fusion(param0, param1), calls=fused_computation, kind=kLoop
   }
-  )"));
+  )";
 
-  auto* root = module->entry_computation()->root_instruction();
-  auto analysis = AnalyzeFusion(*root, device_info_);
+  TF_ASSERT_OK_AND_ASSIGN(auto ir, EmitIR(kHloString));
 
-  MlirConcatenateFusion fusion(analysis);
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto mlir_module,
-      fusion.CreateMLIRModule(context_, *Cast<HloFusionInstruction>(root),
-                              "fused_computation", nullptr));
-
-  std::string out;
-  llvm::raw_string_ostream os(out);
-  mlir_module->print(os);
-  ASSERT_TRUE(RunFileCheck(out, R"(
+  ASSERT_TRUE(RunFileCheck(ir, R"(
 // CHECK-LABEL: fused_computation
 // CHECK:       %[[C_128:.*]] = arith.constant 128
-
 // CHECK:       %[[THREAD_ID:.*]] = gpu.thread_id x
-// CHECK:       %[[VAL_1:.*]] = call @fused_computation_log({{.*}}, %[[THREAD_ID]])
+
+// CHECK:       %[[VAL_1:.*]] = xla_gpu.pure_call @fused_computation_log({{.*}}, %[[THREAD_ID]])
 // CHECK:       %[[INSERTED_1:.*]] = tensor.insert %[[VAL_1:.*]] into {{.*}}[%[[THREAD_ID]]]
 
-// CHECK:       %[[VAL_2:.*]] = call @fused_computation_exp({{.*}}, %[[THREAD_ID]])
+// CHECK:       %[[VAL_2:.*]] = xla_gpu.pure_call @fused_computation_exp({{.*}}, %[[THREAD_ID]])
 // CHECK:       %[[INDEX_2:.*]] = arith.addi %[[THREAD_ID]], %[[C_128]]
 // CHECK:       %[[INSERTED_2:.*]] = tensor.insert %[[VAL_2:.*]] into {{.*}}[%[[INDEX_2]]]
 
 // CHECK:       return %[[INSERTED_2]]
 
-// CHECK: func.func @fused_computation_log
-// CHECK: func.func @fused_computation_exp
+// CHECK: func.func private @fused_computation_log
+// CHECK: func.func private @fused_computation_exp
 )")
                   .value());
+
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
+}
+
+TEST_F(MlirConcatenateFusionTest, MajorDimension) {
+  auto kHloString = R"(
+  HloModule module
+
+  fused_computation {
+    param0 = f32[16,16] parameter(0)
+    param1 = f32[16,16] parameter(1)
+    ROOT concat = f32[32,16] concatenate(param0, param1), dimensions={0}
+  }
+
+  ENTRY main {
+    param0 = f32[16,16] parameter(0)
+    param1 = f32[16,16] parameter(1)
+    ROOT %fusion = f32[32,16] fusion(param0, param1), kind=kInput, calls=fused_computation
+  }
+  )";
+
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
 }
 
 TEST_F(MlirConcatenateFusionTest, DifferentDimensions) {

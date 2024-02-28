@@ -21,6 +21,7 @@ limitations under the License.
 #include "llvm/Support/Debug.h"
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/Matchers.h"  // from @llvm-project
 #include "mlir/IR/OpDefinition.h"  // from @llvm-project
 #include "mlir/IR/TypeUtilities.h"  // from @llvm-project
@@ -48,8 +49,12 @@ bool HasStaticShape(Value value);
 // Returns true if the value has static shape at given dims.
 bool HasStaticShapeAtDims(Value value, ArrayRef<int> dims);
 
-// Returns true if the op has any quantized tensors as input or output.
-bool HasQuantizedTensors(Operation *op);
+// Whether `value` has known rank of `rank`. Returns false when it is not a
+// `ShapedType` or its rank is unknown.
+inline bool HasRankOf(Value value, const int64_t rank) {
+  auto shaped_type = value.getType().dyn_cast_or_null<ShapedType>();
+  return shaped_type && shaped_type.hasRank() && shaped_type.getRank() == rank;
+}
 
 // Creates a new type that has the shape from the `old_type` and the element
 // type from the `element_type`.
@@ -180,6 +185,13 @@ inline FlatSymbolRefAttr GetFuncAttr(TF::XlaCallModuleOp call_op) {
   return call_op->getAttrOfType<FlatSymbolRefAttr>(
       TF::kStablehloEntryFunctionAttrName);
 }
+
+// Returns the entry function name for the given tf.XlaCallModule op. Returns
+// empty string if such attribute does not exist.
+StringRef GetEntryFunctionName(TF::XlaCallModuleOp op);
+
+// Checks whether the given op contains QuantizationTrait::FullyQuantizable.
+bool HasQuantizableTrait(Operation *op);
 
 }  // namespace mlir::quant
 

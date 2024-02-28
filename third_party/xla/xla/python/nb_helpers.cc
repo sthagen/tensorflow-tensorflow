@@ -1,4 +1,4 @@
-/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,22 +12,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_CORE_PROFILER_BACKENDS_CPU_HOST_TRACER_H_
-#define TENSORFLOW_CORE_PROFILER_BACKENDS_CPU_HOST_TRACER_H_
 
-#include <memory>
+#include "xla/python/nb_helpers.h"
 
-#include "xla/backends/profiler/cpu/host_tracer.h"
-#include "tensorflow/core/profiler/lib/profiler_interface.h"
+#include <Python.h>
 
-namespace tensorflow {
-namespace profiler {
+#include "third_party/nanobind/include/nanobind/nanobind.h"
 
-using xla::profiler::HostTracerOptions;  // NOLINT
+namespace nb = nanobind;
 
-using xla::profiler::CreateHostTracer;  // NOLINT
+namespace xla {
 
-}  // namespace profiler
-}  // namespace tensorflow
+ssize_t nb_hash(nb::handle o) {
+  Py_hash_t h = PyObject_Hash(o.ptr());
+  if (h == -1) {
+    throw nb::python_error();
+  }
+  return h;
+}
 
-#endif  // TENSORFLOW_CORE_PROFILER_BACKENDS_CPU_HOST_TRACER_H_
+}  // namespace xla

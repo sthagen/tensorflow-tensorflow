@@ -27,8 +27,6 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
@@ -47,119 +45,74 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_traits.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_utils.h"
 
-#define DEBUG_TYPE "quantization-driver"
-
 namespace mlir {
 namespace quant {
 
-int QuantizationDriver::InitializeState(Operation* op, const int index,
-                                        const Value value,
-                                        const bool as_result) {
-  QuantParams params =
+namespace {
+// This is used to identify an operand or result of an op. The second element
+// of this pair is the index of the operand or result.
+using OpValue = std::pair<mlir::Operation*, int>;
+
+// Uses the type of `value` to set the initial state of the index-th result if
+// `as_result` is true or index-th operand if `as_result` is false. The state
+// is immutable if the type is a quantized type. Returns the index of this
+// new state in the state vector.
+void InitializeStateForValue(Operation* op, const int index, const Value value,
+                             const bool as_result,
+                             std::vector<QuantState>* states,
+                             llvm::DenseMap<Value, int>* value_to_state,
+                             llvm::DenseMap<OpValue, int>* operand_states,
+                             llvm::DenseMap<OpValue, int>* result_states) {
+  const auto [cached, inserted] = value_to_state->insert({value, 0});
+  if (!inserted) {
+    if (as_result)
+      (*result_states)[{op, index}] = cached->second;
+    else
+      (*operand_states)[{op, index}] = cached->second;
+    return;
+  }
+  const QuantParams params =
       quant::QuantizedType::getQuantizedElementType(value.getType());
   const bool immutable = !HasQuantParams(params);
-  const int next_state_index = states_.size();
-  states_.push_back({params, immutable});
+  const int next_state_index = states->size();
+  states->push_back({params, immutable});
   if (as_result)
-    result_states_[{op, index}] = next_state_index;
+    (*result_states)[{op, index}] = next_state_index;
   else
-    operand_states_[{op, index}] = next_state_index;
-
-  return next_state_index;
+    (*operand_states)[{op, index}] = next_state_index;
+  cached->second = next_state_index;
 }
+
+}  // namespace
 
 void QuantizationDriver::InitializeArgState(const BlockArgument arg,
                                             const Value arg_value) {
-  const auto cached = value_to_state_.insert({arg_value, 0});
-  if (!cached.second) {
-    arg_states_[arg] = cached.first->second;
+  const auto [cached, inserted] = value_to_state_.insert({arg_value, 0});
+  if (!inserted) {
+    arg_states_[arg] = cached->second;
     return;
   }
-  QuantParams params =
+  const QuantParams params =
       quant::QuantizedType::getQuantizedElementType(arg_value.getType());
   const bool immutable = !HasQuantParams(params);
   const int next_state_index = states_.size();
   states_.push_back({params, immutable});
   arg_states_[arg] = next_state_index;
-  cached.first->second = next_state_index;
+  cached->second = next_state_index;
 }
 
 void QuantizationDriver::InitializeOperandState(Operation* op, const int index,
-                                                const Value in) {
-  const auto cached = value_to_state_.insert({in, 0});
-  if (!cached.second) {
-    operand_states_[{op, index}] = cached.first->second;
-    return;
-  }
-  cached.first->second = InitializeState(op, index, in, /*as_result=*/false);
+                                                const Value value) {
+  ::mlir::quant::InitializeStateForValue(op, index, value, /*as_result=*/false,
+                                         &states_, &value_to_state_,
+                                         &operand_states_, &result_states_);
 }
 
 void QuantizationDriver::InitializeResultState(Operation* op, const int index,
-                                               const Value res) {
-  const auto cached = value_to_state_.insert({res, 0});
-  if (!cached.second) {
-    result_states_[{op, index}] = cached.first->second;
-    return;
-  }
-  cached.first->second = InitializeState(op, index, res, /*as_result=*/true);
-}
-
-void QuantizationDriver::DumpRequantizeStates(
-    const RequantizeStates& requantize_states) {
-  for (auto& requantize_state : requantize_states) {
-    if (requantize_state.pos != RequantizeState::NO_REQUANTIZE) {
-      llvm::dbgs() << "+";
-      requantize_state.params.print(llvm::dbgs());
-    }
-  }
-}
-
-void QuantizationDriver::DumpStates(Operation* current_op) {
-  if (current_op) {
-    llvm::dbgs() << "\n\n\n" << current_op->getName() << "\n";
-  }
-  fn_.walk([&](Operation* op) {
-    std::unique_ptr<OpQuantScaleSpec> scale_spec = GetQuantScaleSpec(op);
-    if (op->hasTrait<OpTrait::IsTerminator>() ||
-        (!IsOpQuantizable(op) && !scale_spec->has_same_scale_requirement) ||
-        llvm::isa<quantfork::QuantizeCastOp, quantfork::DequantizeCastOp,
-                  func::ConstantOp, arith::ConstantOp>(op)) {
-      return;
-    }
-    if (current_op == op) llvm::dbgs() << "===>>>";
-    llvm::dbgs() << op->getName() << " : (";
-    if (llvm::isa<func::FuncOp>(op)) {
-      for (auto& arg : fn_.getArguments()) {
-        if (auto params = GetArgQuantState(arg).params) {
-          params.print(llvm::dbgs());
-          DumpRequantizeStates(GetArgRequantizeStates(arg));
-        }
-        llvm::dbgs() << ",";
-      }
-    }
-    for (int i = 0; i < op->getNumOperands(); ++i) {
-      if (auto params = GetOperandQuantState(op, i).params) {
-        params.print(llvm::dbgs());
-        DumpRequantizeStates(GetOperandRequantizeStates(op, i));
-      } else {
-        op->getOperand(i).getType().cast<ShapedType>().getElementType().print(
-            llvm::dbgs());
-      }
-      llvm::dbgs() << ",";
-    }
-    llvm::dbgs() << ") -> (";
-    for (int i = 0, e = op->getNumResults(); i < e; ++i) {
-      if (auto params = GetResultQuantState(op, i).params) {
-        params.print(llvm::dbgs());
-        DumpRequantizeStates(GetResultRequantizeStates(op, i));
-      } else {
-        op->getResult(i).getType().cast<ShapedType>().getElementType().print(
-            llvm::dbgs());
-      }
-      llvm::dbgs() << ",";
-    }
-    llvm::dbgs() << ")\n";
-  });
+                                               const Value value) {
+  ::mlir::quant::InitializeStateForValue(op, index, value, /*as_result=*/true,
+                                         &states_, &value_to_state_,
+                                         &operand_states_, &result_states_);
 }
 
 std::unique_ptr<OpQuantSpec> QuantizationDriver::GetQuantSpec(Operation* op) {
@@ -172,7 +125,7 @@ std::unique_ptr<OpQuantScaleSpec> QuantizationDriver::GetQuantScaleSpec(
 }
 
 bool QuantizationDriver::IsQuantized(Operation* op) {
-  for (int i = 0, e = op->getNumResults(); i != e; ++i) {
+  for (int i = 0; i < op->getNumResults(); ++i) {
     if (GetResultQuantState(op, i).IsEmpty()) return false;
   }
   return true;
@@ -451,7 +404,7 @@ QuantParams QuantizationDriver::GetQuantParamsForSameScaleConstraint(
     Operation* op) {
   // Two vector to collect Non-empty operands and results states.
   std::vector<QuantState*> mutable_states, immutable_states;
-  for (int i = 0, e = op->getNumOperands(); i != e; ++i) {
+  for (int i = 0; i < op->getNumOperands(); ++i) {
     auto& state = GetOperandQuantState(op, i);
     if (state.immutable) {
       immutable_states.push_back(&state);
@@ -468,7 +421,7 @@ QuantParams QuantizationDriver::GetQuantParamsForSameScaleConstraint(
     return immutable_states.front()->params;
   }
 
-  for (int i = 0, e = op->getNumResults(); i != e; ++i) {
+  for (int i = 0; i < op->getNumResults(); ++i) {
     auto& state = GetResultQuantState(op, i);
     if (state.immutable) {
       immutable_states.push_back(&state);
@@ -588,7 +541,7 @@ void QuantizationDriver::SetupAllStates() {
     }
     work_list_.push_back(op);
 
-    for (int i = 0, e = op->getNumOperands(); i != e; ++i) {
+    for (int i = 0; i < op->getNumOperands(); ++i) {
       Value operand = op->getOperand(i);
       if (auto* inst = operand.getDefiningOp()) {
         // If the operand comes from a `quantfork::DequantizeCastOp`, we use
@@ -601,7 +554,7 @@ void QuantizationDriver::SetupAllStates() {
       InitializeOperandState(op, i, operand);
     }
 
-    for (int res = 0, e = op->getNumResults(); res != e; ++res) {
+    for (int res = 0; res < op->getNumResults(); ++res) {
       Value result = op->getResult(res);
       // If the result has been quantized, it should only be used by a
       // `quantfork::QuantizeCastOp`. For this case, we uses the quantized
@@ -789,8 +742,6 @@ bool QuantizationDriver::PropagateParamsAndReturnIfChanged() {
     Operation* op = work_list_.back();
     work_list_.pop_back();
 
-    LLVM_DEBUG(DumpStates(op));
-
     // This op has been quantized, so we should not consider it again.
     if (llvm::is_contained(quantized_, op)) continue;
     quantized_.insert(op);
@@ -819,7 +770,7 @@ bool QuantizationDriver::PropagateParamsAndReturnIfChanged() {
       }
 
       // Use the final state to set all the operands' parameters.
-      for (int i = 0, e = op->getNumOperands(); i != e; ++i) {
+      for (int i = 0; i < op->getNumOperands(); ++i) {
         if (auto type = op->getOperand(i).getType().dyn_cast<ShapedType>()) {
           // Without this check, it will accidentally propagate the quantization
           // information by the shared non-float tensors.
@@ -829,7 +780,7 @@ bool QuantizationDriver::PropagateParamsAndReturnIfChanged() {
       }
 
       // Use the final state to set all the results' parameters.
-      for (int res = 0, e = op->getNumResults(); res != e; ++res)
+      for (int res = 0; res < op->getNumResults(); ++res)
         if (auto type = op->getResult(res).getType().dyn_cast<ShapedType>()) {
           // Without this check, it will accidentally propagate the quantization
           // information by the shared non-float-tensors.
@@ -867,9 +818,6 @@ bool QuantizationDriver::PropagateParamsAndReturnIfChanged() {
           SetBiasParamsWithAdjustments(op, it.first, it.second.first, params);
     }
   }
-
-  LLVM_DEBUG(llvm::dbgs() << "\n\n\n");
-  LLVM_DEBUG(DumpStates(nullptr));
 
   return changed;
 }
