@@ -13,14 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_NCCL_COLLECTIVE_PERMUTE_THUNK_H_
-#define XLA_SERVICE_GPU_NCCL_COLLECTIVE_PERMUTE_THUNK_H_
+#ifndef XLA_SERVICE_GPU_RUNTIME_NCCL_COLLECTIVE_PERMUTE_THUNK_H_
+#define XLA_SERVICE_GPU_RUNTIME_NCCL_COLLECTIVE_PERMUTE_THUNK_H_
 
 #include <cstdint>
 
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
+#include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/collective_ops_utils.h"
+#include "xla/service/gpu/nccl_api.h"
 #include "xla/service/gpu/nccl_collective_thunk.h"
 #include "xla/service/gpu/nccl_p2p_thunk_common.h"
+#include "xla/stream_executor/stream.h"
 
 namespace xla {
 namespace gpu {
@@ -65,4 +70,4 @@ absl::Status RunCollectivePermute(
 }  // namespace gpu
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_NCCL_COLLECTIVE_PERMUTE_THUNK_H_
+#endif  // XLA_SERVICE_GPU_RUNTIME_NCCL_COLLECTIVE_PERMUTE_THUNK_H_

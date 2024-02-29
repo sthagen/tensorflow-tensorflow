@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
 #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "xla/service/gpu/fusions/mlir/computation_partitioner.h"
+#include "xla/service/gpu/fusions/mlir/ir/xla_gpu_ops.h"
 #include "xla/service/hlo_parser.h"
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/status_macros.h"
@@ -52,7 +53,8 @@ class ElementalHloToMlirTest : public HloTestBase {
     context_.loadDialect<mlir::tensor::TensorDialect, mlir::func::FuncDialect,
                          mlir::affine::AffineDialect, mlir::arith::ArithDialect,
                          mlir::math::MathDialect, mlir::scf::SCFDialect,
-                         mlir::mhlo::MhloDialect, mlir::LLVM::LLVMDialect>();
+                         mlir::mhlo::MhloDialect, mlir::LLVM::LLVMDialect,
+                         xla::gpu::XlaGpuDialect>();
   }
 
   // Converts the root subgraph of the entry function of the given hlo module to
@@ -159,20 +161,20 @@ TEST_F(ElementalHloToMlirTest, Concatenate) {
     // CHECK-DAG:    %[[C20:.*]] = arith.constant 20
     // CHECK:        %[[IN_BOUNDS:.*]] = arith.cmpi ult, %[[Y]], %[[C20]]
     // CHECK:        %[[CONCAT:.*]] = scf.if %[[IN_BOUNDS]]
-    // CHECK:          %[[P0_VAL:.*]] = tensor.extract %[[ARG0]]
-    // CHECK-SAME:         [%[[X]], %[[Y]], %[[Z]]]
+    // CHECK:          %[[P0_VAL:.*]] = xla_gpu.pure_call @main_p0
+    // CHECK-SAME:         %[[X]], %[[Y]], %[[Z]]
     // CHECK:          scf.yield %[[P0_VAL]]
     // CHECK:        } else {
     // CHECK:          %[[IN_BOUNDS:.*]] = arith.cmpi ult, %[[Y]], %[[C35]]
     // CHECK:          %[[CONCAT2:.*]] = scf.if %[[IN_BOUNDS]]
     // CHECK:            %[[OFFSET:.*]] = arith.subi %[[Y]], %[[C20]]
-    // CHECK:            %[[P1_VAL:.*]] = tensor.extract %[[ARG1]]
-    // CHECK-SAME:           [%[[X]], %[[OFFSET]], %[[Z]]]
+    // CHECK:            %[[P1_VAL:.*]] = xla_gpu.pure_call @main_p1
+    // CHECK-SAME:           %[[X]], %[[OFFSET]], %[[Z]]
     // CHECK:            scf.yield %[[P1_VAL]]
     // CHECK:          } else {
     // CHECK:            %[[OFFSET:.*]] = arith.subi %[[Y]], %[[C35]]
-    // CHECK:            %[[P2_VAL:.*]] = tensor.extract %[[ARG2]]
-    // CHECK-SAME:           [%[[X]], %[[OFFSET]], %[[Z]]]
+    // CHECK:            %[[P2_VAL:.*]] = xla_gpu.pure_call @main_p2
+    // CHECK-SAME:           %[[X]], %[[OFFSET]], %[[Z]]
     // CHECK:            scf.yield %[[P2_VAL]]
     // CHECK:          }
     // CHECK:          scf.yield %[[CONCAT2]]
@@ -303,6 +305,24 @@ TEST_F(ElementalHloToMlirTest, Add) {
   )"));
 }
 
+TEST_F(ElementalHloToMlirTest, Complex) {
+  TF_EXPECT_OK(Run(R"(
+    ENTRY main {
+      p0 = f32[4] parameter(0)
+      p1 = f32[4] parameter(1)
+      ROOT add = c64[4] complex(p0, p1)
+    })",
+                   R"(
+    // CHECK:      @main_add(
+    // CHECK-SAME:     %[[ARG0:.*]]: tensor<4xf32>, %[[ARG1:.*]]: tensor<4xf32>,
+    // CHECK-SAME:     %[[X:.*]]: index {{.*}}
+    // CHECK:        %[[A:.*]] = tensor.extract %[[ARG0]][%[[X]]]
+    // CHECK:        %[[B:.*]] = tensor.extract %[[ARG1]][%[[X]]]
+    // CHECK:        %[[RET:.*]] = complex.create %[[A]], %[[B]]
+    // CHECK:        return %[[RET]]
+  )"));
+}
+
 TEST_F(ElementalHloToMlirTest, InjectedParameter) {
   TF_EXPECT_OK(Run(
       R"(
@@ -333,6 +353,92 @@ TEST_F(ElementalHloToMlirTest, InjectedParameter) {
         // Inject the transpose argument.
         return instr->operand(operand_id)->opcode() == HloOpcode::kTranspose;
       }));
+}
+
+TEST_F(ElementalHloToMlirTest, ScalarConstant) {
+  TF_EXPECT_OK(Run(R"(
+    ENTRY main {
+      p0 = f32[1,1] parameter(0)
+      c1 = f32[1,1] constant({{1.0}})
+      ROOT add = f32[1,1] add(p0, c1)
+    })",
+                   R"(
+    // CHECK:      @main_add(
+    // CHECK-SAME:     %[[ARG0:.*]]: tensor<1x1xf32>
+    // CHECK-SAME:     %[[X:.*]]: index {{.*}}, %[[Y:.*]]: index {{.*}}
+    // CHECK:        %[[C_1:.*]] = arith.constant 1
+    // CHECK:        %[[A:.*]] = tensor.extract %[[ARG0]][%[[X]], %[[Y]]]
+    // CHECK:        %[[RET:.*]] = arith.addf %[[A]], %[[C_1]]
+    // CHECK:        return %[[RET]]
+  })"));
+}
+
+TEST_F(ElementalHloToMlirTest, DynamicSlice) {
+  TF_EXPECT_OK(Run(R"(
+    ENTRY main {
+      in = f32[20,30] parameter(0)
+      i0 = s32[] parameter(1)
+      i1 = s32[] parameter(2)
+      ROOT slice = f32[4,5] dynamic-slice(in, i0, i1), dynamic_slice_sizes={4,5}
+    })",
+                   R"(
+    // CHECK:      @main_slice(
+    // CHECK-SAME:     %[[ARG0:.*]]: tensor<20x30xf32>,
+    // CHECK-SAME:     %[[I0_T:.*]]: tensor<i32>, %[[I1_T:.*]]: tensor<i32>,
+    // CHECK-SAME:     %[[X:.*]]: index {{{.*}}}, %[[Y:.*]]: index {
+    // CHECK-DAG:    %[[C0:.*]] = arith.constant 0
+    // CHECK-DAG:    %[[C16:.*]] = arith.constant 16
+    // CHECK-DAG:    %[[C25:.*]] = arith.constant 25
+    // CHECK:        %[[I0:.*]] = tensor.extract %[[I0_T]]
+    // CHECK:        %[[I0_1:.*]] = arith.index_cast %[[I0]]
+    // CHECK:        %[[I0_2:.*]] = arith.minsi %[[I0_1]], %[[C16]]
+    // CHECK:        %[[I0_3:.*]] = arith.maxsi %[[I0_2]], %[[C0]]
+    // CHECK:        %[[X_IN:.*]] = arith.addi %[[X]], %[[I0_3]]
+    // CHECK:        %[[I1:.*]] = tensor.extract %[[I1_T]]
+    // CHECK:        %[[I1_1:.*]] = arith.index_cast %[[I1]]
+    // CHECK:        %[[I1_2:.*]] = arith.minsi %[[I1_1]], %[[C25]]
+    // CHECK:        %[[I1_3:.*]] = arith.maxsi %[[I1_2]], %[[C0]]
+    // CHECK:        %[[Y_IN:.*]] = arith.addi %[[Y]], %[[I1_3]]
+    // CHECK:        %[[RET:.*]] = tensor.extract %[[ARG0]][%[[X_IN]], %[[Y_IN]]]
+    // CHECK:        return %[[RET]]
+  )"));
+}
+
+TEST_F(ElementalHloToMlirTest, DynamicUpdateSlice) {
+  TF_EXPECT_OK(Run(R"(
+    ENTRY main {
+      in = f32[20,30] parameter(0)
+      updates = f32[5,6] parameter(1)
+      i0 = s32[] parameter(2)
+      i1 = s32[] parameter(3)
+      ROOT updated = f32[20,30] dynamic-update-slice(in, updates, i0, i1)
+    })",
+                   R"(
+    // CHECK:      @main_updated(
+    // CHECK-SAME:     %[[ARG0:.*]]: tensor<20x30xf32>, %[[ARG1:.*]]: tensor<5x6xf32>
+    // CHECK-SAME:     %[[I0_T:.*]]: tensor<i32>, %[[I1_T:.*]]: tensor<i32>,
+    // CHECK-SAME:     %[[X:.*]]: index {{{.*}}}, %[[Y:.*]]: index {
+    // CHECK-DAG:    %[[C0:.*]] = arith.constant 0
+    // CHECK-DAG:    %[[C5:.*]] = arith.constant 5
+    // CHECK-DAG:    %[[C6:.*]] = arith.constant 6
+    // CHECK-DAG:    %[[C15:.*]] = arith.constant 15
+    // CHECK-DAG:    %[[C24:.*]] = arith.constant 24
+    // CHECK:        %[[I0:.*]] = tensor.extract %[[I0_T]]
+    // CHECK:        %[[I0_1:.*]] = arith.index_cast %[[I0]]
+    // CHECK:        %[[I0_2:.*]] = arith.minsi %[[I0_1]], %[[C15]]
+    // CHECK:        %[[START_X:.*]] = arith.maxsi %[[I0_2]], %[[C0]]
+    // CHECK:        %[[END_X:.*]] = arith.addi %[[START_X]], %[[C5]]
+    // CHECK:        %[[LOW_X:.*]] = arith.cmpi sge, %[[X]], %[[START_X]]
+    // CHECK:        %[[HIGH_X:.*]] = arith.cmpi slt, %[[X]], %[[END_X]]
+    // CHECK:        %[[BOUNDS_X:.*]] = arith.andi %[[LOW_X]], %[[HIGH_X]]
+    // CHECK:        %[[UPDATES_X:.*]] = arith.subi %[[X]], %[[START_X]]
+    // CHECK:        arith.andi
+    // CHECK:        %[[BOUNDS:.*]] = arith.andi
+    // CHECK:        scf.if %[[BOUNDS]]
+    // CHECK:          tensor.extract %[[ARG1]][%[[UPDATES_X]]
+    // CHECK:        } else {
+    // CHECK:          tensor.extract %[[ARG0]][%[[X]]
+  )"));
 }
 
 }  // namespace

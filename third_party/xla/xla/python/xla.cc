@@ -78,6 +78,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_api.h"
 #include "xla/pjrt/pjrt_c_api_client.h"
 #include "xla/pjrt/pjrt_client.h"
+#include "xla/pjrt/pjrt_layout.h"
 #include "xla/pjrt/status_casters.h"
 #include "xla/python/custom_call_sharding.h"
 #include "xla/python/dlpack.h"
@@ -451,6 +452,8 @@ static void Init(py::module_& m) {
              }
              return devices;
            });
+
+  py::class_<PjRtLayout>(m, "PjRtLayout").def("__str__", &PjRtLayout::ToString);
 
   // Local XLA client methods.
 
@@ -886,7 +889,7 @@ static void Init(py::module_& m) {
   jax::BuildJaxjitSubmodule(m);
   jax::BuildPmapSubmodule(m);
   jax::BuildPjitSubmodule(m);
-  jax::BuildTransferGuardSubmodule(m);
+  jax::BuildTransferGuardSubmodule(m_nb);
   BuildTracebackSubmodule(m_nb);
   BuildMlirSubmodule(m);
   BuildCustomCallShardingPybindAPI(m);

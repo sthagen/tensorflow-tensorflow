@@ -61,7 +61,7 @@ def LowerTensorsPass :
 
   let dependentDialects = [
     "mlir::func::FuncDialect", "mlir::gpu::GPUDialect", "mlir::LLVM::LLVMDialect",
-    "mlir::tensor::TensorDialect"
+    "mlir::tensor::TensorDialect", "mlir::scf::SCFDialect",
   ];
 
   let constructor = "CreateLowerTensorsPass()";
@@ -120,6 +120,18 @@ def ExpandFloatConversionsPass : Pass<"xla-gpu-expand-conversions", "mlir::Modul
     Option<"include_bf16_", "include-bf16", "bool", /*default=*/"false",
            "Enable the BF16 <-> F32 expansion patterns.">,
   ];
+}
+
+def LowerXlaGpuToScfPass :
+   Pass<"xla-gpu-lower-xla-gpu-to-scf", "mlir::ModuleOp"> {
+  let summary = "Lowers xla_gpu to SCF.";
+
+  let dependentDialects = [
+    "mlir::gpu::GPUDialect", "mlir::scf::SCFDialect",
+    "mlir::tensor::TensorDialect", "xla::gpu::XlaGpuDialect",
+  ];
+
+  let constructor = "CreateLowerXlaGpuToScfPass()";
 }
 
 def LowerToLLVMPass :

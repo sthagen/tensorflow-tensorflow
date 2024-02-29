@@ -25,6 +25,8 @@ limitations under the License.
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/Casting.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"  // from @llvm-project
+#include "mlir/Conversion/ComplexToStandard/ComplexToStandard.h"  // from @llvm-project
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"  // from @llvm-project
 #include "mlir/Dialect/Affine/IR/AffineOps.h"  // from @llvm-project
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"  // from @llvm-project
@@ -219,7 +221,9 @@ MlirFusionEmitterBase::CreateLLVMModule(
   pm.addPass(mlir::createCSEPass());
   pm.addPass(CreatePropagateSliceIndicesPass());
   pm.addPass(CreateLowerFuncPass());
+  pm.addPass(CreateLowerXlaGpuToScfPass());
   pm.addPass(CreateLowerTensorsPass());
+  pm.addPass(mlir::createConvertComplexToStandardPass());
   pm.addPass(CreateMergePointersToSameSlicePass());
 
   // LowerTensors creates new affine.apply ops. Fold and CSE them so
@@ -239,6 +243,7 @@ MlirFusionEmitterBase::CreateLLVMModule(
   pm.addPass(CreateExpandFloatConversionsPass(
       !device.cuda_compute_capability().IsAtLeastAmpere()));
   pm.addPass(CreateLowerToLLVMPass());
+  pm.addPass(mlir::createReconcileUnrealizedCastsPass());
   TF_RET_CHECK(pm.run(module.get()).succeeded());
 
   auto llvm_module = mlir::translateModuleToLLVMIR(module.get(), llvm_context);
@@ -345,7 +350,7 @@ MlirFusionEmitterBase::CreateMLIRModule(
 
 absl::StatusOr<llvm::SmallVector<mlir::Value>>
 MlirFusionEmitterBase::EmitLoopNest(
-    mlir::ImplicitLocOpBuilder& b, mlir::ValueRange output_tensors,
+    mlir::ImplicitLocOpBuilder& b, mlir::ValueRange outputs,
     const IndexingMap& indexing_map,
     const std::function<absl::StatusOr<llvm::SmallVector<mlir::Value>>(
         mlir::ValueRange outputs_tensors, mlir::ValueRange dim_values,
@@ -391,7 +396,7 @@ MlirFusionEmitterBase::EmitLoopNest(
     return if_op.getResults();
   };
 
-  return make_loops(0, output_tensors);
+  return make_loops(0, outputs);
 }
 
 }  // namespace gpu

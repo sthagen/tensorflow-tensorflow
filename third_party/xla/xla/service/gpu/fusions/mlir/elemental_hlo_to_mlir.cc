@@ -63,6 +63,7 @@ limitations under the License.
 #include "xla/service/gpu/fusions/mlir/ir/xla_gpu_ops.h"
 #include "xla/service/gpu/hlo_traversal.h"
 #include "xla/service/gpu/model/indexing_analysis.h"
+#include "xla/shape_util.h"
 #include "xla/status_macros.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/translate/hlo_to_mhlo/hlo_utils.h"
@@ -116,14 +117,12 @@ static auto& kUnsupportedOps =
                                         HloOpcode::kCustomCall,
                                         HloOpcode::kDomain,
                                         HloOpcode::kDynamicReshape,
-                                        HloOpcode::kDynamicSlice,
                                         HloOpcode::kFft,
                                         HloOpcode::kFusion,
                                         HloOpcode::kGetDimensionSize,
                                         HloOpcode::kOptimizationBarrier,
                                         HloOpcode::kInfeed,
                                         HloOpcode::kOutfeed,
-                                        HloOpcode::kParameter,
                                         HloOpcode::kPartitionId,
                                         HloOpcode::kRecv,
                                         HloOpcode::kRecvDone,
@@ -146,15 +145,16 @@ static auto& kUnsupportedOps =
                                         HloOpcode::kCall};
 
 static auto& kUnimplementedOps = *new absl::flat_hash_set<HloOpcode>{
-    HloOpcode::kConvolution, HloOpcode::kDot, HloOpcode::kDynamicUpdateSlice,
-    HloOpcode::kMap, HloOpcode::kReduceWindow,
+    HloOpcode::kConvolution, HloOpcode::kDot, HloOpcode::kMap,
+    HloOpcode::kReduceWindow,
     // Custom approximations in XLA:
     HloOpcode::kErf, HloOpcode::kTanh,
     // Incorrect NaN handling:
     HloOpcode::kMaximum, HloOpcode::kMinimum, HloOpcode::kClamp};
 
 bool IsUnsupportedConstant(const HloInstruction* instr) {
-  return instr->opcode() == HloOpcode::kConstant && instr->shape().rank() != 0;
+  return instr->opcode() == HloOpcode::kConstant &&
+         !ShapeUtil::IsEffectiveScalar(instr->shape());
 }
 
 bool IsUnsupportedTuple(const HloInstruction* instr) {
@@ -306,6 +306,85 @@ absl::StatusOr<llvm::SmallVector<Value>> EmitConcat(
   return outermost_if.getResults();
 }
 
+mlir::Value ClampIndex(mlir::Value index, int64_t high,
+                       mlir::ImplicitLocOpBuilder& b) {
+  auto zero = b.create<ConstantOp>(b.getIndexAttr(0));
+  if (high <= 0) {
+    return zero;
+  }
+
+  if (index.getType() != b.getIndexType()) {
+    index = b.create<arith::IndexCastOp>(b.getIndexType(), index);
+  }
+  index = b.create<arith::MinSIOp>(index,
+                                   b.create<ConstantOp>(b.getIndexAttr(high)));
+  index = b.create<arith::MaxSIOp>(index, zero);
+  return index;
+}
+
+absl::StatusOr<llvm::SmallVector<Value>> EmitDynamicSlice(
+    const HloInstruction* instr, ValueRange indices,
+    const OperandProvider& operand_provider, mlir::ImplicitLocOpBuilder& b) {
+  llvm::SmallVector<Value> input_indices(indices);
+
+  const auto& input_shape = instr->operand(0)->shape();
+  for (int i = 0; i < input_shape.rank(); ++i) {
+    TF_ASSIGN_OR_RETURN(
+        auto offset, GetSingleOperandValue(operand_provider, instr, i + 1, {}));
+    offset = ClampIndex(
+        offset, input_shape.dimensions(i) - instr->shape().dimensions(i), b);
+    input_indices[i] = b.create<arith::AddIOp>(input_indices[i], offset);
+  }
+
+  return operand_provider(instr, 0, input_indices);
+}
+
+absl::StatusOr<llvm::SmallVector<Value>> EmitDynamicUpdateSlice(
+    const HloInstruction* instr, ValueRange indices,
+    const OperandProvider& operand_provider, mlir::ImplicitLocOpBuilder& b) {
+  mlir::Value is_in_bounds =
+      b.create<ConstantOp>(b.getIntegerAttr(b.getI1Type(), 1));
+  mlir::SmallVector<Value> update_indices;
+  const auto& updates_shape = instr->operand(1)->shape();
+  for (int i = 0; i < instr->shape().rank(); ++i) {
+    int64_t update_size = updates_shape.dimensions(i);
+    TF_ASSIGN_OR_RETURN(
+        auto start_index,
+        GetSingleOperandValue(operand_provider, instr, i + 2, {}));
+    start_index =
+        ClampIndex(start_index, instr->shape().dimensions(i) - update_size, b);
+
+    auto end_index = b.create<arith::AddIOp>(
+        start_index, b.create<ConstantOp>(b.getIndexAttr(update_size)));
+
+    is_in_bounds = b.create<AndIOp>(
+        is_in_bounds,
+        b.create<CmpIOp>(CmpIPredicate::sge, indices[i], start_index));
+    is_in_bounds = b.create<AndIOp>(
+        is_in_bounds,
+        b.create<CmpIOp>(CmpIPredicate::slt, indices[i], end_index));
+
+    update_indices.push_back(b.create<arith::SubIOp>(indices[i], start_index));
+  }
+
+  auto ty = *ConvertPrimitiveTypeToMLIRType(instr->shape().element_type(), b);
+  auto if_op = b.create<IfOp>(mlir::TypeRange{ty}, is_in_bounds, true, true);
+  b.setInsertionPointToStart(if_op.getBody(0));
+  TF_ASSIGN_OR_RETURN(
+      auto updated_value,
+      GetSingleOperandValue(operand_provider, instr, 1, update_indices));
+  b.create<YieldOp>(updated_value);
+
+  b.setInsertionPointToStart(if_op.getBody(1));
+  TF_ASSIGN_OR_RETURN(
+      auto original_value,
+      GetSingleOperandValue(operand_provider, instr, 0, indices));
+  b.create<YieldOp>(original_value);
+
+  b.setInsertionPointAfter(if_op);
+  return if_op.getResults();
+}
+
 absl::StatusOr<llvm::SmallVector<Value>> EmitGather(
     const HloInstruction* instr, ValueRange indices,
     const OperandProvider& operand_provider, mlir::ImplicitLocOpBuilder& b) {
@@ -322,24 +401,13 @@ absl::StatusOr<llvm::SmallVector<Value>> EmitGather(
     auto i_val = i == 0 ? zero : b.create<ConstantOp>(b.getIndexAttr(i));
     int64_t slice_size = instr->gather_slice_sizes()[i];
     int64_t input_size = instr->operand(0)->shape().dimensions()[i];
-    if (slice_size == input_size) {
-      // We're reading the full dimension, so clamping would always result in a
-      // zero index.
-      operand_indices[i] = zero;
-    } else {
-      // Read and clamp index.
-      TF_ASSIGN_OR_RETURN(auto input_index,
-                          operand_provider(instr, 1, {row, i_val}));
-      TF_RET_CHECK(input_index.size() == 1)
-          << "Expected operand to be a single value.";
-      mlir::Value index =
-          b.create<arith::IndexCastOp>(b.getIndexType(), input_index.front());
-      auto max_minus_size =
-          b.create<ConstantOp>(b.getIndexAttr(input_size - slice_size));
-      index = b.create<arith::MinSIOp>(index, max_minus_size);
-      index = b.create<arith::MaxSIOp>(index, zero);
-      operand_indices[i] = index;
-    }
+    // Read and clamp index.
+    TF_ASSIGN_OR_RETURN(auto input_index,
+                        operand_provider(instr, 1, {row, i_val}));
+    TF_RET_CHECK(input_index.size() == 1)
+        << "Expected operand to be a single value.";
+    operand_indices[i] =
+        ClampIndex(input_index.front(), input_size - slice_size, b);
   }
 
   // Add offsets.
@@ -384,7 +452,6 @@ absl::StatusOr<llvm::SmallVector<Value>> EmitPad(
   auto indexing = ComputeOutputToInputIndexing(instr, 0, b.getContext());
   const auto& indexing_map = *indexing.indexing_maps[0].begin();
   mlir::Value is_in_bounds = CheckConstraints(indexing_map, indices, {}, b);
-  b.create<ConstantOp>(b.getIntegerAttr(b.getI1Type(), 1));
   for (auto&& [index, range] :
        llvm::enumerate(indexing_map.GetDimensionRanges())) {
     // If the range is the full output dimension, it's always in bounds. Sadly,
@@ -414,6 +481,21 @@ absl::StatusOr<llvm::SmallVector<Value>> EmitPad(
 
   b.setInsertionPointAfter(if_op);
   return if_op.getResults();
+}
+
+absl::StatusOr<llvm::SmallVector<Value>> EmitParameter(
+    const HloInstruction* instr, ValueRange indices,
+    const CallTargetProvider& call_target_provider,
+    mlir::ImplicitLocOpBuilder& b) {
+  auto this_fn = call_target_provider(instr);
+
+  mlir::Value value = this_fn.getArgument(instr->parameter_number());
+  if (value.getType().isa<mlir::TensorType>()) {
+    value = b.create<mlir::tensor::ExtractOp>(value, indices);
+  } else {
+    TF_RET_CHECK(indices.empty());
+  }
+  return {{value}};
 }
 
 template <typename MhloOp, typename... ExtraArgs>
@@ -489,7 +571,7 @@ absl::StatusOr<llvm::SmallVector<Value>> HloToMlir(
     case HloOpcode::kConcatenate:
       return EmitConcat(instr, indices, operand_provider, builder);
     case HloOpcode::kConstant:
-      if (instr->shape().rank() == 0) {
+      if (ShapeUtil::IsEffectiveScalar(instr->shape())) {
         auto val = mlir::cast<mlir::TypedAttr>(
             CreateDenseElementsAttrFromLiteral(instr->literal(), builder)
                 ->getValues<mlir::Attribute>()[0]);
@@ -497,6 +579,10 @@ absl::StatusOr<llvm::SmallVector<Value>> HloToMlir(
       }
       return absl::UnimplementedError(
           absl::StrCat("Unimplemented: ", instr->ToShortString()));
+    case HloOpcode::kDynamicSlice:
+      return EmitDynamicSlice(instr, indices, operand_provider, builder);
+    case HloOpcode::kDynamicUpdateSlice:
+      return EmitDynamicUpdateSlice(instr, indices, operand_provider, builder);
     case HloOpcode::kGather:
       return EmitGather(instr, indices, operand_provider, builder);
     case HloOpcode::kIota: {
@@ -514,6 +600,8 @@ absl::StatusOr<llvm::SmallVector<Value>> HloToMlir(
     }
     case HloOpcode::kPad:
       return EmitPad(instr, indices, operand_provider, builder);
+    case HloOpcode::kParameter:
+      return EmitParameter(instr, indices, call_target_provider, builder);
     case HloOpcode::kReduce:
       return EmitReduce(instr, indices, operand_provider, call_target_provider,
                         builder);
@@ -759,16 +847,16 @@ bool IsHloOpSupported(const HloInstruction* instr,
   auto is_unsupported_type = [](const HloInstruction* instr) {
     auto e = instr->shape().element_type();
     // TODO(jreiffers): Convert to signless.
-    // TODO(jreiffers): Support complex.
-    // TODO(jreiffers): Support fp8, fp16, bf16.
+    // TODO(akuegel): Fix remaining issues with complex.
+    // TODO(jreiffers): Support fp8.
     // TODO(jreiffers): Support int4.
     return (primitive_util::IsIntegralType(e) &&
             primitive_util::BitWidth(e) > 1 &&
             primitive_util::BitWidth(e) < 8) ||
-           primitive_util::IsUnsignedIntegralType(e) ||
            primitive_util::IsComplexType(e) ||
+           primitive_util::IsUnsignedIntegralType(e) ||
            (primitive_util::IsFloatingPointType(e) &&
-            primitive_util::BitWidth(e) < 32);
+            primitive_util::BitWidth(e) < 16);
   };
   if (is_unsupported_type(instr) ||
       absl::c_any_of(instr->operands(), is_unsupported_type)) {
@@ -846,15 +934,6 @@ absl::StatusOr<llvm::SmallVector<mlir::Value>> ProvideParameter(
   auto this_fn = call_target_provider(caller_subgraph.roots[0]);
 
   auto* operand = instr->operand(operand_index);
-  if (operand->opcode() == HloOpcode::kParameter) {
-    mlir::Value value = this_fn.getArgument(operand->parameter_number());
-    if (value.getType().isa<mlir::TensorType>()) {
-      value = builder.create<mlir::tensor::ExtractOp>(value, indices);
-    } else {
-      TF_RET_CHECK(indices.size() == 0);
-    }
-    return {{value}};
-  }
 
   const auto& injected_params = caller_subgraph.injected_param_indices;
   if (auto it = injected_params.find(std::make_pair(instr, operand_index));
@@ -869,6 +948,22 @@ absl::StatusOr<llvm::SmallVector<mlir::Value>> ProvideParameter(
       this_fn.getArguments().take_front(instr->parent()->num_parameters()));
   absl::c_copy(indices, std::back_inserter(operands));
   return builder.create<PureCallOp>(callee, operands).getResults();
+}
+
+absl::StatusOr<llvm::SmallVector<mlir::Value>> ProvideParameterRange(
+    const PartitionedComputation& computation, const HloInstruction* instr,
+    int start, int num, mlir::ValueRange indices,
+    const CallTargetProvider& call_target_provider,
+    mlir::ImplicitLocOpBuilder& builder) {
+  llvm::SmallVector<mlir::Value> scalars;
+  for (int i = 0; i < num; ++i) {
+    TF_ASSIGN_OR_RETURN(auto scalar,
+                        ProvideParameter(computation, instr, i + start, indices,
+                                         call_target_provider, builder));
+    TF_RET_CHECK(scalar.size() == 1);
+    scalars.push_back(scalar.front());
+  }
+  return scalars;
 }
 
 namespace {
@@ -892,8 +987,7 @@ absl::StatusOr<llvm::SmallVector<mlir::Value>> SubgraphToMlir(
                              mlir::ValueRange indices)
       -> absl::StatusOr<llvm::SmallVector<mlir::Value>> {
     auto* operand = instr->operand(index);
-    if (operand->opcode() != HloOpcode::kParameter &&
-        &computation.FindSubgraph(operand) == &subgraph) {
+    if (&computation.FindSubgraph(operand) == &subgraph) {
       return emit_instr(operand, indices);
     }
     return ProvideParameter(computation, instr, index, indices,
