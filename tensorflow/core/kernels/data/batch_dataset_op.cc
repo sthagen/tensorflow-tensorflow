@@ -151,8 +151,9 @@ class BatchDatasetOp::Dataset : public DatasetBase {
       TF_RETURN_IF_ERROR(input_->Get(ctx, i, &batch_element_tuple));
       batch_elements.emplace_back(std::move(batch_element_tuple));
     }
-    TF_RETURN_IF_ERROR(CopyBatch(CopyBatchParams(ctx), batch_elements,
-                                 parallel_copy_, out_tensors));
+    TF_RETURN_IF_ERROR(CopyBatch(CopyBatchParams(ctx),
+                                 std::move(batch_elements), parallel_copy_,
+                                 out_tensors));
     return absl::OkStatus();
   }
 
@@ -243,7 +244,8 @@ class BatchDatasetOp::Dataset : public DatasetBase {
       // respective slice locations. This would require a different GetNext()
       // overload that supports zero-copy, and might make sense in an
       // optimization pass.
-      TF_RETURN_IF_ERROR(CopyBatch(CopyBatchParams(ctx), batch_elements,
+      TF_RETURN_IF_ERROR(CopyBatch(CopyBatchParams(ctx),
+                                   std::move(batch_elements),
                                    dataset()->parallel_copy_, out_tensors));
 
       *end_of_sequence = false;
@@ -270,9 +272,10 @@ class BatchDatasetOp::Dataset : public DatasetBase {
     Status RestoreInternal(IteratorContext* ctx,
                            IteratorStateReader* reader) override {
       mutex_lock l(mu_);
-      if (ctx->element_count().has_value()) {
+      if (ctx->restored_element_count().has_value()) {
         IteratorContext::Params params(ctx);
-        params.element_count = *ctx->element_count() * dataset()->batch_size_;
+        params.restored_element_count =
+            *ctx->restored_element_count() * dataset()->batch_size_;
         IteratorContext ctx_copy(params);
         return RestoreInput(&ctx_copy, reader, input_impl_);
       }

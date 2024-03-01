@@ -13,10 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
+#include "mlir/Dialect/Math/Transforms/Passes.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
@@ -32,17 +34,10 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
-#define GEN_PASS_DEF_EXPANDFLOATCONVERSIONSPASS
+#define GEN_PASS_DEF_EXPANDFLOATOPSPASS
 #include "xla/service/gpu/fusions/mlir/passes.h.inc"
 
 namespace {
-
-class ExpandFloatConversionsPass
-    : public impl::ExpandFloatConversionsPassBase<ExpandFloatConversionsPass> {
- public:
-  using ExpandFloatConversionsPassBase::ExpandFloatConversionsPassBase;
-  void runOnOperation() override;
-};
 
 template <typename Op>
 struct RewriteIntToBF16 : public mlir::OpRewritePattern<Op> {
@@ -180,29 +175,72 @@ struct RewriteTruncF64ToBF16
   }
 };
 
-void ExpandFloatConversionsPass::runOnOperation() {
-  mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<RewriteExtBF16ToF32>(&getContext());
-  patterns.add<RewriteExtBF16ToF64>(&getContext());
-  patterns.add<RewriteIntToBF16<mlir::arith::SIToFPOp>>(&getContext());
-  patterns.add<RewriteIntToBF16<mlir::arith::UIToFPOp>>(&getContext());
-  patterns.add<RewriteBF16ToInt<mlir::arith::FPToSIOp>>(&getContext());
-  patterns.add<RewriteBF16ToInt<mlir::arith::FPToUIOp>>(&getContext());
-  if (include_bf16_) {
-    patterns.add<RewriteTruncF32ToBF16>(&getContext());
+template <typename OpTy, mlir::arith::CmpFPredicate pred,
+          typename =
+              std::enable_if_t<std::is_same_v<OpTy, mlir::arith::MaximumFOp> ||
+                               std::is_same_v<OpTy, mlir::arith::MinimumFOp>>>
+struct RewriteToCmpSelect : public mlir::OpRewritePattern<OpTy> {
+  using mlir::OpRewritePattern<OpTy>::OpRewritePattern;
+
+  mlir::LogicalResult matchAndRewrite(
+      OpTy op, mlir::PatternRewriter& rewriter) const override {
+    auto lhs_is_nan = rewriter.create<mlir::arith::CmpFOp>(
+        op.getLoc(), mlir::arith::CmpFPredicate::UNE, op.getLhs(), op.getLhs());
+    auto rhs_is_not_nan = rewriter.create<mlir::arith::CmpFOp>(
+        op.getLoc(), mlir::arith::CmpFPredicate::OEQ, op.getRhs(), op.getRhs());
+
+    auto return_lhs = rewriter
+                          .create<mlir::arith::CmpFOp>(op.getLoc(), pred,
+                                                       op.getLhs(), op.getRhs())
+                          .getResult();
+
+    // logic: isNaN(lhs) || (!isNan(rhs) && return_lhs) ? lhs : rhs
+    return_lhs = rewriter.create<mlir::arith::OrIOp>(
+        op.getLoc(), lhs_is_nan,
+        rewriter.create<mlir::arith::AndIOp>(op.getLoc(), rhs_is_not_nan,
+                                             return_lhs));
+
+    rewriter.replaceOpWithNewOp<mlir::arith::SelectOp>(
+        op, op.getResult().getType(), return_lhs, op.getLhs(), op.getRhs());
+    return mlir::success();
   }
-  patterns.add<RewriteTruncF64ToBF16>(&getContext());
-  if (mlir::failed(mlir::applyPatternsAndFoldGreedily(getOperation(),
-                                                      std::move(patterns)))) {
-    signalPassFailure();
+};
+
+class ExpandFloatOpsPass
+    : public impl::ExpandFloatOpsPassBase<ExpandFloatOpsPass> {
+ public:
+  using ExpandFloatOpsPassBase::ExpandFloatOpsPassBase;
+  void runOnOperation() override {
+    mlir::RewritePatternSet patterns(&getContext());
+    patterns.add<RewriteExtBF16ToF32>(&getContext());
+    patterns.add<RewriteExtBF16ToF64>(&getContext());
+    patterns.add<RewriteIntToBF16<mlir::arith::SIToFPOp>>(&getContext());
+    patterns.add<RewriteIntToBF16<mlir::arith::UIToFPOp>>(&getContext());
+    patterns.add<RewriteBF16ToInt<mlir::arith::FPToSIOp>>(&getContext());
+    patterns.add<RewriteBF16ToInt<mlir::arith::FPToUIOp>>(&getContext());
+    if (pre_ampere_) {
+      patterns.add<RewriteTruncF32ToBF16>(&getContext());
+      patterns.add<RewriteToCmpSelect<mlir::arith::MinimumFOp,
+                                      mlir::arith::CmpFPredicate::OLE>>(
+          &getContext());
+      patterns.add<RewriteToCmpSelect<mlir::arith::MaximumFOp,
+                                      mlir::arith::CmpFPredicate::OGE>>(
+          &getContext());
+    }
+    patterns.add<RewriteTruncF64ToBF16>(&getContext());
+    mlir::populatePolynomialApproximateTanhPattern(patterns);
+    mlir::populatePolynomialApproximateErfPattern(patterns);
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(getOperation(),
+                                                        std::move(patterns)))) {
+      signalPassFailure();
+    }
   }
-}
+};
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> CreateExpandFloatConversionsPass(bool enable_bf16) {
-  return createExpandFloatConversionsPass(
-      ExpandFloatConversionsPassOptions{enable_bf16});
+std::unique_ptr<mlir::Pass> CreateExpandFloatOpsPass(bool pre_ampere) {
+  return createExpandFloatOpsPass(ExpandFloatOpsPassOptions{pre_ampere});
 }
 
 }  // namespace gpu

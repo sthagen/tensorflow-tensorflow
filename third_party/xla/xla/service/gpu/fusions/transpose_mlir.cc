@@ -15,13 +15,9 @@ limitations under the License.
 #include "xla/service/gpu/fusions/transpose_mlir.h"
 
 #include <cstdint>
-#include <iterator>
 #include <optional>
-#include <tuple>
-#include <utility>
 #include <vector>
 
-#include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
@@ -72,6 +68,8 @@ namespace {
 
 using absl::StatusOr;
 using llvm::SmallVector;
+using mlir::AffineExpr;
+using mlir::AffineMap;
 using mlir::ModuleOp;
 using mlir::RankedTensorType;
 using mlir::Value;
@@ -184,21 +182,23 @@ LaunchDimensions MlirTransposeFusion::launch_dimensions() const {
 IndexingMap GetSharedMemoryWriteIndexingMap(
     const IndexingMap& thread_id_indexing) {
   auto* mlir_context = thread_id_indexing.GetMLIRContext();
-  auto c0 = mlir::getAffineConstantExpr(0, mlir_context);
-  mlir::AffineExpr th_x, th_y, th_z;
-  mlir::bindDims(mlir_context, th_x, th_y, th_z);
-  auto zero_block_map =
-      mlir::AffineMap::get(6, 0, {th_x, th_y, th_z, c0, c0, c0}, mlir_context);
 
-  auto dim_ranges = thread_id_indexing.GetDimensionRanges();
-  for (int bl_dim = 3; bl_dim < 6; ++bl_dim) {
-    dim_ranges[bl_dim] = Range{0, 0};
-  }
-  IndexingMap composed =
-      IndexingMap{zero_block_map, dim_ranges, /*symbol_ranges=*/{}} *
-      thread_id_indexing;
-  composed.Simplify();
-  return composed;
+  AffineExpr c0 = mlir::getAffineConstantExpr(0, mlir_context);
+  AffineExpr th_x = mlir::getAffineDimExpr(0, mlir_context);
+  SmallVector<AffineExpr, 3> tile_sizes(3);
+  mlir::bindSymbolsList(mlir_context, llvm::MutableArrayRef(tile_sizes));
+
+  IndexingMap shmem_write_indexing{
+      AffineMap::get(thread_id_indexing.GetDimensionCount(),
+                     thread_id_indexing.GetSymbolCount(),
+
+                     {c0, th_x.floorDiv(32) + 4 * tile_sizes[1], th_x % 32},
+                     mlir_context),
+      thread_id_indexing.GetDimensionRanges(),
+      thread_id_indexing.GetSymbolRanges(),
+      thread_id_indexing.GetConstraints()};
+  shmem_write_indexing.Simplify();
+  return shmem_write_indexing;
 }
 
 // Returns an indexing map with block_x, block_y, block_z set to 0 and swapped
@@ -209,7 +209,8 @@ IndexingMap GetSharedMemoryReadIndexingMap(
       GetSharedMemoryWriteIndexingMap(thread_id_indexing);
   return IndexingMap{write_indexing.GetAffineMap().getSubMap({0, 2, 1}),
                      write_indexing.GetDimensionRanges(),
-                     write_indexing.GetSymbolRanges()};
+                     write_indexing.GetSymbolRanges(),
+                     write_indexing.GetConstraints()};
 }
 
 absl::StatusOr<SmallVector<Value, 4>> MlirTransposeFusion::EmitWriteToShMemMlir(
@@ -249,12 +250,11 @@ absl::StatusOr<SmallVector<Value, 4>> MlirTransposeFusion::EmitWriteToShMemMlir(
         RankedTensorType::get(shmem_tensor_size, elem_type));
 
     // Emit loop that writes subgraphs of transpose operands to shmem.
-    TF_ASSIGN_OR_RETURN(
-        auto shmem_result,
-        EmitLoopNest(
+    auto shmem_result =
+        EmitThreadLoopNest(
             builder, {shmem}, *input_indexing,
             [&](ValueRange output_tensors, ValueRange dim_values,
-                ValueRange symbol_values) -> StatusOr<SmallVector<Value>> {
+                ValueRange symbol_values) -> SmallVector<Value> {
               auto input_indices =
                   ApplyAffineMap(input_indexing->GetAffineMap(), dim_values,
                                  symbol_values, builder);
@@ -262,11 +262,9 @@ absl::StatusOr<SmallVector<Value, 4>> MlirTransposeFusion::EmitWriteToShMemMlir(
                   ApplyAffineMap(shmem_input_indexing.GetAffineMap(),
                                  dim_values, symbol_values, builder);
 
-              TF_ASSIGN_OR_RETURN(
-                  auto result_scalars,
-                  mlir_converter::ProvideParameter(
-                      root_computation, transpose, /*operand_index=*/0,
-                      input_indices, call_target_provider, builder));
+              auto result_scalars = mlir_converter::ProvideParameter(
+                  root_computation, transpose, /*operand_index=*/0,
+                  input_indices, call_target_provider, builder);
 
               SmallVector<Value> result_tensors;
               result_tensors.reserve(num_outputs);
@@ -276,7 +274,7 @@ absl::StatusOr<SmallVector<Value, 4>> MlirTransposeFusion::EmitWriteToShMemMlir(
                     builder.create<InsertOp>(value, tensor, shmem_indices));
               }
               return result_tensors;
-            }));
+            });
     shmem_intermediate_result.append(shmem_result.begin(), shmem_result.end());
   }
 
@@ -313,14 +311,13 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
     auto description =
         GetDescriptionForTiledTransposeEmitter(*root, *transpose);
 
+    SmallVector<Value> result_scalars;
     if (description.has_value()) {
-      SmallVector<Value> result_scalars;
-      TF_ASSIGN_OR_RETURN(
-          auto subresult_tensors,
-          EmitLoopNest(
+      auto subresult_tensors =
+          EmitThreadLoopNest(
               builder, output_tensor_args, *output_indexing,
               [&](ValueRange output_tensors, ValueRange dim_values,
-                  ValueRange symbol_values) -> StatusOr<SmallVector<Value>> {
+                  ValueRange symbol_values) -> SmallVector<Value> {
                 auto output_indices =
                     ApplyAffineMap(output_indexing->GetAffineMap(), dim_values,
                                    symbol_values, builder);
@@ -358,7 +355,7 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
                       builder.create<InsertOp>(value, tensor, output_indices));
                 }
                 return results;
-              }));
+              });
       result_tensors.append(subresult_tensors.begin(), subresult_tensors.end());
     } else {
       auto indexing = ComputeThreadIdToOutputIndexing(0, module.getContext());
@@ -369,20 +366,18 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
       auto output_tensor_args =
           entry_function.getArguments().drop_front(num_inputs);
 
-      TF_ASSIGN_OR_RETURN(
-          auto subresult_tensors,
-          EmitLoopNest(
+      auto subresult_tensors =
+          EmitThreadLoopNest(
               builder, output_tensor_args, *indexing,
               [&](ValueRange output_tensors, ValueRange dim_values,
-                  ValueRange symbol_values)
-                  -> absl::StatusOr<SmallVector<mlir::Value>> {
+                  ValueRange symbol_values) -> SmallVector<Value> {
                 auto output_indices =
                     ApplyAffineMap(indexing->GetAffineMap(), dim_values,
                                    symbol_values, builder);
 
                 // Generate the operands for the root function: input tensors +
                 // output indices.
-                llvm::SmallVector<mlir::Value> operands(
+                llvm::SmallVector<Value> operands(
                     entry_function.getArguments().take_front(num_inputs));
                 absl::c_copy(output_indices, std::back_inserter(operands));
 
@@ -397,7 +392,7 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
                       builder.create<InsertOp>(value, tensor, output_indices));
                 }
                 return results;
-              }));
+              });
       result_tensors.append(subresult_tensors.begin(), subresult_tensors.end());
     }
   }
