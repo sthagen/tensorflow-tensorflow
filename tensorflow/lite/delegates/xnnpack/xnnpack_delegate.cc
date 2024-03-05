@@ -300,7 +300,7 @@ xnn_datatype GetXNNPackDatatype(TfLiteContext* context,
         TF_LITE_KERNEL_LOG(
             context,
             "mismatching number of quantization parameters %d and outer "
-            "dimension %d for INT8 tensor %d in XNNPACK delegate",
+            "dimension %d for INT32 tensor %d in XNNPACK delegate",
             quantization_params->scale->size, SizeOfDimension(&tensor, 0), t);
         return xnn_datatype_invalid;
       }
@@ -3417,6 +3417,14 @@ class Subgraph {
     const int kernel_width = SizeOfDimension(&filter_tensor, 2);
     const int input_channels = SizeOfDimension(&filter_tensor, 3);
     const int groups = SizeOfDimension(&input_tensor, 3) / input_channels;
+    // Input tensor shape is not yet known.
+    if (groups == 0) {
+      TF_LITE_KERNEL_LOG(
+          logging_context,
+          "groups of zero is not supported by CONV_2D operator #%d",
+          node_index);
+      return kTfLiteError;
+    }
 
     uint32_t flags;
     TF_LITE_ENSURE_STATUS(CalculatePadding(
@@ -3438,6 +3446,12 @@ class Subgraph {
           filter_params->scale = TfLiteFloatArrayCreate(output_channels);
           for (int i = 0; i < output_channels; ++i) {
             filter_params->scale->data[i] = filter_tensor.params.scale;
+          }
+          TfLiteIntArrayFree(filter_params->zero_point);
+          filter_params->zero_point = TfLiteIntArrayCreate(output_channels);
+          for (int i = 0; i < output_channels; ++i) {
+            filter_params->zero_point->data[i] =
+                filter_tensor.params.zero_point;
           }
         }
         uint32_t dq_quantized_id = XNN_INVALID_VALUE_ID;
@@ -4032,6 +4046,12 @@ class Subgraph {
           filter_params->scale = TfLiteFloatArrayCreate(output_channels);
           std::fill_n(filter_params->scale->data, output_channels,
                       filter_tensor.params.scale);
+          TfLiteIntArrayFree(filter_params->zero_point);
+          filter_params->zero_point = TfLiteIntArrayCreate(output_channels);
+          for (int i = 0; i < output_channels; ++i) {
+            filter_params->zero_point->data[i] =
+                filter_tensor.params.zero_point;
+          }
         }
         uint32_t dq_quantized_id = XNN_INVALID_VALUE_ID;
         size_t num_nonbatch_dims = 0;
@@ -5902,17 +5922,6 @@ class Subgraph {
     TF_LITE_ENSURE(logging_context, split_dim >= 0);
     TF_LITE_ENSURE(logging_context, split_dim < NumDimensions(&input_tensor));
 
-    const int input_split_dim_size = SizeOfDimension(&input_tensor, split_dim);
-    if (input_split_dim_size % num_outputs != 0) {
-      TF_LITE_MAYBE_KERNEL_LOG(
-          logging_context,
-          "Cannot evenly split dimension %d, which is %d, into %d", split_dim,
-          input_split_dim_size, num_outputs);
-      return kTfLiteError;
-    }
-
-    const int32_t expected_output_split_dim_size =
-        input_split_dim_size / num_outputs;
 
     for (int i = 0; i < NumOutputs(node); i++) {
       const int output_idx = node->outputs->data[i];
@@ -5922,28 +5931,6 @@ class Subgraph {
           delegate, logging_context, output_tensor, output_idx, node_index));
       TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
           delegate, logging_context, output_tensor, output_idx, node_index));
-      TF_LITE_ENSURE_EQ(logging_context, NumDimensions(&input_tensor),
-                        NumDimensions(&output_tensor));
-
-      for (int d = 0; d < NumDimensions(&input_tensor); d++) {
-        if (d == split_dim) {
-          if (SizeOfDimension(&output_tensor, split_dim) !=
-              expected_output_split_dim_size) {
-            TF_LITE_MAYBE_KERNEL_LOG(
-                logging_context,
-                "mismatch in split dimension %d (%d != %d) "
-                "in output %d and input"
-                "tensors of SPLIT operator #%d",
-                split_dim, SizeOfDimension(&output_tensor, split_dim),
-                expected_output_split_dim_size, d, node_index);
-            return kTfLiteError;
-          }
-        } else {
-          TF_LITE_ENSURE_STATUS(CheckTensorsDimensionMatch(
-              logging_context, input_tensor, output_tensor, d, node_index,
-              "SPLIT"));
-        }
-      }
     }
 
     if (subgraph != nullptr) {

@@ -70,7 +70,21 @@ cc_test(
 cc_library(
     name = "bf16",
     hdrs = ["bf16.h"],
-    deps = [":has_keyword"],
+    deps = [
+        ":has_keyword",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/log:absl_check",
+    ],
+)
+
+cc_test(
+    name = "bf16_test",
+    srcs = ["bf16_test.cc"],
+    deps = [
+        ":bf16",
+        "@com_google_absl//absl/base",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_library(
@@ -98,6 +112,16 @@ cc_library(
     hdrs = ["dispatch.h"],
     visibility = ["//tensorflow/lite/experimental/shlo:__subpackages__"],
     deps = [":data_type"],
+)
+
+cc_test(
+    name = "dispatch_test",
+    srcs = ["dispatch_test.cc"],
+    deps = [
+        ":dispatch",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_library(
