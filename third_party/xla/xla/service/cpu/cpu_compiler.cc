@@ -635,7 +635,8 @@ Status CpuCompiler::RunHloPassesThroughLayoutAssn(
 
     spmd_pipeline.AddPass<ShardingPropagation>(
         /*is_spmd=*/true, /*propagate_metadata=*/false,
-        module->config().allow_spmd_sharding_propagation_to_output());
+        module->config().allow_spmd_sharding_propagation_to_output(),
+        module->config().allow_spmd_sharding_propagation_to_parameters());
     spmd_pipeline.AddPass<spmd::StatefulRngSpmdPartitioner>(
         num_partitions, module->config().replica_count());
     TF_RETURN_IF_ERROR(spmd_pipeline.Run(module).status());
@@ -1103,11 +1104,10 @@ absl::StatusOr<std::unique_ptr<HloModule>> CpuCompiler::RunHloPasses(
           CompilerTargetOptions(module->config()),
           CodeGenOptLevel(module->config()));
 
-  TF_RETURN_IF_ERROR(RunHloPasses(
-      module.get(), /*is_aot_compile=*/false, jit_target_machine.get(),
-      /*compile_options=*/options,
-      /*is_mlir_compile=*/
-      module->config().debug_options().xla_cpu_use_xla_runtime()));
+  TF_RETURN_IF_ERROR(RunHloPasses(module.get(), /*is_aot_compile=*/false,
+                                  jit_target_machine.get(),
+                                  /*compile_options=*/options,
+                                  /*is_mlir_compile=*/false));
   return std::move(module);
 }
 
@@ -1608,14 +1608,8 @@ absl::StatusOr<std::unique_ptr<Executable>> CpuCompiler::RunBackend(
                   &InitializeLLVMCommandLineOptions, module->config());
 
   std::unique_ptr<CpuExecutable> cpu_executable;
-  if (module->config().debug_options().xla_cpu_use_xla_runtime()) {
-    TF_ASSIGN_OR_RETURN(
-        cpu_executable,
-        CompileXlaRuntimeCpuExecutable(std::move(module), options.registry));
-  } else {
-    TF_ASSIGN_OR_RETURN(cpu_executable,
-                        CompileLegacyCpuExecutable(std::move(module)));
-  }
+  TF_ASSIGN_OR_RETURN(cpu_executable,
+                      CompileLegacyCpuExecutable(std::move(module)));
 
   cpu_executable->set_debug_info(
       cpu_executable->buffer_assignment().GetStats().ToString());

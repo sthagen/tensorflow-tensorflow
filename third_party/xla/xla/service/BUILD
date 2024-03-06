@@ -5449,6 +5449,7 @@ cc_library(
     hdrs = ["stream_pool.h"],
     deps = [
         "//xla/stream_executor",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -5847,7 +5848,9 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
     ],

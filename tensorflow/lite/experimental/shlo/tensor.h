@@ -29,6 +29,10 @@ namespace shlo_ref {
 
 using TensorElementType = DataType;
 
+constexpr TensorElementType BaselineType(TensorElementType type) {
+  return type;
+}
+
 struct TensorType {
   Shape shape;
   TensorElementType element_type;
@@ -61,6 +65,9 @@ struct Tensor {
 
   const TensorElementType& tensor_element_type() const;
   const QuantizedTensorElementType& quantized_tensor_element_type() const;
+
+  std::variant<TensorElementType, QuantizedTensorElementType> element_type()
+      const;
 
   template <DataType data_type, typename T = typename Storage<data_type>::Type>
   T* GetDataAs() {

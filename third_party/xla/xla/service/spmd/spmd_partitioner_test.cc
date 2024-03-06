@@ -3215,6 +3215,40 @@ ENTRY entry {
   }
 }
 
+TEST_P(SpmdPartitioningTest, SortShardedOnSortDim_TwoOperands_FreeDimOfSize1) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+compare {
+  p.0.lhs = f32[] parameter(0), sharding={replicated}
+  p.0.rhs = f32[] parameter(1), sharding={replicated}
+  p.1.lhs = s32[] parameter(2), sharding={replicated}
+  p.1.rhs = s32[] parameter(3), sharding={replicated}
+  ROOT lt = pred[] compare(p.0.lhs, p.0.rhs), direction=LT, sharding={replicated}
+}
+
+ENTRY entry {
+  param.0 = f32[1,1024]{1,0} parameter(0)
+  negate.0 = f32[1,1024]{1,0} negate(param.0), sharding={devices=[1,8]<=[8]}
+  iota.0 = s32[1,1024]{1,0} iota(), iota_dimension=1, sharding={devices=[1,8]<=[8]}
+  ROOT sort.0 = (f32[1,1024]{1,0}, s32[1,1024]{1,0}) sort(negate.0, iota.0), dimensions={1}, is_stable=true, to_apply=compare, sharding={{devices=[1,8]<=[8]},{devices=[1,8]<=[8]}}
+  })";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/8));
+  VLOG(1) << module->ToString();
+  for (HloInstruction* inst : module->entry_computation()->instructions()) {
+    if (inst->opcode() == HloOpcode::kSort) {
+      for (HloInstruction* operand : inst->operands()) {
+        EXPECT_EQ(operand->shape().dimensions(0), 1);
+        EXPECT_EQ(operand->shape().dimensions(1), 1024);
+      }
+      EXPECT_THAT(inst, op::Sort(op::AllReduce(), op::AllReduce()));
+    }
+    EXPECT_NE(inst->opcode(), HloOpcode::kAllToAll);
+  }
+}
+
 TEST_P(SpmdPartitioningTest, SortShardedOnSortDim_ThreeOperands) {
   absl::string_view hlo_string = R"(
 HloModule module, entry_computation_layout={(f32[1024,1024]{1,0})->(f32[1024,1024]{1,0},s32[1024,1024]{1,0},s32[1024,1024]{1,0})}
@@ -13946,6 +13980,36 @@ ENTRY %entry {
   EXPECT_THAT(topk_instruction,
               op::Shape("(bf16[64,40]{1,0}, s32[64,40]{1,0})"));
   EXPECT_THAT(topk_operand, op::Shape("bf16[64,128000]{1,0}"));
+}
+
+TEST_P(SpmdPartitioningTest, TopKCustomCallManualSharding) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+region {
+  Arg_2.22549 = s32[] parameter(2)
+  Arg_3.22550 = s32[] parameter(3)
+  Arg_0.22547 = bf16[] parameter(0)
+  Arg_1.22548 = bf16[] parameter(1)
+  ROOT compare.22551 = pred[] compare(Arg_0.22547, Arg_1.22548), direction=GT, type=TOTALORDER
+}
+
+ENTRY %entry {
+  %p0 = bf16[64,256000]{1,0} parameter(0), sharding={manual}
+  %custom-call = (bf16[64,40]{1,0}, s32[64,40]{1,0}) custom-call(bf16[64,256000]{1,0} %p0), custom_call_target="TopK", called_computations={%region}, sharding={{manual}, {manual}}
+  %get-tuple-element.336 = bf16[64,40]{1,0} get-tuple-element((bf16[64,40]{1,0}, s32[64,40]{1,0}) %custom-call), index=0, sharding={manual}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/2));
+  VLOG(1) << module->ToString();
+  EXPECT_EQ(FindInstruction(module.get(), HloOpcode::kSort), nullptr);
+
+  auto topk_instruction = FindInstruction(module.get(), HloOpcode::kCustomCall);
+  EXPECT_EQ(topk_instruction->custom_call_target(), "TopK");
+  EXPECT_THAT(topk_instruction->operand(0), op::Shape("bf16[64,256000]{1,0}"));
+  EXPECT_THAT(topk_instruction,
+              op::Shape("(bf16[64,40]{1,0}, s32[64,40]{1,0})"));
 }
 
 TEST_P(SpmdPartitioningTest, WindowedEinsumShouldMatchLhs_b305313406) {

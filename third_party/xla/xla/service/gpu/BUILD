@@ -578,7 +578,6 @@ xla_test(
         "//xla:literal",
         "//xla:literal_util",
         "//xla:status_macros",
-        "//xla:statusor",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
@@ -1520,6 +1519,22 @@ cc_library(
     ]),
 )
 
+xla_cc_test(
+    name = "gemm_rewriter_test",
+    srcs = ["gemm_rewriter_test.cc"],
+    deps = [
+        ":gemm_rewriter",
+        "//xla:autotuning_proto_cc",
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
 cc_library(
     name = "triton_support",
     srcs = ["triton_support.cc"],
@@ -1566,7 +1581,6 @@ cc_library(
         "//xla:shape_util",
         "//xla:status",
         "//xla:status_macros",
-        "//xla:statusor",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",

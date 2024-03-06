@@ -2092,10 +2092,12 @@ void HloInstruction::SetupDerivedInstruction(
     derived_instruction->mutable_rare()->frontend_attributes.Clear();
     derived_instruction->mutable_rare()->statistics_viz.Clear();
   }
-}
-
-bool HloInstruction::IsRoot() const {
-  return parent_ != nullptr && this == parent_->root_instruction();
+  // If the derived instruction has the same opcode as current,
+  // then the backend config is also applicable.
+  if (opcode() == derived_instruction->opcode() && has_backend_config()) {
+    derived_instruction->set_raw_backend_config_string(
+        raw_backend_config_string());
+  }
 }
 
 bool HloInstruction::HasSideEffectNoRecurse() const {
@@ -3972,6 +3974,7 @@ HloInstruction::HloInstruction(HloOpcode opcode, const Shape& shape)
       is_default_config_(false),
       cleaned_up_(false),
       marked_as_dead_(false),
+      is_root_(false),
       shape_(shape),
       name_(HloOpcodeString(opcode)) {
   TF_DCHECK_OK(ShapeUtil::ValidateShapeWithOptionalLayout(shape_));
