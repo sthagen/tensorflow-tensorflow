@@ -15,7 +15,6 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_MLIR_QUANTIZATION_COMMON_LIFT_AS_FUNCTION_CALL_H_
 #define TENSORFLOW_COMPILER_MLIR_QUANTIZATION_COMMON_LIFT_AS_FUNCTION_CALL_H_
 
-#include "absl/strings/string_view.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
@@ -28,15 +27,18 @@ namespace mlir::quant {
 
 // This attribute will be set for functions created by this pass.
 // Presence of this attribute will mark the function as quantization target.
-inline constexpr absl::string_view kFusedFunctionAttr =
-    "tf_quant.composite_function";
+inline constexpr StringRef kFusedFunctionAttr = "tf_quant.composite_function";
 // The keyword to detect if this is a `NullAttribute`.
-inline constexpr absl::string_view kNullAttributeValue = "N/A";
+inline constexpr StringRef kNullAttributeValue = "N/A";
 
 // The attribute will be used for TF::XlaCallModuleOp to restore the original
 // function name when loading it back.
-inline constexpr absl::string_view kOriginalStablehloEntryFunctionAttrName =
+inline constexpr StringRef kOriginalStablehloEntryFunctionAttrName =
     "_original_entry_function";
+
+// Name of the string attribute attached to `XlaCallModuleOp`, which is the
+// textproto representation of `Method`.
+inline constexpr StringRef kQuantizationMethodAttr = "_quantization_method";
 
 // FunctionCallOpType to be generated as the function call operator when
 // function lifting will happen.
