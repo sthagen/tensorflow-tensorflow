@@ -44,6 +44,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "xla/comparison_util.h"
 #include "xla/hlo/ir/dfs_hlo_visitor.h"
@@ -1651,6 +1652,12 @@ HloInstruction::CreateCollectivePermuteStart(
   CHECK(send_operand != nullptr)
       << "SendDone must take the context operand from Send";
   return std::make_unique<HloSendDoneInstruction>(send_operand,
+                                                  is_host_transfer);
+}
+
+/* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateSendDone(
+    HloInstruction* operand, int64_t channel_id, bool is_host_transfer) {
+  return std::make_unique<HloSendDoneInstruction>(operand, channel_id,
                                                   is_host_transfer);
 }
 
@@ -4870,6 +4877,7 @@ Status HloInstruction::GetBackendConfigInternal(
 }
 
 const std::string& HloInstruction::BackendConfigRep::GetRawString() const {
+  absl::WriterMutexLock lock{&mutex_};
   if (proto_ && raw_string_.empty()) {
     raw_string_ = BackendConfigToRawString(*proto_).value();
   }
@@ -4883,6 +4891,8 @@ HloInstruction::BackendConfigRep HloInstruction::BackendConfigRep::Clone()
   if (auto* proto = GetProtoPtr()) {
     cloned.SetProto(*proto);
   } else {
+    absl::MutexLock source_lock{&mutex_};
+    absl::MutexLock target_lock{&cloned.mutex_};
     cloned.raw_string_ = raw_string_;
   }
   return cloned;
@@ -4890,6 +4900,7 @@ HloInstruction::BackendConfigRep HloInstruction::BackendConfigRep::Clone()
 
 HloInstruction::BackendConfigRep& HloInstruction::BackendConfigRep::operator=(
     std::string raw_string) {
+  absl::MutexLock lock{&mutex_};
   raw_string_ = std::move(raw_string);
   proto_.reset();
   return *this;
@@ -4898,6 +4909,7 @@ HloInstruction::BackendConfigRep& HloInstruction::BackendConfigRep::operator=(
 HloInstruction::BackendConfigRep& HloInstruction::BackendConfigRep::operator=(
     const tsl::protobuf::Message& proto) {
   SetProto(proto);
+  absl::MutexLock lock{&mutex_};
   raw_string_.clear();
   return *this;
 }

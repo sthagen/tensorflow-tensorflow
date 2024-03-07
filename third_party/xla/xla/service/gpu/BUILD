@@ -285,6 +285,7 @@ cc_library(
         ":gpu_executable",
         ":ir_emission_utils",
         ":kernel_reuse_cache",
+        ":nccl_collective_thunks",
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/service:name_uniquer",
@@ -341,6 +342,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/mlir_hlo:transforms_gpu_passes",
         "//xla/service:buffer_assignment",
+        "//xla/service:collective_ops_utils",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_target_registry",
         "//xla/service:global_device_id",
@@ -5708,5 +5710,41 @@ cc_library(
     deps = [
         "//xla:xla_proto_cc",
         "//xla/service:symbol_repository",
+    ],
+)
+
+cc_library(
+    name = "collective_permute_cycle_decomposer",
+    srcs = ["collective_permute_cycle_decomposer.cc"],
+    hdrs = ["collective_permute_cycle_decomposer.h"],
+    deps = [
+        ":backend_configs_cc",
+        "//xla:comparison_util",
+        "//xla:literal_util",
+        "//xla:shape_util",
+        "//xla:status",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/service:hlo_pass",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:errors",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_permute_cycle_decomposer_test",
+    srcs = ["collective_permute_cycle_decomposer_test.cc"],
+    deps = [
+        ":collective_permute_cycle_decomposer",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_parser",
+        "//xla/tests:hlo_test_base",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
