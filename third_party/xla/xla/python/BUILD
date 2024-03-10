@@ -516,11 +516,13 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = [":friends"],  # For the functions to access C++ flags/thread-local variables
     deps = [
+        ":nb_helpers",
         ":py_client",
         ":python_ref_manager",
         ":pytree",
         ":types",
         # placeholder for index annotation deps
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status",
@@ -535,7 +537,6 @@ cc_library(
         "@local_tsl//tsl/concurrency:ref_count",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/profiler/lib:traceme",
-        "@pybind11",
     ],
 )
 
@@ -672,9 +673,10 @@ cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":jax_jit",
+        ":nb_helpers",
+        ":nb_numpy",
         ":py_client",
         ":python_ref_manager",
-        ":python_utils",
         ":pytree",
         ":traceback",
         ":transfer_guard_lib",
@@ -717,6 +719,7 @@ cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":jax_jit",
+        ":nb_helpers",
         ":py_client",
         ":python_ref_manager",
         ":python_utils",
@@ -732,7 +735,6 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@com_google_absl//absl/types:variant",
         "//third_party/nanobind",
         "@local_config_python//:python_headers",  # buildcleaner: keep
         "//xla:status_macros",
@@ -747,7 +749,6 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/profiler/lib:traceme",
         "@pybind11",
-        "@pybind11_abseil//pybind11_abseil:absl_casters",
     ],
 )
 

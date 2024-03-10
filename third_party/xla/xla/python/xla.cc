@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "xla/python/xla.h"
 
+#include <Python.h>
+
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -991,9 +993,9 @@ static void Init(py::module_& m) {
   BuildOpsSubmodule(m_nb);
   BuildOutfeedReceiverSubmodule(m_nb);
   BuildPytreeSubmodule(m_nb);
-  jax::BuildJaxjitSubmodule(m);
-  jax::BuildPmapSubmodule(m);
-  jax::BuildPjitSubmodule(m);
+  jax::BuildJaxjitSubmodule(m_nb);
+  jax::BuildPmapSubmodule(m_nb);
+  jax::BuildPjitSubmodule(m_nb);
   jax::BuildTransferGuardSubmodule(m_nb);
   BuildTracebackSubmodule(m_nb);
   BuildMlirSubmodule(m_nb);
