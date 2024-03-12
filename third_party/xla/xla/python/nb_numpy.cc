@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "xla/python/nb_numpy.h"
 
+#include <Python.h>
+
+#include <cstdint>
 #include <stdexcept>
 
 #include "absl/types/span.h"
@@ -34,8 +37,8 @@ namespace xla {
 }
 
 nb_numpy_ndarray::nb_numpy_ndarray(nb_dtype dtype,
-                                   absl::Span<ssize_t const> shape,
-                                   absl::Span<ssize_t const> strides,
+                                   absl::Span<int64_t const> shape,
+                                   absl::Span<int64_t const> strides,
                                    const void* ptr, nb::handle base) {
   if (shape.size() != strides.size()) {
     throw std::invalid_argument("shape and strides must have the same size.");
@@ -49,9 +52,14 @@ nb_numpy_ndarray::nb_numpy_ndarray(nb_dtype dtype,
       flags = NPY_ARRAY_WRITEABLE;
     }
   }
+  // The reinterpret_cast below assumes that ssize_t and int64_t are the same
+  // width. If that changes, then the code should be updated to convert instead.
+  static_assert(sizeof(int64_t) == sizeof(ssize_t));
   nb::object array = nb::steal<nb::object>(PyArray_NewFromDescr(
       &PyArray_Type, reinterpret_cast<PyArray_Descr*>(dtype.release().ptr()),
-      shape.size(), shape.data(), strides.data(), const_cast<void*>(ptr), flags,
+      shape.size(), reinterpret_cast<const ssize_t*>(shape.data()),
+      reinterpret_cast<const ssize_t*>(strides.data()), const_cast<void*>(ptr),
+      flags,
       /*obj=*/nullptr));
   if (!array) {
     throw nb::python_error();
@@ -107,6 +115,14 @@ ssize_t nb_numpy_ndarray::shape(ssize_t dim) const {
 const ssize_t* nb_numpy_ndarray::strides() const {
   PyArrayObject* self = reinterpret_cast<PyArrayObject*>(ptr());
   return PyArray_STRIDES(self);
+}
+
+ssize_t nb_numpy_ndarray::strides(ssize_t dim) const {
+  PyArrayObject* self = reinterpret_cast<PyArrayObject*>(ptr());
+  if (dim < 0 || dim >= PyArray_NDIM(self)) {
+    throw std::invalid_argument("Invalid dimension.");
+  }
+  return PyArray_STRIDES(self)[dim];
 }
 
 ssize_t nb_numpy_ndarray::itemsize() const {

@@ -230,7 +230,7 @@ absl::StatusOr<nb_dtype> IfrtDtypeToNbDtype(ifrt::DType dtype) {
     case ifrt::DType::kPred:
       return to_nb_dtype(NPY_BOOL);
     case ifrt::DType::kS4:
-      return to_nb_dtype(NPY_INT8);
+      return custom_dtypes.int4;
     case ifrt::DType::kS8:
       return to_nb_dtype(NPY_INT8);
     case ifrt::DType::kS16:
@@ -240,7 +240,7 @@ absl::StatusOr<nb_dtype> IfrtDtypeToNbDtype(ifrt::DType dtype) {
     case ifrt::DType::kS64:
       return to_nb_dtype(NPY_INT64);
     case ifrt::DType::kU4:
-      return to_nb_dtype(NPY_UINT8);
+      return custom_dtypes.uint4;
     case ifrt::DType::kU8:
       return to_nb_dtype(NPY_UINT8);
     case ifrt::DType::kU16:
@@ -298,33 +298,33 @@ absl::StatusOr<ifrt::DType> DtypeToIfRtDType(py::dtype dtype) {
 const NumpyScalarTypes& GetNumpyScalarTypes() {
   static const NumpyScalarTypes* singleton = []() {
     NumpyScalarTypes* dtypes = new NumpyScalarTypes();
-    py::module numpy = py::module::import("numpy");
-    py::module ml_dtypes = py::module::import("ml_dtypes");
-    dtypes->np_bool = py::object(numpy.attr("bool_"));
-    dtypes->np_int4 = py::object(ml_dtypes.attr("int4"));
-    dtypes->np_int8 = py::object(numpy.attr("int8"));
-    dtypes->np_int16 = py::object(numpy.attr("int16"));
-    dtypes->np_int32 = py::object(numpy.attr("int32"));
-    dtypes->np_int64 = py::object(numpy.attr("int64"));
-    dtypes->np_uint4 = py::object(ml_dtypes.attr("uint4"));
-    dtypes->np_uint8 = py::object(numpy.attr("uint8"));
-    dtypes->np_uint16 = py::object(numpy.attr("uint16"));
-    dtypes->np_uint32 = py::object(numpy.attr("uint32"));
-    dtypes->np_uint64 = py::object(numpy.attr("uint64"));
-    dtypes->np_bfloat16 = py::object(ml_dtypes.attr("bfloat16"));
-    dtypes->np_float8_e4m3fn = py::object(ml_dtypes.attr("float8_e4m3fn"));
+    nb::module_ numpy = nb::module_::import_("numpy");
+    nb::module_ ml_dtypes = nb::module_::import_("ml_dtypes");
+    dtypes->np_bool = nb::object(numpy.attr("bool_"));
+    dtypes->np_int4 = nb::object(ml_dtypes.attr("int4"));
+    dtypes->np_int8 = nb::object(numpy.attr("int8"));
+    dtypes->np_int16 = nb::object(numpy.attr("int16"));
+    dtypes->np_int32 = nb::object(numpy.attr("int32"));
+    dtypes->np_int64 = nb::object(numpy.attr("int64"));
+    dtypes->np_uint4 = nb::object(ml_dtypes.attr("uint4"));
+    dtypes->np_uint8 = nb::object(numpy.attr("uint8"));
+    dtypes->np_uint16 = nb::object(numpy.attr("uint16"));
+    dtypes->np_uint32 = nb::object(numpy.attr("uint32"));
+    dtypes->np_uint64 = nb::object(numpy.attr("uint64"));
+    dtypes->np_bfloat16 = nb::object(ml_dtypes.attr("bfloat16"));
+    dtypes->np_float8_e4m3fn = nb::object(ml_dtypes.attr("float8_e4m3fn"));
     dtypes->np_float8_e4m3b11fnuz =
-        py::object(ml_dtypes.attr("float8_e4m3b11fnuz"));
-    dtypes->np_float8_e5m2 = py::object(ml_dtypes.attr("float8_e5m2"));
-    dtypes->np_float8_e4m3fnuz = py::object(ml_dtypes.attr("float8_e4m3fnuz"));
-    dtypes->np_float8_e5m2fnuz = py::object(ml_dtypes.attr("float8_e5m2fnuz"));
-    dtypes->np_float16 = py::object(numpy.attr("float16"));
-    dtypes->np_float32 = py::object(numpy.attr("float32"));
-    dtypes->np_float64 = py::object(numpy.attr("float64"));
-    dtypes->np_complex64 = py::object(numpy.attr("complex64"));
-    dtypes->np_complex128 = py::object(numpy.attr("complex128"));
-    dtypes->np_longlong = py::object(numpy.attr("longlong"));
-    dtypes->np_intc = py::object(numpy.attr("intc"));
+        nb::object(ml_dtypes.attr("float8_e4m3b11fnuz"));
+    dtypes->np_float8_e5m2 = nb::object(ml_dtypes.attr("float8_e5m2"));
+    dtypes->np_float8_e4m3fnuz = nb::object(ml_dtypes.attr("float8_e4m3fnuz"));
+    dtypes->np_float8_e5m2fnuz = nb::object(ml_dtypes.attr("float8_e5m2fnuz"));
+    dtypes->np_float16 = nb::object(numpy.attr("float16"));
+    dtypes->np_float32 = nb::object(numpy.attr("float32"));
+    dtypes->np_float64 = nb::object(numpy.attr("float64"));
+    dtypes->np_complex64 = nb::object(numpy.attr("complex64"));
+    dtypes->np_complex128 = nb::object(numpy.attr("complex128"));
+    dtypes->np_longlong = nb::object(numpy.attr("longlong"));
+    dtypes->np_intc = nb::object(numpy.attr("intc"));
     return dtypes;
   }();
   return *singleton;

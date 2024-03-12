@@ -24,11 +24,16 @@ limitations under the License.
 
 #include <Python.h>
 
+#include <cstdint>
 #include <string_view>
 
 #include "absl/types/span.h"
 #include "third_party/nanobind/include/nanobind/nanobind.h"
 #include "tsl/python/lib/core/numpy.h"  // NOLINT
+
+#if NPY_ABI_VERSION < 0x02000000
+#define PyDataType_ELSIZE(descr) ((descr)->elsize)
+#endif
 
 namespace xla {
 
@@ -52,7 +57,7 @@ class nb_dtype : public nanobind::object {
 
   int itemsize() const {
     auto* descr = reinterpret_cast<PyArray_Descr*>(ptr());
-    return descr->elsize;
+    return PyDataType_ELSIZE(descr);
   }
 
   /// Single-character code for dtype's kind.
@@ -68,8 +73,8 @@ class nb_numpy_ndarray : public nanobind::object {
   NB_OBJECT_DEFAULT(nb_numpy_ndarray, object, "ndarray",
                     PyArray_Check);  // NOLINT
 
-  nb_numpy_ndarray(nb_dtype dtype, absl::Span<ssize_t const> shape,
-                   absl::Span<ssize_t const> strides, const void* ptr = nullptr,
+  nb_numpy_ndarray(nb_dtype dtype, absl::Span<int64_t const> shape,
+                   absl::Span<int64_t const> strides, const void* ptr = nullptr,
                    nanobind::handle base = nanobind::handle());
 
   // Ensures that the given handle is a numpy array. If provided,
@@ -83,6 +88,7 @@ class nb_numpy_ndarray : public nanobind::object {
   const ssize_t* shape() const;
   ssize_t shape(ssize_t dim) const;
   const ssize_t* strides() const;
+  ssize_t strides(ssize_t dim) const;
   ssize_t itemsize() const;
   ssize_t size() const;
   const void* data() const;
