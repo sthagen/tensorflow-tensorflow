@@ -284,13 +284,14 @@ cc_library(
     ],
     features = ["-use_header_modules"],
     deps = [
-        ":traceback",
-        "//xla:statusor",
+        "//third_party/nanobind",
         "//xla:util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status:statusor",
+        "@local_config_python//:python_headers",  # buildcleaner: keep
+        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/profiler/protobuf:profile_proto_cc",
-        "@pybind11",
     ],
 )
 
@@ -891,6 +892,8 @@ cc_library(
         "//xla/service/llvm_ir:llvm_util",
         "//xla/translate/hlo_to_mhlo:hlo_to_mlir_hlo",
         "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:statusor",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
