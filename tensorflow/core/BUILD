@@ -108,7 +108,7 @@ load(
     "cc_library",
 )
 load(
-    "//third_party/mkl:build_defs.bzl",
+    "@local_tsl//tsl/mkl:build_defs.bzl",
     "if_mkl",
 )
 load("@local_config_tensorrt//:build_defs.bzl", "if_tensorrt")
@@ -1027,6 +1027,7 @@ cc_library(
         "//tensorflow/core:mobile_additional_lib_deps",
         "//tensorflow/core/platform:resource",
         "//tensorflow/core/util:stats_calculator_portable",
+        "@local_xla//xla:bazel_issue_21519",
     ] + tf_portable_proto_lib() + tf_portable_deps_no_runtime(),
     alwayslink = 1,
 )
