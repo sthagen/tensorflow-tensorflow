@@ -2729,6 +2729,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:statusor",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_dfs_reachability",
         "//xla/hlo/ir:hlo_reachability",
         "//xla/service:hlo_cost_analysis",
         "//xla/service:hlo_graph_dumper",
@@ -2739,7 +2740,6 @@ cc_library(
         "//xla/service/gpu/model:gpu_performance_model_base",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -3346,6 +3346,7 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:float_support",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/log:check",
     ],
 )
@@ -3410,6 +3411,8 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",
+        ":hlo_fusion_analysis",
+        ":hlo_traversal",
         ":ir_emission_utils",
         ":variant_visitor",
         "//xla:shape_util",
@@ -3418,8 +3421,6 @@ cc_library(
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_pass",
-        "//xla/service/gpu:hlo_fusion_analysis",
-        "//xla/service/gpu:hlo_traversal",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -4038,6 +4039,7 @@ cc_library(
         "//xla/stream_executor/gpu:asm_compiler",
         "//xla/stream_executor/gpu:gpu_asm_opts",
         "//xla/stream_executor/gpu:gpu_driver_header",
+        "//xla/stream_executor/gpu:gpu_executor_header",
         "@local_tsl//tsl/platform:cuda_libdevice_path",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
@@ -5924,7 +5926,14 @@ xla_cc_test(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:protobuf",
     ]) + [
+        "//xla/hlo/ir:hlo",
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream_executor_headers",
+        "//xla/stream_executor/host:host_platform",
         "//xla/tests:xla_internal_test_main",  # Keep outside GPU guard
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
     ],
 )
 

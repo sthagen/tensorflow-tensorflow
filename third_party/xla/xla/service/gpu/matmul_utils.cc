@@ -390,6 +390,8 @@ absl::StatusOr<bool> CanFoldTransposeOperandIntoDot(const HloInstruction& dot,
   switch (output_shape.element_type()) {
     case F8E4M3FN:
     case F8E5M2:
+    case F8E4M3FNUZ:
+    case F8E5M2FNUZ:
     case F16:
     case BF16:
     case F32:
@@ -876,6 +878,11 @@ absl::StatusOr<bool> IsMatrixMultiplicationTooSmallForRewriting(
 }
 
 bool IsDotSupportedByClassicalEmitters(const HloInstruction& dot) {
+  if (!algorithm_util::IsSupportedByElementalIrEmitter(
+          dot.precision_config().algorithm())) {
+    return false;
+  }
+
   // Let us be conservative and only throw float dots at the emitters.
   switch (dot.shape().element_type()) {
     case F16:
