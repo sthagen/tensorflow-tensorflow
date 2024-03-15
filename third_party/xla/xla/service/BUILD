@@ -842,6 +842,20 @@ xla_cc_test(
 )
 
 xla_cc_test(
+    name = "hlo_dfs_reachability_test",
+    srcs = ["hlo_dfs_reachability_test.cc"],
+    deps = [
+        "//xla:test",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_dfs_reachability",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/random",
+        "@local_tsl//tsl/platform:test_benchmark",
+    ],
+)
+
+xla_cc_test(
     name = "hlo_reachability_test",
     srcs = ["hlo_reachability_test.cc"],
     deps = [
@@ -5297,16 +5311,25 @@ xla_test(
         "no_windows",  # TODO(b/152037541)
     ],
     deps = [
+        ":elemental_ir_emitter",
+        ":hlo_module_config",
         ":hlo_parser",
         "//xla:error_spec",
         "//xla:execution_options_util",
+        "//xla:literal",
+        "//xla:literal_util",
         "//xla:status_macros",
         "//xla:test",
+        "//xla/hlo/ir:hlo",
+        "//xla/service/llvm_ir:ir_array",
         "//xla/tests:client_library_test_base",
         "//xla/tests:hlo_test_base",
         "//xla/tests:test_macros_header",
         "//xla/tests:xla_internal_test_main",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:ir_headers",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
