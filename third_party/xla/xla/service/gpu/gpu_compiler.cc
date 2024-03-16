@@ -119,6 +119,7 @@ limitations under the License.
 #include "xla/service/gpu/alias_passthrough_params.h"
 #include "xla/service/gpu/all_reduce_blueconnect.h"
 #include "xla/service/gpu/autotuner_util.h"
+#include "xla/service/gpu/collective_permute_cycle_decomposer.h"
 #include "xla/service/gpu/command_buffer_scheduling.h"
 #include "xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "xla/service/gpu/conv_layout_normalization.h"
@@ -141,6 +142,7 @@ limitations under the License.
 #include "xla/service/gpu/gpu_float_support.h"
 #include "xla/service/gpu/gpu_hlo_schedule.h"
 #include "xla/service/gpu/gpu_layout_assignment.h"
+#include "xla/service/gpu/gpu_p2p_pipeliner.h"
 #include "xla/service/gpu/gpu_reduce_scatter_creator.h"
 #include "xla/service/gpu/gpu_sanitize_constant_names.h"
 #include "xla/service/gpu/gpu_scatter_expander.h"
@@ -952,6 +954,11 @@ absl::Status RunCollectiveOptimizationPasses(
     collectives_pipeline.AddPass<CollectivePipeliner>(config);
   }
 
+  collectives_pipeline.AddPass<CollectivePermuteCycleDecomposer>(
+      hlo_module->config()
+          .debug_options()
+          .xla_gpu_collective_permute_decomposer_threshold());
+
   // Run algebraic simplifier to reshape(broadcast) into a broadcast when
   // the reshape is just adding a unit dimension. This will help with the
   // AllGatherBroadcastReorder pass.
@@ -1169,29 +1176,7 @@ absl::Status RunPostFusionCollectiveOptimizationPasses(HloModule* hlo_module) {
           .debug_options()
           .xla_gpu_enable_pipelined_collectives() ||
       hlo_module->config().debug_options().xla_gpu_enable_pipelined_p2p()) {
-    auto may_pipeline_p2p = [](const HloInstruction* instruction) {
-      const HloRecvDoneInstruction* recv_done =
-          DynCast<const HloRecvDoneInstruction>(instruction);
-      if (!recv_done || recv_done->is_host_transfer()) return false;
-      // Check that the recv-done is used for non-trivial computation, which
-      // can also help avoid repeatedly pipelining a loop.
-      return recv_done->user_count() == 1 && recv_done->parent() != nullptr &&
-             recv_done->users()[0] != recv_done->parent()->root_instruction();
-    };
-    // We currently use one asynchronous stream to execute P2P operations,
-    // as such, can only support pipelining at most one P2P chain in each
-    // loop.
-    CollectivePipeliner::Config config{
-        /*level_to_operate_on=*/0,
-        /*max_pipelining_per_loop=*/1,
-        /*last_run=*/true,
-        /*pipeline_use_tree=*/false,
-        /*process_different_sized_ops=*/true,
-        /*pipelining_direction=*/
-        CollectivePipeliner::PipeliningDirection::kBackward,
-        /*should_process=*/may_pipeline_p2p,
-        /*acceptable_formatting=*/[](const HloInstruction*) { return true; }};
-    pipeline.AddPass<CollectivePipeliner>(config);
+    AddP2PPipeliner(pipeline);
   }
   return pipeline.Run(hlo_module).status();
 }

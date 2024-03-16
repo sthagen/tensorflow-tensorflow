@@ -379,7 +379,10 @@ cc_library(
         "//xla/service/gpu/runtime:nccl_all_gather_thunk",
         "//xla/service/gpu/runtime:nccl_all_reduce_thunk",
         "//xla/service/gpu/runtime:nccl_all_to_all_thunk",
+        "//xla/service/gpu/runtime:nccl_collective_broadcast_thunk",
         "//xla/service/gpu/runtime:nccl_collective_permute_thunk",
+        "//xla/service/gpu/runtime:nccl_recv_thunk",
+        "//xla/service/gpu/runtime:nccl_send_thunk",
         "//xla/service/gpu/runtime:norm_thunk",
         "//xla/service/gpu/runtime:outfeed_thunk",
         "//xla/service/gpu/runtime:replica_id_thunk",
@@ -888,18 +891,10 @@ cc_library(
 cc_library(
     name = "nccl_collective_thunks",
     srcs = [
-        "nccl_collective_broadcast_thunk.cc",
         "nccl_collective_thunk.cc",
-        "nccl_p2p_thunk_common.cc",
-        "nccl_recv_thunk.cc",
-        "nccl_send_thunk.cc",
     ],
     hdrs = [
-        "nccl_collective_broadcast_thunk.h",
         "nccl_collective_thunk.h",
-        "nccl_p2p_thunk_common.h",
-        "nccl_recv_thunk.h",
-        "nccl_send_thunk.h",
     ],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
         "TENSORFLOW=1",
@@ -1216,6 +1211,7 @@ cc_library(
         "//xla/service:global_device_id",
         "//xla/service:rendezvous",
         "//xla/service:lockable",
+        "//xla/service/gpu/runtime:nccl_p2p_thunk_common",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:gpu_activation",
         "//xla/stream_executor/gpu:gpu_stream",
@@ -1250,6 +1246,7 @@ cc_library(
         "//xla:status",
         "//xla:statusor",
         "//xla:util",
+        "//xla/service/gpu/runtime:nccl_p2p_thunk_common",
         "//xla/service:collective_ops_utils",
         "//xla/service:global_device_id",
         "//xla/service:lockable",
@@ -1876,6 +1873,7 @@ cc_library(
         ":variant_visitor",
         ":autotuner_util",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1900,7 +1898,7 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/util/proto:proto_utils",
-    ]) + ["@com_google_absl//absl/log"],
+    ]),
 )
 
 cc_library(
@@ -3628,6 +3626,8 @@ cc_library(
         "TENSORFLOW_USE_ROCM=1",
     ]),
     deps = if_gpu_is_configured([
+        ":gpu_p2p_pipeliner",
+        ":collective_permute_cycle_decomposer",
         ":address_computation_fusion_rewriter",
         ":algorithm_checker",
         ":alias_passthrough_params",

@@ -1253,6 +1253,7 @@ cc_library(
     srcs = ["p2p_schedule_preparation.cc"],
     hdrs = ["p2p_schedule_preparation.h"],
     deps = [
+        ":collective_ops_utils",
         ":hlo_pass",
         "//xla:status",
         "//xla:statusor",
@@ -6788,6 +6789,12 @@ cc_library(
         ":hlo_pass",
         "//xla:statusor",
         "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -6796,10 +6803,16 @@ xla_cc_test(
     srcs = ["collective_transformation_reorderer_test.cc"],
     deps = [
         ":collective_transformation_reorderer",
+        ":hlo_verifier",
+        "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_matchers",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -7547,25 +7560,24 @@ xla_cc_test(
     deps = if_cuda_is_configured([
         ":gpu_plugin_impl",
         ":platform_util",
+        ":shaped_buffer",
         "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "//xla:executable_run_options",
         "//xla:literal_util",
         "//xla/client:client_library",
         "//xla/client:local_client",
         "//xla/service/cpu:cpu_compiler",
+        "//xla/client:executable_build_options",
+        "//xla:literal",
+        "//xla:shape_util",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
-    ]) + [
-        ":shaped_buffer",
-        "//xla:literal",
-        "//xla:shape_util",
-        "//xla/client:executable_build_options",
-        "@com_google_absl//absl/types:span",
-    ],
+    ]),
 )
 
 tf_proto_library(

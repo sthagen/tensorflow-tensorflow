@@ -454,6 +454,7 @@ tf_py_strict_test(
     name = "from_tensor_slices_test",
     size = "medium",
     srcs = ["from_tensor_slices_test.py"],
+    shard_count = 4,
     deps = [
         ":checkpoint_test_base",
         ":test_base",
@@ -475,7 +476,7 @@ tf_py_strict_test(
 
 tf_py_strict_test(
     name = "from_tensors_test",
-    size = "small",
+    size = "medium",
     srcs = ["from_tensors_test.py"],
     shard_count = 4,
     deps = [
@@ -1225,6 +1226,7 @@ tf_py_strict_test(
     deps = [
         ":checkpoint_test_base",
         ":test_base",
+        "//tensorflow/python/data/experimental/ops:global_shuffle_op",
         "//tensorflow/python/data/experimental/ops:random_access",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/data/ops:options",
