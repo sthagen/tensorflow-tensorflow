@@ -17,15 +17,14 @@ limitations under the License.
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
-#include "absl/container/flat_hash_set.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/ImplicitLocOpBuilder.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
 #include "mlir/IR/ValueRange.h"  // from @llvm-project
-#include "mlir/Interfaces/DataLayoutInterfaces.h"  // from @llvm-project
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/gpu/fusions/mlir/computation_partitioner.h"
 #include "xla/service/gpu/fusions/mlir/mlir_fusion_emitter.h"
@@ -55,13 +54,21 @@ class MlirTransposeFusion : public MlirFusionEmitterBase {
   static bool IsSupported(const HloFusionAnalysis& analysis);
 
   std::optional<IndexingMap> ComputeThreadIdToOutputIndexing(
-      int64_t root_index, mlir::MLIRContext* ctx) const override;
+      int64_t root_index, IndexingContext* indexing_context) const override;
 
   std::optional<IndexingMap> ComputeThreadIdToInputIndexing(
       int64_t root_index, int64_t hero_operand_index,
-      mlir::MLIRContext* ctx) const override;
+      IndexingContext* indexing_context) const override {
+    return ComputeThreadIdToInputIndexing(
+        *analysis_.fusion_heroes()[root_index], indexing_context);
+  }
 
  protected:
+  IndexingMap ComputeThreadIdToInputIndexing(
+      const HloInstruction& hero, IndexingContext* indexing_context) const;
+  IndexingMap ComputeThreadIdToOutputIndexing(
+      const HloInstruction& hero, IndexingContext* indexing_context) const;
+
   absl::Status EmitEntryFunction(
       const mlir_converter::PartitionedComputations& computations,
       const mlir_converter::CallTargetProvider& call_targets,
@@ -87,7 +94,7 @@ class MlirTransposeFusion : public MlirFusionEmitterBase {
   const HloFusionAnalysis& analysis_;
   Tiling tiling_;
   Vector3 permutation_;
-  absl::flat_hash_set<const HloInstruction*> shmem_transposes_;
+  std::vector<const HloInstruction*> shmem_transposes_;
 };
 
 }  // namespace gpu

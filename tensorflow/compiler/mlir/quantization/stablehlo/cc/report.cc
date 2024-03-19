@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,11 +12,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include "tensorflow/compiler/mlir/quantization/stablehlo/cc/report.h"
 
-#include "xla/stream_executor/gpu/gpu_timer_kernel.h"
+#include <utility>
 
-namespace stream_executor::gpu {
-namespace delay_kernel {
-void* kernel() { return nullptr; }
-}  // namespace delay_kernel
-}  // namespace stream_executor::gpu
+#include "tensorflow/compiler/mlir/quantization/stablehlo/quantization_config.pb.h"
+
+namespace mlir::quant::stablehlo {
+
+using ::stablehlo::quantization::QuantizationResult;
+
+void QuantizationReport::AddQuantizationResult(QuantizationResult&& result) {
+  *quantization_results_.add_results() = std::move(result);
+}
+
+}  // namespace mlir::quant::stablehlo

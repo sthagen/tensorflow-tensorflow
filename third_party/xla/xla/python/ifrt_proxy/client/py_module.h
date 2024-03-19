@@ -13,14 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_GPU_GPU_TIMER_KERNEL_H_
-#define XLA_STREAM_EXECUTOR_GPU_GPU_TIMER_KERNEL_H_
+#ifndef XLA_PYTHON_IFRT_PROXY_CLIENT_PY_MODULE_H_
+#define XLA_PYTHON_IFRT_PROXY_CLIENT_PY_MODULE_H_
 
-namespace stream_executor::gpu {
-enum struct GpuSemaphoreState { Hold, Release, TimedOut };
-namespace delay_kernel {
-void* kernel();  // returns a pointer to a CUDA C++ device function
-}  // namespace delay_kernel
-}  // namespace stream_executor::gpu
+#include "pybind11/pybind11.h"  // from @pybind11
 
-#endif  // XLA_STREAM_EXECUTOR_GPU_GPU_TIMER_KERNEL_H_
+namespace xla {
+namespace ifrt {
+namespace proxy {
+
+void BuildIfrtProxySubmodule(pybind11::module_& m);
+
+}  // namespace proxy
+}  // namespace ifrt
+}  // namespace xla
+
+#endif  // XLA_PYTHON_IFRT_PROXY_CLIENT_PY_MODULE_H_

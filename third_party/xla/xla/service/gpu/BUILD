@@ -300,6 +300,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/service:name_uniquer",
+        "//xla/service/gpu/model:indexing_map",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -766,6 +767,7 @@ xla_test(
         ":backend_configs_cc",
         ":gemm_fusion",
         ":gemm_fusion_autotuner",
+        ":ir_emission_utils",
         ":matmul_utils",
         "//xla:autotuning_proto_cc",
         "//xla:error_spec",
@@ -3927,6 +3929,7 @@ xla_cc_test(
     srcs = ["auto_sharding_gpu_compiler_test.cc"],
     tags = tf_cuda_tests_tags() + ["no_oss"],  # TODO(b/277355322): Make autosharding work in OSS
     deps = [
+        "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/service:gpu_plugin",
         "//xla/service:hlo_module_config",
@@ -5966,6 +5969,7 @@ xla_cc_test(
         "//xla/tests:hlo_test_base",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:protobuf",
     ]) + [
