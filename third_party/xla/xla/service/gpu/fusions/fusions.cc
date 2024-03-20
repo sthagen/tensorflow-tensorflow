@@ -178,6 +178,9 @@ absl::StatusOr<std::unique_ptr<FusionInterface>> GetFusionEmitter(
       if (config.name() == "address_computation") {
         return std::make_unique<AddressComputationFusion>(analysis);
       }
+      if (config.name() == "dynamic_address_computation") {
+        return std::make_unique<DynamicAddressComputationFusion>(analysis);
+      }
       return std::make_unique<CustomFusion>();
     }
     case HloFusionAnalysis::EmitterFusionKind::kInputSlices:
@@ -212,7 +215,7 @@ absl::StatusOr<std::unique_ptr<FusionInterface>> GetFusionEmitter(
       return std::make_unique<ScatterFusion>(analysis);
     }
     case HloFusionAnalysis::EmitterFusionKind::kTranspose: {
-      if (check_mlir_emitters(MlirTransposeFusion::IsSupported)) {
+      if (check_mlir_emitters(nullptr)) {
         return std::make_unique<MlirTransposeFusion>(analysis);
       }
       return std::make_unique<TransposeFusion>(analysis);

@@ -138,26 +138,9 @@ MlirTransposeFusion::MlirTransposeFusion(const HloFusionAnalysis& analysis)
   }
 }
 
-/*static*/ bool MlirTransposeFusion::IsSupported(
-    const HloFusionAnalysis& analysis) {
-  // If there is a hero, which does not have a transpose, the codegen might
-  // fail because of the incorrect thread ID mapping for that particular case.
-  return GetShMemTransposes(analysis).size() == analysis.fusion_heroes().size();
-}
-
 std::optional<IndexingMap> MlirTransposeFusion::ComputeThreadIdToOutputIndexing(
     int64_t root_index, IndexingContext* indexing_context) const {
   const auto& hero = *analysis_.fusion_heroes()[root_index];
-  const auto& root = *analysis_.fusion_roots()[root_index];
-  if (!GetDescriptionForTiledTransposeEmitter(root, hero)) {
-    // Non-transpose roots are elementwise by definition.
-    return ComputeThreadIdToInputIndexing(root_index, 0, indexing_context);
-  }
-  return ComputeThreadIdToOutputIndexing(hero, indexing_context);
-}
-
-IndexingMap MlirTransposeFusion::ComputeThreadIdToOutputIndexing(
-    const HloInstruction& hero, IndexingContext* indexing_context) const {
   // The block offsets are permuted, but the thread offsets remain the same.
   auto* mlir_context = indexing_context->GetMLIRContext();
   auto block_offset = GetBlockOffsetsForTiling(tiling_, mlir_context)
@@ -187,6 +170,20 @@ IndexingMap MlirTransposeFusion::ComputeThreadIdToInputIndexing(
   return map;
 }
 
+std::optional<IndexingMap> MlirTransposeFusion::ComputeThreadIdToInputIndexing(
+    int64_t root_index, int64_t hero_operand_index,
+    IndexingContext* indexing_context) const {
+  const auto& hero = *analysis_.fusion_heroes()[root_index];
+  const auto& root = *analysis_.fusion_roots()[root_index];
+  if (!GetDescriptionForTiledTransposeEmitter(root, hero)) {
+    // Non-transpose roots are elementwise by definition.
+    return ComputeThreadIdToOutputIndexing(root_index, indexing_context);
+  }
+
+  return ComputeThreadIdToInputIndexing(*analysis_.fusion_heroes()[root_index],
+                                        indexing_context);
+}
+
 LaunchDimensions MlirTransposeFusion::launch_dimensions() const {
   return LaunchDimensions(tiling_.GetNumBlocks(),
                           tiling_.GetNumThreadsPerBlock());
@@ -210,8 +207,9 @@ IndexingMap GetSharedMemoryWriteIndexingMap(
           thread_id_indexing.GetSymbolCount(),
           {c0, th_x.floorDiv(32) + 4 * tile_sizes[loop_dim], th_x % 32},
           mlir_context),
-      thread_id_indexing.GetDimensionRanges(),
-      thread_id_indexing.GetSymbolRanges(),
+      thread_id_indexing.GetDimVars(),
+      thread_id_indexing.GetRangeVars(),
+      thread_id_indexing.GetRTVars(),
       thread_id_indexing.GetConstraints()};
   shmem_write_indexing.Simplify();
   return shmem_write_indexing;
@@ -225,8 +223,9 @@ IndexingMap GetSharedMemoryReadIndexingMap(
       GetSharedMemoryWriteIndexingMap(thread_id_indexing, loop_dim);
   return IndexingMap{thread_id_indexing.GetIndexingContext(),
                      write_indexing.GetAffineMap().getSubMap({0, 2, 1}),
-                     write_indexing.GetDimensionRanges(),
-                     write_indexing.GetSymbolRanges(),
+                     write_indexing.GetDimVars(),
+                     write_indexing.GetRangeVars(),
+                     write_indexing.GetRTVars(),
                      write_indexing.GetConstraints()};
 }
 
@@ -298,12 +297,11 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
   IndexingContext indexing_context{mlir_context};
   ValueRange output_tensor_args =
       entry_function.getArguments().drop_front(num_inputs);
-  auto output_indexing = ComputeThreadIdToOutputIndexing(
-      *shmem_transposes_.front(), &indexing_context);
+  auto output_indexing = *ComputeThreadIdToOutputIndexing(0, &indexing_context);
   auto shmem_output_indexing =
       GetSharedMemoryReadIndexingMap(output_indexing, permutation_[2]);
   auto epilogue_indexing = ComputeEpilogueInputToOutputIndexing(
-      shmem_transposes_.front(), &indexing_context);
+      analysis_.fusion_heroes()[0], &indexing_context);
   auto root_indexing = ComposeIndexingMaps(output_indexing, epilogue_indexing);
   auto result_tensors = EmitThreadLoopNest(
       builder, output_tensor_args, output_indexing,
@@ -324,9 +322,19 @@ absl::Status MlirTransposeFusion::EmitReadFromShMemMlir(
                          root_indices, builder);
         SmallVector<Value> results;
         results.reserve(output_tensor_args.size());
-        for (auto [tensor, value] : llvm::zip(output_tensors, result_scalars)) {
-          results.push_back(
-              builder.create<InsertOp>(value, tensor, root_indices));
+        const auto& first_shape = analysis_.fusion_roots().front()->shape();
+        for (auto [tensor, value, root] : llvm::zip(
+                 output_tensors, result_scalars, analysis_.fusion_roots())) {
+          llvm::SmallVector<Value> indices;
+          if (ShapeUtil::EqualIgnoringElementType(first_shape, root->shape())) {
+            indices = root_indices;
+          } else {
+            auto bitcast_map =
+                GetBitcastMap(first_shape, root->shape(), &indexing_context);
+            indices = ApplyAffineMap(bitcast_map.GetAffineMap(), root_indices,
+                                     {}, builder);
+          }
+          results.push_back(builder.create<InsertOp>(value, tensor, indices));
         }
         return results;
       });
