@@ -167,15 +167,18 @@ H AbslHashValue(H h, const RangeVar& range_var) {
 // RTSymbol variable represents a runtime symbol, e.g. a dynamic offset in
 // HLO dynamic-update-slice op. RTSymbol variables correspond to the back
 // portion of the symbols in `affine_map_`.
-using RTVarID = int64_t;
 struct RTVar {
-  RTVarID id;
+  Interval feasible_values;
+  const HloInstruction* hlo;
+  mlir::AffineMap map;
 };
 bool operator==(const RTVar& lhs, const RTVar& rhs);
 
 template <typename H>
 H AbslHashValue(H h, const RTVar& rt_var) {
-  return H::combine(std::move(h), rt_var.id);
+  llvm::hash_code map_hash = llvm::hash_combine(rt_var.map);
+  return H::combine(std::move(h), rt_var.feasible_values, rt_var.hlo,
+                    static_cast<size_t>(map_hash));
 }
 
 std::vector<DimVar> DimVarsFromTensorSizes(
@@ -333,6 +336,9 @@ class IndexingMap {
   // Returns true if simplification was performed.
   bool SimplifyConstraintRanges();
 
+  // Merges "mod" constraints for the same AffineExpr.
+  void MergeModConstraints();
+
   IndexingContext* indexing_context_ = nullptr;
   mlir::AffineMap affine_map_;
   std::vector<DimVar> dim_vars_;
@@ -360,15 +366,6 @@ H AbslHashValue(H h, const IndexingMap& indexing_map) {
                     indexing_map.GetRTVars(),
                     indexing_map.GetConstraintsCount());
 }
-
-struct RTVarData {
-  std::string ToString() const;
-  void Print(std::ostream& out) const;
-
-  Interval feasible_values;
-  const HloInstruction* hlo;
-  IndexingMap indexing_map;
-};
 
 }  // namespace gpu
 }  // namespace xla
