@@ -21,11 +21,12 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/types/span.h"
+#include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "xla/hlo/ir/hlo_instruction.h"
-#include "xla/service/gpu/model/indexing_context.h"
 #include "xla/service/gpu/model/tile_analysis.h"
 #include "xla/service/instruction_fusion.h"
 
@@ -53,35 +54,30 @@ class SymbolicTileAnalysis {
   // Tries to construct a symbolic tile analysis from a computation. Returns
   // a diagnostic if the construction fails for any reason.
   static SymbolicTileAnalysisOrError AnalyzeComputation(
-      const HloComputation& computation, IndexingContext* ctx);
+      const HloComputation& computation, mlir::MLIRContext* ctx);
 
   // Evaluates the tile offsets of an instruction from the analyzed computation
   // following the provided path from the root. Tile parameters must have been
   // set before calling this method.
-  std::vector<int64_t> TileOffsets(const HloInstruction* hlo,
+  std::vector<int64_t> TileOffsets(absl::Nonnull<const HloInstruction*> hlo,
                                    const InstructionPathFromRoot& path) const;
   // Evaluates the tile sizes of an instruction from the analyzed computation
   // following the provided path from the root. Tile parameters must have been
   // set before calling this method.
-  std::vector<int64_t> TileSizes(const HloInstruction* hlo,
+  std::vector<int64_t> TileSizes(absl::Nonnull<const HloInstruction*> hlo,
                                  const InstructionPathFromRoot& path) const;
   // Evaluates the tile strides of an instruction from the analyzed computation
   // following the provided path from the root. Tile parameters must have been
   // set before calling this method.
-  std::vector<int64_t> TileStrides(const HloInstruction* hlo,
+  std::vector<int64_t> TileStrides(absl::Nonnull<const HloInstruction*> hlo,
                                    const InstructionPathFromRoot& path) const;
 
-  // Populate tile parameters. This is a prerequisite in order to extract
+  // Populates input tile sizes. This is a prerequisite in order to extract
   // concrete values using `TileOffsets`, `TileSizes`, and `TileStrides`.
-  void SetTileParameters(absl::Span<int64_t const> parameters);
+  void SetTileSizes(absl::Span<int64_t const> sizes);
 
-  // Populate tile parameters with given sizes. All offsets are 0 and strides
-  // are 1.
-  void SetTileParametersWithDefaultOffsetsAndStrides(
-      absl::Span<int64_t const> sizes);
-
-  // Return the underlying IndexingContext.
-  IndexingContext* GetIndexingContext() const { return context_; };
+  // Return the underlying MLIRContext.
+  mlir::MLIRContext* GetMLIRContext() const { return context_; };
 
  private:
   SymbolicTileAnalysis(
@@ -89,7 +85,7 @@ class SymbolicTileAnalysis {
           symbolic_tile_from_path,
       ConstHloInstructionMap<absl::flat_hash_set<InstructionPathFromRoot>>
           paths_from_root_to_instruction,
-      IndexingContext* context)
+      mlir::MLIRContext* context)
       : symbolic_tile_from_path_(symbolic_tile_from_path),
         paths_from_root_to_instruction_(paths_from_root_to_instruction),
         context_(context) {}
@@ -100,7 +96,7 @@ class SymbolicTileAnalysis {
   // the possible paths from the root instruction to the key instruction.
   ConstHloInstructionMap<absl::flat_hash_set<InstructionPathFromRoot>>
       paths_from_root_to_instruction_;
-  IndexingContext* context_;
+  mlir::MLIRContext* context_;
   // Optionally set tile parameters. These parameters can be set by calling
   // `SetTileParameters`, and correspond to the output tile for the analyzed
   // computation. The order and type of parameters are as explained in the
