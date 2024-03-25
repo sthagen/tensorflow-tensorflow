@@ -818,3 +818,119 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "divide",
+    srcs = ["divide.cc"],
+    hdrs = ["divide.h"],
+    deps = [
+        ":binary_elementwise",
+        ":util",
+        "//tensorflow/lite/experimental/shlo:dispatch",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "divide_test",
+    srcs = ["divide_test.cc"],
+    deps = [
+        ":binary_elementwise_test_util",
+        ":divide",
+        ":test_util",
+        "//tensorflow/lite/experimental/shlo:quantize",
+        "//tensorflow/lite/experimental/shlo:quantized_tensor_element_type",
+        "//tensorflow/lite/experimental/shlo:shape",
+        "//tensorflow/lite/experimental/shlo:status_matcher",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "subtract",
+    srcs = ["subtract.cc"],
+    hdrs = ["subtract.h"],
+    deps = [
+        ":binary_elementwise",
+        ":util",
+        "//tensorflow/lite/experimental/shlo:dispatch",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "subtract_test",
+    srcs = ["subtract_test.cc"],
+    deps = [
+        ":binary_elementwise_test_util",
+        ":subtract",
+        ":test_util",
+        "//tensorflow/lite/experimental/shlo:quantize",
+        "//tensorflow/lite/experimental/shlo:quantized_tensor_element_type",
+        "//tensorflow/lite/experimental/shlo:shape",
+        "//tensorflow/lite/experimental/shlo:status_matcher",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "and",
+    srcs = ["and.cc"],
+    hdrs = ["and.h"],
+    deps = [
+        ":binary_elementwise",
+        ":util",
+        "//tensorflow/lite/experimental/shlo:data_type",
+        "//tensorflow/lite/experimental/shlo:dispatch",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "and_test",
+    srcs = ["and_test.cc"],
+    deps = [
+        ":and",
+        ":binary_elementwise_test_util",
+        ":test_util",
+        "//tensorflow/lite/experimental/shlo:data_type",
+        "//tensorflow/lite/experimental/shlo:shape",
+        "//tensorflow/lite/experimental/shlo:status_matcher",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "or",
+    srcs = ["or.cc"],
+    hdrs = ["or.h"],
+    deps = [
+        ":binary_elementwise",
+        ":util",
+        "//tensorflow/lite/experimental/shlo:data_type",
+        "//tensorflow/lite/experimental/shlo:dispatch",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "or_test",
+    srcs = ["or_test.cc"],
+    deps = [
+        ":binary_elementwise_test_util",
+        ":or",
+        ":test_util",
+        "//tensorflow/lite/experimental/shlo:data_type",
+        "//tensorflow/lite/experimental/shlo:shape",
+        "//tensorflow/lite/experimental/shlo:status_matcher",
+        "//tensorflow/lite/experimental/shlo:tensor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)

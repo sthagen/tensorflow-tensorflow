@@ -47,10 +47,15 @@ inline constexpr StringRef kQuantizationMethodAttr = "_quantization_method";
 // function lifting will happen.
 enum FunctionCallOpType { TFPartitionedCallOp = 0, TFXlaCallModuleOp = 1 };
 
-// Checks if the op is inside a lifted function.
-bool IsInLiftedFunc(Operation& op);
+// Checks if an op is inside a lifted function.
+// If the given op pointer is a nullptr, returns false.
+bool IsInLiftedFunc(Operation* op);
 
-// Checks if the given einsum op is supported for XlaDotV2 quantization.
+// Checks if the op is inside a StableHLO op with region.
+// If the given op pointer is a nullptr, returns false.
+bool IsInStableHloOpRegion(Operation* op);
+
+// Checks if a given einsum op is supported for XlaDotV2 quantization.
 bool IsEinsumSupportedByXlaDotV2(StringAttr equation_attr);
 
 // Gets the quantization method from the given `XlaCallModuleOp`. It is
@@ -58,6 +63,13 @@ bool IsEinsumSupportedByXlaDotV2(StringAttr equation_attr);
 // `absl::InvalidArgumentError` when the attribute doesn't exist. Returns
 // `absl::InternalError` when parsing the attribute to `Method` failed.
 absl::StatusOr<::stablehlo::quantization::Method> GetQuantizationMethod(
+    TF::XlaCallModuleOp xla_call_module_op);
+
+// Gets the quantization method from the given `XlaCallModuleOp`. It is
+// retrieved from the `kQuantizationMethodAttr` string attribute. Returns a
+// default instance of `Method` iff the attribute doesn't exist or the attribute
+// contains an invalid textproto for `Method`.
+::stablehlo::quantization::Method GetQuantizationMethodOrDefault(
     TF::XlaCallModuleOp xla_call_module_op);
 
 // Creates a function to wrap the section between arguments and results.

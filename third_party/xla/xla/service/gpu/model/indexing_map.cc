@@ -1015,8 +1015,6 @@ bool IsFunctionOfUnusedDimsAndSymbolsOnly(
 
 void IndexingMap::RemoveUnusedSymbols() {
   if (IsUndefined()) return;
-  // TODO(b/329052892): Implement composition with RT vars.
-  if (GetRTVarsCount()) return;
 
   // Remove unused symbols from the affine_map.
   unsigned num_symbols_before = affine_map_.getNumSymbols();
@@ -1059,18 +1057,25 @@ void IndexingMap::RemoveUnusedSymbols() {
   if (num_symbols_after == num_symbols_before) return;
 
   std::vector<RangeVar> compressed_range_vars;
+  std::vector<RTVar> compressed_rt_vars;
   MLIRContext* mlir_context = GetMLIRContext();
   int64_t used_symbols_count = 0;
   std::vector<AffineExpr> symbol_replacements(
       num_symbols_before, getAffineConstantExpr(0, mlir_context));
+  auto range_vars_count = range_vars_.size();
   for (int i = 0; i < unused_symbols_bit_vector.size(); ++i) {
     if (!unused_symbols_bit_vector[i]) {
-      compressed_range_vars.push_back(range_vars_[i]);
+      if (i < range_vars_count) {
+        compressed_range_vars.push_back(range_vars_[i]);
+      } else {
+        compressed_rt_vars.push_back(rt_vars_[i - range_vars_count]);
+      }
       symbol_replacements[i] =
           getAffineSymbolExpr(used_symbols_count++, mlir_context);
     }
   }
   range_vars_ = std::move(compressed_range_vars);
+  rt_vars_ = std::move(compressed_rt_vars);
   std::vector<AffineExpr> to_remove;
   std::vector<std::pair<AffineExpr, Interval>> to_add;
   for (const auto& [expr, range] : constraints_) {
@@ -1211,6 +1216,54 @@ IndexingMap ComposeIndexingMaps(const IndexingMap& first,
         producer_dim_range);
   }
   return composed_indexing_map;
+}
+
+bool IndexingMap::RescaleSymbols() {
+  MergeModConstraints();
+
+  std::vector<AffineExpr> to_delete;
+
+  for (const auto& [expr, range] : constraints_) {
+    if (range.lower != range.upper) continue;
+    auto shift_value = range.lower;
+
+    if (expr.getKind() != AffineExprKind::Mod) continue;
+    auto mod_expr = mlir::cast<AffineBinaryOpExpr>(expr);
+
+    auto constant_expr = mlir::dyn_cast<AffineConstantExpr>(mod_expr.getRHS());
+    if (!constant_expr) continue;
+
+    // We don't rescale mod expressions with non-positive divisors.
+    if (constant_expr.getValue() <= 0) continue;
+    auto scaling_factor = constant_expr.getValue();
+
+    if (mod_expr.getLHS().getKind() != AffineExprKind::SymbolId) continue;
+    auto symbol_expr = mlir::cast<AffineSymbolExpr>(mod_expr.getLHS());
+
+    affine_map_ = affine_map_.replace(
+        symbol_expr, constant_expr * symbol_expr + shift_value,
+        affine_map_.getNumDims(), affine_map_.getNumSymbols());
+
+    for (auto& [other_expr, other_range] : constraints_) {
+      if (other_expr == expr) continue;
+      if (!other_expr.isFunctionOfSymbol(symbol_expr.getPosition())) continue;
+
+      other_expr = other_expr.replace(
+          symbol_expr, constant_expr * symbol_expr + shift_value);
+    }
+
+    auto& symbol_range = range_vars_[symbol_expr.getPosition()].range;
+    symbol_range.lower = (symbol_range.lower - shift_value) / scaling_factor;
+    symbol_range.upper = (symbol_range.upper - shift_value) / scaling_factor;
+
+    to_delete.emplace_back(expr);
+  }
+
+  for (const auto& expr : to_delete) {
+    constraints_.erase(expr);
+  }
+
+  return !to_delete.empty();
 }
 
 }  // namespace gpu
