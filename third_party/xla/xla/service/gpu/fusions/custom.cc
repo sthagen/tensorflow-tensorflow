@@ -193,6 +193,7 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
       offset_buffer_indices;
   std::vector<std::optional<const Shape>> orig_shapes;
   std::vector<std::optional<const Shape>> sliced_shapes;
+  std::vector<std::optional<uint64_t>> offset_byte_sizes;
 
   HloDynamicIndexInstruction* slice_instr = nullptr;
   auto get_original_operand_slice =
@@ -226,6 +227,7 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
       offset_buffer_indices.push_back(std::nullopt);
       orig_shapes.push_back(std::nullopt);
       sliced_shapes.push_back(std::nullopt);
+      offset_byte_sizes.push_back(std::nullopt);
       return;
     }
 
@@ -243,6 +245,8 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
     sliced_shapes.push_back(DynCast<HloDynamicSliceInstruction>(slice_instr)
                                 ? slice_instr->shape()
                                 : slice_instr->operand(1)->shape());
+    offset_byte_sizes.push_back(ShapeUtil::ByteSizeOfPrimitiveType(
+        slice_instr->index_operands().front()->shape().element_type()));
   };
 
   TF_ASSIGN_OR_RETURN(
@@ -275,8 +279,10 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
           static_cast<const HloDynamicIndexInstruction*>(
               &slice_adaptor->instruction()));
 
-      if (!IsContiguousSlice(slice_instr->operand(0)->shape(),
-                             slice_instr->shape())) {
+      if (!IsContiguousSlice(slice_instr->shape(),
+                             Cast<HloDynamicUpdateSliceInstruction>(slice_instr)
+                                 ->update()
+                                 ->shape())) {
         return absl::InternalError(
             "DynamicAddressComputationFusion only handles contiguous slices "
             "currently");
@@ -286,15 +292,16 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
     return GetAllocationSlice(buffer_assignment, &fusion, index);
   };
 
-  int64_t out_byte_size = 0;
-  if (custom_call.shape().IsArray()) {
+  int64_t out_fake_byte_size = ShapeUtil::ByteSizeOf(
+      custom_call.shape().IsArray() ? custom_call.shape()
+                                    : custom_call.shape().tuple_shapes(0));
+  if (fusion.shape().IsArray()) {
     TF_ASSIGN_OR_RETURN(output,
                         get_original_result_slice(&custom_call, /*index=*/{}));
     collect_slice_info();
     // Collect slice info for std::nullopt workspace.
     slice_instr = nullptr;
     collect_slice_info();
-    out_byte_size = ShapeUtil::ByteSizeOf(custom_call.shape());
   } else {
     TF_ASSIGN_OR_RETURN(output,
                         get_original_result_slice(&custom_call, /*index=*/{0}));
@@ -305,7 +312,6 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
                                                       &fusion, /*index=*/{1}));
     slice_instr = nullptr;
     collect_slice_info();
-    out_byte_size = ShapeUtil::ByteSizeOf(custom_call.shape().tuple_shapes(0));
     slice_workspace_fake =
         BufferAllocation::Slice(workspace->allocation(), 0, workspace->size());
   }
@@ -338,7 +344,8 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
   BufferAllocation::Slice slice_rhs_fake(rhs_slice.allocation(), 0,
                                          rhs_byte_size);
 
-  BufferAllocation::Slice slice_out_fake(output.allocation(), 0, out_byte_size);
+  BufferAllocation::Slice slice_out_fake(output.allocation(), 0,
+                                         out_fake_byte_size);
   ThunkSequence seq;
   seq.emplace_back(std::make_unique<GemmThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(&custom_call), std::move(config),
@@ -351,7 +358,7 @@ absl::StatusOr<FusionEmissionResult> EmitDynamicSlicedGemm(
   auto thunk = std::make_unique<AddressComputationThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(&custom_call),
       std::make_unique<ThunkSequence>(std::move(seq)), arguments,
-      offset_buffer_indices, orig_shapes, sliced_shapes);
+      offset_buffer_indices, orig_shapes, sliced_shapes, offset_byte_sizes);
 
   FusionEmissionResult result;
   result.thunks.push_back(std::move(thunk));

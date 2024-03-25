@@ -694,7 +694,10 @@ struct internal::Decode<internal::AttrTag<T>> {
 
     // Attribute name does not match.
     std::string_view attr_name_view = {attr_name->ptr, attr_name->len};
-    if (attr_name_view != ctx.attrs_names[i]) return std::nullopt;
+    if (attr_name_view != ctx.attrs_names[i]) {
+      return diagnostic.Emit("Attribute name mismatch: ")
+             << attr_name_view << " vs " << ctx.attrs_names[i];
+    }
 
     return AttrDecoding<T>::Decode(attr_type, attr, diagnostic);
   }
@@ -1096,12 +1099,14 @@ class Handler : public Ffi {
 
 inline std::ostream& operator<<(std::ostream& os, const XLA_FFI_AttrType type) {
   switch (type) {
+    case XLA_FFI_AttrType_ARRAY:
+      return os << "array";
+    case XLA_FFI_AttrType_DICTIONARY:
+      return os << "dictionary";
     case XLA_FFI_AttrType_SCALAR:
       return os << "scalar";
     case XLA_FFI_AttrType_STRING:
       return os << "string";
-    case XLA_FFI_AttrType_DICTIONARY:
-      return os << "dictionary";
   }
 }
 

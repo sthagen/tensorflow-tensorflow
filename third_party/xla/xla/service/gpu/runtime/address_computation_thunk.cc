@@ -48,14 +48,16 @@ AddressComputationThunk::AddressComputationThunk(
     std::vector<std::optional<std::vector<BufferAllocation::Slice>>>
         offset_buffer_indices,
     std::vector<std::optional<const Shape>> orig_shapes,
-    std::vector<std::optional<const Shape>> sliced_shapes)
+    std::vector<std::optional<const Shape>> sliced_shapes,
+    std::vector<std::optional<uint64_t>> offset_byte_sizes)
     : Thunk(Kind::kAddressComputation, thunk_info),
       embedded_thunk_(std::make_unique<SequentialThunk>(
           ThunkInfo(thunk_info.op), std::move(*embedded_thunk))),
       embedded_thunk_arguments_(std::move(arguments)),
       offset_buffer_indices_(std::move(offset_buffer_indices)),
       orig_shapes_(std::move(orig_shapes)),
-      sliced_shapes_(std::move(sliced_shapes)) {}
+      sliced_shapes_(std::move(sliced_shapes)),
+      offset_byte_sizes_(std::move(offset_byte_sizes)) {}
 
 absl::Status AddressComputationThunk::Prepare(
     const PrepareParams& params, ResourceRequests& resource_requests) {
@@ -63,13 +65,16 @@ absl::Status AddressComputationThunk::Prepare(
   TF_RET_CHECK(num_arguments == offset_buffer_indices_.size());
   TF_RET_CHECK(num_arguments == orig_shapes_.size());
   TF_RET_CHECK(num_arguments == sliced_shapes_.size());
-  for (auto [argument, offset_slice, orig_shape, sliced_shape] :
+  TF_RET_CHECK(num_arguments == offset_byte_sizes_.size());
+  for (auto [argument, offset_slice, orig_shape, sliced_shape,
+             offset_byte_size] :
        llvm::zip(embedded_thunk_arguments_, offset_buffer_indices_,
-                 orig_shapes_, sliced_shapes_)) {
+                 orig_shapes_, sliced_shapes_, offset_byte_sizes_)) {
     if (offset_slice.has_value()) {
       TF_RET_CHECK(argument.has_value());
       TF_RET_CHECK(orig_shape.has_value());
       TF_RET_CHECK(sliced_shape.has_value());
+      TF_RET_CHECK(offset_byte_size.has_value());
 
       TF_RET_CHECK(orig_shape->IsArray());
       TF_RET_CHECK(sliced_shape->IsArray());
@@ -116,23 +121,24 @@ absl::Status AddressComputationThunk::ExecuteOnStream(
     return reinterpret_cast<int64_t*>(offsets_.at(stream.parent())->opaque());
   }();
 
-  for (auto [operand_idx, values] : llvm::enumerate(
+  for (auto [argument_idx, values] : llvm::enumerate(
            llvm::zip(embedded_thunk_arguments_, offset_buffer_indices_,
-                     orig_shapes_, sliced_shapes_))) {
-    auto [argument_slice, offset_slice, orig_shape, sliced_shape] = values;
+                     orig_shapes_, sliced_shapes_, offset_byte_sizes_))) {
+    auto [argument_slice, offset_slice, orig_shape, sliced_shape,
+          offset_byte_size] = values;
 
     if (argument_slice == std::nullopt) {
       continue;
     }
 
-    // `orig_operand` will contain the original offset for slice
+    // `orig_argument` will contain the original offset for slice
     // `argument_slice` within `orig_allocations`
-    se::DeviceMemoryBase orig_operand =
+    se::DeviceMemoryBase orig_argument =
         orig_allocations.GetDeviceAddress(*argument_slice);
     auto buffer_idx = argument_slice->index();
 
     if (offset_slice == std::nullopt) {
-      new_buffers[buffer_idx] = orig_operand;
+      new_buffers[buffer_idx] = orig_argument;
       continue;
     }
 
@@ -143,16 +149,16 @@ absl::Status AddressComputationThunk::ExecuteOnStream(
     std::vector<int64_t> slice_starts;
     slice_starts.reserve(dst_shape.rank());
 
-    // Get offset for `operand_idx`-th operand, which has `dst_shape.rank()`
+    // Get offset for `argument_idx`-th argument, which has `dst_shape.rank()`
     // components.
-    for (auto [offset_idx, offset_slice] : llvm::enumerate(*offset_slice)) {
+    for (auto [offset_idx, slice] : llvm::enumerate(*offset_slice)) {
       se::DeviceMemoryBase offset_src =
-          orig_allocations.GetDeviceAddress(offset_slice);
-      int64_t* offset_dst = &offsets_base[operand_idx + offset_idx];
+          orig_allocations.GetDeviceAddress(slice);
+      int64_t* offset_dst = &offsets_base[argument_idx + offset_idx];
       // Copy the `offset_idx`-th component of the offset for the
-      // `operand_idx`-th operand from device to host.
+      // `argument_idx`-th argument from device to host.
       TF_RETURN_IF_ERROR(
-          stream.Memcpy(offset_dst, offset_src, sizeof(int64_t)));
+          stream.Memcpy(offset_dst, offset_src, offset_byte_size.value()));
 
       if (absl::Status blocked = stream.BlockHostUntilDone(); !blocked.ok()) {
         return absl::InternalError(absl::StrFormat(
@@ -172,7 +178,7 @@ absl::Status AddressComputationThunk::ExecuteOnStream(
       new_offset += start * stride;
     }
 
-    new_buffers[buffer_idx] = orig_operand.GetByteSlice(new_offset, new_size);
+    new_buffers[buffer_idx] = orig_argument.GetByteSlice(new_offset, new_size);
   }
 
   // Safe to create a local BufferAllocations here since buffers are only slices
