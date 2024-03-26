@@ -39,7 +39,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/gpu/model/indexing_analysis.h"
 #include "xla/service/gpu/model/indexing_map.h"
-#include "xla/service/gpu/model/tile_analysis.h"
+#include "xla/service/gpu/model/symbolic_tile.h"
 #include "xla/service/instruction_fusion.h"
 #include "xla/status.h"
 
@@ -206,9 +206,9 @@ std::vector<int64_t> SymbolicTileAnalysis::TileStrides(
                          *tile_parameters_);
 }
 
-void SymbolicTileAnalysis::SetTileSizes(absl::Span<int64_t const> sizes) {
+void SymbolicTileAnalysis::SetTileSizes(std::vector<int64_t> sizes) {
   // TODO(bchetioui): CHECK num parameters somehow?
-  tile_parameters_ = std::vector(sizes.begin(), sizes.end());
+  tile_parameters_ = std::vector(std::move(sizes));
 }
 
 }  // namespace gpu

@@ -529,7 +529,12 @@ cc_library(
         "//xla/service:algorithm_util",
         "//xla/service:dump",
         "//xla/service:hlo_module_config",
+        "//xla/service/gpu/fusions/mlir:elemental_hlo_to_mlir",
         "//xla/service/gpu/llvm_gpu_backend",
+        "//xla/service/gpu/model:affine_map_printer",
+        "//xla/service/gpu/model:indexing_analysis",
+        "//xla/service/gpu/model:indexing_map",
+        "//xla/service/gpu/model:symbolic_tile_analysis",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:launch_dim",
@@ -549,6 +554,8 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:TargetParser",
         "@llvm-project//llvm:ir_headers",
+        "@llvm-project//mlir:AffineDialect",
+        "@llvm-project//mlir:AffineToStandard",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:ArithToLLVM",
         "@llvm-project//mlir:BuiltinToLLVMIRTranslation",
@@ -612,6 +619,7 @@ xla_test(
         "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
+        "//xla/service/gpu/model:indexing_test_utils",
         "//xla/service/gpu/tests:gpu_codegen_test",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor/cuda:cublas_plugin",
@@ -621,6 +629,7 @@ xla_test(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:ir_headers",
@@ -1369,6 +1378,7 @@ cc_library(
     name = "reduction_utils",
     srcs = ["reduction_utils.cc"],
     hdrs = ["reduction_utils.h"],
+    compatible_with = get_compatible_with_portable(),
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":ir_emission_utils",
@@ -1702,53 +1712,6 @@ xla_cc_test(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
-    ],
-)
-
-cc_library(
-    name = "fusion_merger_triton",
-    srcs = ["fusion_merger_triton.cc"],
-    hdrs = ["fusion_merger_triton.h"],
-    deps = [
-        ":backend_configs_cc",
-        ":gpu_fusible",
-        ":ir_emission_utils",
-        ":triton_fusion_analysis",
-        "//xla:status",
-        "//xla:statusor",
-        "//xla:util",
-        "//xla:xla_data_proto_cc",
-        "//xla/hlo/ir:hlo",
-        "//xla/service:hlo_pass",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:status",
-    ],
-)
-
-xla_test(
-    name = "fusion_merger_triton_test",
-    srcs = ["fusion_merger_triton_test.cc"],
-    backend_tags = {"gpu": [
-        "requires-gpu-sm70",
-    ]},
-    backends = [
-        "gpu",
-    ],
-    deps = [
-        ":fusion_merger_triton",
-        "//xla:autotune_results_proto_cc",
-        "//xla/service:pattern_matcher",
-        "//xla/service:pattern_matcher_gmock",
-        "//xla/tests:hlo_test_base",
-        "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
-        "@com_google_absl//absl/log",
-        "@com_google_googletest//:gtest",
-        "@local_tsl//tsl/platform:status_matchers",
     ],
 )
 
@@ -3773,7 +3736,6 @@ cc_library(
         "@local_tsl//tsl/platform:numbers",
     ]) + xla_export_hlo_deps() + [
         ":command_buffer_scheduling",
-        ":fusion_merger_triton",
         ":fusion_pipeline",
         ":ir_emitter_context",
         ":ir_emitter_unnested",
@@ -4645,6 +4607,7 @@ cc_library(
     name = "gpu_fusible",
     srcs = ["gpu_fusible.cc"],
     hdrs = ["gpu_fusible.h"],
+    compatible_with = get_compatible_with_portable(),
     deps = [
         ":backend_configs_cc",
         ":hlo_traversal",

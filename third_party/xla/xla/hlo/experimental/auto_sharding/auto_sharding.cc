@@ -33,7 +33,6 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -73,7 +72,6 @@ limitations under the License.
 #include "xla/service/hlo_alias_analysis.h"
 #include "xla/service/hlo_buffer.h"
 #include "xla/service/hlo_cost_analysis.h"
-#include "xla/service/hlo_dce.h"
 #include "xla/service/hlo_memory_scheduler.h"
 #include "xla/service/hlo_value.h"
 #include "xla/service/optimize_input_output_buffer_alias.h"
@@ -1423,6 +1421,9 @@ void TrimOrGenerateStrategiesBasedOnExistingSharding(
           cluster_env, pretrimmed_strategy_map, call_graph, strict);
     }
   } else {
+    if (existing_sharding.IsUnknown()) {
+      return;
+    }
     if (ShardingIsComplete(existing_sharding,
                            cluster_env.device_mesh_.num_elements())) {
       // Sharding provided by XLA users, we need to keep them.
@@ -1461,9 +1462,13 @@ void TrimOrGenerateStrategiesBasedOnExistingSharding(
                 strategy_map.at(operand).get();
             Shape operand_shape = operand->shape();
             if (ins->opcode() == HloOpcode::kGetTupleElement) {
+              if (input_sharding && input_sharding->IsTuple()) {
+                input_sharding = input_sharding->GetSubSharding(
+                    operand->shape(), {ins->tuple_index()});
+              }
               operand_strategy_group =
                   operand_strategy_group->childs[ins->tuple_index()].get();
-              operand_shape = operand_shape.tuple_shapes(ins->tuple_index());
+              operand_shape = operand->shape().tuple_shapes(ins->tuple_index());
             }
 
             if (input_sharding.has_value()) {
@@ -2613,6 +2618,7 @@ void CheckUserShardingPreservation(
                    << preserve_shardings.at(inst->name())[0].ToString()
                    << "\nbut it's empty.";
       } else if (!inst->sharding().IsTuple() &&
+                 !preserve_shardings.at(inst->name())[0].IsUnknown() &&
                  preserve_shardings.at(inst->name())[0] != inst->sharding()) {
         LOG(FATAL) << "User sharding is not preserved! Instruction with name "
                    << inst->name() << " should be: "
@@ -2622,8 +2628,9 @@ void CheckUserShardingPreservation(
         const std::vector<HloSharding>* preserve_shardings_tuple =
             &preserve_shardings.at(inst->name());
         for (size_t i = 0; i < inst->shape().tuple_shapes_size(); i++) {
-          if (preserve_shardings_tuple->at(i) !=
-              inst->sharding().tuple_elements().at(i)) {
+          if (!preserve_shardings_tuple->at(i).IsUnknown() &&
+              preserve_shardings_tuple->at(i) !=
+                  inst->sharding().tuple_elements().at(i)) {
             LOG(FATAL) << "Tuple sharding is not preserved! Instruction "
                           "with name "
                        << inst->name() << " " << i << "th tuple element "
@@ -3938,8 +3945,6 @@ absl::StatusOr<bool> AutoSharding::Run(
   metrics::RecordAutoShardingInvocations();
 #endif
 
-  CHECK_OK(HloDCE().Run(module, execution_threads));
-
   TF_RETURN_IF_ERROR(option_.CheckAndSetup());
   LOG(INFO) << "AutoShardingOptions:\n" << option_.ToString();
 
@@ -3982,13 +3987,33 @@ absl::StatusOr<bool> AutoSharding::Run(
     mesh_shapes.push_back(option_.device_mesh_shape);
   }
 
+  HloInstruction* parameter_instruction =
+      module->entry_computation()->parameter_instruction(0);
+  if (parameter_instruction->shape().IsTuple() &&
+      parameter_instruction->has_sharding()) {
+    CHECK_EQ(module->entry_computation()->num_parameters(), 1);
+    parameter_instruction->set_sharding(
+        spmd::ReplaceGivenShardingsWithUnknownForTuple(
+            parameter_instruction->sharding(), parameter_instruction->shape(),
+            module->config().allow_spmd_sharding_propagation_to_parameters()));
+  }
+
+  HloInstruction* root_instruction =
+      module->entry_computation()->root_instruction();
+  if (root_instruction->shape().IsTuple() && root_instruction->has_sharding()) {
+    root_instruction->set_sharding(
+        spmd::ReplaceGivenShardingsWithUnknownForTuple(
+            root_instruction->sharding(), root_instruction->shape(),
+            module->config().allow_spmd_sharding_propagation_to_output()));
+  }
+
   absl::flat_hash_map<std::string, const HloInstruction*>
       sharding_propagation_solution;
   std::unique_ptr<HloModule> module_with_default_solution = nullptr;
   if (option_.use_sharding_propagation_for_default_shardings) {
     module_with_default_solution = CloneModule(module);
-    // TODO(pratikf): Ensure that we're passing the correct custom call sharding
-    // helper to the sharding propagation pass.
+    // TODO(pratikf): Ensure that we're passing the correct custom call
+    // sharding helper to the sharding propagation pass.
     auto sharding_prop = ShardingPropagation(
         /*is_spmd */ true, /*propagate_metadata */ false,
         /*allow_spmd_sharding_propagation_to_output*/
@@ -4101,8 +4126,6 @@ absl::StatusOr<bool> AutoSharding::Run(
         chosen_mesh_shape_ = mesh_shapes[min_mesh_shape_index];
         absl::flat_hash_map<HloComputation*, HloComputation*>
             computation_replacements;
-        CHECK_EQ(module->computation_count(),
-                 modules[min_mesh_shape_index]->computation_count());
         for (size_t i = 0; i < module->computation_count(); ++i) {
           auto original_computation = module->mutable_computation(i);
           auto new_computation =

@@ -159,6 +159,7 @@ cc_library(
         "//xla/service:hlo_module_config",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/service/gpu:cublas_cudnn",
+        "//xla/service/gpu:gpu_fusible",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -517,9 +518,9 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "tile_analysis",
-    srcs = ["tile_analysis.cc"],
-    hdrs = ["tile_analysis.h"],
+    name = "symbolic_tile",
+    srcs = ["symbolic_tile.cc"],
+    hdrs = ["symbolic_tile.h"],
     deps = [
         ":affine_map_printer",
         ":indexing_map",
@@ -534,13 +535,13 @@ cc_library(
 )
 
 xla_cc_test(
-    name = "tile_analysis_test",
-    srcs = ["tile_analysis_test.cc"],
+    name = "symbolic_tile_test",
+    srcs = ["symbolic_tile_test.cc"],
     deps = [
         ":affine_map_printer",
         ":indexing_analysis",
         ":indexing_test_utils",
-        ":tile_analysis",
+        ":symbolic_tile",
         "//xla/hlo/ir:hlo",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
@@ -559,7 +560,7 @@ cc_library(
     deps = [
         ":indexing_analysis",
         ":indexing_map",
-        ":tile_analysis",
+        ":symbolic_tile",
         "//xla:status",
         "//xla/hlo/ir:hlo",
         "//xla/service:instruction_fusion",
@@ -579,7 +580,6 @@ xla_cc_test(
     deps = [
         ":indexing_map",
         ":symbolic_tile_analysis",
-        "//xla/hlo/ir:hlo",
         "//xla/tests:hlo_test_base",
         "//xla/tests:verified_hlo_module",
         "@com_google_absl//absl/strings",

@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_MODEL_TILE_ANALYSIS_H_
-#define XLA_SERVICE_GPU_MODEL_TILE_ANALYSIS_H_
+#ifndef XLA_SERVICE_GPU_MODEL_SYMBOLIC_TILE_H_
+#define XLA_SERVICE_GPU_MODEL_SYMBOLIC_TILE_H_
 
 #include <optional>
 #include <ostream>
@@ -32,21 +32,20 @@ namespace gpu {
 // expressed as a strided expression
 //     offset + stride * iota(size)
 // with offset, stride, and size three integers, and iota the usual range
-// function. The size and offsets may never be negative.
+// function. These values may never be negative.
 //
 // A N-dimensional symbolic tile is a function from offsets, strides, and sizes
 // to a N-dimensional tile. It can be represented as three affine maps with
 // domain
-//     ()[size0, ..., size{M-1}}]
+//     ()[size0, ..., size{M-1}]
 // and respective co-domains
 //     (offset0, ..., offset{N-1})     (offset_map())
 //     (size0', ..., size'{N-1})       (size_map())
 //     (stride0, ..., stride{N-1})     (stride_map())
 // where maps respectively encode the offset, size, and stride component of
 // each strided expression in the tile. The parameters to the maps above are all
-// assumed to be strictly positive, but results of stride_map() may be negative.
-// The input offsets are assumed to be all 0s, and the input strides are assumed
-// to be all 1s.
+// assumed to be strictly positive. The input offsets are assumed to be all 0s,
+// and the input strides are assumed to be all 1s.
 //
 // A symbolic tile with M symbols and N results is constructed using an
 // `IndexingMap` with M input dimensions and N results. The construction of the
@@ -79,4 +78,4 @@ class SymbolicTile {
 }  // namespace gpu
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_MODEL_TILE_ANALYSIS_H_
+#endif  // XLA_SERVICE_GPU_MODEL_SYMBOLIC_TILE_H_
