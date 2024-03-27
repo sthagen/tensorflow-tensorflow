@@ -1,8 +1,8 @@
-load("//xla/tests:build_defs.bzl", "xla_test")
-load("//xla:xla.bzl", "xla_cc_test")
 load("@local_config_rocm//rocm:build_defs.bzl", "if_rocm_is_configured")
 load("@local_tsl//tsl/platform:build_config_root.bzl", "tf_cuda_tests_tags")
 load("@local_tsl//tsl/platform/default:cuda_build_defs.bzl", "if_cuda_is_configured")
+load("//xla:xla.bzl", "xla_cc_test")
+load("//xla/tests:build_defs.bzl", "xla_test")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -104,8 +104,8 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/service/gpu:ir_emitter_context",
-        "//xla/service/gpu:thunk",
         "//xla/service/gpu/runtime:copy_thunk",
+        "//xla/service/gpu/runtime:thunk",
         "@llvm-project//mlir:IR",
     ],
 )
@@ -135,13 +135,13 @@ cc_library(
         "//xla/service/gpu:ir_emitter_context",
         "//xla/service/gpu:kernel_arguments",
         "//xla/service/gpu:matmul_utils",
-        "//xla/service/gpu:thunk",
         "//xla/service/gpu/kernels:custom_kernel",
         "//xla/service/gpu/kernels:custom_kernel_fusion",
         "//xla/service/gpu/runtime:address_computation_thunk",
         "//xla/service/gpu/runtime:custom_call_thunk",
         "//xla/service/gpu/runtime:gemm_thunk",
         "//xla/service/gpu/runtime:kernel_thunk",
+        "//xla/service/gpu/runtime:thunk",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
@@ -204,10 +204,10 @@ cc_library(
         "//xla/service/gpu:kernel_reuse_cache",
         "//xla/service/gpu:launch_dimensions",
         "//xla/service/gpu:target_util",
-        "//xla/service/gpu:thunk",
         "//xla/service/gpu/model:indexing_analysis",
         "//xla/service/gpu/model:indexing_map",
         "//xla/service/gpu/runtime:kernel_thunk",
+        "//xla/service/gpu/runtime:thunk",
         "//xla/service/llvm_ir:ir_array",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor:device_description",
@@ -665,8 +665,8 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/service/gpu:ir_emitter_context",
-        "//xla/service/gpu:thunk",
         "//xla/service/gpu/runtime:memset_thunk",
+        "//xla/service/gpu/runtime:thunk",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
@@ -702,10 +702,10 @@ cc_library(
         "//xla/service/gpu:parallel_loop_emitter",
         "//xla/service/gpu:reduction_utils",
         "//xla/service/gpu:target_util",
-        "//xla/service/gpu:thunk",
         "//xla/service/gpu/model:indexing_analysis",
         "//xla/service/gpu/model:indexing_map",
         "//xla/service/gpu/runtime:kernel_thunk",
+        "//xla/service/gpu/runtime:thunk",
         "//xla/service/llvm_ir:fused_ir_emitter",
         "//xla/service/llvm_ir:ir_array",
         "//xla/service/llvm_ir:kernel_support_library",

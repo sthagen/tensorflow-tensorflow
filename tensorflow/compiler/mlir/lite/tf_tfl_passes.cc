@@ -19,7 +19,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "absl/log/log.h"
 #include "llvm/ADT/StringRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
@@ -227,8 +226,7 @@ void AddPostQuantizationStableHloToTfPasses(
   }
 
   if (pass_config.enable_composite_direct_lowering) {
-    LOG(WARNING) << "Direct lowerting of composites to TFLite ops is not "
-                    "implemented yet.";
+    pass_manager.addPass(mlir::odml::CreateCompositeLoweringPass());
   }
 
   // TFLite dialect passes.
@@ -256,9 +254,12 @@ void AddPostQuantizationStableHloToTfPasses(
   // Translate "stablehlo.custom_call @stablehlo.composite" to
   // "stablehlo.composite"
   // TODO: b/330741524 - clean this up when "stablehlo.composite" is emitted
-  // directly.
+  // directly. Additionally remove the composite to custom once ODML long term
+  // solution lands.
   pass_manager.addPass(
       mlir::odml::createLegalizeStablehloCustomCallToCompositePass());
+  pass_manager.addNestedPass<mlir::func::FuncOp>(
+      mlir::odml::createLegalizeCompositeToCustomOpPass());
 }
 
 // This is the early part of the conversion in isolation. This enables a caller

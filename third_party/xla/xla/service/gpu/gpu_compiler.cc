@@ -124,7 +124,6 @@ limitations under the License.
 #include "xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "xla/service/gpu/conv_layout_normalization.h"
 #include "xla/service/gpu/copy_fusion.h"
-#include "xla/service/gpu/cudnn_fusion_compiler.h"
 #include "xla/service/gpu/custom_kernel_fusion_rewriter.h"
 #include "xla/service/gpu/dot_dimension_sorter.h"
 #include "xla/service/gpu/dot_operand_converter.h"
@@ -165,12 +164,12 @@ limitations under the License.
 #include "xla/service/gpu/reduction_splitter.h"
 #include "xla/service/gpu/reduction_utils.h"
 #include "xla/service/gpu/rename_fusions.h"
+#include "xla/service/gpu/runtime/thunk.h"
 #include "xla/service/gpu/runtime_intrinsics.h"
 #include "xla/service/gpu/scatter_slice_simplifier.h"
 #include "xla/service/gpu/softmax_rewriter_triton.h"
 #include "xla/service/gpu/stream_attribute_annotator.h"
 #include "xla/service/gpu/stream_attribute_async_wrapper.h"
-#include "xla/service/gpu/thunk.h"
 #include "xla/service/gpu/topk_specializer.h"
 #include "xla/service/gpu/topk_splitter.h"
 #include "xla/service/gpu/tree_reduction_rewriter.h"
@@ -1980,8 +1979,8 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
     const CompileOptions& options) {
   Thunk::BinaryMap dnn_compiled_graphs;
   if (stream_exec) {
-    CuDnnFusionCompiler cudnn_compiler(*stream_exec, dnn_compiled_graphs);
-    TF_RETURN_IF_ERROR(cudnn_compiler.Run(&*module).status());
+    TF_RETURN_IF_ERROR(RunCudnnFusionCompilerPass(module.get(), stream_exec,
+                                                  &dnn_compiled_graphs));
   }
 
   const DebugOptions& debug_opts = module->config().debug_options();

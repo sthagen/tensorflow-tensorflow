@@ -124,6 +124,7 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status.h"
 #include "xla/status_macros.h"
+#include "xla/statusor.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/translate/hlo_to_mhlo/hlo_function_importer.h"
@@ -270,7 +271,10 @@ Value Cast(ImplicitLocOpBuilder& b, Value value, Type dst_element_ty) {
     return Cast(b, b.create<ma::ExtFOp>(fp32_ty, value), dst_element_ty);
   }
   if (dst_element_ty.isBF16()) {
-    return b.create<ma::TruncFOp>(dst_ty, Cast(b, value, b.getF32Type()));
+    // S8 -> BF16 is directly supported and doesn't need to go through f32.
+    if (!src_element_ty.isInteger(8)) {
+      return b.create<ma::TruncFOp>(dst_ty, Cast(b, value, b.getF32Type()));
+    }
   }
 
   // float => float
@@ -692,6 +696,44 @@ absl::StatusOr<Value> EmitReduce(ImplicitLocOpBuilder& b,
   return Cast(b, result, TritonType(b, hlo_reduce.shape().element_type()));
 }
 
+// Emit code corresponding to a fusion instruction somehow nested within the
+// initial Triton fusion. This can happen when we carry around auxiliary
+// computations, e.g. with reduces. Since we are emitting a single Triton
+// fusion, we simply flatten the fusion inside the computation.
+//
+// TODO(b/331413981): get rid of this special handling once this is solved.
+absl::StatusOr<Value> EmitNestedFusion(
+    ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
+    const se::DeviceDescription& device_info,
+    const HloFusionInstruction& fusion_instruction,
+    absl::flat_hash_map<const HloInstruction*, Value>& values) {
+  // TODO(b/331402498): revisit the order of scope once we completely deprecate
+  // Triton fusion analysis.
+  const HloComputation* fusion_computation =
+      fusion_instruction.fused_instructions_computation();
+
+  absl::flat_hash_map<const HloInstruction*, Value> region_values;
+
+  std::vector<const HloInstruction*> to_emit;
+  for (const HloInstruction* instr :
+       fusion_computation->MakeInstructionPostOrder()) {
+    if (instr->opcode() == HloOpcode::kParameter) {
+      int64_t parameter_number = instr->parameter_number();
+      auto it = values.find(fusion_instruction.operand(parameter_number));
+      TF_RET_CHECK(it != values.end());
+      TF_RET_CHECK(region_values.insert({instr, it->second}).second);
+    } else {
+      to_emit.push_back(instr);
+    }
+  }
+
+  TF_RET_CHECK(to_emit.back() == fusion_computation->root_instruction());
+
+  return EmitScope(b, libdevice_path, device_info, /*analysis=*/nullptr,
+                   TritonFusionAnalysis::Scope::OUTPUT, {}, to_emit,
+                   region_values);
+}
+
 // TODO(b/331332678): Add unit tests to target this function specifically.
 Value EmitTiledBroadcast(
     ImplicitLocOpBuilder& b, const SymbolicTileAnalysis& analysis,
@@ -855,7 +897,7 @@ absl::StatusOr<Value> EmitScope(
     } else if (hlo->opcode() == HloOpcode::kReduce) {
       TF_ASSIGN_OR_RETURN(result, EmitReduce(b, libdevice_path, device_info,
                                              *hlo, values[hlo->operand(0)]));
-    } else if (hlo->IsElementwise()) {
+    } else if (HloInstruction::IsOpElementwise(hlo->opcode())) {
       std::vector<Value> operands;
       operands.reserve(hlo->operands().size());
       for (const HloInstruction* operand : hlo->operands()) {
@@ -873,6 +915,11 @@ absl::StatusOr<Value> EmitScope(
       // which are pushed to loads and stores. No operations on tiles are
       // performed here.
       result = values[hlo->operand(0)];
+    } else if (hlo->opcode() == HloOpcode::kFusion) {
+      const auto* fusion_instruction = ::xla::Cast<HloFusionInstruction>(hlo);
+      TF_ASSIGN_OR_RETURN(result,
+                          EmitNestedFusion(b, libdevice_path, device_info,
+                                           *fusion_instruction, values));
     } else {
       LOG(FATAL) << hlo->ToString();
     }
@@ -1894,6 +1941,43 @@ bool Is3xBfloat16MatMul(const HloDotInstruction* dot_instr,
   return algorithm == PrecisionConfig::ALG_DOT_BF16_BF16_F32_X3;
 }
 
+// This is a heuristic that serves as a proxy for register usage and code size.
+//
+// We have noticed that tilings with very long LLVM IR code are both slow to
+// compile and slow to run. This can be for example due to register spills. So
+// we should skip these tilings to save time. But it's better to skip them
+// before the LLVM IR is generated. To do that, we came up with a formula that
+// strongly correlates with the LLVM IR size. The formula is the size of the two
+// input and the output thread block tiles divided by the number of warps. We
+// read https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/ as a
+// reference, and found the formula by trial and error.
+//
+// To regenerate the limit, we have to run an exhaustive search on all tilings
+// for a few different HLOs, printing the runtimes and the heuristic values.
+//
+// From that, we can find a limit, such that all tilings within alpha *
+// optimal_runtime have a heuristic value less than or equal to the limit.
+//
+// In our measurements, all tilings which were within 1.13 * optimal_runtime had
+// a complexity_heuristic_value <= kComplexityHeuristicLimit.
+//
+// See go/tiling-heuristic for more details.
+absl::Status CheckGemmTilingComplexityHeuristic(
+    const TritonGemmConfig& config) {
+  constexpr int64_t kComplexityHeuristicLimit = 9000;
+  int64_t complexity_heuristic_value =
+      (config.block_m * config.block_n +
+       (config.block_m + config.block_n) * config.block_k) /
+      config.num_warps;
+  VLOG(2) << "Complexity heuristic: " << complexity_heuristic_value;
+  if (complexity_heuristic_value > kComplexityHeuristicLimit) {
+    return ResourceExhausted("Tiling complexity heuristic exceeded: %d > %d",
+                             complexity_heuristic_value,
+                             kComplexityHeuristicLimit);
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace
 
 // Variable naming: lhs [m, k] x rhs [k, n] -> out [m, n].
@@ -1904,6 +1988,8 @@ absl::Status EmitMatMul(mlir::OpBuilder builder,
                         const HloComputation* computation,
                         mlir::triton::FuncOp fn,
                         const TritonGemmConfig& config) {
+  TF_RETURN_IF_ERROR(CheckGemmTilingComplexityHeuristic(config));
+
   const HloDotInstruction* dot_instr = DynCast<HloDotInstruction>(
       hlo_query::GetFirstInstructionWithOpcode(*computation, HloOpcode::kDot));
   TF_RET_CHECK(!dot_instr->sparse_operands());
@@ -2663,8 +2749,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
 
 absl::StatusOr<TritonWrapperResult> TritonWrapper(
     const TritonFusionAnalysis& analysis, absl::string_view fn_name,
-    const HloComputation* hlo_computation, absl::string_view fusion_kind,
-    const se::CudaComputeCapability& cc,
+    const HloComputation* hlo_computation, const se::CudaComputeCapability& cc,
     const se::DeviceDescription& device_info, const TritonGemmConfig& config,
     llvm::Module* llvm_module, TritonIrEmitter ir_emitter,
     mlir::MLIRContext& mlir_context) {
@@ -2673,43 +2758,6 @@ absl::StatusOr<TritonWrapperResult> TritonWrapper(
     // Set environment variables for consumption by Triton.
     tsl::setenv("ENABLE_MMA_V3", "true", true /*overwrite*/);
     tsl::setenv("ENABLE_PIPELINING", "true", true /*overwrite*/);
-  }
-
-  if (fusion_kind == kTritonGemmFusionKind) {
-    // This is a heuristic that serves as a proxy for register usage and code
-    // size.
-    //
-    // We have noticed that tilings with very long LLVM IR code are both slow to
-    // compile and slow to run. This can be for example due to register spills.
-    // So we should skip these tilings to save time. But it's better to skip
-    // them before the LLVM IR is generated. To do that, we came up with a
-    // formula that strongly correlates with the LLVM IR size. The formula is
-    // the size of the two input and the output thread block tiles divided by
-    // the number of warps. We read
-    // https://developer.nvidia.com/blog/cutlass-linear-algebra-cuda/ as a
-    // reference, and found the formula by trial and error.
-    //
-    // To regenerate the limit, we have to run an exhaustive search on all
-    // tilings for a few different HLOs, printing the runtimes and the heuristic
-    // values.
-    // From that, we can find a limit, such that all tilings within alpha *
-    // optimal_runtime have a heuristic value less than or equal to the limit.
-    //
-    // In our measurements, all tilings which were within 1.13 * optimal_runtime
-    // had a complexity_heuristic_value <= kComplexityHeuristicLimit.
-    //
-    // See go/tiling-heuristic for more details.
-    constexpr int64_t kComplexityHeuristicLimit = 9000;
-    int64_t complexity_heuristic_value =
-        (config.block_m * config.block_n +
-         (config.block_m + config.block_n) * config.block_k) /
-        config.num_warps;
-    VLOG(2) << "Complexity heuristic: " << complexity_heuristic_value;
-    if (complexity_heuristic_value > kComplexityHeuristicLimit) {
-      return ResourceExhausted("Tiling complexity heuristic exceeded: %d > %d",
-                               complexity_heuristic_value,
-                               kComplexityHeuristicLimit);
-    }
   }
 
   TF_ASSIGN_OR_RETURN(
