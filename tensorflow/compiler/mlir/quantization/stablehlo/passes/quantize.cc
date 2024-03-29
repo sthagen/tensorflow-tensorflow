@@ -77,6 +77,14 @@ struct StableHloQuantizationReverse
                                   quantfork::QuantizeCastOp>(ctx) {}
 };
 
+bool IsHybridQuantizableOp(Operation& op) {
+  auto call_op = cast<TF::XlaCallModuleOp>(op);
+  if (call_op == nullptr) return false;
+  StringRef entry_function_name = GetEntryFunctionName(call_op);
+  return entry_function_name.contains("conv") ||
+         entry_function_name.contains("dot_general");
+}
+
 // Quantization rewrite pattern using DQ as the root op.
 struct StableHloQuantizationWeightOnly
     : public StableHloQuantizationBase<StableHloQuantizationWeightOnly> {
@@ -84,8 +92,7 @@ struct StableHloQuantizationWeightOnly
       : StableHloQuantizationBase<StableHloQuantizationWeightOnly>(ctx) {}
 
   static bool AllowWeightOnlyQuantization(Operation& op) {
-    auto call_op = cast<TF::XlaCallModuleOp>(op);
-    return call_op && GetEntryFunctionName(call_op).contains("dot_general");
+    return IsHybridQuantizableOp(op);
   }
 };
 
@@ -96,9 +103,10 @@ class QuantizePass : public impl::QuantizePassBase<QuantizePass> {
   using impl::QuantizePassBase<QuantizePass>::QuantizePassBase;
 
   explicit QuantizePass(const bool enable_per_channel_quantized_weight,
-                        const bool enable_weight_only,
-                        const QuantizationSpecs& quant_specs) {
+                        const bool enable_full_int_quantization,
+                        const bool enable_weight_only) {
     enable_per_channel_quantized_weight_ = enable_per_channel_quantized_weight;
+    enable_full_int_quantization_ = enable_full_int_quantization;
     enable_weight_only_ = enable_weight_only;
   }
 
@@ -119,6 +127,11 @@ void QuantizePass::runOnOperation() {
 
   PopulateComputeHeavyPatterns(ctx, patterns,
                                enable_per_channel_quantized_weight_);
+
+  // Quantize all quantizable ops, including ops that are not compute-heavy.
+  if (enable_full_int_quantization_) {
+    PopulateAllQuantizablePatterns(ctx, patterns);
+  }
 
   if (failed(applyPatternsAndFoldGreedily(module_op, std::move(patterns)))) {
     // There are cases where no rewrites happen even if a pattern matches,

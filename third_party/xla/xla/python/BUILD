@@ -40,6 +40,7 @@ package_group(
 pytype_strict_library(
     name = "xla_client",
     srcs = ["xla_client.py"],
+    pytype_srcs = ["xla_client.pyi"],
     srcs_version = "PY3",
     visibility = ["//visibility:public"],
     deps = [
@@ -537,8 +538,6 @@ cc_library(
         "@local_config_python//:python_headers",  # build_cleaner: keep
         "//xla/pjrt:pjrt_client",
         "//xla/pjrt:status_casters",
-        "//xla/python/ifrt",
-        "@local_tsl//tsl/concurrency:ref_count",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/profiler/lib:traceme",
     ],
@@ -733,6 +732,7 @@ cc_library(
         ":types",
         # placeholder for index annotation deps
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -747,7 +747,6 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/pjrt:exceptions",
         "//xla/pjrt:pjrt_client",
-        "//xla/pjrt:pjrt_future",
         "//xla/pjrt:status_casters",
         "//xla/python/ifrt",
         "@local_tsl//tsl/concurrency:ref_count",
@@ -908,6 +907,7 @@ cc_library(
         "//xla/mlir/utils:error_util",
         "@com_google_absl//absl/status",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:BytecodeWriter",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",
@@ -1141,13 +1141,18 @@ cc_library(
     ]),
 )
 
+cc_library(
+    name = "logging",
+    srcs = ["logging.cc"],
+    hdrs = ["logging.h"],
+    deps = [
+        "@com_google_absl//absl/log:initialize",
+    ],
+)
+
 tsl_pybind_extension(
     name = "xla_extension",
-    srcs = [
-        "logging.cc",
-        "logging.h",
-        "xla.cc",
-    ],
+    srcs = ["xla.cc"],
     copts = [
         "-fexceptions",
         "-fno-strict-aliasing",
@@ -1178,6 +1183,7 @@ tsl_pybind_extension(
         ":custom_call_sharding",
         ":dlpack",
         ":jax_jit",
+        ":logging",
         ":mlir",
         ":nb_absl_flat_hash_map",
         ":nb_absl_span",

@@ -133,8 +133,7 @@ bool IsAlignedSlice(const Shape& src_shape, const Shape& dst_shape,
 
 UseDefDataflowPaths GetSlicedOperandPaths(const HloInstruction* instr,
                                           bool dynamic) {
-  UseDefDataflowPaths sliced_operand_paths = {
-      const_cast<HloInstruction*>(instr)};
+  UseDefDataflowPaths sliced_operand_paths;
 
   auto fusion = HloFusionAdaptor::ForComputation(instr->parent());
   // This set is used to avoid duplicates in the matched results. It contains
@@ -191,12 +190,14 @@ UseDefDataflowPaths GetSlicedOperandPaths(const HloInstruction* instr,
       // still need to add instructions encountered in the sliced operand path
       // during the latest traversal.
       sliced_operand_paths.insert(sliced_operand_paths.end(),
-                                  maybe_sliced_operand_path.begin(),
-                                  maybe_sliced_operand_path.end());
+                                  maybe_sliced_operand_path.rbegin(),
+                                  maybe_sliced_operand_path.rend());
       processed_instrs.insert(maybe_sliced_operand_path.begin(),
                               maybe_sliced_operand_path.end());
     }
   }
+
+  sliced_operand_paths.push_back(const_cast<HloInstruction*>(instr));
   return sliced_operand_paths;
 }
 
@@ -278,30 +279,6 @@ absl::InlinedVector<HloInstruction*, 4> GetPatternCaptures(
   return captures;
 }
 
-UseDefDataflowPaths GetSortedMatches(
-    absl::Span<HloInstruction* const> matches) {
-  UseDefDataflowPaths sorted_matches;
-  InstructionSet matched_instrs(matches.begin(), matches.end());
-  InstructionSet processed_instrs;
-  // Topologically sort `matches`
-  for (auto it = matches.rbegin(); it != matches.rend(); ++it) {
-    if (processed_instrs.contains(*it)) continue;
-    for (auto* operand : (*it)->operands()) {
-      if (!matched_instrs.contains(operand)) {
-        continue;
-      }
-      if (!processed_instrs.contains(operand)) {
-        sorted_matches.emplace_back(operand);
-        processed_instrs.insert(operand);
-      }
-    }
-    sorted_matches.emplace_back(*it);
-    processed_instrs.insert(*it);
-  }
-
-  return sorted_matches;
-}
-
 Status CreateRootTuple(HloInstruction* hero, HloComputation::Builder& builder,
                        DefUseDataflowPaths sliced_user_paths,
                        absl::flat_hash_map<const HloInstruction*,
@@ -337,7 +314,7 @@ Status CreateRootTuple(HloInstruction* hero, HloComputation::Builder& builder,
 }
 
 absl::StatusOr<HloComputation*> CreateFusionBody(
-    HloModule* module, absl::Span<HloInstruction* const> operand_matches,
+    HloModule* module, absl::Span<HloInstruction* const> sliced_operand_paths,
     DefUseDataflowPaths sliced_user_paths,
     absl::Span<HloInstruction* const> captures) {
   HloComputation::Builder builder("address-computation");
@@ -365,7 +342,7 @@ absl::StatusOr<HloComputation*> CreateFusionBody(
   // Instructions in the pattern are already topologically sorted, as we visited
   // them following use-def path, then reverse the list.
   HloInstruction* hero;
-  for (HloInstruction* instr : operand_matches) {
+  for (HloInstruction* instr : sliced_operand_paths) {
     instr_mapping[instr] = builder.AddInstruction(
         instr->CloneWithNewOperands(instr->shape(), mapped_operands(instr)));
     hero = instr;
@@ -464,37 +441,36 @@ absl::StatusOr<bool> AddressComputationFusionRewriter::Run(
     if (matches.empty()) return false;
 
     HloSchedule& schedule = module->schedule();
-    for (auto& kv : matches) {
-      auto& [operand_matches, sliced_user_paths] = kv.second;
-      std::vector<HloInstruction*> matches;
-      absl::c_copy(operand_matches, std::back_inserter(matches));
+    for (auto& [hero, paths] : matches) {
+      auto& [sliced_operand_paths, sliced_user_paths] = paths;
+      std::vector<HloInstruction*> matched_instrs;
+      absl::c_copy(sliced_operand_paths, std::back_inserter(matched_instrs));
 
       for (auto& sliced_user_path : sliced_user_paths)
-        absl::c_copy(sliced_user_path, std::back_inserter(matches));
+        absl::c_copy(sliced_user_path, std::back_inserter(matched_instrs));
 
-      auto captures = GetPatternCaptures(matches);
-      auto sorted_operand_matches = GetSortedMatches(operand_matches);
+      auto captures = GetPatternCaptures(matched_instrs);
 
       TF_ASSIGN_OR_RETURN(HloComputation * fusion_body,
-                          CreateFusionBody(module, sorted_operand_matches,
+                          CreateFusionBody(module, sliced_operand_paths,
                                            sliced_user_paths, captures));
 
       TF_ASSIGN_OR_RETURN(HloInstruction * fusion,
-                          CreateFusionInstruction(module, kv.first, captures,
+                          CreateFusionInstruction(module, hero, captures,
                                                   fusion_body, dynamic));
 
       // As we are running after scheduling we have to keep it valid.
-      HloComputation* parent = kv.first->parent();
+      HloComputation* parent = hero->parent();
       // Update schedule to replace the custom call instruction with the fusion
       // instruction.
       // Removal of the rest of the instructions in the sequence is handled by
       // schedule update below.
       HloInstructionSequence& sequence = schedule.GetOrCreateSequence(parent);
-      sequence.replace_instruction(kv.first, fusion);
+      sequence.replace_instruction(hero, fusion);
 
       if (fusion->shape().IsTuple()) {
         TF_RETURN_IF_ERROR(parent->ReplaceInstructionWithDifferentShape(
-            const_cast<HloInstruction*>(kv.first), fusion));
+            const_cast<HloInstruction*>(hero), fusion));
         for (auto& sliced_user_path : sliced_user_paths) {
           auto old_gte =
               Cast<HloGetTupleElementInstruction>(sliced_user_path.front());
@@ -505,28 +481,29 @@ absl::StatusOr<bool> AddressComputationFusionRewriter::Run(
               parent->ReplaceInstruction(sliced_user_path.back(), gte));
         }
       } else {
-        auto* old_instr = const_cast<HloInstruction*>(kv.first);
+        auto* instr_to_be_replaced = const_cast<HloInstruction*>(hero);
         if (sliced_user_paths.empty()) {
           // The only case where a tuple-shaped original hero op is fused into a
           // non-tuple-shaped fusion is there's only one element of the original
           // tuple being used. In that case, we need to replace that single
           // get-tuple-element (instead of the hero op) with the fusion
           // instruction.
-          if (kv.first->shape().IsTuple()) {
-            if (kv.first->user_count() != 1 ||
+          if (hero->shape().IsTuple()) {
+            if (hero->user_count() != 1 ||
                 !DynCast<HloGetTupleElementInstruction>(
-                    kv.first->users().front())) {
+                    hero->users().front())) {
               return absl::InternalError(
                   "Expect a single get-tuple-element user of the original "
                   "tuple-shaped hero op when address computation fusion does "
                   "not return a tuple");
             }
-            old_instr = kv.first->users().front();
+            instr_to_be_replaced = hero->users().front();
           }
         } else {
-          old_instr = sliced_user_paths.front().back();
+          instr_to_be_replaced = sliced_user_paths.front().back();
         }
-        TF_RETURN_IF_ERROR(parent->ReplaceInstruction(old_instr, fusion));
+        TF_RETURN_IF_ERROR(
+            parent->ReplaceInstruction(instr_to_be_replaced, fusion));
       }
     }
 
