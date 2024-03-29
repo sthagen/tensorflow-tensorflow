@@ -599,7 +599,6 @@ xla_test(
     srcs = if_cuda_is_configured(["ir_emitter_triton_test.cc"]),
     backends = [
         "gpu_a100",
-        "gpu_h100",
     ],
     shard_count = 20,
     tags = ["nomac"],
@@ -652,10 +651,7 @@ xla_test(
     backend_tags = {"gpu": [
         "requires-gpu-sm80",
     ]},
-    backends = [
-        "gpu",
-        "gpu_h100",
-    ],
+    backends = ["gpu"],
     tags = [
         "large",
         "no_oss",  # requires-mem:16g tag doesn't work in open source
@@ -1477,8 +1473,49 @@ cc_library(
         ":variant_visitor",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/service:instruction_fusion",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log:check",
+        "@local_tsl//tsl/platform:tensor_float_32_utils",
+    ],
+)
+
+xla_test(
+    name = "triton_support_test",
+    srcs = if_cuda_is_configured(["triton_support_test.cc"]),
+    backends = [
+        "gpu_a100",
+    ],
+    shard_count = 10,
+    tags = ["nomac"],
+    deps = [
+        ":gpu_device_info_for_tests",
+        ":gpu_float_support",
+        ":ir_emission_utils",
+        ":ir_emitter_triton",
+        ":matmul_utils",
+        ":triton_fusion_analysis",
+        ":triton_support",
+        "//xla:error_spec",
+        "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/service:float_normalization",
+        "//xla/service:hlo_pass_pipeline",
+        "//xla/service/gpu/tests:gpu_codegen_test",
+        "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:ir_headers",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -3069,6 +3106,7 @@ cc_library(
     deps = [
         ":gemm_fusion",
         ":ir_emission_utils",
+        ":triton_support",
         "//xla:literal_util",
         "//xla:shape_util",
         "//xla:statusor",
