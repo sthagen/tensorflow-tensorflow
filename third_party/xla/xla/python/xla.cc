@@ -56,7 +56,7 @@ limitations under the License.
 #include "xla/python/ifrt_proxy/client/py_module.h"
 #include "xla/python/py_client.h"
 #include "xla/service/cpu/collectives_interface.h"
-#include "tsl/python/lib/core/numpy.h"  //NOLINT
+#include "xla/tsl/python/lib/core/numpy.h"  //NOLINT
 #ifdef XLA_PYTHON_ENABLE_GPU
 #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
 #endif  // XLA_PYTHON_ENABLE_GPU
@@ -67,6 +67,11 @@ limitations under the License.
 #include "xla/pjrt/cpu/gloo_collectives.h"
 #include "xla/pjrt/cpu/gloo_kv_store.h"
 #endif  // __linux__
+
+#if !defined(_WIN32) && !defined(PLATFORM_GOOGLE)
+#include "xla/pjrt/cpu/mpi_collectives.h"
+#endif  // !_WIN32 && !PLATFORM_GOOGLE
+
 #include "xla/pjrt/cpu/cpu_client.h"
 #include "xla/pjrt/distributed/key_value_store_interface.h"
 #include "xla/pjrt/exceptions.h"
@@ -269,6 +274,23 @@ NB_MODULE(xla_extension, m_nb) {
       },
       nb::arg("distributed_client"), nb::arg("hostname").none() = std::nullopt,
       nb::arg("interface").none() = std::nullopt);
+
+#if !defined(_WIN32) && !defined(PLATFORM_GOOGLE)
+  nb::class_<cpu::MpiCollectives> mpi_collectives(m_nb, "MpiCollectives",
+                                                  cpu_collectives);
+  mpi_collectives.def("Init", &cpu::MpiCollectives::Init);
+  mpi_collectives.def("Finalize", &cpu::MpiCollectives::Finalize);
+  m_nb.def("make_mpi_collectives",
+           []() -> std::shared_ptr<cpu::MpiCollectives> {
+             return std::make_shared<cpu::MpiCollectives>();
+           });
+#else   // !_WIN32 && !PLATFORM_GOOGLE
+  m_nb.def("make_mpi_collectives",
+           []() -> std::shared_ptr<xla::cpu::CollectivesInterface> {
+             throw xla::XlaRuntimeError(
+                 "make_mpi_collectives is not implemented for Windows");
+           });
+#endif  // !_WIN32 && !PLATFORM_GOOGLE
 
   m_nb.def(
       "get_tfrt_cpu_client",
