@@ -3453,6 +3453,7 @@ AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
         spmd::SaveShardingForInstruction(inst,
                                          /* save_for_copy_users */ false,
                                          preserve_shardings);
+        continue;
       }
       if (inst->has_sharding() &&
           spmd::IsShardingMisaligned(inst->sharding(), inst->shape())) {
@@ -4000,15 +4001,18 @@ absl::StatusOr<bool> AutoSharding::Run(
     mesh_shapes.push_back(option_.device_mesh_shape);
   }
 
-  HloInstruction* parameter_instruction =
-      module->entry_computation()->parameter_instruction(0);
-  if (parameter_instruction->shape().IsTuple() &&
-      parameter_instruction->has_sharding()) {
-    CHECK_EQ(module->entry_computation()->num_parameters(), 1);
-    parameter_instruction->set_sharding(
-        spmd::ReplaceGivenShardingsWithUnknownForTuple(
-            parameter_instruction->sharding(), parameter_instruction->shape(),
-            module->config().allow_spmd_sharding_propagation_to_parameters()));
+  if (module->entry_computation()->num_parameters() > 0) {
+    HloInstruction* parameter_instruction =
+        module->entry_computation()->parameter_instruction(0);
+    if (parameter_instruction->shape().IsTuple() &&
+        parameter_instruction->has_sharding()) {
+      CHECK_EQ(module->entry_computation()->num_parameters(), 1);
+      parameter_instruction->set_sharding(
+          spmd::ReplaceGivenShardingsWithUnknownForTuple(
+              parameter_instruction->sharding(), parameter_instruction->shape(),
+              module->config()
+                  .allow_spmd_sharding_propagation_to_parameters()));
+    }
   }
 
   HloInstruction* root_instruction =
@@ -4142,6 +4146,10 @@ absl::StatusOr<bool> AutoSharding::Run(
 
         *module->mutable_config().mutable_entry_computation_layout() =
             modules[min_mesh_shape_index]->entry_computation_layout();
+        module->input_output_alias_config() =
+            modules[min_mesh_shape_index]->input_output_alias_config();
+        module->buffer_donor_config() =
+            modules[min_mesh_shape_index]->buffer_donor_config();
 
         module_is_changed = true;
       } else if (changed[min_mesh_shape_index].value() ==
