@@ -701,6 +701,29 @@ xla_test(
 )
 
 xla_test(
+    name = "complex_unary_op_test",
+    srcs = [
+        "complex_unary_op_samples.h",
+        "complex_unary_op_test.cc",
+    ],
+    backends = [
+        "cpu",
+        "gpu",
+    ],
+    deps = [
+        ":client_library_test_base",
+        ":literal_test_util",
+        ":test_macros_header",
+        ":xla_internal_test_main",
+        "//xla:xla_data_proto_cc",
+        "//xla/client:global_data",
+        "//xla/client:local_client",
+        "//xla/client:xla_builder",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+xla_test(
     name = "scalar_computations_test",
     srcs = ["scalar_computations_test.cc"],
     shard_count = 32,
@@ -1751,12 +1774,16 @@ xla_test(
         "//xla:xla_data_proto_cc",
         "//xla/client:xla_builder",
         "//xla/client/lib:constants",
+        "//xla/ffi",
+        "//xla/ffi:ffi_api",
         "//xla/hlo/ir:hlo",
-        "//xla/runtime/ffi:ffi_api",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_target_registry",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:dynamic_annotations",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",

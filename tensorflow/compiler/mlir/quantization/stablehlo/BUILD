@@ -55,6 +55,7 @@ cc_library(
         "passes/lift_quantizable_spots_as_functions.cc",
         "passes/lift_quantizable_spots_as_functions_fusion.inc",
         "passes/lift_quantizable_spots_as_functions_simple.inc",
+        "passes/merge_fusion_with_dequantize.cc",
         "passes/nchw_convolution_to_nhwc.cc",
         "passes/optimize_graph.cc",
         "passes/post_quantize.cc",
@@ -68,6 +69,7 @@ cc_library(
         "passes/restore_function_name.cc",
         "passes/unfuse_mhlo_batch_norm.cc",
         "passes/unwrap_xla_call_module_op.cc",
+        "passes/xla_call_module_to_call.cc",
     ],
     hdrs = [
         "passes/passes.h",

@@ -5331,6 +5331,8 @@ xla_test(
         "cpu",
         "gpu",
     ],
+    # TODO(b/332870133): Enable when it passes on H100.
+    disabled_backends = ["gpu_h100"],
     tags = [
         "no_windows",  # TODO(b/152037541)
     ],
@@ -6269,6 +6271,8 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@local_tsl//tsl/platform:errors",
     ],
 )
