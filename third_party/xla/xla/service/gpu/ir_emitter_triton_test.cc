@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "xla/service/gpu/ir_emitter_triton.h"
 
-#include <cstdint>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -42,7 +41,6 @@ limitations under the License.
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/matmul_utils.h"
-#include "xla/service/gpu/model/indexing_test_utils.h"
 #include "xla/service/gpu/tests/gpu_codegen_test.h"
 #include "xla/service/gpu/triton_fusion_analysis.h"
 #include "xla/service/pattern_matcher.h"
@@ -149,31 +147,6 @@ absl::Status TritonFilecheckTest::CreateTritonIrAndFileCheck(
     return absl::InternalError("FileCheck failed.");
   }
   return absl::OkStatus();
-}
-
-TEST_F(TritonTest, ComputeProgramIdToOutputTileIndexing) {
-  mlir::MLIRContext context;
-
-  auto compute_map = [&](absl::Span<const int64_t> dimensions,
-                         absl::Span<const int64_t> tile_sizes) {
-    return ComputeProgramIdToOutputTileIndexing(dimensions, tile_sizes,
-                                                &context);
-  };
-
-  EXPECT_THAT(compute_map(/*dimensions=*/{9, 17}, /*tile_sizes=*/{5, 10}),
-              MatchIndexingMap(R"(
-    (d0) -> ((d0 floordiv 2) * 5, (d0 mod 2) * 10)
-    domain:
-    d0 in [0, 3]
-  )"));
-
-  EXPECT_THAT(
-      compute_map(/*dimensions=*/{8, 16, 32}, /*tile_sizes=*/{1, 1, 32}),
-      MatchIndexingMap(R"(
-    (d0) -> (d0 floordiv 16, d0 mod 16, 0)
-    domain:
-    d0 in [0, 127]
-  )"));
 }
 
 TEST_F(TritonFilecheckTest, TestGemm) {
@@ -2901,40 +2874,6 @@ ENTRY e {
 // This group of tests compares GPU results of dots already rewritten
 // into Triton fusions.
 using CompareTest = TritonGemmTest;
-
-// TEST_F(CompareTest, DUMMY) {
-//   const char* hlo_text_ref = R"(
-// HloModule t
-
-// triton_dot {
-//   parameter_0 = s32[11,24]{1,0} parameter(0)
-//   broadcast.1747 = s32[11,24,128]{2,1,0} broadcast(parameter_0),
-//   dimensions={0,1} parameter_1 = s32[11,24,128]{2,1,0} parameter(1)
-//   compare.49 = pred[11,24,128]{2,1,0} compare(broadcast.1747, parameter_1),
-//   direction=EQ bitcast.4717 = pred[264,128]{1,0} bitcast(compare.49)
-//   convert.142 = f32[264,128]{1,0} convert(bitcast.4717)
-//   parameter_2 = f32[128,8]{1,0} parameter(2)
-//   ROOT dot.381 = f32[264,8]{1,0} dot(convert.142, parameter_2),
-//   lhs_contracting_dims={1}, rhs_contracting_dims={0}
-// }
-
-// ENTRY e {
-//   p0 = s32[11,24]{1,0} parameter(0)
-//   p1 = s32[11,24,128]{2,1,0} parameter(1)
-//   p2 = f32[128,8]{1,0} parameter(2)
-//   ROOT _ = f32[264,8] fusion(p0, p1, p2), kind=kCustom, calls=triton_dot,
-//     backend_config={"fusion_backend_config": {kind: "__triton_gemm",
-//       triton_gemm_config:
-//         {"block_m":32,"block_n":16,"block_k":128,
-//          "split_k":1,"num_stages":1,"num_warps":4,
-//          "num_ctas":1}}}
-// })";
-
-//   EXPECT_TRUE(RunAndCompareTwoModules(hlo_text_ref, hlo_text_ref,
-//                                       ErrorSpec{/*aabs=*/1e-6,
-//                                       /*arel=*/1e-6},
-//                                       /*run_hlo_passes=*/false));;
-// }
 
 TEST_F(CompareTest, DifferentTilingsProduceSameResult) {
   const char* hlo_text_ref = R"(

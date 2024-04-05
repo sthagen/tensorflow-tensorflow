@@ -30,8 +30,6 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
-#include "nvidia/include/NVGPUToLLVM/NVGPUToLLVMPass.h"
-#include "nvidia/include/TritonNVIDIAGPUToLLVM/Passes.h"
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -54,6 +52,7 @@ limitations under the License.
 #include "llvm/TargetParser/Triple.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"  // from @llvm-project
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"  // from @llvm-project
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"  // from @llvm-project
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"  // from @llvm-project
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"  // from @llvm-project
 #include "mlir/Dialect/Affine/IR/AffineOps.h"  // from @llvm-project
@@ -90,6 +89,7 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"  // from @llvm-project
+#include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Export.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
 #include "xla/autotuning.pb.h"
@@ -113,7 +113,6 @@ limitations under the License.
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/llvm_gpu_backend/gpu_backend_lib.h"
 #include "xla/service/gpu/matmul_utils.h"
-#include "xla/service/gpu/model/indexing_analysis.h"
 #include "xla/service/gpu/model/indexing_map.h"
 #include "xla/service/gpu/model/symbolic_tile_analysis.h"
 #include "xla/service/gpu/model/symbolic_tiled_hlo_instruction.h"
@@ -125,7 +124,6 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status.h"
 #include "xla/status_macros.h"
-#include "xla/statusor.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/translate/hlo_to_mhlo/hlo_function_importer.h"
@@ -141,8 +139,6 @@ limitations under the License.
 #include "triton/Conversion/TritonToTritonGPU/TritonToTritonGPUPass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
-#include "triton/Dialect/Triton/Transforms/Passes.h"
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/Passes.h"
 
 namespace xla {
@@ -425,11 +421,15 @@ absl::StatusOr<Value> EmitElementwise(ImplicitLocOpBuilder& b,
       mlir::getElementTypeOrSelf(inputs[0]).isF64()) {
     auto dev_fn_id = GetTargetDeviceFunctionID(hlo.opcode());
     if (dev_fn_id.ok()) {
+      llvm::Triple triple("nvptx64-unknown-unknown");
+      if (std::holds_alternative<se::RocmComputeCapability>(
+              device_info.gpu_compute_capability())) {
+        triple.setTriple("amdgcn-unknown-unknown");
+      }
       return b.create<mt::ExternElementwiseOp>(
           inputs[0].getType(), inputs, "libdevice", libdevice_path,
           ObtainDeviceFunctionName(dev_fn_id.value(),
-                                   hlo.shape().element_type(),
-                                   llvm::Triple("nvptx64-unknown-unknown")),
+                                   hlo.shape().element_type(), triple),
           /*pure=*/true);
     }
   }
@@ -932,86 +932,6 @@ absl::StatusOr<Value> EmitScope(
     VLOG(8) << "Emitted " << hlo->ToString(HloPrintOptions::ShortParsable());
   }
   return values[instructions.back()];
-}
-
-// Create Triton pipeline.
-//
-// `out_cluster_info` must be kept alive at least until pm.run() is called.
-// It should be read after that. We have to pass the cluster dims to
-// LaunchDimensions. Triton currently uses this as an out-parameter to return
-// the cluster dims determined based on `config.num_ctas` and a heuristic. There
-// are some signs that show that this was intended to be used as an in-out
-// parameter which would give a hint to Triton which cluster dims we prefer to
-// use, but that's not the case currently.
-absl::Status CreateTritonPipeline(
-    mlir::OpPassManager& pm, const se::CudaComputeCapability& cc,
-    const TritonGemmConfig& config,
-    mt::nvidia_gpu::ClusterInfo& out_cluster_info) {
-  const int ccAsInt = cc.major * 10 + cc.minor;
-  const int threadsPerWarp = 32;
-
-  // Based on make_ttir() in
-  // @triton//:third_party/nvidia/backend/compiler.py
-  pm.addPass(mlir::createInlinerPass());
-  pm.addPass(mt::createRewriteTensorPointerPass());
-  pm.addPass(mt::createCombineOpsPass());
-  pm.addPass(mlir::createCanonicalizerPass());
-  pm.addPass(mt::createReorderBroadcastPass());
-  pm.addPass(mlir::createCSEPass());
-  pm.addPass(mlir::createLoopInvariantCodeMotionPass());
-  pm.addPass(mlir::createSymbolDCEPass());
-
-  // Based on make_ttgir() in
-  // @triton//:third_party/nvidia/backend/compiler.py
-  pm.addPass(mt::createConvertTritonToTritonGPUPass(
-      config.num_warps, threadsPerWarp, config.num_ctas, ccAsInt));
-  pm.addPass(mt::gpu::createCoalescePass());
-  pm.addPass(mlir::createTritonNvidiaGPUPlanCTAPass(&out_cluster_info));
-  pm.addPass(mt::gpu::createRemoveLayoutConversionsPass());
-  pm.addPass(mt::gpu::createOptimizeThreadLocalityPass());
-  pm.addPass(mt::gpu::createAccelerateMatmulPass(ccAsInt));
-  pm.addPass(mt::gpu::createRemoveLayoutConversionsPass());
-  pm.addPass(mt::gpu::createOptimizeDotOperandsPass());
-  pm.addPass(mlir::createCSEPass());
-
-  pm.addPass(mt::gpu::createPipelinePass(config.num_stages, config.num_warps,
-                                         config.num_ctas, ccAsInt));
-
-  if (!cc.IsAtLeastHopper()) {
-    pm.addPass(mt::gpu::createPrefetchPass());
-  }
-
-  pm.addPass(mt::gpu::createOptimizeDotOperandsPass());
-  // We need to disable this pass because it undoes the hoisting of dot_operand
-  // layout conversion done in
-  // triton/lib/Dialect/TritonGPU/Transforms/OptimizeDotOperands.cpp in
-  // HoistLayoutConversion pattern.
-  // Bug: b/331360119
-  // pm.addPass(mt::gpu::createRemoveLayoutConversionsPass());
-  pm.addPass(mt::gpu::createReduceDataDuplicationPass());
-  pm.addPass(mt::gpu::createReorderInstructionsPass());
-  pm.addPass(mlir::createCSEPass());
-  pm.addPass(mlir::createSymbolDCEPass());
-  if (cc.IsAtLeastHopper()) {
-    pm.addPass(mlir::createTritonNvidiaGPUFenceInsertionPass(ccAsInt));
-  }
-  pm.addPass(mlir::createCanonicalizerPass());
-
-  // Based on make_llir() in
-  // @triton//:third_party/nvidia/backend/compiler.py
-  pm.addPass(mt::gpu::createDecomposeUnsupportedConversionsPass());
-  pm.addPass(mlir::createConvertSCFToCFPass());
-  pm.addPass(mlir::createConvertIndexToLLVMPass());
-  pm.addPass(mt::gpu::createAllocateSharedMemoryPass());
-  pm.addPass(mt::createConvertTritonGPUToLLVMPass(ccAsInt));
-  pm.addPass(mt::createConvertNVGPUToLLVMPass());
-  pm.addPass(mlir::createArithToLLVMConversionPass());
-  pm.addPass(mlir::createCanonicalizerPass());
-  pm.addPass(mlir::createCSEPass());
-  pm.addPass(mlir::createSymbolDCEPass());
-  // Note: translateTritonGPUToLLVMIR adds line info with LLVMDIScopePass.
-
-  return absl::OkStatus();
 }
 
 // Extract additional attributes from an LLVM function that are not passed
@@ -2295,46 +2215,12 @@ absl::Status EmitMatMul(mlir::OpBuilder builder,
   return absl::OkStatus();
 }
 
-// Computes indexing map from program id into the tile offset for the given
-// shape and tile sizes.
-IndexingMap ComputeProgramIdToOutputTileIndexing(
-    absl::Span<const int64_t> dimensions, absl::Span<const int64_t> tile_sizes,
-    mlir::MLIRContext* mlir_context) {
-  CHECK_EQ(dimensions.size(), tile_sizes.size());
-
-  int num_tiles = 1;
-  std::vector<int64_t> outer_loop_bounds;
-  outer_loop_bounds.reserve(dimensions.size());
-  for (auto [dim_size, tile_size] : llvm::zip(dimensions, tile_sizes)) {
-    int num_tiles_per_dim = (dim_size + tile_size - 1) / tile_size;
-
-    num_tiles *= num_tiles_per_dim;
-    outer_loop_bounds.push_back(num_tiles_per_dim);
-  }
-
-  mlir::AffineExpr program_id = mlir::getAffineDimExpr(0, mlir_context);
-
-  // Delinearize the block id.
-  auto tile_exprs =
-      DelinearizeIndex(outer_loop_bounds, program_id, mlir_context);
-
-  // Scale each index by the tile size to produce tile offset.
-  for (auto [tile_expr, tile_size] : llvm::zip(tile_exprs, tile_sizes)) {
-    tile_expr = tile_expr * tile_size;
-  }
-
-  return IndexingMap::FromTensorSizes(
-      mlir::AffineMap::get(
-          /*dimCount=*/1, /*symbolCount=*/0, tile_exprs, mlir_context),
-      /*dim_upper_bounds=*/{num_tiles}, /*symbol_upper_bounds=*/{});
-}
-
 // Computes the base pointer offset for the given pid and shape.
 // `tile_offset_indexing` is a mapping from
 // (program_id) -> [tile_offset0, ..., tile_offsetN]
-StatusOr<Value> ComputeBasePtrOffset(ImplicitLocOpBuilder b, Value pid,
-                                     const Shape& shape,
-                                     const IndexingMap& tile_offset_indexing) {
+Value ComputeBasePtrOffset(ImplicitLocOpBuilder b, Value pid,
+                           const Shape& shape,
+                           const IndexingMap& tile_offset_indexing) {
   ArrayRef<mlir::AffineExpr> dimension_exprs =
       tile_offset_indexing.GetAffineMap().getResults();
 
@@ -2346,25 +2232,10 @@ StatusOr<Value> ComputeBasePtrOffset(ImplicitLocOpBuilder b, Value pid,
     stride *= shape.dimensions(i);
   }
 
-  // A symbol in an indexing map means that to produce on element of output, we
-  // need to read all elements of input in the symbol range. Since this function
-  // computes start of the tile, we need to substitute each symbol with its
-  // lower bound value. We assume here the iteration order is normalized.
-  // TODO(b/330906085): Support cases when tile offsets are not 0.
-  for (const Interval& symbol_bound : tile_offset_indexing.GetSymbolBounds()) {
-    if (symbol_bound.lower != 0) {
-      return absl::FailedPreconditionError(absl::StrCat(
-          "Symbol lower bound is not zero. ", tile_offset_indexing.ToString()));
-    }
-  }
-
-  std::vector<Value> symbol_lower_bounds(
-      tile_offset_indexing.GetSymbolCount(),
-      b.create<ma::ConstantOp>(b.getIndexAttr(0)));
-
   return b.create<ma::IndexCastUIOp>(
-      b.getI64Type(), mlir_converter::ApplyAffineExpr(linear_index, pid,
-                                                      symbol_lower_bounds, b));
+      b.getI64Type(),
+      mlir_converter::ApplyAffineExpr(linear_index, /*dims=*/pid,
+                                      /*symbols=*/{}, b));
 }
 
 absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
@@ -2373,8 +2244,6 @@ absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
                               SymbolicTileAnalysis* analysis,
                               const HloComputation* computation,
                               mlir::triton::FuncOp fn) {
-  mlir::MLIRContext* mlir_context = analysis->GetMLIRContext();
-
   const HloInstruction* root = computation->root_instruction();
   auto loc = mlir::NameLoc::get(builder.getStringAttr(root->name()));
   ImplicitLocOpBuilder b(loc, builder);
@@ -2425,10 +2294,6 @@ absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
 
   analysis->SetTileSizes(output_tile_sizes);
 
-  IndexingMap program_id_to_output_tile_indexing =
-      ComputeProgramIdToOutputTileIndexing(root_shape.dimensions(),
-                                           output_tile_sizes, mlir_context);
-
   // block_size must be a power of two.
   int result_block_size = llvm::PowerOf2Ceil(row_len);
 
@@ -2438,14 +2303,12 @@ absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
   }
 
   // Emits load instructions
-  auto emit_param_load =
-      [&](const SymbolicTiledHloInstruction& tiled_hlo_instruction)
+  auto emit_param_load = [&](const SymbolicTiledHloInstruction& tiled_hlo)
       -> absl::StatusOr<Value> {
     std::vector<Value> tile_sizes, tile_strides, tile_offsets;
-    for (auto [size, stride, offset] :
-         llvm::zip(analysis->TileSizes(tiled_hlo_instruction),
-                   analysis->TileStrides(tiled_hlo_instruction),
-                   analysis->TileOffsets(tiled_hlo_instruction))) {
+    for (auto [size, stride, offset] : llvm::zip(
+             analysis->TileSizes(tiled_hlo), analysis->TileStrides(tiled_hlo),
+             analysis->TileOffsets(tiled_hlo))) {
       if (size == 1) continue;
 
       tile_sizes.push_back(CreateConst(b, b.getI64Type(), size));
@@ -2453,20 +2316,16 @@ absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
       tile_offsets.push_back(CreateConst(b, b.getI32Type(), offset));
     }
 
-    IndexingMap program_id_to_input_tile_indexing =
-        ComposeIndexingMaps(program_id_to_output_tile_indexing,
-                            tiled_hlo_instruction.indexing_map());
-    program_id_to_input_tile_indexing.Simplify(GetIndexingMapForInstruction);
+    TF_ASSIGN_OR_RETURN(
+        IndexingMap program_id_to_input_tile_indexing,
+        analysis->ComputeBlockIdToTileOffsetIndexing(tiled_hlo));
 
     // Manually compute pointer offset to avoid materialized fully parallel
     // dimensions in the tile. Current codegen tried to avoid size-1 dims.
-    TF_ASSIGN_OR_RETURN(
-        Value ptr_offset,
-        ComputeBasePtrOffset(b, pid, tiled_hlo_instruction.hlo()->shape(),
-                             program_id_to_input_tile_indexing));
+    Value ptr_offset = ComputeBasePtrOffset(b, pid, tiled_hlo.hlo()->shape(),
+                                            program_id_to_input_tile_indexing);
 
-    auto fn_arg =
-        fn.getArgument(tiled_hlo_instruction.hlo()->parameter_number());
+    auto fn_arg = fn.getArgument(tiled_hlo.hlo()->parameter_number());
     auto tile_ptr = AddPtr(b, fn_arg, ptr_offset);
 
     if (tile_sizes.empty()) {
@@ -2489,9 +2348,12 @@ absl::Status EmitTiledSoftMax(mlir::OpBuilder builder,
                       EmitTiledScope(b, libdevice_path, device_info, *analysis,
                                      emit_param_load, values_out));
 
-  TF_ASSIGN_OR_RETURN(Value ptr_offset,
-                      ComputeBasePtrOffset(b, pid, root_shape,
-                                           program_id_to_output_tile_indexing));
+  TF_ASSIGN_OR_RETURN(
+      IndexingMap program_id_to_output_tile_indexing,
+      analysis->ComputeBlockIdToTileOffsetIndexing(*analysis->GetRoot()));
+
+  Value ptr_offset = ComputeBasePtrOffset(b, pid, root_shape,
+                                          program_id_to_output_tile_indexing);
 
   Value store_tensor = b.create<mt::MakeTensorPtrOp>(
       /*base=*/AddPtr(b, fn.getArgument(computation->num_parameters()),
@@ -2671,6 +2533,7 @@ absl::StatusOr<std::unique_ptr<llvm::Module>> TranslateLLVMToLLVMIR(
   mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
   mlir::registerNVVMDialectTranslation(registry);
+  mlir::registerROCDLDialectTranslation(registry);
   module->getContext()->appendDialectRegistry(registry);
 
   std::unique_ptr<llvm::Module> llvmModule =
@@ -2694,15 +2557,6 @@ absl::StatusOr<std::unique_ptr<llvm::Module>> TranslateLLVMToLLVMIR(
 
   return llvmModule;
 }
-
-namespace {
-
-std::string GetLibdevicePath(const HloModuleConfig& hlo_config) {
-  return nvptx::LibDevicePath(
-      hlo_config.debug_options().xla_gpu_cuda_data_dir());
-}
-
-}  // namespace
 
 absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     const TritonFusionAnalysis& analysis, absl::string_view fn_name,
@@ -2741,9 +2595,9 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
 
-  TF_RETURN_IF_ERROR(
-      ir_emitter(b, GetLibdevicePath(hlo_computation->parent()->config()),
-                 device_info, analysis, hlo_computation, fn, config));
+  TF_RETURN_IF_ERROR(ir_emitter(
+      b, GetLibdevicePath(hlo_computation->parent()->config(), device_info),
+      device_info, analysis, hlo_computation, fn, config));
 
   b.create<mt::ReturnOp>(loc);
 
@@ -2764,19 +2618,23 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
 
 absl::StatusOr<TritonWrapperResult> TritonWrapper(
     const TritonFusionAnalysis& analysis, absl::string_view fn_name,
-    const HloComputation* hlo_computation, const se::CudaComputeCapability& cc,
+    const HloComputation* hlo_computation, const se::GpuComputeCapability& cc,
     const se::DeviceDescription& device_info, const TritonGemmConfig& config,
     llvm::Module* llvm_module, TritonIrEmitter ir_emitter,
     mlir::MLIRContext& mlir_context) {
-  if (!cc.IsAtLeastAmpere()) {
-    return absl::FailedPreconditionError(
-        "Triton support is only enabled for Ampere GPUs and up.");
+  if (std::holds_alternative<se::CudaComputeCapability>(cc)) {
+    auto ccCuda = std::get<se::CudaComputeCapability>(cc);
+    if (!ccCuda.IsAtLeastAmpere()) {
+      return absl::FailedPreconditionError(
+          "Triton support is only enabled for Ampere GPUs and up.");
+    }
   }
 
   auto debug_options = GetDebugOptionsFromFlags();
   if (debug_options.xla_gpu_enable_triton_hopper()) {
     // Set environment variables for consumption by Triton.
     tsl::setenv("ENABLE_MMA_V3", "true", true /*overwrite*/);
+    tsl::setenv("ENABLE_PIPELINING", "true", true /*overwrite*/);
   }
 
   TF_ASSIGN_OR_RETURN(
@@ -2797,13 +2655,16 @@ absl::StatusOr<TritonWrapperResult> TritonWrapper(
 // TODO(b/325220878): Replace TritonGemmConfig with a more generic abstraction.
 absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
     const HloModuleConfig& hlo_config, absl::string_view hlo_module_name,
-    const se::CudaComputeCapability& cc,
+    const se::GpuComputeCapability& cc,
     const se::DeviceDescription& device_info, const TritonGemmConfig& config,
     mlir::ModuleOp triton_module, llvm::Module* llvm_module,
     mlir::MLIRContext& mlir_context) {
-  if (!cc.IsAtLeastAmpere()) {
-    return absl::FailedPreconditionError(
-        "Triton support is only enabled for Ampere GPUs and up.");
+  if (std::holds_alternative<se::CudaComputeCapability>(cc)) {
+    auto ccCuda = std::get<se::CudaComputeCapability>(cc);
+    if (!ccCuda.IsAtLeastAmpere()) {
+      return absl::FailedPreconditionError(
+          "Triton support is only enabled for Ampere GPUs and up.");
+    }
   }
 
   bool should_verify =
@@ -2877,7 +2738,8 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
       triton_module->getAttrOfType<mlir::IntegerAttr>("triton_gpu.shared")
           .getInt();
   VLOG(2) << "Shared memory usage: " << shared_mem_bytes << " B";
-  if (shared_mem_bytes > device_info.shared_memory_per_block_optin()) {
+  if (std::holds_alternative<se::CudaComputeCapability>(cc) &&
+      shared_mem_bytes > device_info.shared_memory_per_block_optin()) {
     return absl::ResourceExhaustedError(absl::StrFormat(
         "Shared memory size limit exceeded: requested %d, available: %d",
         shared_mem_bytes, device_info.shared_memory_per_block_optin()));
@@ -2886,7 +2748,7 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<llvm::Module> ll_triton_module,
       TranslateLLVMToLLVMIR(&llvm_module->getContext(), triton_module,
-                            GetLibdevicePath(hlo_config)));
+                            GetLibdevicePath(hlo_config, device_info)));
   VLogModule(5, *ll_triton_module);
   if (should_verify) {
     VerifyModule(*ll_triton_module);
