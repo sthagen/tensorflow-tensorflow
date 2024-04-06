@@ -502,6 +502,7 @@ cc_library(
         "//xla/python/ifrt",
         "//xla/python/pjrt_ifrt",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -879,6 +880,7 @@ cc_library(
     deps = [
         ":refine_polymorphic_shapes",
         # placeholder for index annotation deps
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "//third_party/nanobind",
         "//xla:status",
@@ -894,6 +896,7 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:BytecodeWriter",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",

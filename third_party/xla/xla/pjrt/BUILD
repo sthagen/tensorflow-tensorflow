@@ -21,6 +21,7 @@ package_group(
         "//xla:internal",
     ],
     packages = [
+        "//tensorflow/core/tfrt/ifrt/...",
         "//third_party/australis/...",
         "//third_party/openxla_pjrt_plugin/...",
         "//third_party/py/jax/...",
@@ -602,6 +603,17 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "host_memory_spaces",
+    srcs = ["host_memory_spaces.cc"],
+    hdrs = ["host_memory_spaces.h"],
+    deps = [
+        ":pjrt_client",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
 # Transitional forwarding target. Use cpu:cpu_client instead.
 cc_library(
     name = "tfrt_cpu_pjrt_client",
@@ -807,7 +819,7 @@ cc_library(
     name = "host_callback",
     srcs = ["host_callback.cc"],
     hdrs = ["host_callback.h"],
-    visibility = [":friends"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         ":pjrt_client",
         ":pjrt_future",

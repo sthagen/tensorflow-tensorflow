@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "xla/service/shape_inference.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -22,7 +24,9 @@ limitations under the License.
 #include <vector>
 
 #include <gtest/gtest.h>
+#include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/span.h"
@@ -32,10 +36,8 @@ limitations under the License.
 #include "xla/service/hlo_parser.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/statusor.h"
 #include "xla/test.h"
 #include "xla/test_helpers.h"
-#include "xla/types.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -139,6 +141,10 @@ class UnboundedBinaryOpShapeInferenceTest
 
 // Subclass for testing unbounded dynamic compare op
 class UnboundedCompareOpShapeInferenceTest
+    : public ::testing::TestWithParam<BinaryOpTestCase> {};
+
+// Subclass for testing unbounded dynamic complex op
+class UnboundedComplexOpShapeInferenceTest
     : public ::testing::TestWithParam<BinaryOpTestCase> {};
 
 // Subclass for testing unbounded dynamic concatenate op
@@ -4236,6 +4242,25 @@ TEST_P(UnboundedCompareOpShapeInferenceTest, UnboundedCompare) {
   }
 }
 
+TEST_P(UnboundedComplexOpShapeInferenceTest, UnboundedComplex) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape real, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape imag, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_shape =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kComplex, real, imag,
+                                         GetParam().broadcast_dimensions);
+  if (inferred_shape.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_shape, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_shape)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_shape.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
+}
+
 TEST_P(UnboundedConcatenateOpShapeInferenceTest, UnboundedConcatenate) {
   TF_ASSERT_OK_AND_ASSIGN(const Shape operand1, ParseShape(GetParam()[0]));
   TF_ASSERT_OK_AND_ASSIGN(const Shape operand2, ParseShape(GetParam()[1]));
@@ -4403,6 +4428,22 @@ TEST_F(ShapeInferenceTest, UnboundedGather) {
       << " expected: " << ShapeUtil::HumanString(expected);
 }
 
+TEST_F(ShapeInferenceTest, UnboundedMap) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand0, ParseShape("f32[2, ?, ?]"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand1, ParseShape("f32[?, 3, ?]"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected, ParseShape("f32[2, ?, ?]"));
+
+  const ProgramShape to_apply = ShapeUtil::MakeProgramShape({f32_, f32_}, f32_);
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      const Shape result_shape,
+      ShapeInference::InferMapShape(/*arg_shapes=*/{&operand0, &operand1},
+                                    to_apply, /*dimensions=*/{0, 1, 2}));
+  EXPECT_TRUE(ShapeUtil::Equal(result_shape, expected))
+      << "inferred: " << ShapeUtil::HumanString(result_shape)
+      << " expected: " << ShapeUtil::HumanString(expected);
+}
+
 TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedMax) {
   TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
   TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
@@ -4418,6 +4459,25 @@ TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedMax) {
   } else {
     ASSERT_TRUE(GetParam().error_message.has_value());
     EXPECT_THAT(inferred_shape.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
+}
+
+TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedMin) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_status =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kMinimum, lhs, rhs,
+                                         GetParam().broadcast_dimensions);
+  if (inferred_status.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_status, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_status)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_status.status().message(),
                 HasSubstr(*GetParam().error_message));
   }
 }
@@ -4533,6 +4593,18 @@ TEST_F(ShapeInferenceTest, UnboundedReduceInvalidReduceDimension) {
               HasSubstr("All reduced tensors must have compatible dimension"));
 }
 
+TEST_F(ShapeInferenceTest, UnboundedReducePrecision) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand, ParseShape("f32[?, 10]"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected, ParseShape("f32[?, 10]"));
+  TF_ASSERT_OK_AND_ASSIGN(
+      const Shape inferred,
+      ShapeInference::InferReducePrecisionShape(operand, /*exponent_bits=*/2,
+                                                /*mantissa_bits=*/2));
+  ASSERT_TRUE(ShapeUtil::Equal(inferred, expected))
+      << "inferred: " << ShapeUtil::HumanString(inferred)
+      << " expected: " << ShapeUtil::HumanString(expected);
+}
+
 TEST_F(ShapeInferenceTest, UnboundedReduceWindow) {
   TF_ASSERT_OK_AND_ASSIGN(const Shape input, ParseShape("f32[?, 4, 8]"));
   TF_ASSERT_OK_AND_ASSIGN(const Shape expected, ParseShape("f32[?, 3, 5]"));
@@ -4559,6 +4631,25 @@ TEST_F(ShapeInferenceTest, UnboundedReduceWindow) {
   EXPECT_TRUE(ShapeUtil::Equal(inferred_shape, expected))
       << "inferred: " << ShapeUtil::HumanString(inferred_shape)
       << " expected: " << ShapeUtil::HumanString(expected);
+}
+
+TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedRemainder) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_status =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kRemainder, lhs, rhs,
+                                         GetParam().broadcast_dimensions);
+  if (inferred_status.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_status, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_status)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_status.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
 }
 
 TEST_F(ShapeInferenceTest, UnboundedReshape) {
@@ -4621,6 +4712,44 @@ TEST_F(ShapeInferenceTest, UnboundedSelectWithTupleUnsupported) {
   EXPECT_THAT(inferred_shape.status().message(),
               HasSubstr("Expected array argument for select pred, but got "
                         "(pred[2], pred[?])."));
+}
+
+TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedShiftLeft) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_status =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kShiftLeft, lhs, rhs,
+                                         GetParam().broadcast_dimensions);
+  if (inferred_status.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_status, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_status)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_status.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
+}
+
+TEST_P(UnboundedBinaryOpShapeInferenceTest, UnboundedShiftRightArithmetic) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_status =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kShiftRightArithmetic, lhs,
+                                         rhs, GetParam().broadcast_dimensions);
+  if (inferred_status.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_status, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_status)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_status.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
 }
 
 TEST_F(ShapeInferenceTest, UnboundedSlice) {
@@ -4705,6 +4834,25 @@ TEST_F(ShapeInferenceTest, UnboundedTransposeRank1) {
       << " expected: " << ShapeUtil::HumanString(expected);
 }
 
+TEST_P(UnboundedLogicalOpShapeInferenceTest, UnboundedXor) {
+  TF_ASSERT_OK_AND_ASSIGN(const Shape lhs, ParseShape(GetParam().lhs));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape rhs, ParseShape(GetParam().rhs));
+  const absl::StatusOr<Shape> inferred_status =
+      ShapeInference::InferBinaryOpShape(HloOpcode::kXor, lhs, rhs,
+                                         GetParam().broadcast_dimensions);
+  if (inferred_status.ok()) {
+    TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                            ParseShape(GetParam().expected));
+    EXPECT_TRUE(ShapeUtil::Equal(*inferred_status, expected))
+        << "inferred: " << ShapeUtil::HumanString(*inferred_status)
+        << " expected: " << ShapeUtil::HumanString(expected);
+  } else {
+    ASSERT_TRUE(GetParam().error_message.has_value());
+    EXPECT_THAT(inferred_status.status().message(),
+                HasSubstr(*GetParam().error_message));
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(UnboundedDynamism,
                          UnboundedLogicalOpShapeInferenceTest,
                          ::testing::ValuesIn<BinaryOpTestCase>(
@@ -4784,6 +4932,36 @@ INSTANTIATE_TEST_SUITE_P(UnboundedDynamism,
                               {"f32[?]", "f32[?]", {}, "pred[?]"},
                               // 1   | ?,3 | [0]   | ?,3
                               {"f32[1]", "f32[?,3]", zero_array, "pred[?,3]"},
+                              // 2   | ?,3 | [0]   | err
+                              {"f32[2]", "f32[?,3]", zero_array, "",
+                               kBroadcastDimensionMismatchErrorMessage},
+                              // ?,2 | ?,3 | []    | err
+                              {"f32[?,2]",
+                               "f32[?,3]",
+                               {},
+                               "",
+                               kIncompatibleBinaryOpShapeErrorMessage}}));
+
+INSTANTIATE_TEST_SUITE_P(UnboundedDynamism,
+                         UnboundedComplexOpShapeInferenceTest,
+                         ::testing::ValuesIn<BinaryOpTestCase>(
+                             {// LHS | RHS | bdims | Res
+                              // 1   | ?   | []    | ?
+                              {"f32[1]", "f32[?]", {}, "c64[?]"},
+                              // ?   | 1   | []    | ?
+                              {"f32[?]", "f32[1]", {}, "c64[?]"},
+                              // 2   | ?   | []    | 2
+                              {"f32[2]", "f32[?]", {}, "c64[2]"},
+                              // ?   | 2   | []    | 2
+                              {"f32[?]", "f32[2]", {}, "c64[2]"},
+                              // <=2 | ?   | []    | <=2
+                              {"f32[<=2]", "f32[?]", {}, "c64[<=2]"},
+                              // ?   | <=2 | []    | <=2
+                              {"f32[?]", "f32[<=2]", {}, "c64[<=2]"},
+                              // ?   | ?   | []    | ?
+                              {"f32[?]", "f32[?]", {}, "c64[?]"},
+                              // 1   | ?,3 | [0]   | ?,3
+                              {"f32[1]", "f32[?,3]", zero_array, "c64[?,3]"},
                               // 2   | ?,3 | [0]   | err
                               {"f32[2]", "f32[?,3]", zero_array, "",
                                kBroadcastDimensionMismatchErrorMessage},
@@ -4933,6 +5111,7 @@ INSTANTIATE_TEST_SUITE_P(UnboundedDynamism, UnboundedUnaryOpShapeInferenceTest,
                               {"f32[?]", "f32[?]", HloOpcode::kLog1p},
                               {"f32[?]", "f32[?]", HloOpcode::kLogistic},
                               {"f32[?]", "f32[?]", HloOpcode::kNegate},
+                              {"s32[?]", "s32[?]", HloOpcode::kNot},
                               {"u32[?]", "u32[?]", HloOpcode::kPopulationCount},
                               {"f32[?]", "f32[?]", HloOpcode::kReal},
                               {"f32[?]", "f32[?]", HloOpcode::kRoundNearestAfz},
