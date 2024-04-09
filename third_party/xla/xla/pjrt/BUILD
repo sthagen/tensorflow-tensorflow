@@ -1,4 +1,3 @@
-load("@local_tsl//tsl:tsl.bzl", "internal_visibility")
 load(
     "@local_tsl//tsl/platform:build_config.bzl",
     "tf_proto_library",
@@ -7,6 +6,7 @@ load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 
 # Placeholder: load py_proto_library
 load("//xla:xla.bzl", "xla_cc_test")
+load("//xla/tsl:tsl.bzl", "internal_visibility")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -598,8 +598,22 @@ cc_library(
     visibility = internal_visibility([":friends"]),
     deps = [
         "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/status",
         "@local_tsl//tsl/concurrency:async_value",
         "@local_tsl//tsl/concurrency:ref_count",
+        "@local_tsl//tsl/platform:logging",
+    ],
+)
+
+xla_cc_test(
+    name = "pjrt_future_test",
+    srcs = ["pjrt_future_test.cc"],
+    deps = [
+        ":pjrt_future",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
 

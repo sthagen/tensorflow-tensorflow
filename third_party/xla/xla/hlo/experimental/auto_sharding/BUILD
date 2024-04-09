@@ -1,9 +1,9 @@
 # Automatic sharding annotation
 
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@local_tsl//tsl:tsl.default.bzl", "get_compatible_with_libtpu_portable")
 load("@local_tsl//tsl/platform:build_config.bzl", "tf_proto_library")
 load("//xla:xla.bzl", "auto_sharding_deps", "auto_sharding_solver_deps", "xla_cc_binary", "xla_cc_test")
+load("//xla/tsl:tsl.default.bzl", "get_compatible_with_libtpu_portable")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -270,6 +270,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status",
     ],
 )
