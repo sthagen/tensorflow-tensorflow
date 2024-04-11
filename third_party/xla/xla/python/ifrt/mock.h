@@ -220,7 +220,8 @@ class MockMemory : public Memory {
   MOCK_METHOD(xla::PjRtClient*, client, (), (const, final));
   MOCK_METHOD(absl::Span<Device* const>, devices, (), (const, final));
   MOCK_METHOD(int, id, (), (const, final));
-  MOCK_METHOD(absl::string_view, memory_space_kind, (), (const, final));
+  MOCK_METHOD(absl::string_view, kind, (), (const, final));
+  MOCK_METHOD(int, kind_id, (), (const, final));
   MOCK_METHOD(absl::string_view, DebugString, (), (const, final));
   MOCK_METHOD(absl::string_view, ToString, (), (const, final));
 };
@@ -254,7 +255,7 @@ class MockExecutable : public llvm::RTTIExtends<MockExecutable, Executable> {
   static char ID;  // NOLINT
 };
 
-class MockLoadedExecutable final
+class MockLoadedExecutable
     : public llvm::RTTIExtends<MockLoadedExecutable, LoadedExecutable> {
  public:
   MOCK_METHOD(Client*, client, (), (const, final));

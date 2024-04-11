@@ -46,10 +46,10 @@ limitations under the License.
 #include "xla/stream_executor/dnn.h"
 #include "xla/stream_executor/event.h"
 #include "xla/stream_executor/fft.h"
-#include "xla/stream_executor/host_memory_allocation.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/kernel_spec.h"
 #include "xla/stream_executor/launch_dim.h"
+#include "xla/stream_executor/memory_allocation.h"
 #include "xla/stream_executor/module_spec.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/stream.h"
@@ -73,17 +73,13 @@ static int64_t GetMemoryLimitBytes() {
 
 StreamExecutor::StreamExecutor(
     const Platform* platform,
-    std::unique_ptr<internal::StreamExecutorInterface> implementation,
-    int device_ordinal)
+    std::unique_ptr<internal::StreamExecutorInterface> implementation)
     : platform_(platform),
       implementation_(std::move(implementation)),
-      device_ordinal_(device_ordinal),
       memory_limit_bytes_(GetMemoryLimitBytes()),
       allocator_(this) {}
 
-absl::Status StreamExecutor::Init() {
-  return implementation_->Init(device_ordinal_);
-}
+absl::Status StreamExecutor::Init() { return implementation_->Init(); }
 
 absl::Status StreamExecutor::GetKernel(const MultiKernelLoaderSpec& spec,
                                        Kernel* kernel) {
@@ -139,24 +135,10 @@ int64_t StreamExecutor::GetDeviceLoad() const {
 dnn::DnnSupport* StreamExecutor::AsDnn() { return implementation_->AsDnn(); }
 
 blas::BlasSupport* StreamExecutor::AsBlas() {
-  absl::MutexLock lock(&mu_);
-  if (blas_ != nullptr) {
-    return blas_.get();
-  }
-
-  blas_.reset(implementation_->CreateBlas());
-  return blas_.get();
+  return implementation_->AsBlas();
 }
 
-fft::FftSupport* StreamExecutor::AsFft() {
-  absl::MutexLock lock(&mu_);
-  if (fft_ != nullptr) {
-    return fft_.get();
-  }
-
-  fft_.reset(implementation_->CreateFft());
-  return fft_.get();
-}
+fft::FftSupport* StreamExecutor::AsFft() { return implementation_->AsFft(); }
 
 absl::Status StreamExecutor::Launch(Stream* stream,
                                     const ThreadDim& thread_dims,
@@ -193,7 +175,7 @@ DeviceMemoryBase StreamExecutor::Allocate(uint64_t size, int64_t memory_space) {
   if (memory_limit_bytes_ > 0 &&
       static_cast<int64_t>(size) > memory_limit_bytes_) {
     LOG(WARNING) << "Not enough memory to allocate " << size << " on device "
-                 << device_ordinal_
+                 << device_ordinal()
                  << " within provided limit.  limit=" << memory_limit_bytes_
                  << "]";
     return DeviceMemoryBase();
@@ -239,14 +221,9 @@ absl::Status StreamExecutor::CollectiveMemoryDeallocate(void* location) {
   return implementation_->CollectiveMemoryDeallocate(location);
 }
 
-absl::StatusOr<std::unique_ptr<HostMemoryAllocation>>
+absl::StatusOr<std::unique_ptr<MemoryAllocation>>
 StreamExecutor::HostMemoryAllocate(uint64_t size) {
-  void* buffer = implementation_->HostMemoryAllocate(size);
-  if (buffer == nullptr && size > 0) {
-    return absl::InternalError(
-        absl::StrFormat("Failed to allocate HostMemory of size %d", size));
-  }
-  return std::make_unique<HostMemoryAllocation>(buffer, size, implementation());
+  return implementation_->HostMemoryAllocate(size);
 }
 
 void StreamExecutor::HostMemoryDeallocate(void* data, uint64_t size) {
@@ -350,12 +327,6 @@ bool StreamExecutor::AllocateStream(Stream* stream) {
 }
 
 void StreamExecutor::DeallocateStream(Stream* stream) {
-  // TODO(b/301020144) Make this part of
-  // StreamExecutorInterface::DeallocateStream methods that care about DNNs.
-  dnn::DnnSupport* dnn = AsDnn();
-  if (dnn) {
-    dnn->NotifyStreamDestroyed(stream);
-  }
   implementation_->DeallocateStream(stream);
 }
 
