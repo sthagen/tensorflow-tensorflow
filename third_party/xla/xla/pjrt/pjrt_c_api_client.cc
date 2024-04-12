@@ -100,7 +100,7 @@ namespace xla {
         error, pjrt::MakeErrorDeleter(c_api));                           \
     absl::Status _status = pjrt::PjrtErrorToStatus(_error.get(), c_api); \
     if (!_status.ok()) {                                                 \
-      return PjRtFuture<Status>(_status);                                \
+      return PjRtFuture<>(_status);                                      \
     }                                                                    \
   } while (false)
 
@@ -1322,7 +1322,7 @@ CApiCopyToDeviceStream::~CApiCopyToDeviceStream() {
       c_api_->PJRT_CopyToDeviceStream_Destroy(&destroy_args), c_api_);
 }
 
-PjRtFuture<Status> CApiCopyToDeviceStream::AddChunk(PjRtChunk chunk) {
+PjRtFuture<> CApiCopyToDeviceStream::AddChunk(PjRtChunk chunk) {
   PJRT_Chunk c_chunk = ::pjrt::ConvertFromCppChunk(std::move(chunk));
 
   PJRT_CopyToDeviceStream_AddChunk_Args add_chunk_args;
@@ -1572,8 +1572,10 @@ PjRtCApiLoadedExecutable::Execute(
     std::vector<PjRtFuture<Status>> device_complete_futures;
     device_complete_futures.resize(args.num_devices);
     for (int i = 0; i < device_complete_futures.size(); ++i) {
-      device_complete_futures[i] = pjrt::ConvertCEventToCppFuture(
-          args.device_complete_events[i], pjrt_c_api());
+      device_complete_futures[i] =
+          pjrt::ConvertCEventToCppFuture(args.device_complete_events[i],
+                                         pjrt_c_api())
+              .ToStatusFuture();
       if (!callback_data->c_send_callbacks.empty() ||
           !callback_data->c_recv_callbacks.empty()) {
         device_complete_futures[i].OnReady(
@@ -1644,7 +1646,8 @@ PjRtCApiLoadedExecutable::ExecuteWithSingleDevice(
 
   if (fill_future) {
     returned_future = pjrt::ConvertCEventToCppFuture(
-        args.device_complete_events[0], pjrt_c_api());
+                          args.device_complete_events[0], pjrt_c_api())
+                          .ToStatusFuture();
   }
   return std::move(Convert2DCBuffersToCppBuffers(
       args.output_lists, args.num_devices, c_output_lists_storage[0].size(),
@@ -1824,16 +1827,16 @@ StatusOr<std::vector<int64_t>> PjRtCApiBuffer::logical_dimensions() {
                               args.unpadded_dims + args.num_dims);
 }
 
-PjRtFuture<absl::Status> PjRtCApiBuffer::LazyToLiteral(
+PjRtFuture<> PjRtCApiBuffer::LazyToLiteral(
     absl::AnyInvocable<absl::StatusOr<MutableLiteralBase*>() &&> generator) {
   auto buffer = std::move(generator)();
   if (!buffer.ok()) {
-    return PjRtFuture<Status>(buffer.status());
+    return PjRtFuture<>(buffer.status());
   }
   return ToLiteral(buffer.value());
 }
 
-PjRtFuture<Status> PjRtCApiBuffer::ToLiteral(MutableLiteralBase* literal) {
+PjRtFuture<> PjRtCApiBuffer::ToLiteral(MutableLiteralBase* literal) {
   PJRT_Buffer_ToHostBuffer_Args args;
   args.struct_size = PJRT_Buffer_ToHostBuffer_Args_STRUCT_SIZE;
   args.extension_start = nullptr;
@@ -1842,7 +1845,7 @@ PjRtFuture<Status> PjRtCApiBuffer::ToLiteral(MutableLiteralBase* literal) {
   const xla::Shape& shape = literal->shape();
 
   if (!shape.IsArray()) {
-    return PjRtFuture<Status>(
+    return PjRtFuture<>(
         Unimplemented("PjRtCApiBuffer::ToLiteral: Shapes other than array are"
                       "not supported."));
   }
@@ -1854,7 +1857,7 @@ PjRtFuture<Status> PjRtCApiBuffer::ToLiteral(MutableLiteralBase* literal) {
     c_layout_data =
         pjrt::ConvertToBufferMemoryLayoutData(literal->shape().layout());
     if (!c_layout_data.ok()) {
-      return PjRtFuture<Status>(c_layout_data.status());
+      return PjRtFuture<>(c_layout_data.status());
     }
     args.host_layout = &(c_layout_data->c_layout);
   } else {
@@ -1868,8 +1871,7 @@ PjRtFuture<Status> PjRtCApiBuffer::ToLiteral(MutableLiteralBase* literal) {
       ::pjrt::MakeErrorDeleter(api)};
 
   if (error != nullptr) {
-    absl::Status s = ::pjrt::PjrtErrorToStatus(error.get(), api);
-    return PjRtFuture<Status>(s);
+    return PjRtFuture<>(::pjrt::PjrtErrorToStatus(error.get(), api));
   }
 
   return pjrt::ConvertCEventToCppFuture(args.event, api);
