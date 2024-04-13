@@ -531,7 +531,7 @@ class PjRtCApiBuffer : public PjRtBuffer {
     LOG(ERROR) << "PJRT C API does not support CopyToRemoteDeviceScattered";
   }
 
-  PjRtFuture<Status> GetReadyFuture() override;
+  PjRtFuture<> GetReadyFuture() override;
 
   bool IsOnCpu() const override;
 
@@ -555,7 +555,7 @@ class PjRtCApiBuffer : public PjRtBuffer {
   // This is a shared_ptr to keep the underlying future alive even if
   // `readiness_promise` is destroyed before `readiness_event`, and the callback
   // we set on `readiness_event` modifies `readiness_promise_`.
-  std::shared_ptr<PjRtFuture<Status>::Promise> readiness_promise_;
+  std::shared_ptr<PjRtFuture<>::Promise> readiness_promise_;
   // Set and cached the first time layout() is called.
   mutable std::optional<PjRtXlaLayout> layout_;
   // Set and cached the first time is_dynamic_dimension() is called.
@@ -693,20 +693,17 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
   StatusOr<std::vector<std::vector<std::unique_ptr<PjRtBuffer>>>> Execute(
       absl::Span<const std::vector<PjRtBuffer*>> argument_handles,
       const ExecuteOptions& options,
-      std::optional<std::vector<PjRtFuture<Status>>>& returned_futures)
-      override;
+      std::optional<std::vector<PjRtFuture<>>>& returned_futures) override;
 
   StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecuteSharded(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
-      std::optional<PjRtFuture<Status>>& returned_future,
-      bool fill_future) override;
+      std::optional<PjRtFuture<>>& returned_future, bool fill_future) override;
 
   StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecutePortable(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
-      std::optional<PjRtFuture<Status>>& returned_future,
-      bool fill_future) override;
+      std::optional<PjRtFuture<>>& returned_future, bool fill_future) override;
 
   void Delete() override;
   bool IsDeleted() override;
@@ -764,7 +761,7 @@ class PjRtCApiLoadedExecutable : public PjRtLoadedExecutable {
   StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecuteWithSingleDevice(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
-      std::optional<PjRtFuture<Status>>& returned_future, bool fill_future);
+      std::optional<PjRtFuture<>>& returned_future, bool fill_future);
 
   PjRtCApiClient* client_;
   std::unique_ptr<PJRT_LoadedExecutable, ::pjrt::PJRT_LoadedExecutableDeleter>

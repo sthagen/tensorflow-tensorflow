@@ -723,7 +723,7 @@ class PjRtStreamExecutorBuffer : public PjRtBuffer {
       std::vector<RemoteSendCallback> callbacks,
       const ScatterDetails& scatter_details) override;
 
-  PjRtFuture<Status> GetReadyFuture() override;
+  PjRtFuture<> GetReadyFuture() override;
 
   bool IsOnCpu() const override;
 
@@ -803,7 +803,7 @@ class PjRtStreamExecutorBuffer : public PjRtBuffer {
   std::shared_ptr<TrackedDeviceBuffer> device_buffer_ ABSL_GUARDED_BY(mu_);
   // Count of holds on the buffer.
   std::array<int, ScopedHold::Type::kMaxValue> holds_ ABSL_GUARDED_BY(mu_);
-  PjRtFuture<Status>::Promise definition_promise_ ABSL_GUARDED_BY(mu_);
+  PjRtFuture<>::Promise definition_promise_ ABSL_GUARDED_BY(mu_);
 };
 
 // Wraps one or more XLA LocalExecutables (one per partition, as specified by
@@ -880,22 +880,19 @@ class PjRtStreamExecutorLoadedExecutable : public PjRtLoadedExecutable {
   StatusOr<std::vector<std::vector<std::unique_ptr<PjRtBuffer>>>> Execute(
       absl::Span<const std::vector<PjRtBuffer*>> argument_handles,
       const ExecuteOptions& options,
-      std::optional<std::vector<PjRtFuture<Status>>>& returned_futures)
-      override;
+      std::optional<std::vector<PjRtFuture<>>>& returned_futures) override;
 
   using PjRtLoadedExecutable::ExecuteSharded;
   StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecuteSharded(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
-      std::optional<PjRtFuture<Status>>& returned_future,
-      bool fill_future) override;
+      std::optional<PjRtFuture<>>& returned_future, bool fill_future) override;
 
   using PjRtLoadedExecutable::ExecutePortable;
   StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>> ExecutePortable(
       absl::Span<PjRtBuffer* const> argument_handles, PjRtDevice* device,
       const ExecuteOptions& options,
-      std::optional<PjRtFuture<Status>>& returned_future,
-      bool fill_future) override;
+      std::optional<PjRtFuture<>>& returned_future, bool fill_future) override;
 
   void Delete() override { executables_.clear(); }
 
