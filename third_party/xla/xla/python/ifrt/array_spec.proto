@@ -17,9 +17,13 @@ syntax = "proto3";
 
 package xla.ifrt;
 
-// Proto equivalent of C++ `DeviceList`.
-message DeviceListProto {
-  // Serialization and deserialization are expected to ensure that device ids
-  // are stable across proto construction and consumption.
-  repeated int32 device_ids = 1;
+import "xla/python/ifrt/dtype.proto";
+import "xla/python/ifrt/shape.proto";
+import "xla/python/ifrt/sharding.proto";
+
+// Proto equivalent of C++ `ArraySpec`.
+message ArraySpecProto {
+  DTypeProto dtype = 1;
+  ShapeProto shape = 2;
+  ShardingProto sharding = 3;
 }
