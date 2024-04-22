@@ -704,6 +704,7 @@ cc_library(
     name = "gemm_fusion_autotuner",
     srcs = if_cuda_is_configured(["gemm_fusion_autotuner.cc"]),
     hdrs = if_cuda_is_configured(["gemm_fusion_autotuner.h"]),
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = if_cuda_is_configured([
         ":autotuner_compile_util",
         ":autotuner_util",
@@ -1785,6 +1786,38 @@ xla_cc_test(
         "//xla/hlo/ir:hlo",
         "//xla/service:gpu_plugin",
         "//xla/service/gpu/tests:gpu_codegen_test",
+        "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "dot_sparsity_rewriter",
+    srcs = ["dot_sparsity_rewriter.cc"],
+    hdrs = ["dot_sparsity_rewriter.h"],
+    deps = [
+        "//xla:status",
+        "//xla:util",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_creation_utils",
+        "//xla/service:hlo_pass",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "dot_sparsity_rewriter_test",
+    srcs = ["dot_sparsity_rewriter_test.cc"],
+    tags = tf_cuda_tests_tags(),
+    deps = [
+        ":dot_sparsity_rewriter",
+        "//xla/hlo/ir:hlo",
+        "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
@@ -3083,6 +3116,7 @@ cc_library(
     hdrs = [
         "compile_module_to_llvm_ir.h",
     ],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":executable_proto_cc",
         ":gpu_constants",
@@ -3125,6 +3159,7 @@ cc_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
     ],
 )
 
@@ -3536,6 +3571,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:platform_port",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "@local_tsl//tsl/profiler/lib:traceme",
         "//xla:status",
         "@com_google_absl//absl/status",
@@ -3684,7 +3720,7 @@ cc_library(
             "ENABLE_LIBNVPTXCOMPILER_SUPPORT=1",
         ],
         "//conditions:default": [],
-    }),
+    }) + if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = if_cuda_is_configured([
         ":autotuner_util",
         ":buffer_sharing",
@@ -3702,6 +3738,7 @@ cc_library(
         ":cudnn_simplify_padding",
         ":cudnn_vectorize_convolutions",
         ":cusolver_rewriter",
+        ":dot_sparsity_rewriter",
         ":gemm_algorithm_picker",
         ":gemm_fusion_autotuner",
         ":gpu_asm_opts_util",
@@ -3782,6 +3819,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "@local_tsl//tsl/profiler/lib:traceme",
         "//xla/tsl/util:env_var",
     ]),

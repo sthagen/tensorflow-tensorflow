@@ -535,6 +535,7 @@ cc_library(
     name = "dump",
     srcs = ["dump.cc"],
     hdrs = ["dump.h"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":hlo_graph_dumper",
         ":hlo_proto_util",
@@ -556,6 +557,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:regexp",
         "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
     ],
 )
 
@@ -638,6 +640,7 @@ cc_library(
         ":dot_as_convolution_util",
         ":hlo_graph_dumper",
         ":hlo_pass",
+        ":host_memory_offload_annotations_hdr",
         "//xla:array",
         "//xla:protobuf_util",
         "//xla:shape_tree",
@@ -1542,10 +1545,12 @@ cc_library(
     name = "llvm_compiler",
     srcs = ["llvm_compiler.cc"],
     hdrs = ["llvm_compiler.h"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":compiler",
         "@llvm-project//llvm:Core",
         "@local_tsl//tsl/platform:denormal",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
     ],
 )
 
@@ -1888,6 +1893,7 @@ cc_library(
     name = "hlo_memory_scheduler",
     srcs = ["hlo_memory_scheduler.cc"],
     hdrs = ["hlo_memory_scheduler.h"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":hlo_alias_analysis",
         ":hlo_pass",
@@ -1905,6 +1911,7 @@ cc_library(
         "@local_tsl//tsl/lib/gtl:map_util",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
     ],
 )
 
