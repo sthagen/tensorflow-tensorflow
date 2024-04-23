@@ -184,6 +184,8 @@ class PjRtFutureBase {
       return ref_.CopyRCRef();
     }
 
+    tsl::AsyncValue* GetAsyncValue() const { return ref_.GetAsyncValue(); }
+
    private:
     tsl::AsyncValueRef<T> ref_;
   };
@@ -243,6 +245,9 @@ class PjRtFutureBase {
 template <class T>
 class PjRtFuture : public internal::PjRtFutureBase<T> {
   using Base = internal::PjRtFutureBase<T>;
+
+  static_assert(!std::is_same_v<T, absl::Status>,
+                "Use PjRtFuture<> specialization for stateless futures");
 
  public:
   // Wrapper for AsyncValueRef<T> that can be used by clients that don't
@@ -359,6 +364,9 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<std::nullopt_t> {
     // value stored in the AsyncValue.
     using Base::Promise::CopyRCRef;
 
+    // Same as above but returns non-owned pointer to underlying AsyncValue.
+    using Base::Promise::GetAsyncValue;
+
     // Sets the promise completed with a given status. Must be called at most
     // once.
     //
@@ -386,6 +394,12 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<std::nullopt_t> {
   }
 
   PjRtFuture() = default;
+
+  PjRtFuture(const PjRtFuture& other) = default;
+  PjRtFuture& operator=(const PjRtFuture& other) = default;
+
+  PjRtFuture(PjRtFuture&& other) = default;
+  PjRtFuture& operator=(PjRtFuture&& other) = default;
 
   // Constructor for an already-available PjRtFuture. OkStatus means that future
   // is already successfully completed. Error means that future is already

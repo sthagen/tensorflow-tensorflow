@@ -15,9 +15,13 @@ limitations under the License.
 
 #include "tsl/concurrency/async_value_ref.h"
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <utility>
+#include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -171,6 +175,138 @@ TEST(AsyncValueRefTest, Nullptr) {
   EXPECT_TRUE(av_int2);
   av_int2 = nullptr;
   EXPECT_FALSE(av_int2);
+}
+
+TEST(AsyncValueRefTest, MapAvailable) {
+  AsyncValueRef<int32_t> ref = MakeAvailableAsyncValueRef<int32_t>(42);
+
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map([](int32_t value) -> float { return value; });
+  EXPECT_TRUE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(mapped_to_float.get(), 42.0f);
+}
+
+TEST(AsyncValueRefTest, MapUnvailable) {
+  AsyncValueRef<int32_t> ref = MakeConstructedAsyncValueRef<int32_t>(42);
+
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map([](int32_t value) -> float { return value; });
+
+  EXPECT_FALSE(mapped_to_float.IsAvailable());
+  ref.SetStateConcrete();
+
+  EXPECT_TRUE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(mapped_to_float.get(), 42.0f);
+}
+
+TEST(AsyncValueRefTest, MapToNonMoveable) {
+  AsyncValueRef<int32_t> ref = MakeAvailableAsyncValueRef<int32_t>(42);
+
+  AsyncValueRef<std::atomic<int32_t>> mapped_to_atomic =
+      ref.Map<std::atomic<int32_t>>([](int32_t value) { return value; });
+  EXPECT_TRUE(mapped_to_atomic.IsAvailable());
+  EXPECT_EQ(mapped_to_atomic->load(), 42);
+}
+
+TEST(AsyncValueRefTest, MapError) {
+  AsyncValueRef<int32_t> ref =
+      MakeErrorAsyncValueRef(absl::InternalError("error"));
+
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map([](int32_t value) -> float { return value; });
+  EXPECT_TRUE(mapped_to_float.IsError());
+  EXPECT_EQ(mapped_to_float.GetError(), absl::InternalError("error"));
+}
+
+TEST(AsyncValueRefTest, MapUnvailableError) {
+  AsyncValueRef<int32_t> ref = MakeConstructedAsyncValueRef<int32_t>(42);
+
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map([](int32_t value) -> float { return value; });
+
+  EXPECT_FALSE(mapped_to_float.IsAvailable());
+  ref.SetError(absl::InternalError("error"));
+
+  EXPECT_TRUE(mapped_to_float.IsError());
+  EXPECT_EQ(mapped_to_float.GetError(), absl::InternalError("error"));
+}
+
+TEST(AsyncValueRefTest, MapMultipleTimes) {
+  AsyncValueRef<int32_t> ref = MakeAvailableAsyncValueRef<int32_t>(42);
+
+  auto plus_one = [](int32_t value) { return value + 1; };
+  AsyncValueRef<int32_t> mapped = ref.Map(plus_one)
+                                      .Map(plus_one)
+                                      .Map(plus_one)
+                                      .Map(plus_one)
+                                      .Map(plus_one)
+                                      .Map(plus_one);
+
+  EXPECT_TRUE(mapped.IsAvailable());
+  EXPECT_EQ(mapped.get(), 42 + 6);
+}
+
+struct DeferredExecutor : public AsyncValue::Executor {
+  void Execute(Task task) final { tasks.push_back(std::move(task)); }
+
+  size_t Quiesce() {
+    size_t n = 0;
+    while (!tasks.empty()) {
+      Task task = std::move(tasks.back());
+      tasks.pop_back();
+      task();
+      ++n;
+    }
+    return n;
+  }
+
+  std::vector<Task> tasks;
+};
+
+TEST(AsyncValueRefTest, MapAvailableOnExecutor) {
+  AsyncValueRef<int32_t> ref = MakeAvailableAsyncValueRef<int32_t>(42);
+
+  DeferredExecutor executor;
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map(executor, [](int32_t value) -> float { return value; });
+
+  EXPECT_FALSE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(executor.Quiesce(), 1);
+
+  EXPECT_TRUE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(mapped_to_float.get(), 42.0f);
+}
+
+TEST(AsyncValueRefTest, MapErrorOnExecutor) {
+  AsyncValueRef<int32_t> ref =
+      MakeErrorAsyncValueRef(absl::InternalError("error"));
+
+  DeferredExecutor executor;
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map(executor, [](int32_t value) -> float { return value; });
+
+  EXPECT_FALSE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(executor.Quiesce(), 1);
+
+  EXPECT_TRUE(mapped_to_float.IsError());
+  EXPECT_EQ(mapped_to_float.GetError(), absl::InternalError("error"));
+}
+
+TEST(AsyncValueRefTest, MapUnavailableOnExecutor) {
+  AsyncValueRef<int32_t> ref = MakeConstructedAsyncValueRef<int32_t>(42);
+
+  DeferredExecutor executor;
+  AsyncValueRef<float> mapped_to_float =
+      ref.Map(executor, [](int32_t value) -> float { return value; });
+
+  ref.SetStateConcrete();
+  ref.release()->DropRef();
+
+  EXPECT_FALSE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(executor.Quiesce(), 1);
+
+  EXPECT_TRUE(mapped_to_float.IsAvailable());
+  EXPECT_EQ(mapped_to_float.get(), 42.0f);
 }
 
 TEST(AsyncValueRefTest, BlockUntilReady) {
