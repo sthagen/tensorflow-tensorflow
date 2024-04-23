@@ -525,7 +525,7 @@ PjRtLoadedExecutable::Execute(absl::Span<tsl::RCReference<Array>> args,
   }
 
   const bool portable_execution = devices.has_value();
-  PjRtDevice* portable_execution_device =
+  PjRtCompatibleDevice* portable_execution_device =
       static_cast<PjRtDevice*>(devices_.front());
   if (portable_execution) {
     if (devices->size() != 1) {
@@ -714,11 +714,11 @@ absl::StatusOr<std::string> PjRtLoadedExecutable::Serialize() const {
   return pjrt_loaded_executable_->SerializeExecutable();
 }
 
-Future<Status> PjRtLoadedExecutable::Delete() {
+Future<> PjRtLoadedExecutable::Delete() {
   DCHECK(this);
   pjrt_loaded_executable_->Delete();
   // TODO(hyeontaek): Return a correct future.
-  return Future<Status>(OkStatus());
+  return Future<>(OkStatus());
 }
 
 }  // namespace ifrt

@@ -1,4 +1,4 @@
-/* Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,18 +12,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_TESTING_INIT_TENSORFLOW_H_
-#define TENSORFLOW_LITE_TESTING_INIT_TENSORFLOW_H_
 
-namespace tflite {
+#include "xla/hlo/ir/collective_device_list.h"
 
-// Initializes tensorflow's libraries. Note that this simulates an empty
-// command line, so flags are not initialized.
-void InitTensorFlow();
+namespace xla {
 
-// Initializes tensorflow's libraries with the given command line arguments.
-void InitTensorFlow(int argc, char** argv);
+CollectiveDeviceList::CollectiveDeviceList(
+    absl::Span<const std::vector<int64_t>> replica_groups) {
+  replica_groups_.reserve(replica_groups.size());
+  for (auto g : replica_groups) {
+    auto& group = replica_groups_.emplace_back();
+    *group.mutable_replica_ids() = {g.begin(), g.end()};
+  }
+}
 
-}  // namespace tflite
-
-#endif  // TENSORFLOW_LITE_TESTING_INIT_TENSORFLOW_H_
+}  // namespace xla
