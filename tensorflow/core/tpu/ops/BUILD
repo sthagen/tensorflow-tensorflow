@@ -190,6 +190,7 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@local_xla//xla:util",
     ],
     alwayslink = 1,
@@ -203,9 +204,7 @@ cc_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
-        "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core/tpu:tpu_embedding_optimization_parameters_utils",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/status",
     ],
     alwayslink = 1,
 )
