@@ -113,10 +113,7 @@ cc_library(
     hdrs = ["debugger.h"],
     compatible_with = get_compatible_with_portable(),
     deps = [
-        ":graph_def",
-        "//tensorflow/compiler/mlir/quantization/tensorflow:exported_model_proto_cc",
         "//tensorflow/compiler/mlir/quantization/tensorflow:tf_quant_ops",
-        "//tensorflow/core:protos_all_cc",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
@@ -343,13 +340,18 @@ tf_cc_test(
     name = "report_test",
     srcs = ["report_test.cc"],
     deps = [
+        ":io",
         ":report",
         "//tensorflow/compiler/mlir/quantization/common:test_base",
         "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_config_proto_cc",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/platform:status_matchers",
     ],
 )
 
