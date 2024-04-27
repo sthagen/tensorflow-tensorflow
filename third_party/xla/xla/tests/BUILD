@@ -547,9 +547,10 @@ xla_test(
 xla_test(
     name = "xla_hlo_profile_test",
     srcs = ["xla_hlo_profile_test.cc"],
-    disabled_backends = [
-        # Hlo profiles are not supported on the interpreter backend.
-        "interpreter",
+    backends = [
+        # Hlo profiles are only supported on CPU/GPU.
+        "cpu",
+        "gpu",
     ],
     tags = ["no_aarch64"],
     deps = [
@@ -1015,7 +1016,7 @@ xla_test(
     name = "scatter_test",
     srcs = ["scatter_test.cc"],
     backend_tags = {
-        # TODO(b/305008247)
+        # TODO(b/305008247): Re-enable once fixed.
         "ghostfish_grm": ["broken"],
     },
     tags = ["test_hlo_pjrt_runner"],
@@ -1408,10 +1409,6 @@ xla_test(
 xla_test(
     name = "float8_test",
     srcs = ["float8_test.cc"],
-    backend_tags = {
-        # TODO(b/305009586)
-        "ghostfish_grm": ["broken"],
-    },
     deps = [
         ":client_library_test_base",
         ":xla_internal_test_main",
@@ -2176,10 +2173,6 @@ xla_test(
 xla_test(
     name = "bitcast_convert_test",
     srcs = ["bitcast_convert_test.cc"],
-    backend_tags = {
-        # TODO(b/305008729)
-        "ghostfish_grm": ["broken"],
-    },
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",
@@ -2422,6 +2415,11 @@ xla_test(
 xla_test(
     name = "cpu_gpu_fusion_test",
     srcs = ["cpu_gpu_fusion_test.cc"],
+    backends = [
+        "cpu",
+        "gpu",
+        "interpreter",
+    ],
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",
@@ -2720,10 +2718,6 @@ xla_test(
 xla_test(
     name = "iota_test",
     srcs = ["iota_test.cc"],
-    backend_tags = {
-        # TODO(b/305011394)
-        "ghostfish_grm": ["broken"],
-    },
     shard_count = 30,
     tags = [
         # Require optimized builds, iota_test_cpu is very slow in fastbuild.
