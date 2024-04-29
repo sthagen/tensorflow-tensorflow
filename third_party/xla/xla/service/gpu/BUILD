@@ -1627,6 +1627,29 @@ cc_library(
 )
 
 xla_test(
+    name = "autotuner_compile_util_test",
+    srcs = if_gpu_is_configured(["autotuner_compile_util_test.cc"]),
+    backends = ["gpu"],
+    deps = if_gpu_is_configured(
+        [
+            ":autotuner_compile_util",
+            ":autotuner_util",
+            "@com_google_googletest//:gtest_main",
+            "@com_google_absl//absl/strings",
+            "@com_google_absl//absl/strings:string_view",
+            "//xla/hlo/ir:hlo",
+            "//xla/service:platform_util",
+            "//xla/stream_executor:platform",
+            "//xla/tests:hlo_test_base",
+            "@local_tsl//tsl/platform:statusor",
+        ],
+        if_false = [
+            "@com_google_googletest//:gtest_main",  # b/317293391
+        ],
+    ),
+)
+
+xla_test(
     name = "gemm_algorithm_picker_test",
     srcs = if_gpu_is_configured(["gemm_algorithm_picker_test.cc"]),
     backend_tags = {
@@ -4089,6 +4112,7 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:computation_layout",
+        "//xla/service:host_memory_offload_annotations_hdr",
         "//xla/service:layout_assignment",
         "//xla/service:logical_buffer",
         "//xla/stream_executor",
