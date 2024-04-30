@@ -401,6 +401,7 @@ cc_library(
         "@llvm-project//mlir:IR",
     ] + if_cuda([
         "@local_config_cuda//cuda:cuda_headers",
+        # TODO(b/324133505): remove this dependency after JAX OSS migrates to cuda plugin.
         "//xla/stream_executor/cuda:cuda_driver",
     ]) + if_rocm([
         "@local_config_rocm//rocm:rocm_headers",
@@ -1362,13 +1363,13 @@ tsl_pybind_extension(
                 ":gpu_support",
             ],
             "//conditions:default": [],
+        }) + select({
+            ":link_gpu_plugin": [
+                ":gpu_plugin_deps",
+            ],
+            "//conditions:default": [],
         }),
-    ) + select({
-        ":link_gpu_plugin": [
-            ":gpu_plugin_deps",
-        ],
-        "//conditions:default": [],
-    }),
+    ),
 )
 
 cc_library(
