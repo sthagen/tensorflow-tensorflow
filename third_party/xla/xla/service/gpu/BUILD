@@ -761,6 +761,7 @@ cc_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "//xla/tsl/util/proto:proto_utils",
     ]),
 )
@@ -1549,6 +1550,7 @@ cc_library(
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:scoped_annotation",
     ]),
 )
 
@@ -4318,14 +4320,22 @@ xla_cc_test(
     ],
 )
 
+cuda_library(
+    name = "stream_executor_util_kernel",
+    srcs = if_cuda_is_configured(["stream_executor_util_kernel.cu.cc"]),
+    deps = ["@local_config_cuda//cuda:cuda_headers"],
+)
+
 cc_library(
     name = "stream_executor_util",
     srcs = ["stream_executor_util.cc"],
     hdrs = ["stream_executor_util.h"],
     copts = tsl_copts(),
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":cublas_cudnn",
         ":launch_dimensions",
+        ":stream_executor_util_kernel",
         "//xla:autotuning_proto_cc",
         "//xla:shape_util",
         "//xla:statusor",
