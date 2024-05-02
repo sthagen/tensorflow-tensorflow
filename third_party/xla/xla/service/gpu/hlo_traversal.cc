@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #include "xla/service/gpu/hlo_traversal.h"
 
+#include <algorithm>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -21,6 +22,7 @@ limitations under the License.
 #include <queue>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
@@ -141,7 +143,6 @@ class HloComputationFusion : public internal::HloFusionInstructionAdaptor {
     absl::InlinedVector<HloInstructionAdaptor, 2> roots;
 
     std::function<void(const HloInstruction*)> get_roots;
-    absl::flat_hash_set<HloInstructionAdaptor> roots_set;
     get_roots = [&](const HloInstruction* instr) {
       if (instr->opcode() == HloOpcode::kTuple) {
         for (const auto* operand : instr->operands()) {
@@ -149,9 +150,7 @@ class HloComputationFusion : public internal::HloFusionInstructionAdaptor {
         }
       } else {
         HloInstructionAdaptor wrapped{*instr, parent_};
-        if (roots_set.insert(wrapped).second) {
-          roots.push_back(wrapped);
-        }
+        roots.push_back(wrapped);
       }
     };
     get_roots(computation->root_instruction());
@@ -480,6 +479,30 @@ std::optional<const HloInstruction*> HloFindIf(
     enqueue(node);
   }
   return std::nullopt;
+}
+
+std::vector<HloInstructionAdaptor> HloFindUseChain(HloInstructionAdaptor parent,
+                                                   HloInstructionAdaptor root) {
+  absl::flat_hash_set<HloInstructionAdaptor> visited;
+  std::vector<HloInstructionAdaptor> result;
+  std::function<bool(HloInstructionAdaptor)> visit;
+  visit = [&](HloInstructionAdaptor node) {
+    if (node == root) return true;
+    for (const auto& user : node.GetUsers()) {
+      if (visited.insert(user).second && visit(user)) {
+        result.push_back(user);
+        return true;
+      }
+    }
+    return false;
+  };
+  if (visit(parent)) {
+    result.push_back(parent);
+    std::reverse(result.begin(), result.end());
+  } else {
+    result.clear();
+  }
+  return result;
 }
 
 }  // namespace gpu
