@@ -1,4 +1,4 @@
-/* Copyright 2019 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,27 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_GPU_ASM_COMPILER_H_
-#define XLA_STREAM_EXECUTOR_GPU_ASM_COMPILER_H_
-
-#include <cstdint>
-#include <string>
-#include <vector>
-
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/stream_executor/gpu/gpu_semaphore.h"
+#include "xla/stream_executor/gpu/gpu_stream.h"
+#include "xla/stream_executor/stream.h"
 
-namespace stream_executor {
+namespace stream_executor::gpu {
 
-struct HsacoImage {
-  std::string gfx_arch;
-  std::vector<uint8_t> bytes;
-};
+absl::StatusOr<bool> DelayKernelIsSupported(GpuStream*) { return false; }
 
-// Bundles the GPU machine code (HSA Code Object) and returns the resulting
-// binary (i.e. a fatbin) as a byte array.
-absl::StatusOr<std::vector<uint8_t>> BundleGpuAsm(
-    std::vector<HsacoImage> images, const std::string rocm_root_dir);
+absl::StatusOr<GpuSemaphore> LaunchDelayKernel(Stream* stream) {
+  return absl::UnimplementedError("Not implemented");
+}
 
-}  // namespace stream_executor
-
-#endif  // XLA_STREAM_EXECUTOR_GPU_ASM_COMPILER_H_
+}  // namespace stream_executor::gpu
