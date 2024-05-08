@@ -128,6 +128,7 @@ cc_library(
         ":stream_executor_plugin_headers",
     ],
     deps = STREAM_EXECUTOR_DEPENDENCIES + [
+        ":stream_executor_interface",
         ":stream_executor_pimpl",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
@@ -582,9 +583,7 @@ cc_library(
         ":kernel_spec",
         ":platform",
         ":stream_executor_headers",
-        ":stream_executor_interface",
         "@com_google_absl//absl/container:inlined_vector",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

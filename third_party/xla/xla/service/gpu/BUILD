@@ -23,7 +23,7 @@ load(
     "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
     "if_cuda_is_configured",
 )
-load("//xla:xla.bzl", "xla_cc_test", "xla_cub_deps", "xla_export_hlo_deps")
+load("//xla:xla.bzl", "xla_cc_test", "xla_cub_deps", "xla_internal")
 load(
     "//xla/service/gpu:build_defs.bzl",
     "build_cub_sort_kernels",
@@ -3609,7 +3609,7 @@ cc_library(
         "//xla/service:logical_buffer",
         "//xla/stream_executor/rocm:rocm_platform_id",
         "@local_tsl//tsl/platform:numbers",
-    ]) + xla_export_hlo_deps() + [
+    ]) + xla_internal(["service:export_hlo"]) + [
         ":command_buffer_scheduling",
         ":fusion_pipeline",
         ":ir_emitter_context",
@@ -4960,7 +4960,6 @@ cc_library(
         "//xla/stream_executor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:status",
@@ -4971,16 +4970,12 @@ xla_cc_test(
     name = "hlo_algorithm_denylist_test",
     srcs = ["hlo_algorithm_denylist_test.cc"],
     data = ["data/hlo_algorithm_denylist.pbtxt"],
-    tags = [
-        "nomsan",
-    ],
     deps = [
         ":hlo_algorithm_denylist",
         "//xla/stream_executor:dnn",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:path",
-        "@local_tsl//tsl/platform:resource_loader",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
