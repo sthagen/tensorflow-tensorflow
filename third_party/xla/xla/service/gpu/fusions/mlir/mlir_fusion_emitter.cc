@@ -287,6 +287,9 @@ MlirFusionEmitterBase::CreateLLVMModule(
                                     buffer_assignment));
 
   mlir::PassManager pm(&mlir_context);
+  if (VLOG_IS_ON(5)) {
+    pm.enableIRPrinting();
+  }
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createInlinerPass());
   pm.addPass(mlir::createCanonicalizerPass());
@@ -430,6 +433,10 @@ MlirFusionEmitterBase::CreateMLIRModule(
 
   // Run a minimal simplification pipeline.
   mlir::PassManager pm(&context);
+  if (VLOG_IS_ON(5)) {
+    context.disableMultithreading();
+    pm.enableIRPrinting();
+  }
   pm.addPass(CreateSimplifyArithPass());
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
@@ -480,7 +487,7 @@ absl::Status MlirFusionEmitterBase::EmitMlir(
 
   // The epilogue functions replace the root tuple.
   auto* root = fusion.fused_instructions_computation()->root_instruction();
-  if (!epilogues.empty() && root->opcode() == HloOpcode::kTuple) {
+  if (root->opcode() == HloOpcode::kTuple && !epilogues.empty()) {
     subgraph_to_mlir_fn.extract(&computations.FindSubgraph(root))
         .mapped()
         .erase();
@@ -497,6 +504,7 @@ absl::Status MlirFusionEmitterBase::EmitMlir(
     }
   }
   for (const auto& epilogue : computations.epilogues()) {
+    if (epilogue.roots.empty()) continue;
     TF_RETURN_IF_ERROR(mlir_converter::SubgraphToMlirFunction(
         computations.FindPartitionedComputation(
             fusion.fused_instructions_computation()),
@@ -524,6 +532,9 @@ MlirFusionEmitterBase::EmitEpilogue(
         injected,
     ValueRange output_indices, mlir::ImplicitLocOpBuilder& builder) const {
   const auto& epilogue = computations.epilogues().at(epilogue_index);
+  if (epilogue.roots.empty()) {
+    return {};
+  }
   auto epilogue_fn = mlir::cast<mlir::func::FuncOp>(
       entry_fn->getParentOfType<mlir::ModuleOp>().lookupSymbol(epilogue.name));
   SmallVector<Value> operands = ValueRange(entry_fn.getArguments().take_front(

@@ -530,7 +530,7 @@ xla_test(
     srcs = ["gpu_kernel_tiling_test.cc"],
     backends = [
         "gpu_p100",
-    ] + if_oss(["gpu"]),
+    ] + if_oss(["gpu_any"]),
     deps = [
         ":gpu_codegen_test",
         "//xla:error_spec",
@@ -789,6 +789,7 @@ lit_test_suite(
             "reduction_vectorization_sm_all.hlo",
             "rng_get_and_update_state.hlo",
             "scatter.hlo",
+            "scatter_bf16.hlo",
             "select_and_scatter.hlo",
             "single_instruction.hlo",
             "slice_to_dynamic.hlo",
@@ -819,12 +820,13 @@ lit_test_suite(
         "//xla/tools/hlo_opt:gpu_specs/p100.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/v100.txtpb",
     ],
-    default_tags = tf_cuda_tests_tags(),
+    default_tags = tf_cuda_tests_tags() + ["gpu_any"],
     tags_override = {
-        "reduction_vectorization_sm_all.hlo": ["no_rocm"],
         "element_wise_row_vectorization.hlo": ["no_rocm"],
+        "scatter_bf16.hlo": ["no_rocm"],
         "single_instruction.hlo": ["no_rocm"],
         "reduce_unnested.hlo": ["no_rocm"],
+        "reduction_vectorization_sm_all.hlo": ["no_rocm"],
     },
     tools = [
         "//xla/tools:hlo-opt",
@@ -908,7 +910,7 @@ xla_test(
     srcs = ["tensor_float_32_global_var_test.cc"],
     backends = [
         "gpu_a100",
-    ] + if_oss(["gpu"]),
+    ] + if_oss(["gpu_any"]),
     deps = [
         "//xla:error_spec",
         "//xla/tests:hlo_test_base",
@@ -919,21 +921,24 @@ xla_test(
 
 xla_test(
     name = "gpu_sparse_dot_test",
-    srcs = ["gpu_sparse_dot_test.cc"],
+    srcs = if_cuda_is_configured(["gpu_sparse_dot_test.cc"]),
     backends = [
         "gpu_a100",
         "gpu_h100",
     ],
-    deps = [
-        ":gpu_codegen_test",
-        "//third_party/half:includes",
-        "//xla:literal",
-        "//xla:literal_util",
-        "//xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest",
-    ],
+    deps = if_cuda_is_configured(
+        [
+            ":gpu_codegen_test",
+            "@com_google_googletest//:gtest",
+            "@com_google_absl//absl/strings",
+            "@com_google_absl//absl/types:span",
+            "//third_party/half:includes",
+            "//xla:literal",
+            "//xla:literal_util",
+            "//xla/tests:xla_internal_test_main",
+        ],
+        ["@local_tsl//tsl/platform:test_main"],  # b/317293391
+    ),
 )
 
 xla_test(

@@ -78,7 +78,6 @@ using mlir::TypedValue;
 using mlir::TypeRange;
 using mlir::Value;
 using mlir::ValueRange;
-using mlir::arith::AtomicRMWKind;
 
 namespace arith = ::mlir::arith;
 namespace scf = ::mlir::scf;
@@ -334,6 +333,13 @@ mlir::LLVM::GlobalOp CreateGlobalOp(mlir::Attribute value,
                                     mlir::ModuleOp module, bool is_constant,
                                     int addr_space,
                                     mlir::ImplicitLocOpBuilder& b) {
+  if (auto elements = mlir::dyn_cast_or_null<mlir::DenseElementsAttr>(value)) {
+    // The lowering to LLVM only works for 1d tensors or those with trailing
+    // unit dimensions.
+    value = elements.reshape(mlir::RankedTensorType::get(
+        {elements.getNumElements()}, elements.getElementType()));
+  }
+
   Type element_type = shaped_ty.getElementType();
   // Needed to support complex element type.
   mlir::LLVMTypeConverter converter(b.getContext());
@@ -421,6 +427,34 @@ struct RewriteSyncThreads : mlir::OpRewritePattern<SyncThreadsOp> {
       SyncThreadsOp op, mlir::PatternRewriter& rewriter) const override {
     rewriter.create<mlir::gpu::BarrierOp>(op.getLoc());
     rewriter.replaceOp(op, op.getOperands());
+    return success();
+  }
+};
+
+// TODO(jreiffers): Generalize this to support index switches with some used
+// results and upstream it as a canonicalization pattern.
+struct RemoveUnusedIndexSwitchResults
+    : mlir::OpRewritePattern<scf::IndexSwitchOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      scf::IndexSwitchOp op, mlir::PatternRewriter& rewriter) const override {
+    if (op->getNumResults() == 0 || !op->use_empty()) {
+      return rewriter.notifyMatchFailure(op, "the op has users");
+    }
+
+    auto new_op = rewriter.create<scf::IndexSwitchOp>(
+        op.getLoc(), mlir::TypeRange{}, op.getArg(), op.getCases(),
+        op.getNumCases());
+    for (int i = 0; i < op->getNumRegions(); ++i) {
+      auto& old_region = op->getRegion(i);
+      auto& new_region = new_op->getRegion(i);
+      rewriter.mergeBlocks(&old_region.getBlocks().front(),
+                           &new_region.emplaceBlock());
+      auto yield_op = new_region.getBlocks().front().getTerminator();
+      rewriter.modifyOpInPlace(yield_op, [&]() { yield_op->setOperands({}); });
+    }
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -868,7 +902,8 @@ class LowerTensorsPass : public impl::LowerTensorsPassBase<LowerTensorsPass> {
     }
 
     mlir::RewritePatternSet function_patterns(mlir_context);
-    function_patterns.add<RewriteFunctionSignatures, RewriteCall>(mlir_context);
+    function_patterns.add<RewriteFunctionSignatures, RewriteCall,
+                          RemoveUnusedIndexSwitchResults>(mlir_context);
     scf::ForOp::getCanonicalizationPatterns(function_patterns, mlir_context);
     scf::IfOp::getCanonicalizationPatterns(function_patterns, mlir_context);
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(
