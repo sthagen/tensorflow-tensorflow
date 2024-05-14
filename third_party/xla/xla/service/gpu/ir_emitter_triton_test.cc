@@ -284,7 +284,7 @@ ENTRY e {
 })";
 
   TritonGemmConfig config(16, 16, 32, 1, 1, 1);
-  EXPECT_OK(
+  TF_EXPECT_OK(
       CreateTritonIrAndFileCheck(kHloText, config, EmitMatMul, "triton_dot", R"(
 CHECK:    tt.func @triton_fn(%[[LHS:.*]]: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %[[RHS:.*]]: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %[[OUT:.*]]: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
 CHECK-DAG:  %[[ZERO_KN:.*]] = arith.constant dense<0.000000e+00> : tensor<32x16xf32>
@@ -1083,8 +1083,8 @@ ENTRY main {
                           ParseAndReturnVerifiedModule(kHloText));
 
   TritonGemmConfig config(16, 64, 32, 1, 1, 1);
-  ASSERT_OK(CreateTritonIrAndFileCheck(kHloText, config, EmitSoftMax,
-                                       "triton_softmax_computation", R"(
+  TF_ASSERT_OK(CreateTritonIrAndFileCheck(kHloText, config, EmitSoftMax,
+                                          "triton_softmax_computation", R"(
 // CHECK: #[[MAP:.*]] = affine_map<()[s0] -> (s0 * 16)>
 // CHECK-LABEL:   tt.func @triton_fn(
 // CHECK-SAME:                       %[[P0:[^:]*]]: !tt.ptr<f32> {tt.divisibility = 16 : i32},
@@ -1373,6 +1373,29 @@ ENTRY e {
   TF_EXPECT_OK(tsl::Env::Default()->GetMatchingPaths(
       tsl::io::JoinPath(output_directory, "*.triton-passes.log"), &paths));
   EXPECT_EQ(paths.size(), 1);
+}
+
+TEST_F(TritonGemmTest, DotWithPredFromCompareProducesCorrectResult) {
+  const std::string hlo_text = R"(
+triton_dot {
+  parameter_0 = s32[4,128]{1,0} parameter(0)
+  broadcast.255 = s32[4,128,64]{2,1,0} broadcast(parameter_0), dimensions={0,1}
+  parameter_1 = s32[4,128,64]{2,1,0} parameter(1)
+  compare.39 = pred[4,128,64]{2,1,0} compare(broadcast.255, parameter_1), direction=EQ
+  bitcast.1097 = pred[512,64]{1,0} reshape(compare.39)
+  convert.229 = bf16[512,64]{1,0} convert(bitcast.1097)
+  parameter_2 = bf16[64,256]{0,1} parameter(2)
+  ROOT dot.21 = bf16[512,256]{1,0} dot(convert.229, parameter_2),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0}
+}
+ENTRY main {
+  p0 = s32[4,128]{1,0} parameter(0)
+  p1 = s32[4,128,64]{2,1,0} parameter(1)
+  p2 = bf16[64,256]{0,1} parameter(2)
+  ROOT gemm_fusion_dot.0 = bf16[512,256]{1,0} fusion(p0, p1, p2), kind=kCustom, calls=triton_dot, backend_config={"fusion_backend_config":{"kind":"__triton_gemm","triton_gemm_config":{"block_m":"64","block_n":"128","block_k":"32","split_k":"1","num_stages":"4","num_warps":"4","num_ctas":"1"}}}
+})";
+
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{/*aabs=*/1e-3, /*arel=*/1e-3}));
 }
 
 TEST_F(TritonGemmTest, UseTensorCoresForF32OnAmpere) {
@@ -4527,7 +4550,7 @@ ENTRY e {
 }
 )";
   TritonGemmConfig config(32, 32, 32, 1, 1, 1);
-  ASSERT_OK(
+  TF_ASSERT_OK(
       CreateTritonIrAndFileCheck(kHloText, config, EmitMatMul, "triton_dot", R"(
 CHECK:          %[[INFINITY:.*]] = arith.constant dense<0x7F800000> : tensor<32x32xf32>
 CHECK:          %[[C_MASK:.*]] = arith.constant dense<-65536> : tensor<32x32xi32>
@@ -4858,7 +4881,7 @@ ENTRY e {
 }
 )";
   TritonGemmConfig config(32, 32, 32, 1, 1, 1);
-  ASSERT_OK(
+  TF_ASSERT_OK(
       CreateTritonIrAndFileCheck(kHloText, config, EmitMatMul, "triton_dot", R"(
 CHECK:          %[[INFINITY:.*]] = arith.constant dense<0x7F800000> : tensor<32x32xf32>
 CHECK:          %[[C_MASK:.*]] = arith.constant dense<-65536> : tensor<32x32xi32>

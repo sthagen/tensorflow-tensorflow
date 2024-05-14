@@ -1184,11 +1184,13 @@ cc_library(
     deps = [
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
+        "//xla/ffi:attribute_map",
         "//xla/ffi:call_frame",
         "//xla/ffi:ffi_api",
         "//xla/service:custom_call_status_public_headers",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:dynamic_annotations",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",

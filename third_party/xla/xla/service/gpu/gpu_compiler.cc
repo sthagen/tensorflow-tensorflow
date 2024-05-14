@@ -246,13 +246,6 @@ limitations under the License.
 #include "tsl/platform/threadpool.h"
 #include "tsl/profiler/lib/traceme.h"
 
-#if GOOGLE_CUDA
-#include "third_party/gpus/cuda/include/cuda.h"
-#include "xla/stream_executor/cuda/cuda_platform_id.h"
-#elif TENSORFLOW_USE_ROCM
-#include "xla/stream_executor/rocm/rocm_platform_id.h"
-#endif
-
 #ifdef PLATFORM_GOOGLE
 #include "xla/hlo/experimental/auto_sharding/auto_sharding.h"
 #endif  // PLATFORM_GOOGLE
@@ -574,7 +567,6 @@ absl::Status RunSPMDPasses(
         gpu_target_config.device_description.gpu_compute_capability();
     spmd_simplify.AddPass<GpuAlgebraicSimplifier>(
         layout_insensitive_algsimp_opts, gpu_version);
-
     spmd_simplify.AddPass<SortSimplifier>();
     spmd_simplify.AddPass<TupleSimplifier>();
     spmd_simplify.AddPass<ScatterExpander>(
@@ -587,6 +579,15 @@ absl::Status RunSPMDPasses(
     ReshapeMoverOptions reshape_mover_options;
     reshape_mover_options.reshape_of_1d_broadcast_is_cheap = true;
     spmd_simplify.AddPass<ReshapeMover>(reshape_mover_options);
+    // Run AlgebraicSimplifier directly before HloConstantFolding, because we
+    // need to simplify DynamicSlice(Broadcast) away. Constant folding of
+    // DynamicSlice can be quite costly, as the whole operand will be evaluated.
+    // We run AlgebraicSimplifier as HloPassFix to make sure all simplifications
+    // have been done before running HloConstantFolding. This is necessary
+    // because simplifications create new instructions which may not be visited
+    // in the same iteration of AlgebraicSimplifier.
+    spmd_simplify.AddPass<HloPassFix<AlgebraicSimplifier>>(
+        layout_insensitive_algsimp_opts);
     spmd_simplify.AddPass<HloConstantFolding>();
     spmd_simplify.AddPass<ConditionalSimplifier>();
 
@@ -632,7 +633,9 @@ absl::Status RunSPMDPasses(
             .xla_gpu_threshold_for_windowed_einsum_mib(),
         hlo_module->config()
             .debug_options()
-            .xla_gpu_multi_streamed_windowed_einsum());
+            .xla_gpu_multi_streamed_windowed_einsum(),
+        /*skip_checking_windowed_einsum_users=*/true,
+        /*disable_ag_rewrite_for_multiple_consumers=*/true);
     spmd_pipeline.AddPass<CollectivePermuteMotion>();
     return spmd_pipeline.Run(hlo_module).status();
   } else {
@@ -2074,11 +2077,9 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
 absl::StatusOr<std::vector<std::unique_ptr<AotCompilationResult>>>
 GpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
                                 const AotCompilationOptions& options) {
-#if GOOGLE_CUDA
-  CHECK(options.PlatformId() == se::cuda::kCudaPlatformId);
-#elif TENSORFLOW_USE_ROCM
-  CHECK(options.PlatformId() == se::rocm::kROCmPlatformId);
-#endif
+  // Check that we are on the platform (CUDA or ROCm) that was chosen for AOT
+  // compilation.
+  CHECK_EQ(options.PlatformId(), PlatformId());
 
   std::vector<std::unique_ptr<HloModule>> modules =
       module_group->ConsumeModules();
@@ -2210,14 +2211,10 @@ absl::Status GpuCompiler::RunPostSchedulingPipelines(
 
   // After we have a scheduled module and all operations wrapped into fusions we
   // can decide how to wrap them into command buffers.
-  if (!IsXlaRuntimeExecutableEnabled(module->config())) {
+  {
     HloPassPipeline pipeline("command-buffer-scheduling");
     auto driver_version = se::gpu::GpuDriver::GetDriverVersion();
-#if GOOGLE_CUDA
-    constexpr int toolkit_version = CUDA_VERSION;
-#else
-    constexpr int toolkit_version = TF_ROCM_VERSION;
-#endif
+    const int32_t toolkit_version = GetToolkitVersion();
     pipeline.AddPass<CommandBufferScheduling>(
         gpu_device_info, toolkit_version,
         driver_version.value_or(toolkit_version));
