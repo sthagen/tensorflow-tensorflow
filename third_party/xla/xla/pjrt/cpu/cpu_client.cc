@@ -410,7 +410,9 @@ static tsl::ThreadOptions GetThreadOptions() {
   tsl::ThreadOptions thread_options;
   // On Mac OS the default stack size is 512KiB, which is too small for some
   // BLAS and LAPACK functions (https://github.com/google/jax/issues/20428).
-  thread_options.stack_size = 2 * 1024 * 1024;
+  // On Linux we also observed that 2MB wasn't enough to run some OpenBLAS
+  // functions.
+  thread_options.stack_size = 8 * 1024 * 1024;
   return thread_options;
 }
 
@@ -1528,6 +1530,9 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
     if (!last_enqueue_event.IsAvailable()) {
       input_deps.push_back(std::move(last_enqueue_event));
     }
+  }
+  if (options.context != nullptr) {
+    run_options.set_ffi_execution_context(&options.context->ffi_context());
   }
 
   bool execute_inline = cheap_computation_ || !client_->asynchronous_;
