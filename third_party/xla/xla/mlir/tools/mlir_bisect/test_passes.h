@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2023 The OpenXLA Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,20 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/sleep_kernel.h"
+#ifndef XLA_MLIR_TOOLS_MLIR_BISECT_TEST_PASSES_H_
+#define XLA_MLIR_TOOLS_MLIR_BISECT_TEST_PASSES_H_
 
-namespace xla::gpu {
-namespace {
+namespace mlir {
+namespace bisect {
+namespace test {
 
-// Use busy waiting instead of __nanosleep() to make the code more portable
-// (__nanosleep requires __CUDA_ARCH__ >= 700)
-__global__ void sleep(int64_t num_clocks) {
-  int64_t start = clock64();
-  while (clock64() - start < num_clocks) continue;
+void RegisterTestPasses();
+
 }
+}  // namespace bisect
+}  // namespace mlir
 
-}  // namespace
-
-void* GetSleepKernel() { return reinterpret_cast<void*>(&sleep); }
-
-}  // namespace xla::gpu
+#endif  // XLA_MLIR_TOOLS_MLIR_BISECT_TEST_PASSES_H_

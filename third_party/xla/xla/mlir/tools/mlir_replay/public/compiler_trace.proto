@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2022 The OpenXLA Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,14 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_SLEEP_KERNEL_H_
-#define XLA_SERVICE_GPU_SLEEP_KERNEL_H_
+syntax = "proto2";
 
-namespace xla::gpu {
+package mlir.interpreter;
 
-// Returns a pointer to CUDA kernel that does sleep operation on device.
-void* GetSleepKernel();
+message MlirCompilationTraceEntry {
+  // The name of the pass that was previously executed.
+  optional string after_pass = 1;
 
-}  // namespace xla::gpu
+  // MLIR module IR of the state after the pass.
+  optional string mlir_module = 2;
+}
 
-#endif  // XLA_SERVICE_GPU_SLEEP_KERNEL_H_
+message MlirCompilationTrace {
+  // MLIR modules corresponding to each stage of the compilation pipeline.
+  repeated MlirCompilationTraceEntry passes = 1;
+}
