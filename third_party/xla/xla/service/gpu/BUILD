@@ -1129,9 +1129,6 @@ cc_library(
     name = "gemm_rewriter",
     srcs = ["gemm_rewriter.cc"],
     hdrs = ["gemm_rewriter.h"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",
@@ -1166,9 +1163,7 @@ cc_library(
         "@local_tsl//tsl/platform:ml_dtypes",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/protobuf:dnn_proto_cc",
-    ] + if_cuda_is_configured([
-        "@local_config_cuda//cuda:cuda_headers",
-    ]),
+    ],
 )
 
 cc_library(
@@ -1220,6 +1215,7 @@ xla_test(
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -1533,9 +1529,6 @@ cc_library(
     name = "gemm_algorithm_picker",
     srcs = if_gpu_is_configured(["gemm_algorithm_picker.cc"]),
     hdrs = if_gpu_is_configured(["gemm_algorithm_picker.h"]),
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     deps = if_gpu_is_configured([
         ":backend_configs_cc",
         ":buffer_comparator",
@@ -3388,7 +3381,6 @@ cc_library(
         ":pipelined_p2p_rewriter",
         ":collective_permute_cycle_decomposer",
         ":address_computation_fusion_rewriter",
-        ":gemv_rewriter",
         ":algorithm_checker",
         ":alias_passthrough_params",
         ":all_reduce_blueconnect",
@@ -3407,7 +3399,6 @@ cc_library(
         ":gemm_broadcast_folding_rewriter",
         ":gemm_fusion",
         ":gemm_rewriter",
-        ":gpu_algebraic_simplifier",
         ":gpu_all_gather_optimizer",
         ":gpu_async_collective_annotator",
         ":gpu_constants",
@@ -3758,7 +3749,6 @@ cc_library(
         ":dot_sparsity_rewriter",
         ":gemm_algorithm_picker",
         ":gemm_fusion_autotuner",
-        ":gpu_algebraic_simplifier",
         ":gpu_asm_opts_util",
         ":gpu_compiler",
         ":gpu_conv_padding_legalization",
@@ -3797,6 +3787,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/service:algebraic_simplifier",
         "//xla/service:call_inliner",
         "//xla/service:convert_mover",
         "//xla/service:dot_dimension_merger",
@@ -4415,7 +4406,6 @@ cc_library(
     name = "hlo_fusion_analysis",
     srcs = ["hlo_fusion_analysis.cc"],
     hdrs = ["hlo_fusion_analysis.h"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":backend_configs_cc",
         ":hlo_traversal",
