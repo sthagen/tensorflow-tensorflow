@@ -2033,6 +2033,7 @@ cc_library(
         "//xla/client/lib:comparators",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -3247,6 +3248,7 @@ cc_library(
         ":call_inliner",
         ":collective_ops_utils",
         ":flatten_call_graph",
+        ":hlo_creation_utils",
         ":hlo_cse",
         ":hlo_pass",
         ":pattern_matcher",
@@ -7784,6 +7786,7 @@ xla_cc_test(
     name = "xla_aot_compile_stablehlo_cpu_test",
     srcs = ["xla_aot_compile_stablehlo_cpu_test.cc"],
     data = [":xla_aot_compile_stablehlo_test_cpu_executable"],
+    tags = ["no_aarch64"],  # b/341355246
     deps = [
         ":cpu_plugin",
         ":platform_util",
