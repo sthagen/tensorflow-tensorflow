@@ -767,7 +767,10 @@ cc_library(
         "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "//xla/tsl/util/proto:proto_utils",
         "//xla/service/gpu:hlo_traversal",
-    ]) + ["@local_tsl//tsl/platform:path"],
+    ]) + [
+        "//xla/stream_executor:stream_executor_memory_allocator",
+        "@local_tsl//tsl/platform:path",
+    ],
 )
 
 xla_test(
@@ -991,7 +994,6 @@ cc_library(
         "//xla:literal",
         "//xla:shape_util",
         "//xla:status",
-        "//xla:statusor",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -1610,7 +1612,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:statusor",
-    ]),
+    ]) + ["//xla/stream_executor:stream_executor_memory_allocator"],
 )
 
 # We need a separate target, as runtime executable cannot depend on compilation
