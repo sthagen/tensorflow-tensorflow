@@ -358,7 +358,6 @@ cc_library(
         "//xla/service:custom_call_target_registry",
         "//xla/service:global_device_id",
         "//xla/service:name_uniquer",
-        "//xla/service/gpu/fusions",
         "//xla/service/gpu/fusions:fusion_emitter",
         "//xla/service/gpu/fusions:thunk_util",
         "//xla/service/gpu/kernels:custom_kernel",
@@ -434,6 +433,7 @@ cc_library(
         "@triton//:TritonDialects",
     ] + if_gpu_is_configured([
         ":ir_emitter_triton",
+        "//xla/service/gpu/fusions",
         "//xla/service/gpu/runtime:cholesky_thunk",
         "//xla/service/gpu/runtime:cub_sort_thunk",
         "//xla/service/gpu/runtime:gpublas_lt_matmul_thunk",
@@ -2927,6 +2927,7 @@ cc_library(
         ":gpu_fused_mha_runner",
         ":cublas_cudnn",
         ":stream_executor_util",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -5446,9 +5447,6 @@ cc_library(
     name = "topk_specializer",
     srcs = ["topk_specializer.cc"],
     hdrs = ["topk_specializer.h"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     deps = [
         "//xla:executable_run_options",
         "//xla:shape_util",
@@ -5517,9 +5515,6 @@ xla_cc_test(
 xla_cc_test(
     name = "topk_test",
     srcs = ["topk_test.cc"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     use_gpu = True,
     deps = [
         ":topk_specializer",

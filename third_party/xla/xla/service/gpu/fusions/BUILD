@@ -611,7 +611,6 @@ cc_library(
     name = "triton",
     srcs = ["triton.cc"],
     hdrs = ["triton.h"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":fusion_emitter",
         "//xla:shape_util",
@@ -708,6 +707,7 @@ xla_test(
         "//xla/stream_executor:stream_executor_headers",
         "//xla/stream_executor:stream_executor_memory_allocator",
         "//xla/tests:filecheck",
+        "//xla/tests:verified_hlo_module",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
