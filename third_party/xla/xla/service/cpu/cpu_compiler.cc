@@ -63,6 +63,8 @@ limitations under the License.
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
+#include "xla/service/cpu/runtime/thunk.h"
+#include "xla/service/cpu/thunk_emitter.h"
 #include "xla/service/reduce_window_rewriter.h"
 #ifdef TF_LLVM_X86_AVAILABLE
 #include "llvm/TargetParser/X86TargetParser.h"
@@ -1029,6 +1031,48 @@ std::vector<ComputationToEmit> SubcomputationEmissionOrder(
 
 }  // namespace
 
+// Creates a vector of constant allocations from the given buffer assignment.
+static absl::StatusOr<std::vector<CpuExecutable::ConstantAllocation>>
+CreateConstantAllocations(const BufferAssignment& assignment) {
+  std::vector<CpuExecutable::ConstantAllocation> constants;
+
+  for (const BufferAllocation& allocation : assignment.Allocations()) {
+    if (!allocation.is_constant()) {
+      continue;
+    }
+
+    // Find the constant instruction defining the value for allocation.
+    HloInstruction* const_instr = nullptr;
+    for (const auto& [value, _] : allocation.assigned_buffers()) {
+      // Multiple aliasing instructions can share the allocation, we need to
+      // find the original constant instruction that defines the value.
+      if (value->instruction()->opcode() == HloOpcode::kConstant) {
+        if (const_instr != nullptr) {
+          return absl::InternalError(
+              absl::StrCat("Multiple constant instructions define buffer ",
+                           allocation.ToString()));
+        }
+        const_instr = value->instruction();
+      }
+    }
+    if (const_instr == nullptr) {
+      return absl::InternalError(
+          absl::StrCat("Could not find constant instruction defining buffer ",
+                       allocation.ToString()));
+    }
+
+    const void* untyped_data = const_instr->literal().untyped_data();
+    int64_t size_in_bytes = const_instr->literal().size_bytes();
+
+    constants.push_back(CpuExecutable::ConstantAllocation{
+        allocation.index(),
+        absl::Span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(untyped_data), size_in_bytes)});
+  }
+
+  return constants;
+}
+
 absl::StatusOr<std::unique_ptr<CpuExecutable>>
 CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
   ModuleHook pre_optimization_ir_hook;
@@ -1087,6 +1131,7 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
                       ScheduleModule(module.get(), BufferSizeBytesFunction(),
                                      ComputationSchedulerToModuleScheduler(
                                          DFSMemoryScheduler)));
+  TF_RETURN_IF_ERROR(module->set_schedule(schedule));
 
   // Run buffer allocation on the HLO graph.
   TF_ASSIGN_OR_RETURN(
@@ -1097,6 +1142,39 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
                           /*allocate_buffers_for_constants=*/true));
   DumpHloModuleIfEnabled(*module, *assignment,
                          absl::StrCat("cpu_", kAfterOptimizationsDumpName));
+
+  // Dump computation proto state and buffer assignment for
+  // GetCompiledMemoryStats results.
+  auto with_hlo_proto = [&](std::unique_ptr<CpuExecutable> cpu_executable) {
+    auto hlo_proto = std::make_unique<HloProto>();
+    *hlo_proto->mutable_hlo_module() = cpu_executable->module().ToProto();
+    *hlo_proto->mutable_buffer_assignment() =
+        cpu_executable->buffer_assignment().ToProto();
+    cpu_executable->set_hlo_proto(std::move(hlo_proto));
+    return cpu_executable;
+  };
+
+  // If we use Thunk runtime then instead of emitting LLVM function for the
+  // entry computation we emit a sequence of thunks that implement the
+  // computation as a sequence of interpreted commands.
+  if (module->config().debug_options().xla_cpu_use_thunk_runtime()) {
+    ThunkEmitter thunk_emitter(assignment.get());
+    TF_ASSIGN_OR_RETURN(ThunkSequence thunks,
+                        thunk_emitter.EmitEntryComputation(*module));
+
+    TF_ASSIGN_OR_RETURN(
+        std::vector<CpuExecutable::ConstantAllocation> constants,
+        CreateConstantAllocations(*assignment));
+
+    TF_ASSIGN_OR_RETURN(
+        auto cpu_executable,
+        CpuExecutable::Create(std::move(assignment), std::move(module),
+                              std::move(thunks), std::move(constants),
+                              std::move(hlo_profile_printer_data),
+                              std::move(hlo_profile_index_map)));
+
+    return with_hlo_proto(std::move(cpu_executable));
+  }
 
   // Each computation is a single function.  Emit all embedded computations
   // before the entry computation. The order of computations returned from
@@ -1176,15 +1254,7 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
     cpu_executable->set_ir_module_string(ir_module_string);
   }
 
-  // Dump computation proto state and buffer assignment for
-  // GetCompiledMemoryStats results.
-  auto hlo_proto = std::make_unique<HloProto>();
-  *hlo_proto->mutable_hlo_module() = cpu_executable->module().ToProto();
-  *hlo_proto->mutable_buffer_assignment() =
-      cpu_executable->buffer_assignment().ToProto();
-  cpu_executable->set_hlo_proto(std::move(hlo_proto));
-
-  return cpu_executable;
+  return with_hlo_proto(std::move(cpu_executable));
 }
 
 absl::StatusOr<std::unique_ptr<Executable>> CpuCompiler::RunBackend(
