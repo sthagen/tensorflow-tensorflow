@@ -119,11 +119,12 @@ UnrollSingleIterationOfTrivialLoop(HloInstruction* while_op,
   for (HloInstruction* body_inst : while_body_clone->instructions()) {
     // We need to assign a unique channel_id for the collective ops that are
     // unrolled within the while loop body or fusions containing collectives.
-    if (IsCollectiveWithChannelId(body_inst)) {
+    HloInstruction* collective = IsOrHasCollectiveWithChannelId(body_inst);
+    if (collective != nullptr) {
       // To obtain the channel_id for the collective ops we only need to
       // increment the `unique_channel_id` since it records the next available
       // channel_id across the module.
-      body_inst->set_channel_id(unique_channel_id++);
+      collective->set_channel_id(unique_channel_id++);
     }
 
     // We only consider induction variable instructions of the following form.
@@ -327,10 +328,9 @@ bool IsLoopInductionVar(const HloInstruction* instr,
   }
 }
 
-bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
-                                               HloInstruction* input,
-                                               HloOpcode opcode,
-                                               const WhileLoopConfig& config) {
+std::optional<int64_t> MatchShapeCoveringDynamicIndexInstruction(
+    HloInstruction* instr, HloInstruction* input, HloOpcode opcode,
+    const WhileLoopConfig& config) {
   // Based on the instruction type, start indices start from index 1 or 2 of the
   // operands.
   int64_t start_indices_offset;
@@ -339,11 +339,11 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
   } else if (instr->opcode() == HloOpcode::kDynamicUpdateSlice) {
     start_indices_offset = 2;
   } else {
-    return false;
+    return std::nullopt;
   }
   HloInstruction* operand = instr->mutable_operand(0);
   if (operand != input) {
-    return false;
+    return std::nullopt;
   }
 
   int64_t dynamic_index = -1;
@@ -355,7 +355,7 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
       std::optional<int64_t> offset =
           LiteralUtil::LiteralAsScalarInt64(index->literal());
       if (offset.has_value() && offset.value() != 0) {
-        return false;
+        return std::nullopt;
       }
     }
 
@@ -365,22 +365,22 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
       // In order to cover the whole shape only a single non-constant index is
       // allowed.
       if (dynamic_index != -1) {
-        return false;
+        return std::nullopt;
       }
       dynamic_index = start_index - start_indices_offset;
     }
   }
 
   if (dynamic_index == -1) {
-    return false;
+    return std::nullopt;
   }
 
   // The shape's broadcast_dim must be exactly equal to the loop trip count.
   if (operand->shape().dimensions(dynamic_index) != config.trip_count) {
-    return false;
+    return std::nullopt;
   }
 
-  return true;
+  return dynamic_index;
 }
 
 /*static*/ std::optional<WhileLoopConfig> WhileLoopUnroller::IsLoopUnrollable(

@@ -21,7 +21,6 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -137,8 +136,8 @@ TEST(AddressComputationThunkTest, SlicedGemm) {
       slice_workspace, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -290,10 +289,10 @@ TEST(AddressComputationThunkTest, SlicedNonContiguousGemm) {
       slice_out, slice_workspace, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> rhs_offsets{
-      slice_rhs_offset_0, slice_rhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> rhs_offsets{slice_rhs_offset_0,
+                                                           slice_rhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -454,10 +453,10 @@ TEST(AddressComputationThunkTest, MulipleSlicedOperandsGemm) {
       slice_out, slice_workspace, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> rhs_offsets{
-      slice_rhs_offset_0, slice_rhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> rhs_offsets{slice_rhs_offset_0,
+                                                           slice_rhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -551,8 +550,8 @@ TEST(AddressComputationThunkTest, MulipleSlicedOperandsGemm) {
   ASSERT_EQ(dst, std::vector<float>({2 * 3 + 3 * 4 + 4 * 5}));
 }
 
-static absl::Status Memcpy(se::Stream* stream, ffi::BufferBase src,
-                           ffi::Result<ffi::BufferBase> dst) {
+static absl::Status Memcpy(se::Stream* stream, ffi::AnyBuffer src,
+                           ffi::Result<ffi::AnyBuffer> dst) {
   return stream->MemcpyD2D(
       &dst->data, src.data,
       absl::c_accumulate(src.dimensions, 1.0, std::multiplies<int64_t>()) *
@@ -562,8 +561,8 @@ static absl::Status Memcpy(se::Stream* stream, ffi::BufferBase src,
 XLA_FFI_DEFINE_HANDLER(kMemcpy, Memcpy,
                        ffi::Ffi::Bind()
                            .Ctx<ffi::Stream>()
-                           .Arg<ffi::BufferBase>()  // src
-                           .Ret<ffi::BufferBase>()  // dst
+                           .Arg<ffi::AnyBuffer>()  // src
+                           .Ret<ffi::AnyBuffer>()  // dst
 );
 XLA_FFI_REGISTER_HANDLER(ffi::GetXlaFfiApi(), "__xla_test$$memcpy", PLATFORM,
                          kMemcpy);
@@ -632,7 +631,7 @@ TEST(AddressComputationThunkTest, SlicedMemcpy) {
       /*called_computation=*/nullptr));
 
   // Wrapping address computation thunk around the custom call thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> slice_offsets{
+  std::vector<AddressComputationThunk::Offset> slice_offsets{
       slice_offset_0, slice_offset_1, slice_offset_2, slice_offset_3};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
@@ -790,10 +789,10 @@ TEST(AddressComputationThunkTest, SlicedOutputMemcpy) {
       /*called_computation=*/nullptr));
 
   // Wrapping address computation thunk around the custom call thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> slice_src_offsets{
+  std::vector<AddressComputationThunk::Offset> slice_src_offsets{
       slice_src_offset_0, slice_src_offset_1, slice_src_offset_2,
       slice_src_offset_3};
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> slice_dst_offsets{
+  std::vector<AddressComputationThunk::Offset> slice_dst_offsets{
       slice_dst_offset_0, slice_dst_offset_1, slice_dst_offset_2,
       slice_dst_offset_3};
   AddressComputationThunk thunk(
@@ -970,8 +969,8 @@ TEST(AddressComputationThunkTest, SlicedGemmArbitraryArgumentOrder) {
       slice_out_fake, slice_workspace_fake, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -1118,8 +1117,8 @@ TEST(AddressComputationThunkTest, SlicedGemmArbitraryNumberOfArguments) {
       slice_out_fake, slice_workspace_fake, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -1259,8 +1258,8 @@ TEST(AddressComputationThunkTest, SlicedTupledOperandGemm) {
       slice_workspace, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},
@@ -1429,10 +1428,10 @@ TEST(AddressComputationThunkTest, SlicedMemcpyOOB) {
       /*called_computation=*/nullptr));
 
   // Wrapping address computation thunk around the custom call thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> slice_src_offsets{
+  std::vector<AddressComputationThunk::Offset> slice_src_offsets{
       slice_src_offset_0, slice_src_offset_1, slice_src_offset_2,
       slice_src_offset_3};
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> slice_dst_offsets{
+  std::vector<AddressComputationThunk::Offset> slice_dst_offsets{
       slice_dst_offset_0, slice_dst_offset_1, slice_dst_offset_2,
       slice_dst_offset_3};
   AddressComputationThunk thunk(
@@ -1610,8 +1609,8 @@ TEST(AddressComputationThunkTest, SlicedOperandsSameBufferGemm) {
       slice_out_fake, slice_workspace_fake, /*deterministic=*/true));
 
   // Wrapping address computation thunk around the GEMM thunk.
-  std::vector<std::variant<int64_t, BufferAllocation::Slice>> lhs_offsets{
-      slice_lhs_offset_0, slice_lhs_offset_1};
+  std::vector<AddressComputationThunk::Offset> lhs_offsets{slice_lhs_offset_0,
+                                                           slice_lhs_offset_1};
   AddressComputationThunk thunk(
       Thunk::ThunkInfo(), std::make_unique<ThunkSequence>(std::move(seq)),
       {slice_lhs, slice_rhs, slice_out, slice_workspace},

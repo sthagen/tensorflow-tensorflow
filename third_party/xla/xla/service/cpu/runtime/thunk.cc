@@ -28,8 +28,12 @@ namespace xla::cpu {
 
 std::string_view Thunk::KindToString(Kind kind) {
   switch (kind) {
+    case Kind::kCall:
+      return "call";
     case Kind::kCopy:
       return "copy";
+    case Kind::kKernel:
+      return "kernel";
   }
 }
 

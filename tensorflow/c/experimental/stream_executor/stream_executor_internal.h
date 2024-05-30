@@ -24,7 +24,6 @@ limitations under the License.
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_interface.h"
-#include "xla/stream_executor/stream_interface.h"
 #include "tsl/platform/statusor.h"
 
 namespace stream_executor {
@@ -107,6 +106,7 @@ class CStream : public Stream {
         stream_handle_(nullptr) {}
   ~CStream() override {
     parent()->BlockHostUntilDone(this).IgnoreError();
+    parent()->DeallocateStream(this);
     Destroy();
   }
 

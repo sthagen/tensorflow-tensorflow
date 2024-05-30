@@ -89,6 +89,24 @@ xla_test(
     ],
 )
 
+xla_cc_test(
+    name = "async_kernel_launch_test",
+    srcs = ["async_kernel_launch_test.cc"],
+    # "requires-net:external" tag allows uploading `xprof` results.
+    tags = ["requires-net:external"] + tf_cuda_tests_tags(),
+    deps = [
+        "//xla:debug_options_flags",
+        "//xla:literal",
+        "//xla:literal_util",
+        "//xla/service:gpu_plugin",
+        "//xla/service:hlo_module_config",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:literal_test_util",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
 xla_test(
     name = "float_conversions_test",
     srcs = ["float_conversions_test.cc"],
@@ -449,6 +467,7 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_v100",
+        "gpu_amd_any",
     ],
     deps = [
         ":gpu_codegen_test",
@@ -529,6 +548,7 @@ xla_test(
     srcs = ["gpu_kernel_tiling_test.cc"],
     backends = [
         "gpu_p100",
+        "gpu_amd_any",
     ] + if_oss(["gpu_any"]),
     deps = [
         ":gpu_codegen_test",
@@ -912,6 +932,7 @@ xla_test(
     srcs = ["tensor_float_32_global_var_test.cc"],
     backends = [
         "gpu_a100",
+        "gpu_amd_any",
     ] + if_oss(["gpu_any"]),
     deps = [
         "//xla:error_spec",
@@ -928,6 +949,7 @@ xla_test(
         "gpu_a100",
         "gpu_h100",
     ],
+    tags = ["no_rocm"],
     deps = if_cuda_is_configured(
         [
             ":gpu_codegen_test",

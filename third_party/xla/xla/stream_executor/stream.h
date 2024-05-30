@@ -47,10 +47,6 @@ limitations under the License.
 
 namespace stream_executor {
 
-namespace internal {
-class StreamInterface;
-}  // namespace internal
-
 class DeviceMemoryBase;
 template <typename ElemT>
 class DeviceMemory;
@@ -68,7 +64,7 @@ class StreamExecutor;
 // !ok(), it will never be ok().
 //
 // Thread-safe post-initialization.
-class Stream : public StreamInterface {
+class Stream {
  public:
   // Platform specific handle to the underlying resources behind a stream
   // implementation (e.g. it gives access to CUstream for CUDA platform).
@@ -84,12 +80,12 @@ class Stream : public StreamInterface {
   // Deallocates any stream resources that the parent StreamExecutor has
   // bestowed
   // upon this object.
-  ~Stream();
+  virtual ~Stream() = default;
 
   // TODO(ezhulenev): Consider removing this platform-specific accessor and
   // forward all users to platform-specific headers, however it requires careful
   // build rules set up to avoid leaking even more implementation details.
-  PlatformSpecificHandle platform_specific_handle() const;
+  virtual PlatformSpecificHandle platform_specific_handle() const;
 
   // Returns whether any errors have occurred while entraining work for this
   // stream.
@@ -235,10 +231,6 @@ class Stream : public StreamInterface {
   // Otherwise returns an error describing why the blocking failed.
   absl::Status BlockHostUntilDone() TF_LOCKS_EXCLUDED(mu_);
 
-  // Returns the (opaque) platform-specific backing object. Ownership is not
-  // transferred to the caller.
-  StreamInterface *implementation() { return this; }
-
   // Entrains onto the stream a callback to the host (from the device).
   // Behaves as DoHostCallbackWithStatus below, but the callback should
   // never fail or its failure is inconsequential.
@@ -271,6 +263,11 @@ class Stream : public StreamInterface {
 
   RocmComputeCapability GetRocmComputeCapability() const {
     return parent()->GetDeviceDescription().rocm_compute_capability();
+  }
+
+  // Gets priority for a stream.
+  virtual std::variant<StreamPriority, int> priority() const {
+    return StreamPriority::Default;
   }
 
  private:

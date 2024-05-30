@@ -60,7 +60,7 @@ RBE_FLAGS=""
 TARGET_FILTERS=""
 
 if is_linux_gpu_job ; then
-    TAGS_FILTER="$TAGS_FILTER,requires-gpu-nvidia"
+    TAGS_FILTER="$TAGS_FILTER,requires-gpu-nvidia,-requires-gpu-amd"
 
     # We are currently running XLA presubmits on machines with NVIDIA T4 GPUs,
     # which have a compute compatibility of 7.5. Se we filter out all the tests
@@ -72,14 +72,16 @@ if is_linux_gpu_job ; then
     RBE_FLAGS="--config=rbe_linux_cuda_nvcc --jobs=150"
     (
       #TODO(b/338885148): Remove this block after TF was updated to cuDNN 9
-      sed -i 's/@sigbuild-r2\.17-clang_/@sigbuild-r2.17-clang-cudnn9_/g' ./github/xla/.bazelrc
+      pushd github/xla
+      sed -i 's/@sigbuild-r2\.17-clang_/@sigbuild-r2.17-clang-cudnn9_/g' .bazelrc
       echo "The following changes were made:"
       git diff -- .bazelrc || true
+      popd
     )
     echo "***NOTE: nvidia-smi lists the highest CUDA version the driver supports, which may be different than the version of CUDA actually used!!***"
     nvidia-smi
 else
-    TAGS_FILTER="$TAGS_FILTER,-gpu,-requires-gpu-nvidia"
+    TAGS_FILTER="$TAGS_FILTER,-gpu,-requires-gpu-nvidia,-requires-gpu-amd"
     ADDITIONAL_FLAGS="$ADDITIONAL_FLAGS --config=nonccl"
     TARGET_FILTERS="$TARGET_FILTERS -//xla/service/gpu/..."
 

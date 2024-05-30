@@ -47,11 +47,9 @@ Stream::Stream(StreamExecutor *parent)
   CHECK_NE(parent, nullptr);
 }
 
-Stream::~Stream() { parent_->DeallocateStream(this); }
-
 Stream::PlatformSpecificHandle Stream::platform_specific_handle() const {
   PlatformSpecificHandle handle;
-  handle.stream = platform_specific_stream();
+  handle.stream = nullptr;
   return handle;
 }
 

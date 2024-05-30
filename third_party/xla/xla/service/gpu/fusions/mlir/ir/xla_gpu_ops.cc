@@ -99,8 +99,14 @@ struct XlaGpuInlinerInterface : public mlir::DialectInlinerInterface {
     if (!region) {
       return false;
     }
-    const int kMaxOperationsToInline = 8;
-    return region->front().getOperations().size() <= kMaxOperationsToInline;
+
+    constexpr int kMaxOperationsToInline = 8;
+    int num_ops = 0;
+    region->front().walk([&](mlir::Operation* op) { ++num_ops; });
+
+    // Don't inline functions that are called more than once and contain more
+    // than one call themselves.
+    return num_ops <= kMaxOperationsToInline;
   }
   // Returns true if the given operation 'op', that is registered to this
   // dialect, can be inlined into the given region, false otherwise.
@@ -357,7 +363,7 @@ struct SimplifyIndexingMap : public mlir::OpRewritePattern<ApplyIndexingOp> {
 
     // Remove unused symbols.
     auto unused_symbols_bit_vector = indexing_map.RemoveUnusedVars();
-    bool symbols_removed = !unused_symbols_bit_vector.empty();
+    bool symbols_removed = unused_symbols_bit_vector.count() != 0;
 
     if (!is_simplified && !symbols_removed) {
       return rewriter.notifyMatchFailure(indexing_op,

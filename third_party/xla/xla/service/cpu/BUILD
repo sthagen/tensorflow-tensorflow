@@ -63,7 +63,16 @@ filegroup(
 test_suite(
     name = "thunk_runtime_tests",
     tests = [
+        "//xla/tests:array_elementwise_ops_test_cpu",
+        "//xla/tests:axpy_simple_test_cpu",
+        "//xla/tests:convert_test_cpu",
         "//xla/tests:copy_test_cpu",
+        "//xla/tests:floor_ceil_test_cpu",
+        "//xla/tests:numerics_test_cpu",
+        "//xla/tests:reshape_test_cpu",
+        "//xla/tests:reverse_test_cpu",
+        "//xla/tests:unary_op_test_cpu",
+        "//xla/tests/exhaustive:exhaustive_binary_16_bit_test_cpu",
     ],
 )
 
@@ -246,6 +255,7 @@ cc_library(
         ":executable_proto_cc",
         ":ir_emission_utils",
         ":ir_emitter",
+        ":ir_emitter2",
         ":onednn_matmul_rewriter",
         ":onednn_ops_rewriter",
         ":parallel_task_assignment",
@@ -598,6 +608,7 @@ cc_library(
         "//xla/service/cpu/runtime:thunk",
         "//xla/stream_executor",
         "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor/host:host_kernel_c_api",
         "//xla/stream_executor/host:host_stream",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:dynamic_annotations",
@@ -639,60 +650,28 @@ cc_library(
 )
 
 cc_library(
-    name = "host_kernel_emitter",
-    srcs = ["host_kernel_emitter.cc"],
-    hdrs = ["host_kernel_emitter.h"],
-    deps = [
-        "//xla:shape_util",
-        "//xla/service/llvm_ir:ir_array",
-        "//xla/service/llvm_ir:llvm_util",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Core",
-        "@llvm-project//llvm:Support",
-        "@local_tsl//tsl/platform:logging",
-    ],
-)
-
-xla_cc_test(
-    name = "host_kernel_emitter_test",
-    srcs = ["host_kernel_emitter_test.cc"],
-    deps = [
-        ":host_kernel_emitter",
-        "//xla:shape_util",
-        "//xla:xla_data_proto_cc",
-        "//xla/service/llvm_ir:llvm_util",
-        "//xla/tests:filecheck",
-        "@llvm-project//llvm:Core",
-        "@llvm-project//llvm:OrcJIT",
-        "@llvm-project//llvm:Support",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
-)
-
-cc_library(
     name = "ir_emitter2",
     srcs = ["ir_emitter2.cc"],
     hdrs = ["ir_emitter2.h"],
     deps = [
         ":elemental_math_emitter",
-        ":host_kernel_emitter",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/service:elemental_ir_emitter",
+        "//xla/service/llvm_ir:fused_ir_emitter",
         "//xla/service/llvm_ir:ir_array",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/service/llvm_ir:loop_emitter",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -700,11 +679,11 @@ xla_cc_test(
     name = "ir_emitter2_test",
     srcs = ["ir_emitter2_test.cc"],
     deps = [
-        ":host_kernel_emitter",
         ":ir_emitter2",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_module_config",
         "//xla/service:hlo_parser",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/tests:filecheck",
@@ -845,14 +824,20 @@ cc_library(
     srcs = ["thunk_emitter.cc"],
     hdrs = ["thunk_emitter.h"],
     deps = [
+        ":ir_emitter2",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
+        "//xla/service/cpu/runtime:call_thunk",
         "//xla/service/cpu/runtime:copy_thunk",
+        "//xla/service/cpu/runtime:kernel_thunk",
         "//xla/service/cpu/runtime:thunk",
+        "//xla/stream_executor:launch_dim",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
     ],
