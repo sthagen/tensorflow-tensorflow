@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/service/cpu/runtime/kernel_thunk.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -31,17 +32,21 @@ limitations under the License.
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
+#include "tsl/profiler/lib/traceme.h"
 
 namespace xla::cpu {
 
-KernelThunk::KernelThunk(absl::Span<const BufferAllocation::Slice> buffers,
+KernelThunk::KernelThunk(Info info,
+                         absl::Span<const BufferAllocation::Slice> buffers,
                          std::string kernel_name, se::ThreadDim thread_dim)
-    : Thunk(Kind::kKernel),
+    : Thunk(Kind::kKernel, std::move(info)),
       buffers_(buffers.begin(), buffers.end()),
       kernel_name_(std::move(kernel_name)),
       thread_dim_(thread_dim) {}
 
 absl::Status KernelThunk::Execute(const ExecuteParams& params) {
+  tsl::profiler::TraceMe trace([&] { return TraceMeEncode(); });
+
   VLOG(3) << absl::StreamFormat(
       "Launch host kernel %s with %d buffer arguments: %s", kernel_name_,
       buffers_.size(), thread_dim_.ToString());
@@ -49,10 +54,12 @@ absl::Status KernelThunk::Execute(const ExecuteParams& params) {
   absl::InlinedVector<se::DeviceMemoryBase, 8> buffers_data;
   buffers_data.reserve(buffers_.size());
 
+  int64_t arg_num = 0;
   for (BufferAllocation::Slice& buffer : buffers_) {
     TF_ASSIGN_OR_RETURN(buffers_data.emplace_back(),
                         params.buffer_allocations->GetDeviceAddress(buffer));
-    VLOG(3) << absl::StreamFormat(" - arg: %s (%p)", buffer.ToString(),
+    VLOG(3) << absl::StreamFormat("  arg #%d: %s (%p)", arg_num++,
+                                  buffer.ToString(),
                                   buffers_data.back().opaque());
   }
 

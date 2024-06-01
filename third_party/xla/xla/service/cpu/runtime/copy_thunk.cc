@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/inlined_vector.h"
@@ -31,14 +32,15 @@ limitations under the License.
 #include "xla/stream_executor/device_memory.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
+#include "tsl/profiler/lib/traceme.h"
 
 namespace xla::cpu {
 
-CopyThunk::CopyThunk(BufferAllocation::Slice source_buffer,
+CopyThunk::CopyThunk(Info info, BufferAllocation::Slice source_buffer,
                      const Shape& source_shape,
                      BufferAllocation::Slice destination_buffer,
                      const Shape& destination_shape)
-    : Thunk(Kind::kCopy),
+    : Thunk(Kind::kCopy, std::move(info)),
       source_buffer_(source_buffer),
       source_shape_(source_shape),
       destination_buffer_(destination_buffer),
@@ -49,10 +51,6 @@ CopyThunk::CopyThunk(BufferAllocation::Slice source_buffer,
       << " must be compatble with destination shape "
       << destination_shape_.ToString(true);
 
-  // TODO(ezhulenev): This is almost certainly wrong for many types of copies
-  // that change layout, however it works in a few tests. This implementation
-  // is copied from `xla/pjrt/cpu/abstract_tfrt_cpu_buffer.cc`. It seems to
-  // work only if destination is a row-major layout.
   if (source_shape_ != destination_shape_) {
     TransposePlan::Options options;
     options.elem_size_in_bytes =
@@ -72,6 +70,8 @@ CopyThunk::CopyThunk(BufferAllocation::Slice source_buffer,
 }
 
 absl::Status CopyThunk::Execute(const ExecuteParams& params) {
+  tsl::profiler::TraceMe trace([&] { return TraceMeEncode(); });
+
   TF_ASSIGN_OR_RETURN(
       se::DeviceMemoryBase source_data,
       params.buffer_allocations->GetDeviceAddress(source_buffer_));
@@ -83,10 +83,10 @@ absl::Status CopyThunk::Execute(const ExecuteParams& params) {
   VLOG(3) << absl::StreamFormat("Copy buffer: use_transpose=%s",
                                 transpose_plan_ ? "true" : "false");
   VLOG(3) << absl::StreamFormat(
-      " - src: %s in slice %s (%p)", source_shape_.ToString(true),
+      "  src: %s in slice %s (%p)", source_shape_.ToString(true),
       source_buffer_.ToString(), source_data.opaque());
   VLOG(3) << absl::StreamFormat(
-      " - dst: %s in slice %s (%p)", destination_shape_.ToString(true),
+      "  dst: %s in slice %s (%p)", destination_shape_.ToString(true),
       destination_buffer_.ToString(), destination_data.opaque());
 
   // TODO(ezhulenev): Add benchmarks for copy thunk and add support for
