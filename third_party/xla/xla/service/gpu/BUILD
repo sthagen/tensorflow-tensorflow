@@ -3529,6 +3529,7 @@ cc_library(
         ":prepare_hlo_for_ir_emitting_pipeline",
         ":rename_fusions",
         ":stream_executor_util",
+        "//xla/service:all_reduce_splitter",
         "//xla/service/gpu/runtime:thunk",
         "//xla/stream_executor:platform_manager",
         "@com_google_absl//absl/status",
@@ -4467,6 +4468,7 @@ cc_library(
         ":hlo_traversal",
         ":ir_emission_utils",
         ":reduction_utils",
+        "//xla:permutation_util",
         "//xla:shape_util",
         "//xla:util",
         "//xla/hlo/ir:hlo",
@@ -5532,7 +5534,6 @@ xla_test(
         "gpu_amd_any",
     ],
     tags = [
-        "no_oss",  # Needs fix for `ConvertGenerator`
         "nomac",
     ],
     deps = [
