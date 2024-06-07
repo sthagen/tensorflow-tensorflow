@@ -1162,6 +1162,7 @@ cc_library(
         "//xla:literal",
         "//xla:literal_util",
         "//xla:shape_util",
+        "//xla:status",
         "//xla:status_macros",
         "//xla:statusor",
         "//xla:types",
@@ -1366,7 +1367,6 @@ xla_cc_test(
         ":gemm_fusion",
         ":triton_fusion_analysis",
         "//xla:autotuning_proto_cc",
-        "//xla:statusor",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -2514,7 +2514,6 @@ xla_cc_test(
     deps = [
         ":softmax_rewriter_triton",
         "//xla:shape_util",
-        "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/service:instruction_fusion",
         "//xla/service:pattern_matcher",
