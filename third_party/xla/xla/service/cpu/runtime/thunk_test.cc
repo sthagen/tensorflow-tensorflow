@@ -1,4 +1,4 @@
-/* Copyright 2018 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,14 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/stream_executor/rocm/rocm_platform_id.h"
+#include "xla/service/cpu/runtime/thunk.h"
 
-#include "xla/stream_executor/platform.h"
+#include "tsl/platform/test.h"
 
-namespace stream_executor {
-namespace rocm {
+namespace xla::cpu {
+namespace {
 
-PLATFORM_DEFINE_ID(kROCmPlatformId);
+TEST(ThunkTest, CompletionEvent) {
+  auto event = Thunk::ReadyCompletionEvent();
+  ASSERT_TRUE(event.IsAvailable());
+  ASSERT_EQ(event->num_tasks, 1);
+}
 
-}  // namespace rocm
-}  // namespace stream_executor
+}  // namespace
+}  // namespace xla::cpu
