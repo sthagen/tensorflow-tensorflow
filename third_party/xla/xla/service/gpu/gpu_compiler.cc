@@ -297,10 +297,9 @@ absl::StatusOr<AutotuneConfig> GetAutotuneConfig(
     return AutotuneConfig{DeviceConfig{stream_exec, options.device_allocator},
                           debug_options};
   }
-  AutotuneConfig deviceless_config =
-      AutotuneConfig{DevicelessConfig{gpu_target_config.device_description_str},
-                     debug_options};
-  return deviceless_config;
+  return AutotuneConfig{
+      DevicelessConfig{gpu_target_config.device_description_str},
+      debug_options};
 }
 
 se::GpuComputeCapability GetGpuVersion(const se::StreamExecutor* stream_exec) {
@@ -394,16 +393,17 @@ GpuThunkAotCompilationResult::LoadExecutable(
   mlir::DialectRegistry registry;
   auto mlir_context = std::make_unique<mlir::MLIRContext>(registry);
   llvm::LLVMContext llvm_context;
-  auto llvm_module = std::make_unique<llvm::Module>("", llvm_context);
   auto* gpu_compiler = dynamic_cast<GpuCompiler*>(compiler);
   if (gpu_compiler == nullptr) {
     return Internal("Compiler is not a GpuCompiler.");
   }
+  auto llvm_module = std::make_unique<llvm::Module>("", llvm_context);
   llvm_module->setTargetTriple(gpu_compiler->target_triple());
   llvm_module->setDataLayout(gpu_compiler->data_layout());
   IrEmitterContext ir_emitter_context(
       hlo_module.get(), buffer_assignment.get(), &execution_stream_assignment,
       platform_name, gpu_device_info, mlir_context.get(), llvm_module.get(),
+      /*llvm_module_constants=*/nullptr,
       /*emit_kernels=*/false);
   auto ir_emitter = IrEmitterUnnested::Create(&ir_emitter_context);
   TF_RETURN_IF_ERROR(
@@ -1437,8 +1437,9 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // f32).
   add_float_normalization(pipeline);
 
-  TF_RETURN_IF_ERROR(AddGemmFusionAutotuningPasses(
-      &pipeline, hlo_module, autotune_config, thread_pool));
+  TF_RETURN_IF_ERROR(AddGemmFusionAutotuningPasses(&pipeline, hlo_module,
+                                                   autotune_config, thread_pool,
+                                                   options.key_value_store));
   // Inline back the calls which have better performance with cuBLAS.
   pipeline.AddPass<CallInliner>();
   // TODO(tdanyluk): Apply CublasPadForGemms to the cuBLAS GEMMs generated
@@ -1770,7 +1771,7 @@ GpuCompiler::CompileSingleModule(const HloModuleConfig& module_config,
 
 absl::StatusOr<GpuCompiler::BackendCompileResult>
 GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
-                                   llvm::Module* llvm_module,
+                                   CompileModuleResults& compile_module_results,
                                    se::GpuComputeCapability gpu_version,
                                    se::StreamExecutor* stream_exec,
                                    const CompileOptions& options,
@@ -1784,6 +1785,7 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
                 /*default_thread_pool=*/options.thread_pool,
                 /*default_parallelism=*/1)
           : MaybeOwningThreadPool(nullptr);
+  llvm::Module* llvm_module = &*compile_module_results.llvm_module;
 
   // Test whether LinkModules is supported.
   TF_ASSIGN_OR_RETURN(bool can_use_link_modules,
@@ -1837,7 +1839,11 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
   // We'll change the linkage type of these variables from external to internal
   // to ensure constant-folding works properly after calling llvm::SplitModule.
   llvm::DenseMap<llvm::StringRef, llvm::Constant*> const_initializer_map;
-  for (llvm::GlobalVariable& gv : llvm_module->globals()) {
+  llvm::Module& module_with_constants =
+      (compile_module_results.llvm_module_constants == nullptr)
+          ? *llvm_module
+          : *compile_module_results.llvm_module_constants;
+  for (llvm::GlobalVariable& gv : module_with_constants.globals()) {
     if (gv.hasName() && gv.isConstant() && gv.hasInitializer() &&
         gv.hasExternalLinkage()) {
       llvm::Constant* initializer = gv.getInitializer();
@@ -1855,6 +1861,10 @@ GpuCompiler::CompileToTargetBinary(const HloModuleConfig& module_config,
     }
   }
 
+  if (compile_module_results.llvm_module_constants != nullptr) {
+    llvm_modules.push_back(
+        std::move(compile_module_results.llvm_module_constants));
+  }
   llvm::SplitModule(
       *llvm_module,
       std::max<unsigned>(
@@ -1941,16 +1951,26 @@ GpuCompiler::CompileToBackendResult(
 
   if (user_pre_optimization_hook_) {
     user_pre_optimization_hook_(*compile_module_results.llvm_module);
+    if (compile_module_results.llvm_module_constants != nullptr) {
+      user_pre_optimization_hook_(
+          *compile_module_results.llvm_module_constants);
+    }
   }
 
   llvm_ir::DumpIrIfEnabled(*module, *compile_module_results.llvm_module,
                            /*optimized=*/false);
 
+  if (compile_module_results.llvm_module_constants != nullptr) {
+    llvm_ir::DumpIrIfEnabled(*module,
+                             *compile_module_results.llvm_module_constants,
+                             /*optimized=*/false, "constants");
+  }
+
   TF_ASSIGN_OR_RETURN(
       BackendCompileResult backend_result,
-      CompileToTargetBinary(
-          module->config(), compile_module_results.llvm_module.get(),
-          gpu_device_info.gpu_compute_capability(), executor, options, module));
+      CompileToTargetBinary(module->config(), compile_module_results,
+                            gpu_device_info.gpu_compute_capability(), executor,
+                            options, module));
   RecordXlaDeviceBinarySize(backend_result.binary.size());
   if (DumpingEnabledForHloModule(*module)) {
     DumpToFileInDirOrStdout(*module, "", "thunk_sequence.txt",

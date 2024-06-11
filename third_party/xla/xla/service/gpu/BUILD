@@ -495,7 +495,11 @@ cc_library(
 
 cc_library(
     name = "ir_emitter_triton",
-    srcs = if_gpu_is_configured(["ir_emitter_triton.cc"]) + if_cuda_is_configured(["ir_emitter_triton_cuda.cc"]) + if_rocm_is_configured([
+    srcs = if_gpu_is_configured([
+        "ir_emitter_triton.cc",
+    ]) + if_cuda_is_configured([
+        "ir_emitter_triton_cuda.cc",
+    ]) + if_rocm_is_configured([
         "ir_emitter_triton_rocm.cc",
     ]),
     hdrs = if_gpu_is_configured(["ir_emitter_triton.h"]),
@@ -506,6 +510,7 @@ cc_library(
         ":matmul_utils",
         ":target_util",
         ":triton_fusion_analysis",
+        ":triton_sparse_extensions",
         ":triton_tiling_propagation",
         "//xla:autotuning_proto_cc",
         "//xla:comparison_util",
@@ -597,6 +602,23 @@ cc_library(
     ]) + if_rocm_is_configured([
         "@local_tsl//tsl/platform:rocm_rocdl_path",
     ]),
+)
+
+cc_library(
+    name = "triton_sparse_extensions",
+    srcs = ["triton_sparse_extensions.cc"],
+    hdrs = ["triton_sparse_extensions.h"],
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Rewrite",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
+        "@llvm-project//mlir:Transforms",
+        "@triton//:TritonDialects",
+        "@triton//:TritonGPUTransforms",
+    ],
 )
 
 xla_test(
@@ -773,6 +795,7 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",
+        "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/service:algorithm_util",
         "//xla/service:dump",
         "//xla/service:executable",
@@ -823,6 +846,7 @@ xla_test(
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/service:executable",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_pass_pipeline",
@@ -3724,12 +3748,12 @@ cc_library(
         ":cudnn_fused_conv_rewriter",
         ":cudnn_fused_mha_rewriter",
         ":cudnn_fused_mha_transpose_fusion",
-        ":cudnn_workspace_rewriter",
         ":cudnn_fusion_compiler",
         ":cudnn_norm_rewriter",
         ":cudnn_pad_for_convolutions",
         ":cudnn_simplify_padding",
         ":cudnn_vectorize_convolutions",
+        ":cudnn_workspace_rewriter",
         ":cusolver_rewriter",
         ":dot_sparsity_rewriter",
         ":gemm_algorithm_picker",
@@ -3748,20 +3772,20 @@ cc_library(
         ":target_constants",
         ":triangular_solve_rewriter",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
-        "@local_config_cuda//cuda:cuda_headers",
-        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+        "@local_config_cuda//cuda:cuda_headers",
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//llvm:IRReader",
         "@llvm-project//llvm:Support",
@@ -3772,6 +3796,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/service:call_inliner",
         "//xla/service:convert_mover",
         "//xla/service:dot_dimension_merger",
@@ -3783,8 +3808,8 @@ cc_library(
         "//xla/service:hlo_dataflow_analysis",
         "//xla/service:hlo_dce",
         "//xla/service:hlo_module_config",
-        "//xla/service:hlo_pass",
         "//xla/service:hlo_pass_pipeline",
+        "//xla/service:hlo_pass",
         "//xla/service:hlo_proto_cc",
         "//xla/service:hlo_verifier",
         "//xla/service:layout_normalization",
@@ -3794,17 +3819,18 @@ cc_library(
         "//xla/service:tuple_simplifier",
         "//xla/service/gpu/llvm_gpu_backend",
         "//xla/service/llvm_ir:llvm_util",
+        "//xla/stream_executor:dnn",
         "//xla/stream_executor",
         "//xla/stream_executor/cuda:cuda_asm_compiler",
         "//xla/stream_executor/cuda:cuda_diagnostics",
         "//xla/stream_executor/cuda:cuda_platform_id",
-        "//xla/stream_executor/cuda:ptx_compiler",
         "//xla/stream_executor/cuda:ptx_compiler_support",
+        "//xla/stream_executor/cuda:ptx_compiler",
         "//xla/stream_executor/gpu:asm_compiler",
         "//xla/stream_executor/gpu:gpu_asm_opts",
         "//xla/stream_executor/gpu:gpu_driver_header",
         "//xla/stream_executor/gpu:gpu_executor_header",
-        "//xla/stream_executor:dnn",
+        "//xla/tsl/util:env_var",
         "@local_tsl//tsl/platform:cuda_libdevice_path",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
@@ -3814,7 +3840,6 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "@local_tsl//tsl/profiler/lib:traceme",
-        "//xla/tsl/util:env_var",
     ]),
 )
 
@@ -5866,6 +5891,34 @@ xla_cc_test(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+cc_library(
+    name = "collective_permute_valid_iteration_annotator",
+    srcs = ["collective_permute_valid_iteration_annotator.cc"],
+    hdrs = ["collective_permute_valid_iteration_annotator.h"],
+    deps = [
+        "//xla:literal_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:collective_ops_utils",
+        "//xla/service:hlo_pass",
+        "//xla/service:pattern_matcher",
+        "//xla/service:while_loop_analysis",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_permute_valid_iteration_annotator_test",
+    srcs = ["collective_permute_valid_iteration_annotator_test.cc"],
+    deps = [
+        ":collective_permute_valid_iteration_annotator",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:collective_ops_utils",
+        "//xla/service:hlo_pass_pipeline",
+        "//xla/service:while_loop_trip_count_annotator",
+        "//xla/tests:hlo_test_base",
         "@local_tsl//tsl/platform:test_main",
     ],
 )

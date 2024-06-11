@@ -48,14 +48,17 @@ _DEFAULT_BAZEL_OPTIONS = dict(
 
 _DEFAULT_DOCKER_OPTIONS = dict(
     rm=True,
-    workdir="/github/xla/",
     interactive=True,
     detach=True,
     tty=True,
     volume="./github:/github",
 )
 
-_DEFAULT_TARGET_PATTERNS = ("//xla/...", "//build_tools/...", "@local_tsl//tsl/...")
+_XLA_DEFAULT_TARGET_PATTERNS = (
+    "//xla/...",
+    "//build_tools/...",
+    "@local_tsl//tsl/...",
+)
 
 
 def sh(args, check=True, **kwargs):
@@ -85,9 +88,6 @@ class DockerImage:
   """Class representing a docker image."""
 
   image_url: str
-  name: str = "xla_ci"
-  options: Dict[str, Any] = dataclasses.field(default_factory=dict)
-  command: Tuple[str, ...] = ("bash",)
 
   def _pull_docker_image_with_retries(self, retries=3) -> None:
     """Pulls docker image with retries to avoid transient rate limit errors."""
@@ -99,13 +99,23 @@ class DockerImage:
     # write SHA of image to the sponge config
     _write_to_sponge_config("TF_INFO_DOCKER_IMAGE", self.image_url)
 
-    pull_proc = sh(["docker", "pull", self.image_url])
+    _ = sh(["docker", "pull", self.image_url])
     # TODO(ddunleavy): get sha
     # _write_to_sponge_config("TF_INFO_DOCKER_SHA", sha)
 
   @contextlib.contextmanager
-  def pull_and_run(self):
+  def pull_and_run(
+      self,
+      name: str = "xla_ci",
+      command: Tuple[str, ...] = ("bash",),
+      **kwargs: Any,
+  ):
     """Context manager for the container that yields `docker exec` lambda.
+
+    Args:
+      name: The name of the docker container.
+      command: Command given to `docker run`, e.g. `bash`
+      **kwargs: Extra options passed to `docker run`.
 
     Yields:
       A function that accepts a command as a list of args, and runs those on the
@@ -120,20 +130,20 @@ class DockerImage:
     """
     try:
       self._pull_docker_image_with_retries()
-      options = _dict_to_cli_options(self.options)
+      options = _dict_to_cli_options(kwargs)
       sh([
           "docker",
           "run",
           "--name",
-          self.name,
+          name,
           *options,
           self.image_url,
-          *self.command,
+          *command,
       ])
-      docker_exec = lambda args: sh(["docker", "exec", self.name, *args])
+      docker_exec = lambda args: sh(["docker", "exec", name, *args])
       yield docker_exec
     finally:
-      sh(["docker", "stop", self.name])
+      sh(["docker", "stop", name])
 
 
 @dataclasses.dataclass(frozen=True, **_KW_ONLY_IF_PYTHON310)
@@ -143,9 +153,10 @@ class Build:
   type_: BuildType
   repo: str
   docker_image: DockerImage
+  target_patterns: Tuple[str, ...]
   configs: Tuple[str, ...] = ()
-  target_patterns: Tuple[str, ...] = _DEFAULT_TARGET_PATTERNS
   tag_filters: Tuple[str, ...] = ()
+  action_env: Dict[str, Any] = dataclasses.field(default_factory=dict)
   options: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
   def bazel_test_command(self) -> List[str]:
@@ -153,7 +164,10 @@ class Build:
     configs = [f"--config={config}" for config in self.configs]
     build_tag_filters = f"--build_tag_filters={','.join(self.tag_filters)}"
     test_tag_filters = f"--test_tag_filters={','.join(self.tag_filters)}"
-    all_options = [build_tag_filters, test_tag_filters] + configs + options
+    action_env = [f"--action_env={k}={v}" for k, v in self.action_env.items()]
+    all_options = (
+        [build_tag_filters, test_tag_filters] + configs + action_env + options
+    )
     return ["bazel", "test", *all_options, "--", *self.target_patterns]
 
 
@@ -172,17 +186,15 @@ def _tag_filters_for_compute_capability(
 
 _DEFAULT_IMAGE = DockerImage(
     image_url="gcr.io/tensorflow-sigs/build:latest-python3.11",
-    options=_DEFAULT_DOCKER_OPTIONS,
 )
 
+# TODO(b/338885148): Remove this once the TF containers have cuDNN 9
 _CUDNN_9_IMAGE = DockerImage(
     image_url="gcr.io/tensorflow-sigs/build@sha256:dddcaf30321e9007103dce75c51b83fea3c06de462fcf41e7c6ae93f37fc3545",
-    options=_DEFAULT_DOCKER_OPTIONS,
 )
 
 _ARM64_JAX_MULTI_PYTHON_IMAGE = DockerImage(
     image_url="us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/build-arm64:jax-latest-multi-python",
-    options=_DEFAULT_DOCKER_OPTIONS,
 )
 
 
@@ -192,23 +204,24 @@ def nvidia_gpu_build_with_compute_capability(
   extra_gpu_tags = _tag_filters_for_compute_capability(compute_capability)
   return Build(
       type_=type_,
-      repo="xla",
+      repo="openxla/xla",
       docker_image=_CUDNN_9_IMAGE,
+      target_patterns=_XLA_DEFAULT_TARGET_PATTERNS,
       configs=("warnings", "rbe_linux_cuda_nvcc"),
       tag_filters=("-no_oss", "requires-gpu-nvidia") + extra_gpu_tags,
+      action_env={"TF_CUDA_COMPUTE_CAPABILITIES": compute_capability / 10},
       options=dict(
           run_under="//tools/ci_build/gpu_build:parallel_gpu_execute",
           **_DEFAULT_BAZEL_OPTIONS,
       ),
-      # TODO(b/338885148): Remove this once the TF containers have cuDNN 9
   )
 
 _CPU_X86_BUILD = Build(
     type_=BuildType.CPU_X86,
-    repo="xla",
+    repo="openxla/xla",
     docker_image=_DEFAULT_IMAGE,
     configs=("warnings", "nonccl", "rbe_linux_cpu"),
-    target_patterns=_DEFAULT_TARGET_PATTERNS + ("-//xla/service/gpu/...",),
+    target_patterns=_XLA_DEFAULT_TARGET_PATTERNS + ("-//xla/service/gpu/...",),
     tag_filters=(
         "-no_oss",
         "-gpu",
@@ -219,10 +232,10 @@ _CPU_X86_BUILD = Build(
 )
 _CPU_ARM64_BUILD = Build(
     type_=BuildType.CPU_ARM64,
-    repo="xla",
+    repo="openxla/xla",
     docker_image=_ARM64_JAX_MULTI_PYTHON_IMAGE,
     configs=("warnings", "rbe_cross_compile_linux_arm64_xla", "nonccl"),
-    target_patterns=_DEFAULT_TARGET_PATTERNS + ("-//xla/service/gpu/...",),
+    target_patterns=_XLA_DEFAULT_TARGET_PATTERNS + ("-//xla/service/gpu/...",),
     tag_filters=(
         "-no_oss",
         "-gpu",
@@ -235,6 +248,9 @@ _CPU_ARM64_BUILD = Build(
 _GPU_BUILD = nvidia_gpu_build_with_compute_capability(
     type_=BuildType.GPU, compute_capability=75
 )
+
+# NOTE(ddunleavy): compute_cability=80 should really be 89, but I want to catch
+# anything marked as `requires_sm80_only`.
 _GPU_CONTINUOUS_BUILD = nvidia_gpu_build_with_compute_capability(
     type_=BuildType.GPU_CONTINUOUS, compute_capability=80
 )
@@ -268,7 +284,10 @@ def main():
         ],
     )
 
-  with build.docker_image.pull_and_run() as docker_exec:
+  _, repo_name = build.repo.split("/")
+  with build.docker_image.pull_and_run(
+      workdir=f"/github/{repo_name}", **_DEFAULT_DOCKER_OPTIONS
+  ) as docker_exec:
     docker_exec(build.bazel_test_command())
     docker_exec(["bazel", "analyze-profile", "profile.json.gz"])
 
