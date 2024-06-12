@@ -680,21 +680,29 @@ cc_library(
     hdrs = ["triton_test_utils.h"],
     deps = [
         ":gpu_device_info_for_tests",
+        ":gpu_float_support",
         ":hlo_fusion_analysis",
         ":ir_emission_utils",
         ":ir_emitter_triton",
         ":matmul_utils",
         ":triton_fusion_analysis",
+        "//testing/base/public:gunit_for_library_testonly",
+        "//xla:shape_util",
         "//xla:status_macros",
         "//xla/hlo/ir:hlo",
+        "//xla/service:float_normalization",
+        "//xla/service:hlo_pass_pipeline",
         "//xla/service/gpu/fusions:triton",
         "//xla/service/gpu/tests:gpu_codegen_test",
         "//xla/stream_executor:device_description",
         "//xla/tests:filecheck",
         "//xla/tests:verified_hlo_module",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -1263,13 +1271,40 @@ xla_test(
         "gpu_a100",
         "gpu_amd_any",
     ],
-    shard_count = 10,
+    deps = [
+        ":gpu_device_info_for_tests",
+        ":ir_emitter_triton",
+        ":matmul_utils",
+        ":triton_fusion_analysis",
+        ":triton_support",
+        ":triton_test_utils",
+        "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
+        "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_test(
+    name = "triton_support_legacy_test",
+    srcs = if_gpu_is_configured(["triton_support_legacy_test.cc"]),
+    backends = [
+        "gpu_a100",
+        "gpu_amd_any",
+    ],
     tags = ["nomac"],
     deps = [
         ":gpu_device_info_for_tests",
-        ":gpu_float_support",
         ":ir_emitter_triton",
-        ":matmul_utils",
         ":triton_fusion_analysis",
         ":triton_support",
         ":triton_test_utils",
@@ -1279,16 +1314,11 @@ xla_test(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",
-        "//xla/service:float_normalization",
-        "//xla/service:hlo_pass_pipeline",
         "//xla/stream_executor:device_description",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
-        "@llvm-project//llvm:ir_headers",
-        "@llvm-project//mlir:IR",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
@@ -3193,6 +3223,7 @@ cc_library(
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -4660,7 +4691,9 @@ xla_test(
         "gpu_a100",
         "gpu_amd_any",
     ] + if_oss(["gpu_any"]),
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
+        "TENSORFLOW_USE_ROCM=1",
+    ]),
     shard_count = 10,
     deps = [
         ":backend_configs_cc",
@@ -4697,6 +4730,8 @@ xla_test(
     ] + if_cuda_is_configured([
         "@local_config_cuda//cuda:cuda_headers",
         "@local_config_cuda//cuda:cudnn_header",
+    ]) + if_rocm_is_configured([
+        "@local_config_rocm//rocm:rocm_headers",
     ]),
 )
 
@@ -5660,8 +5695,10 @@ cc_library(
     srcs = ["kernel_reuse_cache.cc"],
     hdrs = ["kernel_reuse_cache.h"],
     deps = [
+        ":executable_proto_cc",
         ":kernel_arguments",
         ":launch_dimensions",
+        "//xla:status_macros",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:launch_dim",
@@ -5670,6 +5707,17 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:logging",
+    ],
+)
+
+xla_cc_test(
+    name = "kernel_reuse_cache_test",
+    srcs = ["kernel_reuse_cache_test.cc"],
+    deps = [
+        ":kernel_reuse_cache",
+        "//xla/tests:xla_internal_test_main",
+        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:test",
     ],
 )
 
