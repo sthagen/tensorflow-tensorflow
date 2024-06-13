@@ -39,6 +39,8 @@ limitations under the License.
 #include "xla/service/cpu/runtime/rng_state_thunk.h"
 #include "xla/service/cpu/runtime/thunk.h"
 #include "xla/service/cpu/runtime/while_thunk.h"
+#include "xla/service/cpu/target_machine_features.h"
+#include "xla/service/hlo_module_config.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/stream_executor/launch_dim.h"
@@ -49,9 +51,14 @@ limitations under the License.
 
 namespace xla::cpu {
 
-ThunkEmitter::ThunkEmitter(IrEmitter2* ir_emitter,
-                           const BufferAssignment* buffer_assignment)
-    : ir_emitter_(ir_emitter), buffer_assignment_(buffer_assignment) {}
+ThunkEmitter::ThunkEmitter(IrEmitter2& ir_emitter,
+                           const BufferAssignment& buffer_assignment,
+                           const TargetMachineFeatures& target_machine_features,
+                           const HloModuleConfig& hlo_module_config)
+    : ir_emitter_(ir_emitter),
+      buffer_assignment_(buffer_assignment),
+      target_machine_features_(target_machine_features),
+      hlo_module_config_(hlo_module_config) {}
 
 static Thunk::Info ThunkInfo(const HloInstruction* instruction) {
   const HloModule* module = instruction->GetModule();
@@ -69,7 +76,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitEntryComputation(
 
 absl::StatusOr<BufferAllocation::Slice> ThunkEmitter::GetAllocationSlice(
     const HloInstruction* instruction, const ShapeIndex& index) {
-  return buffer_assignment_->GetUniqueSlice(instruction, index);
+  return buffer_assignment_.GetUniqueSlice(instruction, index);
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloComputation(
@@ -244,7 +251,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCopyThunk(
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitElementalKernelThunk(
     const HloInstruction* instruction) {
   TF_ASSIGN_OR_RETURN(auto kernel,
-                      ir_emitter_->EmitElementalHostKernel(instruction));
+                      ir_emitter_.EmitElementalHostKernel(instruction));
   TF_ASSIGN_OR_RETURN(auto buffers, GetHostKernelAllocationSlices(instruction));
 
   return ThunkSequence::Of<KernelThunk>(ThunkInfo(instruction),
@@ -255,7 +262,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitElementalKernelThunk(
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusionKernelThunk(
     const HloInstruction* instruction) {
   auto* fusion = Cast<HloFusionInstruction>(instruction);
-  TF_ASSIGN_OR_RETURN(auto kernel, ir_emitter_->EmitFusionHostKernel(fusion));
+  TF_ASSIGN_OR_RETURN(auto kernel, ir_emitter_.EmitFusionHostKernel(fusion));
   TF_ASSIGN_OR_RETURN(auto buffers, GetHostKernelAllocationSlices(instruction));
 
   return ThunkSequence::Of<KernelThunk>(ThunkInfo(instruction),
@@ -266,7 +273,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusionKernelThunk(
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitReductionKernelThunk(
     const HloInstruction* instruction) {
   TF_ASSIGN_OR_RETURN(auto kernel,
-                      ir_emitter_->EmitReductionHostKernel(instruction));
+                      ir_emitter_.EmitReductionHostKernel(instruction));
   TF_ASSIGN_OR_RETURN(auto buffers, GetHostKernelAllocationSlices(instruction));
 
   return ThunkSequence::Of<KernelThunk>(ThunkInfo(instruction),

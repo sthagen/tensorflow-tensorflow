@@ -25,6 +25,8 @@ limitations under the License.
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/cpu/ir_emitter2.h"
 #include "xla/service/cpu/runtime/thunk.h"
+#include "xla/service/cpu/target_machine_features.h"
+#include "xla/service/hlo_module_config.h"
 #include "xla/shape_util.h"
 
 namespace xla::cpu {
@@ -38,8 +40,10 @@ namespace xla::cpu {
 // multiple LLVM modules compiled to object files).
 class ThunkEmitter {
  public:
-  ThunkEmitter(IrEmitter2* ir_emitter,
-               const BufferAssignment* buffer_assignment);
+  ThunkEmitter(IrEmitter2& ir_emitter,
+               const BufferAssignment& buffer_assignment,
+               const TargetMachineFeatures& target_machine_features,
+               const HloModuleConfig& hlo_module_config);
 
   // Emits HLO module entry computation as a sequence of thunks.
   absl::StatusOr<ThunkSequence> EmitEntryComputation(const HloModule& module);
@@ -102,8 +106,11 @@ class ThunkEmitter {
   absl::StatusOr<HostKernelAllocationSlices> GetHostKernelAllocationSlices(
       const HloInstruction* instruction);
 
-  IrEmitter2* ir_emitter_;
-  const BufferAssignment* buffer_assignment_;
+  IrEmitter2& ir_emitter_;
+  const BufferAssignment& buffer_assignment_;
+
+  const TargetMachineFeatures& target_machine_features_;
+  const HloModuleConfig& hlo_module_config_;
 };
 
 }  // namespace xla::cpu
