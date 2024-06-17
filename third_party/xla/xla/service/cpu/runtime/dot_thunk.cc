@@ -15,9 +15,7 @@ limitations under the License.
 
 #include "xla/service/cpu/runtime/dot_thunk.h"
 
-#define EIGEN_USE_THREADS
-
-#include <array>
+#include <atomic>
 #include <complex>
 #include <cstdint>
 #include <functional>
@@ -32,8 +30,6 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
-#include "Eigen/Core"  // from @eigen_archive
-#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "xla/layout_util.h"
 #include "xla/primitive_util.h"
 #include "xla/service/buffer_assignment.h"
@@ -42,6 +38,7 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
+#include "xla/types.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/logging.h"
@@ -82,6 +79,24 @@ struct MatMulDims {
   bool rhs_canonical;
 };
 
+// Keep track of pending matrix multiplications and an event that signals
+// completion of Dot operation to the caller.
+struct ExecuteState {
+  explicit ExecuteState(int64_t batch_size)
+      : pending_matmuls(batch_size),
+        event(tsl::MakeConstructedAsyncValueRef<Thunk::ExecuteEvent>()) {}
+
+  void Notify() {
+    if (pending_matmuls.load(std::memory_order_relaxed) == 1 ||
+        pending_matmuls.fetch_sub(1, std::memory_order_relaxed) == 1) {
+      event.SetStateConcrete();
+    }
+  }
+
+  std::atomic<int64_t> pending_matmuls;
+  tsl::AsyncValueRef<Thunk::ExecuteEvent> event;
+};
+
 }  // namespace
 
 static MatMulDims GetMatMulDims(
@@ -109,37 +124,6 @@ static MatMulDims GetMatMulDims(
       /*lhs_canonical=*/lhs_shape.rank() <= 1 || lhs_contracting_dims[0] == 1,
       /*rhs_column_major=*/is_column_major(rhs_shape),
       /*rhs_canonical=*/rhs_contracting_dims[0] == 0};
-}
-
-// Col-major x Col-major MatMul implementation as Eigen contraction.
-template <typename T>
-static void MatMul(T* out, T* lhs, T* rhs, int64_t m, int64_t n, int64_t k,
-                   int32_t transpose_lhs, int32_t transpose_rhs) {
-  int64_t lhs_rows = m;
-  int64_t lhs_cols = k;
-  if (transpose_lhs) std::swap(lhs_rows, lhs_cols);
-
-  int64_t rhs_rows = k;
-  int64_t rhs_cols = n;
-  if (transpose_rhs) std::swap(rhs_rows, rhs_cols);
-
-  const Eigen::TensorMap<Eigen::Tensor<const T, 2>> a(lhs, lhs_rows, lhs_cols);
-  const Eigen::TensorMap<Eigen::Tensor<const T, 2>> b(rhs, rhs_rows, rhs_cols);
-  Eigen::TensorMap<Eigen::Tensor<T, 2>> c(out, m, n);
-
-  typedef typename Eigen::Tensor<T, 2>::DimensionPair DimPair;
-  int lhs_contract_dim = transpose_lhs ? 0 : 1;
-  int rhs_contract_dim = transpose_rhs ? 1 : 0;
-  std::array<DimPair, 1> dims({DimPair(lhs_contract_dim, rhs_contract_dim)});
-
-  c = a.contract(b, dims);
-}
-
-template <typename T>
-static void TypedMatMul(void* out, void* lhs, void* rhs, int64_t m, int64_t n,
-                        int64_t k, bool transpose_lhs, bool transpose_rhs) {
-  MatMul<T>(static_cast<T*>(out), static_cast<T*>(lhs), static_cast<T*>(rhs), m,
-            n, k, transpose_lhs, transpose_rhs);
 }
 
 absl::StatusOr<std::unique_ptr<DotThunk>> DotThunk::Create(
@@ -171,15 +155,25 @@ absl::StatusOr<std::unique_ptr<DotThunk>> DotThunk::Create(
         absl::StrJoin(dot_dimensions.rhs_batch_dimensions(), ","));
   }
 
-  Shape lhs_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, lhs_shape);
-  Shape rhs_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, rhs_shape);
-  Shape out_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, out_shape);
-
   int64_t num_batch_dims = batch_dims.size();
   int64_t batch_size =
       std::accumulate(out_shape.dimensions().begin(),
                       out_shape.dimensions().begin() + num_batch_dims, 1LL,
                       std::multiplies<int64_t>());
+
+  Shape lhs_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, lhs_shape);
+  Shape rhs_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, rhs_shape);
+  Shape out_matmul_shape = ShapeUtil::DeleteDimensions(batch_dims, out_shape);
+
+  // Check that matmul shapes are rank 2 or less and can be represented as
+  // Eigen 2D contraction.
+  if (lhs_matmul_shape.rank() > 2 || rhs_matmul_shape.rank() > 2 ||
+      out_matmul_shape.rank() > 2) {
+    return InvalidArgument(
+        "MatMul shape must be rank 2 or less: lhs=%s, rhs=%s, out=%s",
+        lhs_matmul_shape.ToString(true), rhs_matmul_shape.ToString(true),
+        out_matmul_shape.ToString(true));
+  }
 
   return absl::WrapUnique(new DotThunk(
       info, std::move(dot_dimensions), lhs_buffer, std::move(lhs_shape),
@@ -268,6 +262,10 @@ tsl::AsyncValueRef<DotThunk::ExecuteEvent> DotThunk::Execute(
       matmul_dims.lhs_canonical, matmul_dims.rhs_column_major,
       matmul_dims.rhs_canonical);
 
+  if (params.intra_op_threadpool == nullptr) {
+    return InvalidArgument("Intra-op threadpool must be provided for DotThunk");
+  }
+
   // Eigen expects column-major layout. If the matrices are row major, then use
   // the following identity to compute the product:
   //
@@ -304,63 +302,44 @@ tsl::AsyncValueRef<DotThunk::ExecuteEvent> DotThunk::Execute(
     return static_cast<uint8_t*>(ptr) + stride * index;
   };
 
+  auto state = std::make_shared<ExecuteState>(batch_size_);
+
+  auto dispatch = [&](auto type_tag) {
+    for (int64_t i = 0; i < batch_size_; ++i) {
+      TypedMatMul<decltype(type_tag)>(
+          params.intra_op_threadpool, batch_ptr(out, out_stride, i),
+          batch_ptr(lhs, lhs_stride, i), batch_ptr(rhs, rhs_stride, i),
+          matmul_dims.m, matmul_dims.n, matmul_dims.k, transpose_lhs,
+          transpose_rhs, [state] { state->Notify(); });
+    }
+  };
+
   switch (element_type) {
     case F16:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<Eigen::half>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(half{});
       break;
     case F32:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<float>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(float{});
       break;
     case F64:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<double>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(double{});
       break;
     case S32:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<int32_t>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(int32_t{});
       break;
     case C64:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<std::complex<float>>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(std::complex<float>{});
       break;
     case C128:
-      for (int64_t i = 0; i < batch_size_; ++i) {
-        TypedMatMul<std::complex<double>>(
-            batch_ptr(out, out_stride, i), batch_ptr(lhs, lhs_stride, i),
-            batch_ptr(rhs, rhs_stride, i), matmul_dims.m, matmul_dims.n,
-            matmul_dims.k, transpose_lhs, transpose_rhs);
-      }
+      dispatch(std::complex<double>{});
       break;
     default:
       return Unimplemented(
-          "Unsupported type for DotThunk::Execute: %s",
+          "Unsupported element type for DotThunk::Execute: %s",
           primitive_util::LowercasePrimitiveTypeName(element_type));
   }
 
-  // TODO(ezhulenev): Execute matmul using Eigen::ThreadPoolDevice.
-  return OkExecuteEvent();
+  return state->event;
 }
 
 }  // namespace xla::cpu
