@@ -61,10 +61,12 @@ namespace xla::cpu {
 class Thunk {
  public:
   enum class Kind {
+    kAllReduce,
     kCall,
     kCopy,
     kConditional,
     kDot,
+    kFft,
     kInfeed,
     kKernel,
     kOutfeed,

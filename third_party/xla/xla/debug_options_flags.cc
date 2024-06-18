@@ -218,7 +218,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_filter_kernels_spilling_registers_on_autotuning(true);
   opts.set_xla_gpu_llvm_verification_level(0);
   opts.set_xla_gpu_target_config_filename("");
-  opts.set_xla_gpu_enable_cub_radix_sort(false);
+  opts.set_xla_gpu_enable_cub_radix_sort(true);
   opts.set_xla_gpu_enable_cudnn_layer_norm(false);
   opts.set_xla_gpu_threshold_for_windowed_einsum_mib(100000);
 
@@ -238,7 +238,11 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_nccl_collective_max_nchannels(0);
   opts.set_xla_gpu_nccl_p2p_max_nchannels(0);
 
+#if GOOGLE_CUDA
+  opts.set_xla_gpu_mlir_emitter_level(1);
+#else
   opts.set_xla_gpu_mlir_emitter_level(0);
+#endif
   opts.set_xla_gpu_max_mlir_kernels(0);
   opts.set_xla_gpu_skip_mlir_kernels(0);
 
@@ -1756,14 +1760,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_shard_autotuning(),
       "Shard autotuning between participating compiler processes (typically in "
       "multi-host setups) and join the results when it's done."));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_kernel_cache_file",
-      string_setter_for(&DebugOptions::set_xla_gpu_kernel_cache_file),
-      debug_options->xla_gpu_kernel_cache_file(),
-      "Path to a file to cache compiled kernels. If the file doesn't exist "
-      "write the compilation cache of the first compiled HLO module into it."
-      "Once the file exists, further compilations will read it to reuse "
-      "the kernels, but not write it. This behavior may change later."));
+  flag_list->push_back(
+      tsl::Flag("xla_gpu_kernel_cache_file",
+                string_setter_for(&DebugOptions::set_xla_gpu_kernel_cache_file),
+                debug_options->xla_gpu_kernel_cache_file(),
+                "Path to a file to cache compiled kernels. Cached kernels get "
+                "reused in further compilations; not yet cached kernels are "
+                "compiled as usual and get appended to the cache file whenever "
+                "possible."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more

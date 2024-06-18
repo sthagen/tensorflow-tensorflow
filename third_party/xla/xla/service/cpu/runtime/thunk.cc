@@ -32,6 +32,8 @@ namespace xla::cpu {
 
 std::string_view Thunk::KindToString(Kind kind) {
   switch (kind) {
+    case Kind::kAllReduce:
+      return "all-reduce";
     case Kind::kCall:
       return "call";
     case Kind::kCopy:
@@ -40,6 +42,8 @@ std::string_view Thunk::KindToString(Kind kind) {
       return "conditional";
     case Kind::kDot:
       return "dot";
+    case Kind::kFft:
+      return "fft";
     case Kind::kInfeed:
       return "infeed";
     case Kind::kRngGetAndUpdateState:

@@ -34,10 +34,12 @@ limitations under the License.
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/cpu/dot_op_emitter.h"
 #include "xla/service/cpu/ir_emitter2.h"
+#include "xla/service/cpu/runtime/all_reduce_thunk.h"
 #include "xla/service/cpu/runtime/call_thunk.h"
 #include "xla/service/cpu/runtime/conditional_thunk.h"
 #include "xla/service/cpu/runtime/copy_thunk.h"
 #include "xla/service/cpu/runtime/dot_thunk.h"
+#include "xla/service/cpu/runtime/fft_thunk.h"
 #include "xla/service/cpu/runtime/infeed_thunk.h"
 #include "xla/service/cpu/runtime/kernel_thunk.h"
 #include "xla/service/cpu/runtime/outfeed_thunk.h"
@@ -49,7 +51,6 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
-#include "xla/stream_executor/launch_dim.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
@@ -195,6 +196,13 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
     case HloOpcode::kXor:
       return EmitElementalKernelThunk(instruction);
 
+    case HloOpcode::kAllReduce:
+      return EmitAllReduceThunk(instruction);
+
+    // TODO(ezhulenev): Port pad optimizations from IrEmitter.
+    case HloOpcode::kPad:
+      return EmitElementalKernelThunk(instruction);
+
     // TODO(ezhulenev): Implement slice operations as separate Thunks because
     // it's much easier to get peak performance from hand written code.
     case HloOpcode::kSlice:
@@ -228,11 +236,33 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
     case HloOpcode::kDot:
       return EmitDotThunk(instruction);
 
+    case HloOpcode::kFft:
+      return EmitFftThunk(instruction);
+
     default:
       return absl::UnimplementedError(
           absl::StrCat("HLO opcode `", HloOpcodeString(instruction->opcode()),
                        "` is not supported by XLA:CPU ThunkEmitter"));
   }
+}
+
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitAllReduceThunk(
+    const HloInstruction* instruction) {
+  std::vector<BufferAllocation::Slice> source_buffers;
+  std::vector<Shape> source_shapes;
+
+  for (const HloInstruction* operand : instruction->operands()) {
+    TF_ASSIGN_OR_RETURN(source_buffers.emplace_back(),
+                        GetAllocationSlice(operand));
+    source_shapes.push_back(operand->shape());
+  }
+
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice destination_buffer,
+                      GetAllocationSlice(instruction));
+
+  return ThunkSequence::Of<AllReduceThunk>(
+      ThunkInfo(instruction), source_buffers, source_shapes, destination_buffer,
+      instruction->shape());
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCallThunk(
@@ -424,6 +454,27 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitDotThunk(
           rhs->shape(), out_slice, instruction->shape());
     }
   }
+}
+
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFftThunk(
+    const HloInstruction* instruction) {
+  TF_RETURN_IF_ERROR(ElementTypesSameAndSupported(
+      /*instruction=*/*instruction, /*operands=*/{instruction->operands()},
+      /*supported_types=*/{F32, F64, C64, C128}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice arg_slice,
+                      GetAllocationSlice(instruction->operand(0)));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice dest_slice,
+                      GetAllocationSlice(instruction));
+  return ThunkSequence::Of<FftThunk>(
+      /*info=*/ThunkInfo(instruction),
+      /*is_multi_thread_eigen=*/
+      hlo_module_config_.debug_options().xla_cpu_multi_thread_eigen(),
+      /*fft_type=*/instruction->fft_type(),
+      /*fft_length=*/instruction->fft_length(),
+      /*input_buffer=*/arg_slice,
+      /*input_shape=*/instruction->operand(0)->shape(),
+      /*output_buffer=*/dest_slice,
+      /*output_shape=*/instruction->shape());
 }
 
 absl::StatusOr<ThunkEmitter::HostKernelAllocationSlices>

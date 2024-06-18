@@ -1425,7 +1425,7 @@ ENTRY entry {
 
   auto backend_config_or =
       triton_dot_fusion->backend_config<GpuBackendConfig>();
-  ASSERT_OK(backend_config_or);
+  TF_ASSERT_OK(backend_config_or);
   GpuBackendConfig& backend_config = *backend_config_or;
 
   FusionBackendConfig& fusion_backend_config =
@@ -1439,7 +1439,7 @@ ENTRY entry {
   config.set_num_warps(8);
   config.set_num_stages(4);
 
-  ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
+  TF_ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
 
   BlockLevelParameters block_level_parameters;
   block_level_parameters.num_ctas = 1;
@@ -1457,7 +1457,7 @@ ENTRY entry {
   config.set_block_n(128);
   config.set_block_k(128);
   block_level_parameters.num_stages = 1;
-  ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
+  TF_ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
 
   TF_ASSERT_OK_AND_ASSIGN(
       const auto result,
@@ -1972,7 +1972,7 @@ ENTRY entry {
 
   auto backend_config_or =
       triton_dot_fusion->backend_config<GpuBackendConfig>();
-  ASSERT_OK(backend_config_or);
+  TF_ASSERT_OK(backend_config_or);
   GpuBackendConfig& backend_config = *backend_config_or;
 
   FusionBackendConfig& fusion_backend_config =
@@ -1986,7 +1986,7 @@ ENTRY entry {
   config.set_num_ctas(1);
   config.set_num_stages(1);
   config.set_num_warps(2);
-  ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
+  TF_ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
 
   BlockLevelParameters block_level_parameters;
   block_level_parameters.num_ctas = 1;
@@ -2003,7 +2003,7 @@ ENTRY entry {
   config.set_block_m(32);
   config.set_block_n(32);
   config.set_block_k(32);
-  ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
+  TF_ASSERT_OK(triton_dot_fusion->set_backend_config(backend_config));
 
   TF_CHECK_OK(TritonWrapper("test_fn", triton_dot_fusion, CudaAmpereOrRocm(),
                             dev_info, block_level_parameters, &llvm_module,
@@ -4118,18 +4118,12 @@ triton_gemm_dot.7103_computation.clone {
   ROOT bitcast.7925.clone = f16[8,1,8,4,128]{4,3,2,1,0} bitcast(dot.1)
 }
 
-fused_computation {
-  param_0.2 = f32[] parameter(0)
-  param_1 = f32[] parameter(1)
-  add.2 = f32[] add(param_0.2, param_1)
-  convert.13 = f16[] convert(add.2)
-  ROOT convert.12 = f32[] convert(convert.13)
-}
-
 triton_gemm_dot.7103.reduce_sub_computation.clone {
   lhs.1 = f32[] parameter(0)
   rhs.1 = f32[] parameter(1)
-  ROOT fusion = f32[] fusion(lhs.1, rhs.1), kind=kLoop, calls=fused_computation
+  add.2 = f32[] add(lhs.1, rhs.1)
+  convert.13 = f16[] convert(add.2)
+  ROOT convert.12 = f32[] convert(convert.13)
 }
 
 fused_computation.1 {
@@ -4202,18 +4196,12 @@ triton_gemm_dot.7103_computation.clone {
   ROOT bitcast.7925.clone = f16[16,1,8,4,128]{4,3,2,1,0} bitcast(dot.1)
 }
 
-fused_computation {
-  param_0.2 = f32[] parameter(0)
-  param_1 = f32[] parameter(1)
-  add.2 = f32[] add(param_0.2, param_1)
-  convert.13 = f16[] convert(add.2)
-  ROOT convert.12 = f32[] convert(convert.13)
-}
-
 triton_gemm_dot.7103.reduce_sub_computation.clone {
   lhs.1 = f32[] parameter(0)
   rhs.1 = f32[] parameter(1)
-  ROOT fusion = f32[] fusion(lhs.1, rhs.1), kind=kLoop, calls=fused_computation
+  add.2 = f32[] add(lhs.1, rhs.1)
+  convert.13 = f16[] convert(add.2)
+  ROOT convert.12 = f32[] convert(convert.13)
 }
 
 fused_computation.1 {
