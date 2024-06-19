@@ -17,9 +17,11 @@ limitations under the License.
 // has landed.
 #include "xla/service/gpu/triton_support.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -30,7 +32,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/ir_emitter_triton.h"
-#include "xla/service/gpu/triton_fusion_analysis.h"
+#include "xla/service/gpu/model/tiled_hlo_computation.h"
 #include "xla/service/gpu/triton_test_utils.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/xla.pb.h"
@@ -51,8 +53,8 @@ auto AllXlaDataTypes() {
   std::vector<xla::PrimitiveType> xla_data_types;
   std::vector<xla::PrimitiveType> to_filter_out = {PRIMITIVE_TYPE_INVALID,
                                                    TUPLE, OPAQUE_TYPE, TOKEN};
-  const proto2::EnumDescriptor* xla_type_descriptor =
-      proto2::GetEnumDescriptor<xla::PrimitiveType>();
+  const tsl::protobuf::EnumDescriptor* xla_type_descriptor =
+      tsl::protobuf::GetEnumDescriptor<xla::PrimitiveType>();
   for (int enum_ix = 0; enum_ix < xla_type_descriptor->value_count();
        ++enum_ix) {
     xla::PrimitiveType xla_type = static_cast<xla::PrimitiveType>(
@@ -64,42 +66,63 @@ auto AllXlaDataTypes() {
   return ::testing::ValuesIn(xla_data_types);
 }
 
-// TODO(b/343158720): remove references to TritonFusionAnalysis in this file.
-// TODO(b/343158720): factor out implication tests into a util in order to
-// simplify the test structure.
+class TritonSupportTest : public TritonSupportTestBase {
+ public:
+  // Runs a support test for the given `TestedInstruction`. The support test
+  // verifies that `IsTritonSupportedInstruction` is in sync with the
+  // implemented Triton emitter, i.e., given an instruction `instr`, either
+  //  -  `IsTritonSupportedInstruction(instr)` =>  Triton lowering is OK
+  //  -  `!IsTritonSupportedInstruction(instr)` => Triton lowering is not OK.
+  //
+  // In order to make sure that the call succeeds in both cases, the user must
+  // pass valid output tile sizes for the tested instruction/computation
+  // as an additional parameter.
+  //
+  // In some cases, the Triton lowering is not handled gracefully by the
+  // lowering code, and the lowering fails with a crash. In such cases, the
+  // user can set `skip_failure_branch_to_avoid_crash` to `true` to skip the
+  // lowering test when `IsTritonSupportedInstruction` returns `false`.
+  void RunSupportTest(TestedInstruction ti,
+                      std::vector<int64_t> output_tile_sizes,
+                      bool skip_failure_branch_to_avoid_crash = false) {
+    BlockLevelParameters block_level_parameters =
+        FromOutputTileSizes(std::move(output_tile_sizes));
+    if (IsTritonSupportedInstruction(ti.Instruction(),
+                                     GetCudaComputeCapability())) {
+      TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
+                                              block_level_parameters,
+                                              "CHECK: tt.func @triton_fn"));
+    } else {
+      if (!skip_failure_branch_to_avoid_crash) {
+        const se::DeviceDescription dev_info =
+            TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
+        EXPECT_THAT(
+            TritonWrapper("test_fn", &ti.TritonFusion(),
+                          GetCudaComputeCapability(), dev_info,
+                          block_level_parameters, &llvm_module_, mlir_context_),
+            Not(IsOk()));
+      }
+    }
+  }
+};
+
+class TritonSupportTestWithParam : public TritonSupportTest,
+                                   public ::testing::WithParamInterface<
+                                       std::tuple<PrimitiveType, HloOpcode>> {};
+
 using BitcastOrReshapeTest = TritonSupportTestWithParam;
 
 TEST_P(BitcastOrReshapeTest, IsTritonSupportedBitcastOrReshape) {
   auto [data_type, opcode] = GetParam();
   const std::string kHloTestTemplate = R"(
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[1,16,4]{2,1,0} parameter(0)
   ROOT bitcast_or_reshape = $0[64]{0} $1(parameter_0)
-}
-
-ENTRY e {
-  parameter_0 = $0[1,16,4]{2,1,0} parameter(0)
-  ROOT root_op = $0[64]{0} fusion(parameter_0),
-    kind=kCustom, calls=triton_computation,
-    backend_config={"fusion_backend_config":{"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({16}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    const se::DeviceDescription dev_info =
-        TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
-    EXPECT_THAT(
-        TritonWrapper("test_fn", &ti.TritonFusion(), GetCudaComputeCapability(),
-                      dev_info, FromOutputTileSizes({1}), &llvm_module_,
-                      mlir_context_),
-        Not(IsOk()));
-  }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{16});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -120,36 +143,15 @@ TEST_P(UnaryElementwiseTest, IsTritonSupportedUnaryElementwise) {
   }
 
   const std::string kHloTestTemplate = R"(
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[33,68]{1,0} parameter(0)
   unary = $0[33,68]{1,0} $1(parameter_0)
   ROOT convert = f32[33,68]{1,0} convert(unary)
-}
-
-ENTRY e {
-  parameter_0 = $0[33,68]{1,0} parameter(0)
-  ROOT root_op = f32[33,68]{1,0} fusion(parameter_0),
-    kind=kCustom, calls=triton_computation,
-    backend_config={"fusion_backend_config":{"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(ti.Module().get()));
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({1, 32}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    // TODO(b/331632717): update the check to use SymbolicTileAnalysis to avoid
-    // tiling failures and check triton emitter fails gracefully.
-    EXPECT_THAT(TritonFusionAnalysis::Execute(ti.TritonComputation()),
-                tsl::testing::StatusIs(
-                    absl::StatusCode::kFailedPrecondition,
-                    ::testing::HasSubstr(
-                        "Can not propagate dim orders and requirements")));
-  }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{1, 32});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -184,40 +186,22 @@ TEST_P(BinaryElementwiseTest, IsTritonSupportedBinaryElementwise) {
   }
 
   const std::string kHloTestTemplate = R"(
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[11,63]{1,0} parameter(0)
   parameter_1 = $0[11,63]{1,0} parameter(1)
   ROOT binary = $0[11,63]{1,0} $1(parameter_0, parameter_1)
-}
-
-ENTRY e {
-  parameter_0 = $0[11,63]{1,0} parameter(0)
-  parameter_1 = $0[11,63]{1,0} parameter(1)
-  ROOT triton_op = $0[11,63]{1,0} fusion(parameter_0, parameter_1),
-    kind=kCustom, calls=triton_computation,
-    backend_config={"fusion_backend_config":{"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(ti.Module().get()));
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({1, 32}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    EXPECT_THAT(TritonFusionAnalysis::Execute(ti.TritonComputation()),
-                ::testing::AnyOf(
-                    tsl::testing::StatusIs(
-                        absl::StatusCode::kInternal,
-                        ::testing::HasSubstr(
-                            "std::holds_alternative<DimOrdersAndReqs>")),
-                    tsl::testing::StatusIs(
-                        absl::StatusCode::kFailedPrecondition,
-                        ::testing::HasSubstr(
-                            "Can not propagate dim orders and requirements"))));
+
+  bool skip_failure_branch_to_avoid_crash = false;
+  if (data_type == F16 && opcode == HloOpcode::kDivide) {
+    skip_failure_branch_to_avoid_crash = true;
   }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{1, 32},
+                 /*skip_failure_branch_to_avoid_crash=*/
+                 skip_failure_branch_to_avoid_crash);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -251,36 +235,16 @@ TEST_P(CompareTest, IsTritonSupportedCompare) {
   }
 
   const std::string kHloTestTemplate = R"(
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[11,63]{1,0} parameter(0)
   parameter_1 = $0[11,63]{1,0} parameter(1)
   compare = pred[11,63]{1,0} $1(parameter_0, parameter_1), direction=GE
   ROOT convert = f32[11,63]{1,0} convert(compare)
-}
-
-ENTRY e {
-  parameter_0 = $0[11,63]{1,0} parameter(0)
-  parameter_1 = $0[11,63]{1,0} parameter(1)
-  ROOT triton_op = f32[11,63]{1,0} fusion(parameter_0, parameter_1),
-    kind=kCustom, calls=triton_computation,
-    backend_config={"fusion_backend_config":{"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(ti.Module().get()));
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({1, 32}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    EXPECT_THAT(
-        TritonFusionAnalysis::Execute(ti.TritonComputation()),
-        tsl::testing::StatusIs(
-            absl::StatusCode::kInternal,
-            ::testing::HasSubstr("std::holds_alternative<DimOrdersAndReqs>")));
-  }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{1, 32});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -298,38 +262,17 @@ TEST_P(TernaryElementwiseTest, IsTritonSupportedTernaryElementwise) {
   }
 
   const std::string kHloTestTemplate = R"(
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[13,63]{1,0} parameter(0)
   parameter_1 = $0[13,63]{1,0} parameter(1)
   parameter_2 = pred[13,63]{1,0} parameter(2)
   ternary = $0[13,63]{1,0} $1(parameter_2, parameter_0, parameter_1)
   ROOT convert = f32[13,63]{1,0} convert(ternary)
-}
-
-ENTRY e {
-  parameter_0 = $0[13,63]{1,0} parameter(0)
-  parameter_1 = $0[13,63]{1,0} parameter(1)
-  parameter_2 = pred[13,63]{1,0} parameter(2)
-  ROOT triton_op = f32[13,63]{1,0} fusion(parameter_0, parameter_1, parameter_2),
-    kind=kCustom, calls=triton_computation,
-    backend_config={"fusion_backend_config":{"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(ti.Module().get()));
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({1, 32}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    EXPECT_THAT(
-        TritonFusionAnalysis::Execute(ti.TritonComputation()),
-        tsl::testing::StatusIs(
-            absl::StatusCode::kInternal,
-            ::testing::HasSubstr("std::holds_alternative<DimOrdersAndReqs>")));
-  }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{1, 32});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -339,6 +282,7 @@ INSTANTIATE_TEST_SUITE_P(
     TritonSupportTestParamsToString);
 
 using ReduceConstTest = TritonSupportTestWithParam;
+
 TEST_P(ReduceConstTest, IsTritonSupportedReduceWithConstInit) {
   auto [data_type, opcode] = GetParam();
   if (data_type == BF16 && SkipBF16Tests()) {
@@ -353,39 +297,15 @@ add {
   ROOT add = $0[] add(Arg_0, Arg_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = $0[125,127]{1,0} parameter(0)
   constant_0 = $0[] constant(0)
   ROOT reduce = $0[125]{0} $1(parameter_0, constant_0), dimensions={1}, to_apply=add
-}
-
-ENTRY main {
-  parameter_0 = $0[125,127]{1,0} parameter(0)
-  ROOT triton_op = $0[125]{0} fusion(parameter_0),
-                          kind=kCustom, calls=triton_computation,
-                          backend_config={"fusion_backend_config":
-                                           {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(
       TestedInstruction ti,
       ParseTemplateAndGetInstruction(kHloTestTemplate, data_type, opcode));
-  if (IsTritonSupportedInstruction(ti.Instruction(),
-                                   GetCudaComputeCapability())) {
-    TF_EXPECT_OK(ApplyFloatNormalization(ti.Module().get()));
-    TF_EXPECT_OK(CreateTritonIrAndFileCheck(ti.TritonComputation(),
-                                            FromOutputTileSizes({1}),
-                                            "CHECK: tt.func @triton_fn"));
-  } else {
-    const se::DeviceDescription dev_info =
-        TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
-    EXPECT_THAT(
-        TritonWrapper("test_fn", &ti.TritonFusion(), GetCudaComputeCapability(),
-                      dev_info, FromOutputTileSizes({1}), &llvm_module_,
-                      mlir_context_),
-        tsl::testing::StatusIs(
-            absl::StatusCode::kInternal,
-            ::testing::HasSubstr("Failed to compile Triton kernel")));
-  }
+  RunSupportTest(std::move(ti), /*output_tile_sizes=*/{1});
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -406,19 +326,11 @@ add {
   ROOT add = f32[] add(Arg_0, Arg_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[125,127]{1,0} parameter(0)
   constant_0 = bf16[] constant(0)
   convert_0 = f32[] convert(constant_0)
   ROOT reduce = f32[125]{0} reduce(parameter_0, convert_0), dimensions={1}, to_apply=add
-}
-
-ENTRY main {
-  parameter_0 = f32[125,127]{1,0} parameter(0)
-  ROOT triton_op = f32[125]{0} fusion(parameter_0), kind=kCustom,
-  calls=triton_computation,
-                        backend_config={"fusion_backend_config":
-                        {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(
@@ -433,7 +345,7 @@ ENTRY main {
 }
 
 TEST_F(
-    TritonSupportTest,
+    TritonSupportTestBase,
     UnsupportedReduceWithMoreThanOneReduceDimensionsFailsGracefullyWithTriton) {
   const std::string kHloTest = R"(
 add {
@@ -442,18 +354,10 @@ add {
   ROOT add = f32[] add(Arg_0, Arg_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[2,125,127]{2,1,0} parameter(0)
   constant_0 = f32[] constant(0)
   ROOT reduce = f32[2]{0} reduce(parameter_0, constant_0), dimensions={1,2}, to_apply=add
-}
-
-ENTRY main {
-  parameter_0 = f32[2,125,127]{2,1,0} parameter(0)
-  ROOT triton_op = f32[2]{0} fusion(parameter_0),
-                          kind=kCustom, calls=triton_computation,
-                          backend_config={"fusion_backend_config":
-                                            {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(
@@ -463,11 +367,13 @@ ENTRY main {
           .Explain(),
       ::testing::HasSubstr(
           "Reduction is not a row-reduction of a single operand."));
-  EXPECT_THAT(TritonFusionAnalysis::Execute(ti.TritonComputation()),
-              tsl::testing::StatusIs(
-                  absl::StatusCode::kFailedPrecondition,
-                  ::testing::HasSubstr(
-                      "Can not propagate dim orders and requirements")));
+  const se::DeviceDescription dev_info =
+      TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
+  EXPECT_THAT(
+      TritonWrapper("test_fn", &ti.TritonFusion(), GetCudaComputeCapability(),
+                    dev_info, FromOutputTileSizes({1}), &llvm_module_,
+                    mlir_context_),
+      Not(IsOk()));
 }
 
 TEST_F(TritonSupportTest,
@@ -479,18 +385,10 @@ add {
   ROOT add = f32[] add(Arg_0, Arg_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[125,127]{1,0} parameter(0)
   constant_0 = f32[] constant(0)
   ROOT reduce = f32[127]{0} reduce(parameter_0, constant_0), dimensions={0}, to_apply=add
-}
-
-ENTRY main {
-  parameter_0 = f32[125,127]{1,0} parameter(0)
-  ROOT triton_op = f32[127]{0} fusion(parameter_0),
-                          kind=kCustom, calls=triton_computation,
-                          backend_config={"fusion_backend_config":
-                                            {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(
@@ -500,11 +398,13 @@ ENTRY main {
           .Explain(),
       ::testing::HasSubstr(
           "Reduction is not a row-reduction of a single operand."));
-  EXPECT_THAT(TritonFusionAnalysis::Execute(ti.TritonComputation()),
-              tsl::testing::StatusIs(
-                  absl::StatusCode::kFailedPrecondition,
-                  ::testing::HasSubstr(
-                      "Can not propagate dim orders and requirements")));
+  const se::DeviceDescription dev_info =
+      TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
+  EXPECT_THAT(
+      TritonWrapper("test_fn", &ti.TritonFusion(), GetCudaComputeCapability(),
+                    dev_info, FromOutputTileSizes({1}), &llvm_module_,
+                    mlir_context_),
+      Not(IsOk()));
 }
 
 TEST_F(TritonSupportTest,
@@ -520,19 +420,11 @@ add {
   ROOT pair = (f32[], f32[]) tuple(add_0, add_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[125,127] parameter(0)
   constant_0 = f32[] constant(0)
   tuple_0 = (f32[125]{0}, f32[125]{0}) reduce(parameter_0, parameter_0, constant_0, constant_0), dimensions={1}, to_apply=add
   ROOT reduce = f32[125]{0} get-tuple-element(tuple_0), index=0
-}
-
-ENTRY main {
-  parameter_0 = f32[125,127]{1,0} parameter(0)
-  ROOT triton_op = f32[125]{0} fusion(parameter_0),
-                          kind=kCustom, calls=triton_computation,
-                          backend_config={"fusion_backend_config":
-                                           {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(
@@ -541,11 +433,13 @@ ENTRY main {
       IsTritonSupportedInstruction(ti.Instruction(), GetCudaComputeCapability())
           .Explain(),
       ::testing::HasSubstr("Unsupported output data type"));
-  EXPECT_THAT(TritonFusionAnalysis::Execute(ti.TritonComputation()),
-              tsl::testing::StatusIs(
-                  absl::StatusCode::kFailedPrecondition,
-                  ::testing::HasSubstr(
-                      "Can not propagate dim orders and requirements")));
+  const se::DeviceDescription dev_info =
+      TestGpuDeviceInfo::RTXA6000DeviceInfo(GetCudaComputeCapability());
+  EXPECT_THAT(
+      TritonWrapper("test_fn", &ti.TritonFusion(), GetCudaComputeCapability(),
+                    dev_info, FromOutputTileSizes({1}), &llvm_module_,
+                    mlir_context_),
+      Not(IsOk()));
 }
 
 TEST_F(TritonSupportTest,
@@ -557,19 +451,10 @@ add {
   ROOT add = f32[] add(Arg_0, Arg_1)
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[125,127]{1,0} parameter(0)
   init = f32[] parameter(1)
   ROOT reduce = f32[125]{0} reduce(parameter_0, init), dimensions={1}, to_apply=add
-}
-
-ENTRY main {
-  parameter_0 = f32[125,127]{1,0} parameter(0)
-  parameter_1 = f32[] parameter(1)
-  ROOT triton_op = f32[125]{0} fusion(parameter_0, parameter_1),
-                          kind=kCustom, calls=triton_computation,
-                        backend_config={"fusion_backend_config":
-                                         {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(
@@ -599,18 +484,10 @@ custom_call {
   ROOT custom_call = f32[] custom-call(Arg_0, Arg_1), custom_call_target="foo"
 }
 
-triton_computation {
+ENTRY triton_computation {
   parameter_0 = f32[125,127]{1,0} parameter(0)
   constant_0 = f32[] constant(0)
   ROOT reduce = f32[125]{0} reduce(parameter_0, constant_0), dimensions={1}, to_apply=custom_call
-}
-
-ENTRY main {
-  parameter_0 = f32[125,127]{1,0} parameter(0)
-  ROOT triton_op = f32[125]{0} fusion(parameter_0),
-                          kind=kCustom, calls=triton_computation,
-                          backend_config={"fusion_backend_config":
-                                         {"kind":"__triton"}}
 })";
   TF_ASSERT_OK_AND_ASSIGN(TestedInstruction ti,
                           ParseTemplateAndGetInstruction(

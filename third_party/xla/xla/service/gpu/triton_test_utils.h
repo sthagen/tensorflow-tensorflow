@@ -91,7 +91,7 @@ class TritonFilecheckTest : public TritonTest {
   }
 };
 
-class TritonSupportTest : public TritonFilecheckTest {
+class TritonSupportTestBase : public TritonFilecheckTest {
  protected:
   // An HLO module together with a reference to the instruction of interest
   // that's being tested. See ParseTemplateAndGetInstruction for more details.
@@ -114,7 +114,7 @@ class TritonSupportTest : public TritonFilecheckTest {
     const HloInstruction& Instruction() { return instruction_; }
 
    private:
-    friend TritonSupportTest;
+    friend TritonSupportTestBase;
 
     TestedInstruction(std::unique_ptr<HloModule> module,
                       const HloInstruction& instruction)
@@ -129,6 +129,13 @@ class TritonSupportTest : public TritonFilecheckTest {
   // The provided template must contain a computation called
   // `triton_computation`. If the template contains parameters $0 and $1, they
   // will be replaced with the data type and opcode respectively.
+  // If the template's entry computation does not have a root fusion
+  // instruction, a new entry computation will be created. The new computation
+  // will have a root fusion instruction that has the same parameters as the
+  // `triton_computation` and contains a fusion instruction that calls the
+  // `triton_computation` with the generic Triton emitter. Tests that need
+  // the `__triton_gemm` backend kind should provide their own ENTRY
+  // computation.
   absl::StatusOr<TestedInstruction> ParseTemplateAndGetInstruction(
       absl::string_view hlo_template, xla::PrimitiveType data_type,
       xla::HloOpcode opcode);
@@ -141,9 +148,10 @@ class TritonSupportTest : public TritonFilecheckTest {
   TritonGemmConfig config_{16, 32, 512, 1, 4, 8};
 };
 
-class TritonSupportTestWithParam : public TritonSupportTest,
-                                   public ::testing::WithParamInterface<
-                                       std::tuple<PrimitiveType, HloOpcode>> {};
+class TritonSupportTestBaseWithParam
+    : public TritonSupportTestBase,
+      public ::testing::WithParamInterface<
+          std::tuple<PrimitiveType, HloOpcode>> {};
 
 std::string TritonSupportTestParamsToString(
     const ::testing::TestParamInfo<std::tuple<PrimitiveType, HloOpcode>>& data);
