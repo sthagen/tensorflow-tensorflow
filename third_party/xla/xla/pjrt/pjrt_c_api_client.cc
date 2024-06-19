@@ -333,11 +333,6 @@ absl::StatusOr<PjRtDevice*> PjRtCApiClient::LookupDevice(
 }
 
 absl::StatusOr<PjRtDevice*> PjRtCApiClient::LookupAddressableDevice(
-    int local_hardware_id) const {
-  return LookupAddressableDevice(PjRtLocalDeviceId(local_hardware_id));
-}
-
-absl::StatusOr<PjRtDevice*> PjRtCApiClient::LookupAddressableDevice(
     PjRtLocalDeviceId local_device_id) const {
   PJRT_Client_LookupAddressableDevice_Args args;
   args.struct_size = PJRT_Client_LookupAddressableDevice_Args_STRUCT_SIZE;
@@ -1173,17 +1168,12 @@ PjRtCApiExecutable::GetHloModules() const {
       return xla::Internal("failed to convert to MHLO");
     // TODO(jieying): Tuple args should really come from GetCompileOptions (or
     // equivalent) once implemented.
-    TF_RETURN_IF_ERROR(mlir::ConvertMlirHloToHlo(module.get(), &hlo_proto,
-                                                 /*use_tuple_args=*/false,
-                                                 /*return_tuple=*/false));
-    xla::DebugOptions debug_options;
-    TF_ASSIGN_OR_RETURN(xla::HloModuleConfig module_config,
-                        xla::HloModule::CreateModuleConfigFromProto(
-                            hlo_proto.hlo_module(), debug_options));
+    mlir::MlirToHloConversionOptions options;
+    options.return_tuple = false;
+    TF_ASSIGN_OR_RETURN(std::unique_ptr<xla::HloModule> hlo_module,
+                        mlir::ConvertMlirHloToHloModule(module.get(), options));
+
     std::vector<std::shared_ptr<HloModule>> out;
-    TF_ASSIGN_OR_RETURN(
-        std::unique_ptr<HloModule> hlo_module,
-        HloModule::CreateFromProto(hlo_proto.hlo_module(), module_config));
     out.push_back(std::move(hlo_module));
     return out;
   }

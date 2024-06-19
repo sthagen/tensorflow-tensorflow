@@ -337,7 +337,7 @@ xla_cc_test(
 cc_library(
     name = "pjrt_common",
     hdrs = ["pjrt_common.h"],
-    visibility = [":friends"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         "@local_tsl//tsl/lib/gtl:int_type",
     ],
@@ -593,6 +593,7 @@ cc_library(
         "@llvm-project//mlir:ReconcileUnrealizedCasts",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
+        "@local_tsl//tsl/platform:statusor",
         "@stablehlo//:chlo_ops",
         "@stablehlo//:register",
         "@stablehlo//:stablehlo_ops",
