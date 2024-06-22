@@ -1,4 +1,4 @@
-/* Copyright 2019 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// This is the canonicalize pattern definition file.
+syntax = "proto3";
 
-include "mlir/IR/OpBase.td"
-include "mhlo/IR/hlo_ops.td"
-include "mhlo/IR/hlo_utils.td"
+package xla.ifrt;
 
-def UnaryToBinaryEinsumEq : NativeCodeCall<
-  "$_builder.getStringAttr(\",\" + $0.getValue().str())">;
-
-// Convert UnaryEinsumOp to EinsumOp with two operands with redundant first
-// operand.
-def UnaryEinsumToEinsum : Pat<
-  (MHLO_UnaryEinsumOp $operand, $equation),
-  (MHLO_EinsumOp (MHLO_ConstantOp (GetScalarOfType<1> $operand)),
-                $operand, (UnaryToBinaryEinsumEq $equation))>;
+// Proto equivalent of C++ `AttributeMap`.
+message AttributeMapProto {
+  message Value {
+    message Int64List {
+      repeated sfixed64 elements = 1;
+    }
+    oneof value {
+      bytes string_value = 1;
+      bool bool_value = 2;
+      sfixed64 int64_value = 3;
+      Int64List int64_list_value = 4;
+      float float_value = 5;
+    }
+  }
+  map<string, Value> attributes = 1;
+}

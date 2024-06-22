@@ -33,6 +33,7 @@ limitations under the License.
 #include "flatbuffers/flatbuffer_builder.h"  // from @flatbuffers
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"  // from @llvm-project
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/Diagnostics.h"  // from @llvm-project
@@ -46,6 +47,7 @@ limitations under the License.
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/compiler/mlir/lite/common/tfl_pass_config.h"
 #include "tensorflow/compiler/mlir/lite/debug/debug.h"
+#include "tensorflow/compiler/mlir/lite/experimental/remat/metadata_util.h"
 #include "tensorflow/compiler/mlir/lite/flatbuffer_export.h"
 #include "tensorflow/compiler/mlir/lite/metrics/error_collector.h"
 #include "tensorflow/compiler/mlir/lite/metrics/error_collector_inst.h"
@@ -78,8 +80,6 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/public/session.h"
-#include "tensorflow/lite/c/c_api_types.h"
-#include "tensorflow/lite/experimental/remat/metadata_util.h"
 #include "tensorflow/lite/python/metrics/converter_error_data.pb.h"
 #include "tensorflow/lite/tools/optimize/quantize_weights.h"
 #include "tensorflow/lite/tools/optimize/reduced_precision_support.h"
@@ -287,12 +287,10 @@ absl::Status ApplyDynamicRangeQuantizationFromOldQuantizer(
   }
 
   bool use_updated_hybrid_scheme = !quant_specs.disable_per_channel;
-  if (::tflite::optimize::QuantizeWeights(
-          &q_builder, input_model, quantized_type, use_updated_hybrid_scheme,
-          ::tflite::optimize::QuantizerType::OLD_QUANTIZER) != kTfLiteOk) {
-    return absl::InvalidArgumentError(
-        "Quantize weights transformation failed.");
-  }
+  absl::Status quantize_weights_status = ::tflite::optimize::QuantizeWeights(
+      &q_builder, input_model, quantized_type, use_updated_hybrid_scheme,
+      ::tflite::optimize::QuantizerType::OLD_QUANTIZER);
+  if (!quantize_weights_status.ok()) return quantize_weights_status;
   const uint8_t* q_buffer = q_builder.GetBufferPointer();
   *result =
       std::string(reinterpret_cast<const char*>(q_buffer), q_builder.GetSize());
@@ -361,6 +359,7 @@ absl::Status ConvertTFExecutorToStablehloFlatbuffer(
   }
   pass_manager.clear();
   pass_manager.addPass(mlir::odml::createLegalizeStablehloToVhloPass());
+  pass_manager.addPass(mlir::createReconcileUnrealizedCastsPass());
   if (failed(pass_manager.run(module))) {
     return status_handler.Combine(
         absl::InvalidArgumentError("VHLO lowering failed"));
@@ -508,6 +507,7 @@ absl::Status ConvertTFExecutorToTFLOrFlatbuffer(
   }
   pass_manager.clear();
   pass_manager.addPass(mlir::odml::createLegalizeStablehloToVhloPass());
+  pass_manager.addPass(mlir::createReconcileUnrealizedCastsPass());
   if (failed(pass_manager.run(module))) {
     return status_handler.Combine(
         absl::InvalidArgumentError("VHLO lowering failed"));

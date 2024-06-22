@@ -1177,6 +1177,7 @@ xla_test(
         "optonly",
         # Timed out on 2020-07-18
         "nozapfhahn",
+        "test_xla_cpu_thunks",
     ],
     deps = CONVOLUTION_TEST_DEPS + [
         "@com_google_absl//absl/memory",
@@ -1828,6 +1829,7 @@ xla_test(
     name = "custom_call_test",
     srcs = ["custom_call_test.cc"],
     backends = ["cpu"],
+    tags = ["test_xla_cpu_thunks"],
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",
@@ -2175,7 +2177,9 @@ xla_test(
         ":test_utils",
         ":xla_internal_test_main",
         "//xla:literal",
+        "//xla:literal_util",
         "//xla:shape_util",
+        "//xla/service:computation_placer",
         "//xla/service:hlo_module_config",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -2186,8 +2190,8 @@ xla_test(
 )
 
 xla_test(
-    name = "collective_ops_test_e2e",
-    srcs = ["collective_ops_test_e2e.cc"],
+    name = "collective_ops_e2e_test",
+    srcs = ["collective_ops_e2e_test.cc"],
     backend_tags = {
         # This test is tagged "manual" because it requires multiple GPUs, and
         # Forge only supports single-GPU tests.  Guitar skips "manual" tests

@@ -34,12 +34,14 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/gpu/hlo_traversal.h"
 #include "xla/service/gpu/model/indexing_test_utils.h"
+#include "xla/service/gpu/model/symbolic_tile.h"
 #include "xla/service/gpu/model/tiled_hlo_computation.h"
 #include "xla/service/gpu/model/tiled_hlo_instruction.h"
 #include "xla/service/instruction_fusion.h"
 #include "xla/tests/hlo_test_base.h"
 #include "xla/tests/verified_hlo_module.h"
 #include "xla/util.h"
+#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla {
@@ -369,8 +371,13 @@ ENTRY main {
 })"));
   std::optional<SymbolicTileAnalysis> analysis = TryAnalyzeModule(module.get());
   ASSERT_TRUE(analysis.has_value());
-  EXPECT_THAT(analysis->GetConstraints(), SizeIs(1));
+  const ConstraintExpression& constraints = analysis->GetConstraints();
+  EXPECT_THAT(constraints.DisjointConjointConstraints(), SizeIs(1));
+  EXPECT_THAT(constraints.DisjointConjointConstraints().front(), SizeIs(1));
 }
+
+// TODO(b/334043867): add disjunction tests here once disjunctions are actually
+// used in `SymbolicTile`s.
 
 TEST_F(SymbolicTileAnalysisTest, DoesNotBailOutOnConstrainedBitcast) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
@@ -386,7 +393,9 @@ ENTRY main {
 })"));
   std::optional<SymbolicTileAnalysis> analysis = TryAnalyzeModule(module.get());
   ASSERT_TRUE(analysis.has_value());
-  EXPECT_THAT(analysis->GetConstraints(), SizeIs(1));
+  const ConstraintExpression& constraints = analysis->GetConstraints();
+  EXPECT_THAT(constraints.DisjointConjointConstraints(), SizeIs(1));
+  EXPECT_THAT(constraints.DisjointConjointConstraints().front(), SizeIs(1));
 }
 
 TEST_F(SymbolicTileAnalysisTest, BailOutOnUnsupportedConcatenate) {
@@ -439,7 +448,9 @@ ENTRY main {
 })"));
   std::optional<SymbolicTileAnalysis> analysis = TryAnalyzeModule(module.get());
   ASSERT_TRUE(analysis.has_value());
-  EXPECT_THAT(analysis->GetConstraints(), SizeIs(2));
+  const ConstraintExpression& constraints = analysis->GetConstraints();
+  EXPECT_THAT(constraints.DisjointConjointConstraints(), SizeIs(1));
+  EXPECT_THAT(constraints.DisjointConjointConstraints().front(), SizeIs(2));
 
   // We expect the constraints here to be
   //    s0 mod 6 in [0, 0]
@@ -462,7 +473,8 @@ ENTRY main {
 
   // Passing tile parameters that satisfy the constraints should let us compute
   // a TiledHloComputation.
-  EXPECT_OK(analysis->ParametersSatisfyConstraints(possible_tile_parameters));
+  TF_EXPECT_OK(
+      analysis->ParametersSatisfyConstraints(possible_tile_parameters));
 
   // Passing tile parameters that do not satisfy the constraints should result
   // in an error...
@@ -470,7 +482,7 @@ ENTRY main {
               StatusIs(absl::StatusCode::kInvalidArgument));
 
   // ... unless we pinky-promise (lie) that they satisfy the constraints ;)
-  EXPECT_OK(analysis->ComputeTiledHloInstructions(
+  TF_EXPECT_OK(analysis->ComputeTiledHloInstructions(
       impossible_tile_parameters, /*constraints_are_known_satisfied=*/true));
 }
 
@@ -494,7 +506,9 @@ ENTRY main {
   ASSERT_TRUE(analysis.has_value());
   // Each bitcast in the above module introduces one constraint. Once they are
   // aggregated, we have two!
-  EXPECT_THAT(analysis->GetConstraints(), SizeIs(2));
+  const ConstraintExpression& constraints = analysis->GetConstraints();
+  EXPECT_THAT(constraints.DisjointConjointConstraints(), SizeIs(1));
+  EXPECT_THAT(constraints.DisjointConjointConstraints().front(), SizeIs(2));
 }
 
 TEST_F(SymbolicTileAnalysisTest, BailsOutWhenConstraintsCanNotBeMerged) {
@@ -748,6 +762,42 @@ ENTRY entry_computation {
       analysis.GetGoodTilings());
   EXPECT_THAT(good_tilings, Not(IsEmpty()));
   LogTilingsIfVlog1(good_tilings);
+}
+
+// This test means to catch integer overflow errors when run with ASan build.
+TEST_F(SymbolicTileAnalysisTest,
+       FusionWithNumberOfTilesLargerThanInt32MaxIsSupported) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(R"(
+HloModule softmax
+
+fused_computation {
+  param_0 = f16[65538,32768]{1,0} parameter(0)
+  ROOT log = f16[65538,32768]{1,0} log(param_0)
+}
+
+ENTRY main {
+  param_0 = f16[65538,32768]{1,0} parameter(0)
+  ROOT fusion = f16[65538,32768]{1,0} fusion(param_0), kind=kLoop, calls=fused_computation
+}
+)"));
+
+  std::optional<SymbolicTileAnalysis> analysis = TryAnalyzeModule(module.get());
+  ASSERT_TRUE(analysis.has_value());
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      TiledHloComputation tiled_hlo_computation,
+      analysis->ComputeTiledHloInstructions(/*tile_parameters=*/{1, 1}));
+
+  EXPECT_THAT(*tiled_hlo_computation.GetRoot(),
+              MatchTiledHloInstruction(
+                  /*tile_sizes=*/{1, 1},
+                  /*tile_strides=*/{1, 1},
+                  /*block_id_to_tile_offsets_indexing=*/R"(
+    (d0) -> (d0 floordiv 32768, d0 mod 32768)
+    domain:
+    d0 in [0, 2147549183]
+  )"));
 }
 
 }  // namespace
