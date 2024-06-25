@@ -57,6 +57,12 @@ MATCHER_P(MatchSymbolicTileString, symbolic_tile_string, "") {
       result_listener);
 }
 
+MATCHER_P(MatchConstraintExpressionString, constraint_expression_string, "") {
+  return ExplainMatchResult(
+      true, ApproximateMatch(constraint_expression_string, arg.ToString()),
+      result_listener);
+}
+
 std::vector<int64_t> EvaluateMapAt(AffineMap affine_map,
                                    absl::Span<int64_t const> parameters) {
   CHECK_EQ(affine_map.getNumSymbols(), parameters.size());
@@ -135,10 +141,6 @@ TEST_F(SymbolicTileTest,
 
   // TODO(bchetioui): support expanding one dimension to more than two
   // dimensions and constrain accordingly.
-  // TODO(b/334043867): add disjunctions in order to relax some of these
-  // constraints. Currently we only support the reshaped tile size to be a
-  // multiple of the smaller collapsed axes---we also need to support the case
-  // where the tile size is a divisor of the collapsed axis.
   EXPECT_THAT(
       SymbolicTile::FromIndexingMap(*input_indexing.indexing_maps[0].begin()),
       Optional(MatchSymbolicTileString(R"(
@@ -147,7 +149,7 @@ TEST_F(SymbolicTileTest,
         size_map: ()[s0, s1] -> (1, (s0 + 5) floordiv 6, s0 - ((s0 - 1) floordiv 6) * 6, s1)
         stride_map: ()[s0, s1] -> (0, 1, 1, 1)
         constraints:
-          s0 mod 6 in [0, 0]
+          6 mod s0 in [0, 1) || s0 mod 6 in [0, 1)
       )")));
 }
 
@@ -428,10 +430,10 @@ TEST_F(SymbolicTileTest, CanPropagateTileThroughDynamicSlice) {
         size_map: ()[s0, s1, s2] -> (1, s1, s2)
         stride_map: ()[s0, s1, s2] -> (0, 1, 1)
         rt_vars:
-          s3 in [0, 1]
+          s3 in [0, 2)
             hlo: %of1 = s32[] parameter(1)
             (d0, d1, d2) -> ()
-          s4 in [0, 226]
+          s4 in [0, 227)
             hlo: %of3 = s32[] parameter(3)
             (d0, d1, d2) -> ()
       )")));
@@ -480,10 +482,10 @@ TEST_F(SymbolicTileTest, CanPropagateTileThroughDynamicUpdateSlice) {
         size_map: ()[s0, s1] -> (s0, s1)
         stride_map: ()[s0, s1] -> (1, 1)
         rt_vars:
-          s2 in [0, 15]
+          s2 in [0, 16)
             hlo: %of1 = s32[] parameter(2)
             (d0, d1) -> ()
-          s3 in [0, 20]
+          s3 in [0, 21)
             hlo: %of2 = s32[] parameter(3)
             (d0, d1) -> ()
       )")));
@@ -523,10 +525,10 @@ TEST_F(SymbolicTileTest, CanPropagateTileThroughGather) {
         size_map: ()[s0, s1, s2, s3] -> (s1, s2, s3)
         stride_map: ()[s0, s1, s2, s3] -> (1, 1, 1)
         rt_vars:
-          s4 in [0, 26]
+          s4 in [0, 27)
             hlo: %indices = s32[1806,2]{1,0} parameter(1)
             (d0, d1, d2, d3) -> (d0, 0)
-          s5 in [0, 68]
+          s5 in [0, 69)
             hlo: %indices = s32[1806,2]{1,0} parameter(1)
             (d0, d1, d2, d3) -> (d0, 1)
       )")));
@@ -710,9 +712,6 @@ TEST_F(SymbolicTileTest, CanCombineCompatibleConstraints) {
     }
   )"));
 
-  // TODO(b/334043867): add disjunctions in order to relax some of these
-  // constraints. Currently we only support the reshaped axis to be a multiple
-  // of the smaller collapsed axes.
   EXPECT_THAT(
       SymbolicTile::FromIndexingMap(*input_indexing.indexing_maps[0].begin()),
       Optional(MatchSymbolicTileString(R"(
@@ -721,31 +720,11 @@ TEST_F(SymbolicTileTest, CanCombineCompatibleConstraints) {
         size_map: ()[s0, s1] -> (1, (s0 + 5) floordiv 6, s0 - ((s0 - 1) floordiv 6) * 6, (s1 + 7) floordiv 8, s1 - ((s1 - 1) floordiv 8) * 8)
         stride_map: ()[s0, s1] -> (0, 1, 1, 1, 1)
         constraints:
-          s0 mod 6 in [0, 0] &&
-          s1 mod 8 in [0, 0]
+          6 mod s0 in [0, 1) && 8 mod s1 in [0, 1) ||
+          6 mod s0 in [0, 1) && s1 mod 8 in [0, 1) ||
+          8 mod s1 in [0, 1) && s0 mod 6 in [0, 1) ||
+          s0 mod 6 in [0, 1) && s1 mod 8 in [0, 1)
       )")));
-}
-
-TEST_F(SymbolicTileTest,
-       DerivesUnsatisfiableConstraintWhenMergingOfConstraintsIsUnsupported) {
-  // This is kind of an artificial test case that we could easily support---we
-  // assume here that we can't merge two constraints that are the same.
-  // Nevertheless, there doesn't seem to be an obvious way to produce other
-  // constraints that would trigger this particular failure at the moment. This
-  // will change as we support more constraints, disjunctions, etc...
-  IndexingMap indexing_map(
-      ParseAffineMap("(d0) -> (d0 mod 6, d0 mod 6)", &mlir_context_),
-      /*dimensions=*/{DimVar{0, 10}}, /*range_vars=*/{}, /*rt_vars=*/{});
-
-  EXPECT_THAT(SymbolicTile::FromIndexingMap(std::move(indexing_map)),
-              Optional(MatchSymbolicTileString(R"(
-              Symbolic tile with
-              offset_map: ()[s0] -> (0, 0)
-              size_map: ()[s0] -> (s0 - ((s0 - 1) floordiv 6) * 6, s0 - ((s0 - 1) floordiv 6) * 6)
-              stride_map: ()[s0] -> (1, 1)
-              constraints:
-                unsatisfiable
-              )")));
 }
 
 TEST_F(SymbolicTileTest,
@@ -809,6 +788,40 @@ TEST_F(ConstraintExpressionTest,
   EXPECT_TRUE(ConstraintExpression().IsAlwaysSatisfied());
 }
 
+TEST_F(ConstraintExpressionTest, PrettyPrintingTest) {
+  EXPECT_THAT(ConstraintExpression(),
+              MatchConstraintExpressionString("always satisfied"));
+  EXPECT_THAT(ConstraintExpression::GetUnsatisfiableConstraintExpression(),
+              MatchConstraintExpressionString("unsatisfiable"));
+
+  ConjointConstraints conjunction_1 =
+      GetConjointConstraints({{"d0", Interval{0, 5}}, {"d1", Interval{0, 5}}});
+  ConjointConstraints conjunction_2 =
+      GetConjointConstraints({{"d2", Interval{0, 5}}});
+
+  ConstraintExpression constraints;
+  constraints.Or(std::move(conjunction_1));
+  constraints.Or(std::move(conjunction_2));
+  EXPECT_THAT(constraints, MatchConstraintExpressionString(
+                               "d0 in [0, 6) && d1 in [0, 6) || d2 in [0, 6)"));
+}
+
+TEST_F(ConstraintExpressionTest,
+       ConjunctionOfConstraintsOnTheSameExpressionAreIntersected) {
+  ConstraintExpression constraints;
+
+  constraints.And(GetConjointConstraints({{"d0", Interval{0, 5}}}));
+  EXPECT_THAT(constraints, MatchConstraintExpressionString("d0 in [0, 6)"));
+
+  // Constraints are intersected.
+  constraints.And(GetConjointConstraints({{"d0", Interval{3, 6}}}));
+  EXPECT_THAT(constraints, MatchConstraintExpressionString("d0 in [3, 6)"));
+
+  // Empty intersection results in unsatisfiability.
+  constraints.And(GetConjointConstraints({{"d0", Interval{7, 8}}}));
+  EXPECT_THAT(constraints, MatchConstraintExpressionString("unsatisfiable"));
+}
+
 TEST_F(ConstraintExpressionTest,
        UnsatisfiableConstraintExpressionHoldsNoConstraint) {
   ConstraintExpression unsatisfiable_constraint =
@@ -837,9 +850,39 @@ TEST_F(
   EXPECT_THAT(conjunctions, SizeIs(1));
   // There are three constraints in the single conjunction.
   EXPECT_THAT(conjunctions.front(), SizeIs(3));
+}
 
-  // TODO(bchetioui): add test for the case where a conjunction becomes
-  // unsatisfiable and thus gets eliminated from the disjoint expression.
+TEST_F(
+    ConstraintExpressionTest,
+    CorrectlyEliminatesConjunctionFromDisjunctionWhenItBecomesUnsatisfiable) {
+  ConjointConstraints conjunction_1 =
+      GetConjointConstraints({{"d0", Interval{0, 5}}});
+  ConjointConstraints conjunction_2 =
+      GetConjointConstraints({{"d1", Interval{0, 5}}});
+
+  ConstraintExpression constraints;
+  constraints.Or(std::move(conjunction_1));
+  constraints.Or(std::move(conjunction_2));
+  EXPECT_THAT(constraints,
+              MatchConstraintExpressionString("d0 in [0, 6) || d1 in [0, 6)"));
+
+  // `conjunction_1` && `conjunction_3` is an unsatisfiable constraint. Taking
+  // the conjunction of the existing constraint expression with `conjunction_3`
+  // should therefore evict the unsatisfiable intersection of `conjunction_1`
+  // and `conjunction_3` from the disjoint expression.
+  ConjointConstraints conjunction_3 =
+      GetConjointConstraints({{"d0", Interval{6, 6}}});
+  constraints.And(std::move(conjunction_3));
+
+  EXPECT_THAT(constraints,
+              MatchConstraintExpressionString("d0 in [6, 7) && d1 in [0, 6)"));
+
+  // But becomes unsatisfiable if we eliminate the last remaining constraint by
+  // constructing another unsatisfiable conjunction.
+  ConjointConstraints conjunction_4 =
+      GetConjointConstraints({{"d0", Interval{7, 7}}});
+  constraints.And(std::move(conjunction_4));
+  EXPECT_THAT(constraints, MatchConstraintExpressionString("unsatisfiable"));
 }
 
 TEST_F(
@@ -1014,9 +1057,6 @@ TEST_F(
   EXPECT_FALSE(
       ConstraintExpression::And(constraints_1, constraints_2).is_satisfiable());
 }
-
-// TODO(b/334043867): add support for intersecting constraints within a single
-// conjunction.
 
 }  // namespace
 }  // namespace gpu

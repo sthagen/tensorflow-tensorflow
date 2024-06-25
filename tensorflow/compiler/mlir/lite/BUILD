@@ -4,6 +4,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
 load("//tensorflow:tensorflow.bzl", "if_google", "if_oss", "tf_cc_binary", "tf_cc_test", "tf_native_cc_binary")
 load("//tensorflow:tensorflow.default.bzl", "filegroup", "get_compatible_with_portable")
+load("//tensorflow/compiler/mlir/lite:build_def.bzl", "tflite_copts_warnings")
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
@@ -736,6 +737,7 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AffineAnalysis",
@@ -751,6 +753,7 @@ cc_library(
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
         "@local_xla//xla:status",
+        "@local_xla//xla:statusor",
         "@local_xla//xla/mlir_hlo",
         "@stablehlo//:stablehlo_ops",
     ],
@@ -1027,6 +1030,7 @@ cc_library(
         ":convert_type",
         ":converter_inc",
         ":tensorflow_lite",
+        "//tensorflow/compiler/mlir/lite/core/c:private_common",
         "//tensorflow/compiler/mlir/lite/schema:schema_fbs",
         "//tensorflow/compiler/mlir/lite/schema:schema_fbs_with_mutable",
         "//tensorflow/compiler/mlir/lite/schema:schema_utils",
@@ -1035,7 +1039,6 @@ cc_library(
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:status",
         "//tensorflow/core/platform:statusor",
-        "//tensorflow/lite/core/c:private_common",
         "//tensorflow/lite/kernels/internal:kernel_utils",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status:statusor",
@@ -1084,12 +1087,14 @@ cc_library(
     deps = [
         ":convert_type",
         ":flatbuffer_tflite_operator_lib",
+        ":lite_version",
         ":low_bit_utils",
         ":stateful_ops_utils",
         ":string_utils",
         ":tensorflow_lite",
         "//tensorflow/compiler/mlir:op_or_arg_name_mapper",
         "//tensorflow/compiler/mlir/lite:control_edges",
+        "//tensorflow/compiler/mlir/lite/core/c:private_common",
         "//tensorflow/compiler/mlir/lite/experimental/remat:metadata_util",
         "//tensorflow/compiler/mlir/lite/metrics:error_collector_inst",
         "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
@@ -1103,9 +1108,7 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:portable_gif_internal",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/lite:schema_fbs_version",
         "//tensorflow/lite/core:framework",
-        "//tensorflow/lite/core/c:private_common",
         "//tensorflow/lite/delegates/flex:allowlisted_flex_ops_lib",
         "//tensorflow/lite/python/metrics:converter_error_data_proto_cc",
         "//tensorflow/lite/toco:toco_flags_proto_cc",
@@ -1149,6 +1152,7 @@ cc_library(
         ":offset_buffer",
         ":size_utils",
         ":tensorflow_lite",
+        "//tensorflow/compiler/mlir/lite:control_edges",
         "//tensorflow/compiler/mlir/lite/experimental/remat:metadata_util",
         "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
         "//tensorflow/compiler/mlir/lite/schema:schema_fbs_with_mutable",
@@ -1165,7 +1169,7 @@ cc_library(
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:status",
-        "//tensorflow/lite:framework",
+        "//tensorflow/lite:model_builder",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
@@ -1599,3 +1603,12 @@ selects.config_setting_group(
     ],
 )
 # LINT.ThenChange(//tensorflow/lite/BUILD)
+
+# LINT.IfChange(version)
+cc_library(
+    name = "lite_version",
+    hdrs = ["version.h"],
+    compatible_with = get_compatible_with_portable(),
+    copts = tflite_copts_warnings(),
+)
+# LINT.ThenChange(//tensorflow/lite:version)

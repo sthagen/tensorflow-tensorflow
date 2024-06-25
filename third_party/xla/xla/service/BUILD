@@ -51,7 +51,9 @@ tf_proto_library(
     srcs = ["hlo.proto"],
     cc_api_version = 2,
     make_default_target_header_only = True,
-    protodeps = ["//xla:xla_data_proto"],
+    protodeps = [
+        "//xla:xla_data_proto",
+    ] + if_google(["@com_google_protobuf//:any"]),
     visibility = ["//visibility:public"],
 )
 
@@ -79,6 +81,11 @@ tf_proto_library(
     name = "metrics_proto",
     srcs = ["metrics.proto"],
     cc_api_version = 2,
+    protodeps = if_google([
+        "@com_google_protobuf//:any",
+        "@com_google_protobuf//:duration",
+        "@com_google_protobuf//:timestamp",
+    ]),
     visibility = ["//visibility:public"],
 )
 
@@ -119,6 +126,7 @@ cc_library(
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@local_tsl//tsl/platform:errors",
     ],
 )
@@ -618,6 +626,7 @@ xla_cc_test(
         "//xla/tests:filecheck",
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1856,6 +1865,7 @@ xla_cc_test(
         ":copy_insertion",
         ":cpu_plugin",
         ":flatten_call_graph",
+        ":hlo_alias_analysis",
         ":hlo_dce",
         ":hlo_memory_scheduler",
         ":hlo_ordering",
@@ -2855,7 +2865,6 @@ cc_library(
     srcs = ["bitcast_dtypes_expander.cc"],
     hdrs = ["bitcast_dtypes_expander.h"],
     deps = [
-        ":hlo_pass",
         ":op_expander_pass",
         "//xla:literal_util",
         "//xla:shape_util",
@@ -2867,6 +2876,7 @@ cc_library(
         "//xla/client/lib:constants",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:logging",
@@ -7563,7 +7573,7 @@ cc_library(
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
-    ],
+    ] + if_google(["@com_google_protobuf//:any_cc_proto"]),
 )
 
 cc_library(
@@ -8151,7 +8161,7 @@ tf_proto_library(
     protodeps = [
         ":hlo_proto",
         "@local_tsl//tsl/protobuf:status_proto",
-    ],
+    ] + if_google(["@com_google_protobuf//:duration"]),
     visibility = ["//visibility:public"],
 )
 

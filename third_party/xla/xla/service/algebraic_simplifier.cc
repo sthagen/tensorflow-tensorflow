@@ -94,6 +94,19 @@ bool IsAll(const HloInstruction* op, int8_t value) {
   }
 }
 
+// Unwraps broadcasts hunting for a constant.  If we find one, checks if the
+// constant contains only the given value.
+bool IsAllFloat(const HloInstruction* op, float value) {
+  switch (op->opcode()) {
+    case HloOpcode::kBroadcast:
+      return IsAllFloat(op->operand(0), value);
+    case HloOpcode::kConstant:
+      return op->literal().IsAllFloat(value);
+    default:
+      return false;
+  }
+}
+
 bool IsAll(const HloInstruction* op, const Literal& scalar) {
   CHECK(ShapeUtil::IsScalar(scalar.shape()));
   switch (op->opcode()) {
@@ -4569,15 +4582,23 @@ absl::Status AlgebraicSimplifierVisitor::HandleMultiply(
         HloInstruction::CreateUnary(multiply->shape(), HloOpcode::kExp, add));
   }
 
-  VLOG(10) << "trying transform [rsqrt(B) * rsqrt(B) => 1/B], for B >= 0 "
+  VLOG(10) << "trying transform [sqrt(x) * sqrt(x) => x], for x >= 0 "
            << multiply->ToString();
-  HloInstruction* b;
-  if (Match(multiply, m::Multiply(m::Rsqrt(m::Op(&b)), m::Rsqrt(m::Op(&b)))) &&
-      IsNonNegative(b, options_)) {
+  if (Match(multiply,
+            m::Multiply(m::Sqrt(m::Op(&lhs)), m::Sqrt(m::Op(&rhs)))) &&
+      lhs == rhs && IsNonNegative(lhs, options_)) {
+    return ReplaceInstruction(multiply, lhs);
+  }
+
+  VLOG(10) << "trying transform [rsqrt(x) * rsqrt(x) => 1/x], for x >= 0 "
+           << multiply->ToString();
+  if (Match(multiply,
+            m::Multiply(m::Rsqrt(m::Op(&lhs)), m::Rsqrt(m::Op(&rhs)))) &&
+      lhs == rhs && IsNonNegative(lhs, options_)) {
     return ReplaceWithNewInstruction(
         multiply,
         HloInstruction::CreateBinary(multiply->shape(), HloOpcode::kDivide,
-                                     MakeScalarLike(b, 1), b));
+                                     MakeScalarLike(lhs, 1), lhs));
   }
 
   return absl::OkStatus();
@@ -5447,6 +5468,14 @@ absl::Status AlgebraicSimplifierVisitor::HandlePower(HloInstruction* power) {
     return ReplaceWithNewInstruction(
         power, HloInstruction::CreateBinary(power->shape(), HloOpcode::kDivide,
                                             MakeScalarLike(lhs, 1), lhs));
+  }
+
+  VLOG(10) << "trying transform [pow(A, 0.5) => sqrt(A)], for A >= 0: "
+           << power->ToString();
+  if (IsAllFloat(rhs, 0.5) && IsNonNegative(lhs, options_)) {
+    return ReplaceWithNewInstruction(
+        power,
+        HloInstruction::CreateUnary(power->shape(), HloOpcode::kSqrt, lhs));
   }
 
   return absl::OkStatus();
@@ -6565,6 +6594,88 @@ absl::Status AlgebraicSimplifierVisitor::HandleSlice(HloInstruction* slice) {
       return ReplaceWithNewInstruction(
           slice, HloInstruction::CreateSlice(slice->shape(), operand, starts,
                                              limits, strides));
+    }
+  }
+
+  if (HloInstruction * reduce_window;
+      options_.enable_window_reduce_to_reduce_replacement() &&
+      hlo_instruction_utils::IsUnstridedSlice(slice) &&
+      Match(slice, m::Slice(m::ReduceWindow(&reduce_window).WithOneUse()))) {
+    // A reduce_window with window pad + slice[:,-1] can be expressed as
+    // reduce + reshape if all dimensions either have a window size of one or
+    // the entire dimension. No stride or dilation are expected. reduce_window
+    // pad should be present to make output shape equal to input shape.
+    // slice_limit[dim] should be equal to reduce_window shape[dim].
+    // slice_limit[dim] - slice_start[dim] should be equal to 1 for reduced dim
+    //
+    // The reshape is a bitcast since it adds one-sized dimensions. Often
+    // these ones are immediately removed as well with another reshape. The
+    // implementation of reduce tends to be slightly more efficient at
+    // reducing entire dimensions compared to reduce window.
+    //
+    //// Example 1:
+    // r = s32[2,8] reduce-window(s32[2,8] p, c), window={size=1x8 pad=0_0x7_0}
+    // s = s32[2,1] slice(r), slice={[0:2], [7:8]}
+    //// Can be folded to:
+    // r = s32[2] reduce(s32[2,8] p, c), dimensions={1},
+    // s = s32[2] reshape(r)
+    //
+    //// Example 2:
+    // p = s32[3,4,2]
+    // r = s32[3,4,2] reduce-window(p, c), window={size=1x4x2 pad=0_0x3_0x1_0}
+    // s = s32[3,1,1] slice(r), slice={[0:3], [3:4], [1:2]}
+    //// Can be folded to:
+    // r = s32[3] reduce(p, c), dimensions={1,2},
+    // s = s32[3,1,1] reshape(r)
+    auto effective_reduce_dims = [&] {
+      auto& window = reduce_window->window();
+      // reduce_window should have padding, but no Strides and Dilation
+      if (window_util::HasStride(window) || window_util::HasDilation(window) ||
+          !window_util::HasPadding(window)) {
+        return DimensionVector{};
+      }
+      auto rank = reduce_window->shape().dimensions_size();
+      auto& slice_starts = slice->slice_starts();
+      auto& slice_limits = slice->slice_limits();
+      DimensionVector reduce_dims;
+      for (auto i = 0; i < rank; ++i) {
+        auto window_dim_size = window.dimensions(i).size();
+        auto reduce_window_dim_size = reduce_window->shape().dimensions(i);
+        auto slice_dim_size = slice->shape().dimensions(i);
+        if (reduce_window_dim_size != slice_limits[i] ||
+            window.dimensions(i).padding_low() != slice_starts[i] ||
+            window.dimensions(i).padding_high() != 0) {
+          return DimensionVector{};
+        }
+        if (window_dim_size == 1 && reduce_window_dim_size == slice_dim_size &&
+            slice_starts[i] == 0) {
+          continue;
+        }
+        if (slice_dim_size == 1 && reduce_window_dim_size == window_dim_size &&
+            slice_limits[i] - slice_starts[i] == 1) {
+          reduce_dims.push_back(i);
+        } else {
+          return DimensionVector{};
+        }
+      }
+      return reduce_dims;
+    }();
+
+    // If a reduce window can be expressed as a reduce, do so and reshape the
+    // output.
+    if (!effective_reduce_dims.empty()) {
+      Shape reduce_shape = ShapeUtil::DeleteDimensions(effective_reduce_dims,
+                                                       reduce_window->shape());
+      simplifier_->UpdateLayout(&reduce_shape);
+      HloInstruction* reduce =
+          slice->AddInstruction(HloInstruction::CreateReduce(
+              /*shape=*/reduce_shape,
+              /*operand=*/reduce_window->mutable_operand(0),
+              /*init_value=*/reduce_window->mutable_operand(1),
+              /*dimensions_to_reduce=*/effective_reduce_dims,
+              /*reduce_computation=*/reduce_window->to_apply()));
+      return ReplaceWithNewInstruction(
+          slice, HloInstruction::CreateReshape(slice->shape(), reduce));
     }
   }
 
@@ -9146,7 +9257,7 @@ absl::Status AlgebraicSimplifierVisitor::HandleConvolution(
   TF_ASSIGN_OR_RETURN(bool can_rewrite_bf16_conv_to_onednn,
                       IsOneDnnRewritableBF16Conv(&convolution));
   if (can_rewrite_bf16_conv_to_onednn) {
-    return OkStatus();
+    return absl::OkStatus();
   }
 #endif  // INTEL_MKL && ENABLE_ONEDNN_V3
   // Try to replace the convolution with a kDot or a kMultiply instruction.

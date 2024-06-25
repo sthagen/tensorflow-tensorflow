@@ -80,10 +80,38 @@ using mlir::MLIRContext;
 
 AffineExpr GetLhs(AffineExpr e) {
   return mlir::cast<AffineBinaryOpExpr>(e).getLHS();
-};
+}
+
 AffineExpr GetRhs(AffineExpr e) {
   return mlir::cast<AffineBinaryOpExpr>(e).getRHS();
-};
+}
+
+// Rewrites summands in arbitrarily nested sums (e.g, ((a+b)+c)) by applying
+// `fn` to each one. In the example, the result is fn(a)+fn(b)+fn(c).
+AffineExpr MapSummands(AffineExpr expr,
+                       const std::function<AffineExpr(AffineExpr)>& fn) {
+  if (expr.getKind() == AffineExprKind::Add) {
+    auto add = mlir::dyn_cast<AffineBinaryOpExpr>(expr);
+    auto lhs = MapSummands(add.getLHS(), fn);
+    auto rhs = MapSummands(add.getRHS(), fn);
+    if (lhs == add.getLHS() && rhs == add.getRHS()) {
+      return add;
+    }
+    return lhs + rhs;
+  }
+  return fn(expr);
+}
+
+// Calls `visit` for each summand in an arbitrarily nested sum.
+void VisitSummands(mlir::AffineExpr expr,
+                   const std::function<void(mlir::AffineExpr)>& visit) {
+  if (expr.getKind() == AffineExprKind::Add) {
+    VisitSummands(GetLhs(expr), visit);
+    VisitSummands(GetRhs(expr), visit);
+  } else {
+    visit(expr);
+  }
+}
 
 class AffineExprSimplifier {
  public:
@@ -115,18 +143,14 @@ class AffineExprSimplifier {
   mlir::AffineExpr RewriteFloorDiv(mlir::AffineBinaryOpExpr div);
 
   // Rewrites `(c % ab) // a` to `(c // a) % b`. Returns nullptr on mismatch.
-  AffineExpr SimplifyModDiv(AffineExpr divisor, int64_t dividend);
+  AffineExpr SimplifyModDiv(AffineExpr dividend, int64_t divisor);
 
   // Rewrites `a // b // c` to `a // (b * c)` if `c` is positive. Returns
   // nullptr on mismatch.
-  AffineExpr SimplifyDivDiv(AffineExpr divisor, int64_t dividend);
+  AffineExpr SimplifyDivDiv(AffineExpr dividend, int64_t divisor);
 
-  // Rewrites summands in arbitrarily nested sums (e.g, ((a+b)+c)) by applying
-  // `fn` to each one. In the example, the result is fn(a)+fn(b)+fn(c).
-  AffineExpr MapSummands(AffineExpr expr,
-                         const std::function<AffineExpr(AffineExpr)>& fn);
-  void VisitSummands(mlir::AffineExpr expr,
-                     const std::function<void(mlir::AffineExpr)>& visit);
+  // Rewrites `a // b` where a may be a sum.
+  AffineExpr SimplifySumDiv(AffineExpr dividend, int64_t divisor);
 
   // Attempts to simplify the expression, but doesn't attempt to simplify the
   // result further.
@@ -183,15 +207,13 @@ AffineExpr AffineExprSimplifier::RewriteMod(AffineBinaryOpExpr mod) {
   auto zero = getAffineConstantExpr(0, mod.getContext());
   int64_t extracted_constant = 0;
   auto new_lhs = MapSummands(lhs_simplified, [&](AffineExpr expr) {
-    if (auto cst = mlir::dyn_cast<AffineConstantExpr>(expr);
-        cst && cst.getValue() >= m) {
+    if (auto cst = mlir::dyn_cast<AffineConstantExpr>(expr)) {
       extracted_constant += cst.getValue();
       return zero;
     }
-    if (auto multiplier = GetConstantRhs(expr, AffineExprKind::Mul)) {
-      if (*multiplier % m == 0) {
-        return zero;
-      }
+    if (auto multiplier = GetConstantRhs(expr, AffineExprKind::Mul);
+        multiplier && (*multiplier % m == 0)) {
+      return zero;
     }
     return expr;
   });
@@ -231,30 +253,105 @@ AffineExpr AffineExprSimplifier::RewriteMod(AffineBinaryOpExpr mod) {
   return new_lhs % mod.getRHS() + extracted;
 }
 
-AffineExpr AffineExprSimplifier::SimplifyModDiv(AffineExpr divisor,
-                                                int64_t dividend) {
-  if (auto mod = GetConstantRhs(divisor, AffineExprKind::Mod);
-      mod && (*mod % dividend == 0)) {
-    return GetLhs(divisor).floorDiv(dividend) % (*mod / dividend);
+AffineExpr AffineExprSimplifier::SimplifyModDiv(AffineExpr dividend,
+                                                int64_t divisor) {
+  if (auto mod = GetConstantRhs(dividend, AffineExprKind::Mod);
+      mod && (*mod % divisor == 0)) {
+    return GetLhs(dividend).floorDiv(divisor) % (*mod / divisor);
   }
   return nullptr;
 }
 
-AffineExpr AffineExprSimplifier::SimplifyDivDiv(AffineExpr divisor,
-                                                int64_t dividend) {
-  // The inner dividend here can be negative.
-  if (auto dividend_2 = GetConstantRhs(divisor, AffineExprKind::FloorDiv)) {
-    return GetLhs(divisor).floorDiv(dividend * *dividend_2);
+AffineExpr AffineExprSimplifier::SimplifyDivDiv(AffineExpr dividend,
+                                                int64_t divisor) {
+  // The inner divisor here can be negative.
+  if (auto inner_divisor = GetConstantRhs(dividend, AffineExprKind::FloorDiv)) {
+    return GetLhs(dividend).floorDiv(divisor * *inner_divisor);
   }
   return nullptr;
+}
+
+AffineExpr AffineExprSimplifier::SimplifySumDiv(AffineExpr dividend,
+                                                int64_t divisor) {
+  AffineExpr zero = getAffineConstantExpr(0, dividend.getContext());
+  AffineExpr extracted = zero;
+  auto new_dividend = MapSummands(dividend, [&](AffineExpr expr) {
+    if (auto multiplier = GetConstantRhs(expr, AffineExprKind::Mul)) {
+      // We can extract summands whose factor is a multiple of the divisor.
+      if (*multiplier % divisor == 0) {
+        int64_t factor = *multiplier / divisor;
+        extracted = extracted + GetLhs(expr) * factor;
+        // Remove from dividend.
+        return zero;
+      }
+    }
+    // Not a constant multiplier, keep in dividend.
+    return expr;
+  });
+
+  // The gcd of all multipliers and the divisor.
+  int64_t multiplier_divisor_gcd = divisor;
+  Interval no_multiplier_range{0, 0};
+  std::optional<int64_t> inner_divisor = std::nullopt;
+  int num_inner_divisors = 0;
+  VisitSummands(new_dividend, [&](AffineExpr summand) {
+    if (auto multiplier = GetConstantRhs(summand, AffineExprKind::Mul)) {
+      multiplier_divisor_gcd = std::gcd(multiplier_divisor_gcd, *multiplier);
+    } else {
+      no_multiplier_range = no_multiplier_range +
+                            range_evaluator_->ComputeExpressionRange(summand);
+    }
+
+    if (auto divisor = GetConstantRhs(summand, AffineExprKind::FloorDiv)) {
+      inner_divisor = divisor;
+      ++num_inner_divisors;
+    }
+  });
+
+  // Consider an expression like: `(x * 6 + y) / 9`. if the range of `y` is at
+  // most `[0; 3)`, we can rewrite it to `(x * 2) / 3`, since `y` can't affect
+  // the result.
+  if (no_multiplier_range.lower >= 0 &&
+      no_multiplier_range.upper < multiplier_divisor_gcd) {
+    new_dividend = MapSummands(new_dividend, [&](AffineExpr summand) {
+      if (auto mult = GetConstantRhs(summand, AffineExprKind::Mul)) {
+        return GetLhs(summand) * (*mult / multiplier_divisor_gcd);
+      }
+      // This has no multiplier and we previously determined it can't affect
+      // the result of the division.
+      return zero;
+    });
+    divisor /= multiplier_divisor_gcd;
+  }
+
+  // If we have an inner divisor whose value is equal to the GCD of all the
+  // divisors, we can remove a division:
+  //   `(a0 / c0 + ...) / c1` -> `(a0 + (...) * c0) / c0c1`
+  // This potentially increases the number of multiplications, but it's
+  // generally a win. It also matches what the MLIR simplifier does better, so
+  // we can get more simplifications. Note that this rewrite is not correct if
+  // there's more than one inner division, since each inner dividend may be
+  // rounded down, whereas the sum might not be. For example, in
+  //   `(a0 / 3 + a1 / 3) / 6)`
+  // If a0 is 16 and a1 is 2, the result is `(5 + 0) / 6 = 0`, whereas the
+  // rewritten form `(a0 + a1) / 18` evaluates to 1. This can only happen when
+  // there is more than one division.
+  if (num_inner_divisors == 1) {
+    new_dividend = MapSummands(new_dividend, [&](AffineExpr summand) {
+      if (auto inner_divisor =
+              GetConstantRhs(summand, AffineExprKind::FloorDiv)) {
+        return GetLhs(summand).floorDiv(*inner_divisor / *inner_divisor);
+      }
+      return summand * *inner_divisor;
+    });
+    divisor *= *inner_divisor;
+  }
+
+  return new_dividend.floorDiv(divisor) + extracted;
 }
 
 AffineExpr AffineExprSimplifier::RewriteFloorDiv(AffineBinaryOpExpr div) {
-  auto mlir_context = range_evaluator_->GetMLIRContext();
   auto rhs_range = range_evaluator_->ComputeExpressionRange(div.getRHS());
-
-  // TODO(jreiffers): Split this function into multiple (one for each rewrite
-  // rule).
 
   // The logic below assumes we have a constant positive RHS.
   if (!rhs_range.IsPoint() || rhs_range.lower <= 0) {
@@ -274,52 +371,12 @@ AffineExpr AffineExprSimplifier::RewriteFloorDiv(AffineBinaryOpExpr div) {
     return result;
   }
 
-  AffineExpr zero = getAffineConstantExpr(0, mlir_context);
-  AffineExpr extracted = zero;
-  auto new_dividend = MapSummands(lhs_simplified, [&](AffineExpr expr) {
-    if (auto multiplier = GetConstantRhs(expr, AffineExprKind::Mul)) {
-      // (x * 7 + ...) / 3 -> can't extract. We could extract x * 2 and keep
-      // one x, but we currently have no reason to do that.
-      if (*multiplier % d == 0) {
-        int64_t factor = *multiplier / d;
-        extracted = extracted + GetLhs(expr) * factor;
-        // Remove from dividend.
-        return zero;
-      }
-    }
-    // Not a constant multiplier, keep in dividend.
-    return expr;
-  });
-
-  // The gcd of all multipliers and the dividend.
-  int64_t multiplier_divisor_gcd = d;
-  Interval no_multiplier_range{0, 0};
-  VisitSummands(new_dividend, [&](AffineExpr summand) {
-    if (auto multiplier = GetConstantRhs(summand, AffineExprKind::Mul)) {
-      multiplier_divisor_gcd = std::gcd(multiplier_divisor_gcd, *multiplier);
-    } else {
-      no_multiplier_range = no_multiplier_range +
-                            range_evaluator_->ComputeExpressionRange(summand);
-    }
-  });
-
-  // Consider an expression like: `(x * 6 + y) / 9`. if the range of `y` is at
-  // most `[0; 3)`, we can rewrite it to `(x * 2) / 3`, since `y` can't affect
-  // the result.
-  if (no_multiplier_range.lower >= 0 &&
-      no_multiplier_range.upper < multiplier_divisor_gcd) {
-    new_dividend = MapSummands(new_dividend, [&](AffineExpr summand) {
-      if (auto mult = GetConstantRhs(summand, AffineExprKind::Mul)) {
-        return GetLhs(summand) * (*mult / multiplier_divisor_gcd);
-      }
-      // This has no multiplier and we previously determined it can't affect
-      // the result of the division.
-      return zero;
-    });
-    d /= multiplier_divisor_gcd;
+  // Rewrite sums on the LHS.
+  if (auto result = SimplifySumDiv(lhs_simplified, d)) {
+    return result;
   }
 
-  return new_dividend.floorDiv(d) + extracted;
+  return div;
 }
 
 std::optional<int64_t> AffineExprSimplifier::GetConstantRhs(
@@ -333,30 +390,6 @@ std::optional<int64_t> AffineExprSimplifier::GetConstantRhs(
     return std::nullopt;
   }
   return bound.lower;
-}
-
-AffineExpr AffineExprSimplifier::MapSummands(
-    AffineExpr expr, const std::function<AffineExpr(AffineExpr)>& fn) {
-  if (expr.getKind() == AffineExprKind::Add) {
-    auto add = mlir::dyn_cast<AffineBinaryOpExpr>(expr);
-    auto lhs = MapSummands(add.getLHS(), fn);
-    auto rhs = MapSummands(add.getRHS(), fn);
-    if (lhs == add.getLHS() && rhs == add.getRHS()) {
-      return add;
-    }
-    return lhs + rhs;
-  }
-  return fn(expr);
-}
-
-void AffineExprSimplifier::VisitSummands(
-    mlir::AffineExpr expr, const std::function<void(mlir::AffineExpr)>& visit) {
-  if (expr.getKind() == AffineExprKind::Add) {
-    VisitSummands(GetLhs(expr), visit);
-    VisitSummands(GetRhs(expr), visit);
-  } else {
-    visit(expr);
-  }
 }
 
 // Compares the two expression by their AST. The ordering is arbitrary but
@@ -407,14 +440,25 @@ int CompareExprs(AffineExpr a, AffineExpr b) {
 }
 
 AffineExpr CanonicalizeOrder(AffineExpr in) {
+  if (in.getKind() == AffineExprKind::Add) {
+    // If we have nested adds, canonicalize all of them together.
+    llvm::SmallVector<AffineExpr, 4> summands;
+    VisitSummands(in, [&](AffineExpr summand) {
+      summands.push_back(CanonicalizeOrder(summand));
+    });
+    llvm::sort(summands, [](AffineExpr a, AffineExpr b) {
+      return CompareExprs(a, b) < 0;
+    });
+    auto result = mlir::getAffineConstantExpr(0, in.getContext());
+    for (auto summand : summands) {
+      result = result + summand;
+    }
+    return result;
+  }
+
   if (auto binop = mlir::dyn_cast<AffineBinaryOpExpr>(in)) {
     auto lhs = CanonicalizeOrder(binop.getLHS());
     auto rhs = CanonicalizeOrder(binop.getRHS());
-    if ((binop.getKind() == AffineExprKind::Add ||
-         binop.getKind() == AffineExprKind::Mul) &&
-        CompareExprs(lhs, rhs) > 0) {
-      std::swap(lhs, rhs);
-    }
     return getAffineBinaryOpExpr(binop.getKind(), lhs, rhs);
   }
   return in;
@@ -475,18 +519,13 @@ AffineExpr AffineExprSimplifier::SimplifyOnce(AffineExpr expr) {
           if (!div) continue;  // Already erased.
           if ((div_mul % mod_mul) || (div_mul / mod_mul) != mod_c) continue;
 
-          auto mod_lhs = GetLhs(mod);
-          if (GetConstantRhs(mod_lhs, AffineExprKind::FloorDiv)) {
-            // If x is a floorDiv itself, we need to check a bit more carefully:
-            //    ((x // c0) % c1) * d + (x // (c0 * c1)) * (c1 * d)`
-            // `x // (c0 * c1)` will be simplified, so we we may not even have
-            // `c0 * c1` in the expression, if `x` contains a multiplier.
-            if (Simplify(mod_lhs.floorDiv(*mod_c)) != Simplify(div)) continue;
-          } else {
-            if (mod_lhs != GetLhs(div)) continue;
-            auto div_c = GetConstantRhs(div, AffineExprKind::FloorDiv);
-            if (mod_c != div_c) continue;
-          }
+          // In many cases, we could just compare the LHSes of the mod and the
+          // div, but if x is a floorDiv itself, we need to check a bit more
+          // carefully:
+          //    ((x // c0) % c1) * d + (x // (c0 * c1)) * (c1 * d)`
+          // `x // (c0 * c1)` will be simplified, so we we may not even have
+          // `c0 * c1` in the expression, if `x` contains a multiplier.
+          if (Simplify(GetLhs(mod).floorDiv(*mod_c)) != Simplify(div)) continue;
 
           others.push_back(GetLhs(mod) * mod_mul);
           divs[div_i].first = nullptr;
@@ -594,12 +633,6 @@ AffineMap AffineExprSimplifier::Simplify(AffineMap affine_map) {
   return Simplify(AffineMap::get(affine_map.getNumDims(),
                                  affine_map.getNumSymbols(), results,
                                  affine_map.getContext()));
-}
-
-// Computes intersection of two ranges.
-Interval Intersect(const Interval& lhs, const Interval& rhs) {
-  return Interval{std::max(lhs.lower, rhs.lower),
-                  std::min(lhs.upper, rhs.upper)};
 }
 
 // Simplifies a constraint range, i.e. a constraint d0 + x in [lb, ub] will
@@ -749,7 +782,8 @@ std::string Interval::ToString() const {
 }
 
 void Interval::Print(std::ostream& out) const {
-  out << '[' << lower << ", " << upper << "]";
+  // The interval is printed as a semi-open one because it is easier to read.
+  out << '[' << lower << ", " << upper + 1 << ")";
 }
 
 int64_t Interval::GetLoopTripCount() const {

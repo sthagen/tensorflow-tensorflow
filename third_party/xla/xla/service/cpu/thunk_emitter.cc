@@ -52,9 +52,9 @@ limitations under the License.
 #include "xla/service/cpu/runtime/fft_thunk.h"
 #include "xla/service/cpu/runtime/infeed_thunk.h"
 #include "xla/service/cpu/runtime/kernel_thunk.h"
+#include "xla/service/cpu/runtime/logical_id_thunk.h"
 #include "xla/service/cpu/runtime/outfeed_thunk.h"
 #include "xla/service/cpu/runtime/reduce_scatter_thunk.h"
-#include "xla/service/cpu/runtime/replica_id_thunk.h"
 #include "xla/service/cpu/runtime/rng_state_thunk.h"
 #include "xla/service/cpu/runtime/thunk.h"
 #include "xla/service/cpu/runtime/while_thunk.h"
@@ -209,10 +209,15 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
     case HloOpcode::kXor:
       return EmitElementalKernelThunk(instruction);
 
+    case HloOpcode::kSelectAndScatter:
+      return EmitSelectAndScatterThunk(instruction);
+
     // ReplicaId and PartitionId identify the location of the current device in
     // a logical grid of communicating devices.
     case HloOpcode::kReplicaId:
       return EmitReplicaIdThunk(instruction);
+    case HloOpcode::kPartitionId:
+      return EmitPartitionIdThunk(instruction);
 
     case HloOpcode::kAllGather:
       return EmitAllGatherThunk(instruction);
@@ -690,6 +695,14 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitReplicaIdThunk(
                                            replica_id_buffer);
 }
 
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitPartitionIdThunk(
+    const HloInstruction* instruction) {
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice partition_id_buffer,
+                      GetAllocationSlice(instruction));
+  return ThunkSequence::Of<PartitionIdThunk>(ThunkInfo(instruction),
+                                             partition_id_buffer);
+}
+
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFftThunk(
     const HloInstruction* instruction) {
   TF_RETURN_IF_ERROR(ElementTypesSameAndSupported(
@@ -788,6 +801,17 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallThunk(
   return ThunkSequence::Of<CustomCallThunk>(ThunkInfo(instruction),
                                             custom_call_target, op_buffers,
                                             backend_config, version);
+}
+
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSelectAndScatterThunk(
+    const HloInstruction* instruction) {
+  TF_ASSIGN_OR_RETURN(auto kernel,
+                      ir_emitter_.EmitSelectAndScatterHostKernel(instruction));
+  TF_ASSIGN_OR_RETURN(auto buffers, GetHostKernelAllocationSlices(instruction));
+
+  return ThunkSequence::Of<KernelThunk>(ThunkInfo(instruction),
+                                        buffers.arguments, buffers.results,
+                                        kernel.name, kernel.thread_dims);
 }
 
 absl::StatusOr<ThunkEmitter::HostKernelAllocationSlices>

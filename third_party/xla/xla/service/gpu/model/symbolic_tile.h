@@ -90,6 +90,11 @@ class ConstraintExpression {
     return disjoint_conjoint_constraints_;
   }
 
+  std::string ToString(
+      const AffineMapPrinter& printer = AffineMapPrinter()) const;
+
+  void Print(std::ostream& out, const AffineMapPrinter& printer) const;
+
   // TODO(bchetioui): add a util to verify constraints here later.
   // TODO(bchetioui): is canonicalization of disjunctions necessary?
  private:
@@ -224,8 +229,6 @@ class ConstraintExpression {
 class SymbolicTile {
  public:
   static std::optional<SymbolicTile> FromIndexingMap(IndexingMap indexing_map);
-
-  using ConstraintMap = llvm::DenseMap<mlir::AffineExpr, Interval>;
 
   // For printing in tests.
   std::string RtVarsToString(

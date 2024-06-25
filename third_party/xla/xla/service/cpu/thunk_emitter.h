@@ -110,6 +110,9 @@ class ThunkEmitter {
   absl::StatusOr<ThunkSequence> EmitReplicaIdThunk(
       const HloInstruction* instruction);
 
+  absl::StatusOr<ThunkSequence> EmitPartitionIdThunk(
+      const HloInstruction* instruction);
+
   absl::StatusOr<ThunkSequence> EmitAllGatherThunk(
       const HloInstruction* instruction);
 
@@ -126,6 +129,9 @@ class ThunkEmitter {
       const HloInstruction* instruction);
 
   absl::StatusOr<ThunkSequence> EmitCustomCallThunk(
+      const HloInstruction* instruction);
+
+  absl::StatusOr<ThunkSequence> EmitSelectAndScatterThunk(
       const HloInstruction* instruction);
 
   // Returns the list of buffer allocation slices assigned to the given

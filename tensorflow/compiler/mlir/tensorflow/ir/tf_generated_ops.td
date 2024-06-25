@@ -1137,6 +1137,7 @@ to be batched.}]>:$captured_tensors,
     DefaultValuedOptionalAttr<I64ArrayAttr, "{}">:$low_priority_allowed_batch_sizes,
     DefaultValuedOptionalAttr<I64Attr, "0">:$low_priority_max_enqueued_batches,
     DefaultValuedOptionalAttr<TF_AnyStrAttrOf<["low_priority_padding_with_max_batch_size", "low_priority_padding_with_next_allowed_batch_size", "priority_isolation"]>, "\"low_priority_padding_with_max_batch_size\"">:$mixed_priority_policy,
+    DefaultValuedOptionalAttr<TF_AnyStrAttrOf<["PAD_UP"]>, "\"PAD_UP\"">:$batch_padding_policy,
     DefaultValuedOptionalAttr<BoolAttr, "false">:$enable_large_batch_splitting
   );
 
@@ -5458,7 +5459,42 @@ def TF_FakeQuantWithMinMaxArgsGradientOp : TF_Op<"FakeQuantWithMinMaxArgsGradien
 
   let results = (outs
     Res<TF_Float32Tensor, [{Backpropagated gradients below the FakeQuantWithMinMaxArgs operation:
-`gradients * (inputs >= min && inputs <= max)`.}]>:$backprops
+`gradients * (inputs >= min && inputs <= max)`.
+
+```
+import tensorflow as tf
+
+# Define some sample data
+gradients = tf.random.uniform((2, 3), minval=-5.0, maxval=5.0, dtype=tf.float32)
+inputs = tf.random.uniform((2, 3), minval=-10.0, maxval=10.0, dtype=tf.float32)
+
+# Define quantization parameters (adjust as needed)
+min_val = -2.0
+max_val = 8.0
+num_bits = 4  # Number of bits for quantization
+
+# Calculate gradients for fake quantization with specified parameters
+output_gradients = tf.quantization.fake_quant_with_min_max_args_gradient(
+    gradients=gradients, inputs=inputs, min=min_val, max=max_val, num_bits=num_bits, narrow_range = False, name=None
+)
+
+# Print the original gradients and the gradients after the fake-quant operation
+print("Original Gradients:")
+print(gradients)
+print("\nGradients after Fake-Quantization:")
+print(output_gradients)
+
+```
+#Original Gradients:
+#tf.Tensor(
+#[[ 1.242547    3.217492    3.568469  ]
+#[-0.55371046  0.23130894  2.608243  ]], shape=(2, 3), dtype=float32)
+
+#Gradients after Fake-Quantization:
+#tf.Tensor(
+#[[ 0.          3.217492    3.568469  ]
+# [-0.55371046  0.23130894  2.608243  ]], shape=(2, 3), dtype=float32)
+}]>:$backprops
   );
 
   let extraClassDeclaration = [{
@@ -15362,7 +15398,7 @@ e.g. Max(segment_ids) should be equal to `num_segments` - 1 for a 1-d segment_id
 With inconsistent num_segments, the op still runs. only difference is,
 the output takes the size of num_segments irrespective of size of segment_ids and data.
 for num_segments less than expected output size, the last elements are ignored
-for num_segments more than the expected output size, last elements are assigned 
+for num_segments more than the expected output size, last elements are assigned
 smallest possible value for the specific numeric type.
 
 For example:
@@ -15532,7 +15568,7 @@ e.g. Max(segment_ids) should be equal to `num_segments` - 1 for a 1-d segment_id
 With inconsistent num_segments, the op still runs. only difference is,
 the output takes the size of num_segments irrespective of size of segment_ids and data.
 for num_segments less than expected output size, the last elements are ignored
-for num_segments more than the expected output size, last elements are assigned 
+for num_segments more than the expected output size, last elements are assigned
 the largest possible value for the specific numeric type.
 
 For example:
@@ -15638,7 +15674,7 @@ The only difference with SegmentProd is the additional input  `num_segments`.
 This helps in evaluating the output shape in compile time.
 `num_segments` should be consistent with segment_ids.
 e.g. Max(segment_ids) - 1 should be equal to `num_segments` for a 1-d segment_ids
-With inconsistent num_segments, the op still runs. only difference is, 
+With inconsistent num_segments, the op still runs. only difference is,
 the output takes the size of num_segments irrespective of size of segment_ids and data.
 for num_segments less than expected output size, the last elements are ignored
 for num_segments more than the expected output size, last elements are assigned 1.

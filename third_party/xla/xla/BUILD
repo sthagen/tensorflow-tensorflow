@@ -8,7 +8,7 @@ load("//third_party/compute_library:build_defs.bzl", "if_enable_acl")
 
 # Placeholder: load py_proto_library
 load("//xla:xla.bzl", "xla_cc_test", "xla_py_proto_library")
-load("//xla/tsl:tsl.bzl", "internal_visibility")
+load("//xla/tsl:tsl.bzl", "if_google", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
 
 package(
@@ -103,7 +103,7 @@ tf_proto_library(
     protodeps = [
         ":xla_data_proto",
         "//xla/service:hlo_proto",
-    ],
+    ] + if_google(["@com_google_protobuf//:any"]),
     visibility = ["//visibility:public"],
 )
 
@@ -301,11 +301,10 @@ xla_cc_test(
 cc_library(
     name = "status",
     hdrs = ["status.h"],
+    deprecation = "Use @com_google_absl//absl/status instead.",
     visibility = ["//visibility:public"],
     deps = [
-        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
     ],
 )
 
@@ -337,7 +336,6 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":status",
         ":status_macros",
         ":types",
         ":xla_data_proto_cc",
@@ -350,6 +348,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -1111,6 +1110,8 @@ cc_library(
             "@com_google_absl//absl/base",
             "@com_google_absl//absl/container:flat_hash_map",
             "@com_google_absl//absl/container:node_hash_map",
+            "@com_google_absl//absl/log",
+            "@com_google_absl//absl/log:check",
             "@com_google_absl//absl/strings",
             "@com_google_absl//absl/strings:str_format",
             "@local_tsl//tsl/platform:logging",
@@ -1206,7 +1207,12 @@ tf_proto_library(
     name = "autotuning_proto",
     srcs = ["autotuning.proto"],
     make_default_target_header_only = True,
-    protodeps = ["@local_tsl//tsl/protobuf:dnn_proto"],
+    protodeps = [
+        "@local_tsl//tsl/protobuf:dnn_proto",
+    ] + if_google([
+        "@com_google_protobuf//:any",
+        "@com_google_protobuf//:duration",
+    ]),
 )
 
 cc_library(
