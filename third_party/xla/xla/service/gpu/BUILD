@@ -583,14 +583,12 @@ cc_library(
         "@triton//:TritonGPUToLLVM",
         "@triton//:TritonToTritonGPU",
         "@triton//:TritonGPUTransforms",
-        "@triton//:TritonLLVMIR",
     ]) + if_cuda_is_configured([
         "@triton//third_party/nvidia:NVGPUToLLVM",
         "@triton//third_party/nvidia:TritonNVIDIAGPUToLLVM",
+        "@triton//:TritonLLVMIR",
     ]) + if_rocm_is_configured([
         "@local_tsl//tsl/platform:rocm_rocdl_path",
-        "@triton//third_party/amd:TritonAMDGPUToLLVM",
-        "@triton//third_party/amd:TritonAMDGPUTransforms",
     ]),
 )
 
@@ -3014,6 +3012,7 @@ cc_library(
         "//xla/service:hlo_pass",
         "//xla/stream_executor:dnn",
         "//xla/stream_executor:stream_executor_h",
+        "//xla/service:dump",
         "//xla/stream_executor/cuda:cudnn_frontend_helpers",
         "//xla/stream_executor/cuda:cudnn_plugin",
         "@local_tsl//tsl/platform:errors",
@@ -4796,7 +4795,7 @@ cc_library(
     ] + if_cuda_is_configured([
         "@local_config_cuda//cuda:cuda_headers",
         "@local_config_cuda//cuda:cudnn_header",
-    ]) + if_static([
+    ]) + if_google([
         "@com_google_protobuf//:wrappers_cc_proto",
     ]),
 )

@@ -3057,11 +3057,14 @@ cc_library(
     srcs = ["all_reduce_simplifier.cc"],
     hdrs = ["all_reduce_simplifier.h"],
     deps = [
+        ":collective_ops_utils",
+        ":hlo_module_config",
         ":hlo_pass",
         ":hlo_replication_analysis",
         "//xla:literal_util",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
@@ -3076,6 +3079,7 @@ xla_cc_test(
     srcs = ["all_reduce_simplifier_test.cc"],
     deps = [
         ":all_reduce_simplifier",
+        ":hlo_module_config",
         ":hlo_parser",
         ":pattern_matcher",
         ":pattern_matcher_gmock",
@@ -4451,10 +4455,9 @@ cc_library(
     deps = [
         ":hlo_proto_cc",
         "//xla:shape_util",
-        "//xla:types",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
-        "@com_google_absl//absl/types:span",
+        "@com_google_absl//absl/base:core_headers",
         "@local_tsl//tsl/platform:logging",
     ],
 )
@@ -5658,6 +5661,7 @@ xla_test(
     ],
     # TODO(b/332870133): Enable when it passes on H100.
     disabled_backends = ["gpu_h100"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     tags = [
         "no_windows",  # TODO(b/152037541)
     ],
@@ -5681,7 +5685,9 @@ xla_test(
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:ir_headers",
         "@local_tsl//tsl/platform:statusor",
-    ],
+    ] + if_cuda_is_configured([
+        "@local_config_cuda//cuda:cuda_headers",
+    ]),
 )
 
 cc_library(
@@ -7254,6 +7260,7 @@ xla_cc_test(
         "//xla/tests:xla_internal_test_main",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
