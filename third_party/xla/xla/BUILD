@@ -4,10 +4,6 @@ load(
     "tf_proto_library",
 )
 load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
-load(
-    "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
-    "if_cuda_is_configured",
-)
 load("//third_party/compute_library:build_defs.bzl", "if_enable_acl")
 
 # Placeholder: load py_proto_library
@@ -1070,7 +1066,6 @@ cc_library(
     ],
     hdrs = ["debug_options_flags.h"],
     copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]),
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     visibility = internal_visibility([":friends"]),
     deps =
         [
@@ -1185,6 +1180,34 @@ tf_proto_library(
         "@com_google_protobuf//:any",
         "@com_google_protobuf//:duration",
     ]),
+)
+
+cc_library(
+    name = "autotune_result_wrapper",
+    srcs = ["autotune_result_wrapper.cc"],
+    hdrs = ["autotune_result_wrapper.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":autotune_results_proto_cc",
+        ":autotuning_proto_cc",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@local_tsl//tsl/lib/strings:proto_serialization",
+    ],
+)
+
+xla_cc_test(
+    name = "autotune_result_wrapper_test",
+    srcs = ["autotune_result_wrapper_test.cc"],
+    deps = [
+        ":autotune_result_wrapper",
+        ":autotuning_proto_cc",
+        ":test",
+        ":test_helpers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test_main",
+    ],
 )
 
 cc_library(

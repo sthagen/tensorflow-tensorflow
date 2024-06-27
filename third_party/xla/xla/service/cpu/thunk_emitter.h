@@ -16,8 +16,10 @@ limitations under the License.
 #ifndef XLA_SERVICE_CPU_THUNK_EMITTER_H_
 #define XLA_SERVICE_CPU_THUNK_EMITTER_H_
 
+#include <memory>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -26,6 +28,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/cpu/ir_emitter2.h"
+#include "xla/service/cpu/runtime/resource_use.h"
 #include "xla/service/cpu/runtime/thunk.h"
 #include "xla/service/cpu/target_machine_features.h"
 #include "xla/service/hlo_module_config.h"
@@ -59,6 +62,10 @@ class ThunkEmitter {
   // Returns the buffer allocation slice assigned to the given instruction at
   // the given shape index. Instruction must have a unique slice assigned to it!
   absl::StatusOr<BufferAllocation::Slice> GetAllocationSlice(
+      const HloInstruction* instruction, const ShapeIndex& index = {});
+
+  // Returns a token resource corresponding to the given instruction result.
+  absl::StatusOr<std::shared_ptr<Resource>> GetTokenResource(
       const HloInstruction* instruction, const ShapeIndex& index = {});
 
   absl::StatusOr<ThunkSequence> EmitHloComputation(
@@ -154,6 +161,15 @@ class ThunkEmitter {
 
   const TargetMachineFeatures& target_machine_features_;
   const HloModuleConfig& hlo_module_config_;
+
+  // A global resource that is used to order all collective operations.
+  std::shared_ptr<Resource> communicator_resource_;
+
+  // Token resources that correspond to the token buffer allocation slices. We
+  // rely on buffer assignment to assign unique "identity" to each token, and
+  // create a separate resource for each unique allocation slice.
+  absl::flat_hash_map<BufferAllocation::Slice, std::shared_ptr<Resource>>
+      token_resources_;
 };
 
 }  // namespace xla::cpu

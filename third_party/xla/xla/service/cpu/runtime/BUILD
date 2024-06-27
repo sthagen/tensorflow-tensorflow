@@ -59,6 +59,7 @@ cc_library(
     hdrs = ["thunk.h"],
     deps = [
         ":buffer_allocations",
+        ":resource_use",
         "//xla:executable_run_options",
         "//xla/ffi:execution_context",
         "//xla/runtime:buffer_use",
@@ -84,6 +85,7 @@ cc_library(
     testonly = 1,
     hdrs = ["thunk_testlib.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         "//xla/runtime:buffer_use",
         "//xla/tsl/concurrency:async_value",
@@ -109,6 +111,7 @@ cc_library(
     srcs = ["thunk_executor.cc"],
     hdrs = ["thunk_executor.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         "//xla/runtime:buffer_use",
         "//xla/tsl/concurrency:async_value",
@@ -134,6 +137,7 @@ xla_cc_test(
     srcs = ["thunk_executor_test.cc"],
     deps = [
         ":buffer_allocations",
+        ":resource_use",
         ":task",
         ":thunk",
         ":thunk_executor",
@@ -178,6 +182,7 @@ cc_library(
     srcs = ["conditional_thunk.cc"],
     hdrs = ["conditional_thunk.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         ":thunk_executor",
         "//xla:util",
@@ -202,6 +207,7 @@ xla_cc_test(
     deps = [
         ":buffer_allocations",
         ":conditional_thunk",
+        ":resource_use",
         ":thunk",
         ":thunk_testlib",
         "//xla:shape_util",
@@ -435,6 +441,7 @@ cc_library(
     srcs = ["collective_thunk.cc"],
     hdrs = ["collective_thunk.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         "//xla:shape_util",
         "//xla:status_macros",
@@ -587,6 +594,7 @@ cc_library(
     srcs = ["outfeed_thunk.cc"],
     hdrs = ["outfeed_thunk.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         "//xla:shape_util",
         "//xla:util",
@@ -613,6 +621,7 @@ xla_cc_test(
     deps = [
         ":buffer_allocations",
         ":outfeed_thunk",
+        ":resource_use",
         ":thunk",
         ":thunk_testlib",
         "//xla:shape_util",
@@ -676,6 +685,7 @@ cc_library(
     srcs = ["infeed_thunk.cc"],
     hdrs = ["infeed_thunk.h"],
     deps = [
+        ":resource_use",
         ":thunk",
         "//xla:shape_util",
         "//xla:util",
@@ -702,6 +712,7 @@ xla_cc_test(
     deps = [
         ":buffer_allocations",
         ":infeed_thunk",
+        ":resource_use",
         ":thunk",
         ":thunk_testlib",
         "//xla:shape_util",
@@ -733,7 +744,6 @@ cc_library(
         "//xla/stream_executor/host:host_kernel_c_api",
         "//xla/tsl/concurrency:async_value",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/status",
@@ -742,6 +752,7 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
+        "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:numbers",
@@ -766,6 +777,29 @@ xla_cc_test(
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+cc_library(
+    name = "resource_use",
+    srcs = ["resource_use.cc"],
+    hdrs = ["resource_use.h"],
+    deps = [
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "resource_use_test",
+    srcs = ["resource_use_test.cc"],
+    deps = [
+        ":resource_use",
+        "//xla/service:buffer_assignment",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -822,6 +856,7 @@ xla_cc_test(
     srcs = ["while_thunk_test.cc"],
     deps = [
         ":buffer_allocations",
+        ":resource_use",
         ":thunk",
         ":thunk_testlib",
         ":while_thunk",
