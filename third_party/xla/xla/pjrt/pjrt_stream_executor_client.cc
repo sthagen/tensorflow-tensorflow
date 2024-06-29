@@ -432,18 +432,46 @@ AllocateDestinationBuffer(
     const Shape& on_host_shape, PjRtDevice* device,
     LocalDeviceState* local_device, se::Stream* copy_stream,
     bool is_uninitialized_create, PjRtStreamExecutorClient* client,
-    std::shared_ptr<BufferSequencingEvent> definition_event) {
+    std::shared_ptr<BufferSequencingEvent> definition_event,
+    PjRtMemorySpace* memory_space) {
   if (on_host_shape.IsTuple() && on_host_shape.tuple_shapes_size() == 0) {
     return InvalidArgument("Can't make a buffer from an empty tuple");
+  }
+
+  PjRtMemorySpace* default_memory_space =
+      device->default_memory_space().value_or(nullptr);
+  if (!memory_space) {
+    memory_space = default_memory_space;
+  }
+  bool is_pinned_host_memory =
+      memory_space && (memory_space->kind() == PinnedHostMemorySpace::kKind);
+  // Only allow pinned host memory or device memory.
+  if (memory_space != default_memory_space && !is_pinned_host_memory) {
+    return InvalidArgument("Buffer allocation: invalid memory space");
   }
 
   auto* se_client = tensorflow::down_cast<PjRtStreamExecutorClient*>(client);
   TransferManager* transfer_manager =
       se_client->client()->backend().transfer_manager();
-  TF_ASSIGN_OR_RETURN(ScopedShapedBuffer dst_buffer,
-                      transfer_manager->AllocateScopedShapedBuffer(
-                          on_host_shape, se_client->allocator(),
-                          local_device->local_device_id().value()));
+
+  // Communicate the desired memory space to the allocator via the shape
+  // callback.
+  auto memory_space_shape_fn = [is_pinned_host_memory,
+                                transfer_manager](const Shape& shape) {
+    Shape result = shape;
+    if (is_pinned_host_memory) {
+      result.mutable_layout()->set_memory_space(Layout::kHostMemorySpace);
+    } else {
+      result = transfer_manager->HostShapeToDeviceShape(result);
+    }
+    return result;
+  };
+
+  TF_ASSIGN_OR_RETURN(
+      ScopedShapedBuffer dst_buffer,
+      transfer_manager->AllocateScopedShapedBuffer(
+          on_host_shape, se_client->allocator(),
+          local_device->local_device_id().value(), memory_space_shape_fn));
   if (local_device->allocation_model() ==
       LocalDeviceState::kComputeSynchronized) {
     if (copy_stream == nullptr) {
@@ -529,7 +557,7 @@ AllocateDestinationBuffer(
 
   auto py_buffer = std::make_unique<PjRtStreamExecutorBuffer>(
       on_device_shape, std::move(dst_device_buffer), client, device,
-      device->default_memory_space().value_or(nullptr));
+      memory_space);
 
   if (on_device_shape.IsTuple()) {
     // Add a usage hold for the tuple table write and immediately convert it to
@@ -619,7 +647,10 @@ void PjRtStreamExecutorBuffer::ScopedHold::AddToInput(
   }
 }
 
-bool PjRtStreamExecutorBuffer::IsOnCpu() const { return false; }
+bool PjRtStreamExecutorBuffer::IsOnCpu() const {
+  return memory_space() != nullptr &&
+         memory_space()->kind() == PinnedHostMemorySpace::kKind;
+}
 
 absl::StatusOr<Shape> PjRtStreamExecutorBuffer::logical_on_device_shape() {
   if (on_device_shape_.is_static()) {
@@ -790,13 +821,17 @@ PjRtStreamExecutorBuffer::DonateWithControlDependency(PjRtFuture<> dependency) {
   return new_buffer;
 }
 
+// BufferFromHostBuffer() is used to create a buffer either for a device, or
+// for a host memory, depending on `memory_space`. The memory copy is needed
+// for both cases, either from the unpinned host memory to device, or from
+// the unpinned host memory to the pinned host memory.
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
-PjRtStreamExecutorClient::BufferFromHostBuffer(
+PjRtStreamExecutorClient::BufferFromHostBufferInternal(
     const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
     std::optional<absl::Span<int64_t const>> byte_strides,
     HostBufferSemantics host_buffer_semantics,
     absl::AnyInvocable<void() &&> on_done_with_host_buffer, PjRtDevice* device,
-    const Layout* device_layout) {
+    const Layout* device_layout, PjRtMemorySpace* memory_space) {
   tsl::profiler::TraceMe traceme(
       "PjRtStreamExecutorClient::BufferFromHostBuffer");
   Shape device_shape = ShapeUtil::MakeShape(type, dims);
@@ -833,7 +868,8 @@ PjRtStreamExecutorClient::BufferFromHostBuffer(
       std::unique_ptr<PjRtStreamExecutorBuffer> py_buffer,
       AllocateDestinationBuffer(device_shape, device, local_device,
                                 local_device->host_to_device_stream(),
-                                /*is_uninitialized_create=*/false, this));
+                                /*is_uninitialized_create=*/false, this,
+                                /*definition_event=*/nullptr, memory_space));
 
   PjRtStreamExecutorBuffer::ScopedHold device_buffer(
       py_buffer->GetBufferWithUsageHold());
@@ -1003,11 +1039,25 @@ PjRtStreamExecutorClient::BufferFromHostBuffer(
     const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
     std::optional<absl::Span<int64_t const>> byte_strides,
     HostBufferSemantics host_buffer_semantics,
+    absl::AnyInvocable<void() &&> on_done_with_host_buffer, PjRtDevice* device,
+    const Layout* device_layout) {
+  return BufferFromHostBufferInternal(
+      data, type, dims, byte_strides, host_buffer_semantics,
+      std::move(on_done_with_host_buffer), device, device_layout,
+      /*memory_space=*/nullptr);
+}
+
+absl::StatusOr<std::unique_ptr<PjRtBuffer>>
+PjRtStreamExecutorClient::BufferFromHostBuffer(
+    const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
+    std::optional<absl::Span<int64_t const>> byte_strides,
+    HostBufferSemantics host_buffer_semantics,
     absl::AnyInvocable<void() &&> on_done_with_host_buffer,
     PjRtDevice* device) {
-  return BufferFromHostBuffer(
+  return BufferFromHostBufferInternal(
       data, type, dims, byte_strides, host_buffer_semantics,
-      std::move(on_done_with_host_buffer), device, /*device_layout=*/nullptr);
+      std::move(on_done_with_host_buffer), device, /*device_layout=*/nullptr,
+      /*memory_space=*/nullptr);
 }
 
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
@@ -1017,16 +1067,10 @@ PjRtStreamExecutorClient::BufferFromHostBuffer(
     HostBufferSemantics host_buffer_semantics,
     absl::AnyInvocable<void() &&> on_done_with_host_buffer,
     PjRtMemorySpace* memory_space, const Layout* device_layout) {
-  if (memory_space->devices().size() == 1) {
-    return BufferFromHostBuffer(data, type, dims, byte_strides,
-                                host_buffer_semantics,
-                                std::move(on_done_with_host_buffer),
-                                memory_space->devices()[0], device_layout);
-  }
-  return absl::UnimplementedError(absl::StrCat(
-      "BufferFromHostBuffer with PjRtMemorySpace is not implemented on "
-      "platform: ",
-      platform_name()));
+  return BufferFromHostBufferInternal(
+      data, type, dims, byte_strides, host_buffer_semantics,
+      std::move(on_done_with_host_buffer), memory_space->devices()[0],
+      device_layout, memory_space);
 }
 
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
@@ -1795,14 +1839,15 @@ absl::StatusOr<std::pair<std::unique_ptr<PjRtBuffer>,
                          std::shared_ptr<BufferSequencingEvent>>>
 PjRtStreamExecutorBuffer::CopyToDeviceHelper(
     PjRtDevice* dst_device, LocalDeviceState* dst_local_device,
-    LocalDeviceState* transfer_local_device, LocalDeviceState* src_local_device,
-    se::Stream* transfer_stream,
+    PjRtMemorySpace* dst_memory_space, LocalDeviceState* transfer_local_device,
+    LocalDeviceState* src_local_device, se::Stream* transfer_stream,
     std::shared_ptr<TrackedDeviceBuffer> src_device_buffer) {
   TF_ASSIGN_OR_RETURN(std::unique_ptr<PjRtStreamExecutorBuffer> py_buffer,
                       AllocateDestinationBuffer(
                           ShapeUtil::DeviceShapeToHostShape(on_device_shape_),
                           dst_device, dst_local_device, transfer_stream,
-                          /*is_uninitialized_create=*/false, client_));
+                          /*is_uninitialized_create=*/false, client_,
+                          /*definition_event=*/nullptr, dst_memory_space));
 
   ScopedHold dst_device_buffer(py_buffer->GetBufferWithUsageHold());
   CHECK(dst_device_buffer.ok());
@@ -1912,7 +1957,17 @@ PjRtStreamExecutorBuffer::CopyToDevice(PjRtDevice* dst_device) {
     return InvalidArgument(
         "CopyToDevice cannot accept the same source and destination devices");
   }
+  return CopyToDeviceMemorySpace(dst_device, nullptr);
+}
 
+absl::StatusOr<std::unique_ptr<PjRtBuffer>>
+PjRtStreamExecutorBuffer::CopyToDeviceMemorySpace(
+    PjRtDevice* dst_device, PjRtMemorySpace* dst_memory_space) {
+  if (dst_device == device_ && dst_memory_space == memory_space()) {
+    return InvalidArgument(
+        "CopyToDeviceMemorySpace cannot accept the same source and destination "
+        "devices/memory");
+  }
   // Copying across PjRtClients involves a copy through the host.
   if (dst_device->client() != client_) {
     TF_ASSIGN_OR_RETURN(std::shared_ptr<Literal> literal, ToLiteralSync());
@@ -1958,7 +2013,7 @@ PjRtStreamExecutorBuffer::CopyToDevice(PjRtDevice* dst_device) {
   absl::StatusOr<std::pair<std::unique_ptr<PjRtBuffer>,
                            std::shared_ptr<BufferSequencingEvent>>>
       buffer_and_event_or = CopyToDeviceHelper(
-          dst_device, dst_local_device, transfer_local_device,
+          dst_device, dst_local_device, dst_memory_space, transfer_local_device,
           device_->local_device_state(), transfer_stream,
           src_device_buffer.buffer());
   if (!buffer_and_event_or.ok()) {
@@ -1984,7 +2039,8 @@ PjRtStreamExecutorBuffer::CopyToDevice(PjRtDevice* dst_device) {
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
 PjRtStreamExecutorBuffer::CopyToMemorySpace(PjRtMemorySpace* dst_memory_space) {
   if (dst_memory_space->devices().size() == 1) {
-    return CopyToDevice(dst_memory_space->devices()[0]);
+    return CopyToDeviceMemorySpace(dst_memory_space->devices()[0],
+                                   dst_memory_space);
   }
   return Unimplemented("CopyToMemorySpace is not supported");
 }
@@ -3386,7 +3442,7 @@ PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
 
     if (build_options.device_ordinal() < 0) {
       build_options.set_device_ordinal(
-          addressable_devices.front()->local_hardware_id());
+          addressable_devices.front()->local_hardware_id().value());
     }
   }
   return extras;

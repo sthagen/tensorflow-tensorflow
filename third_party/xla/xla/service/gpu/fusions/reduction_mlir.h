@@ -23,6 +23,7 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"  // from @llvm-project
+#include "mlir/IR/AffineExpr.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -64,6 +65,12 @@ class MlirReductionFusion : public MlirFusionEmitterBase {
   struct EmitterState;
   friend struct EmitterState;
 
+  // Returns the init values for reductions, and the init values for the side
+  // outputs. Side output init values are tensors, while reduction init values
+  // are scalars.
+  HloValueMap GetInitsAndSideOutputTensors(int group_id,
+                                           EmitterState& state) const;
+
   absl::Status EmitEntryFunction(
       const mlir_converter::PartitionedComputations& computations,
       const mlir_converter::CallTargetProvider& call_targets,
@@ -81,6 +88,11 @@ class MlirReductionFusion : public MlirFusionEmitterBase {
 
   virtual llvm::SmallVector<mlir::Value> EmitReduction(
       int group_id, EmitterState& state) const = 0;
+
+  // Returns a reduction indexing map with the given results. Symbols are
+  // derived from tile_sizes_per_thread_. Symbols not occurring in the results
+  // have their ranges set to 1 (instead of the size).
+  IndexingMap GetIndexingMap(llvm::ArrayRef<mlir::AffineExpr> results) const;
 
   Shape GetReduceOperandShape() const {
     return first_reduce_->operand(0)->shape();

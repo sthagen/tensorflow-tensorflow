@@ -598,7 +598,11 @@ cc_library(
     hdrs = ["triton_sparse_extensions.h"],
     deps = [
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:GPUDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:LLVMCommonConversion",
+        "@llvm-project//mlir:LLVMDialect",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Rewrite",
         "@llvm-project//mlir:Support",
@@ -607,6 +611,7 @@ cc_library(
         "@triton//:TritonDialects",
         "@triton//:TritonGPUToLLVM",
         "@triton//:TritonGPUTransforms",
+        "@triton//third_party/nvidia:TritonNVIDIAGPUToLLVM",
     ],
 )
 
@@ -1253,6 +1258,8 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:tensor_float_32_utils",
     ],
 )
@@ -3433,6 +3440,7 @@ cc_library(
         ":compile_module_to_llvm_ir",
         ":conv_layout_normalization",
         ":copy_fusion",
+        ":collective_permute_valid_iteration_annotator",
         ":custom_kernel_fusion_rewriter",
         ":dot_dimension_sorter",
         ":dot_operand_converter",
@@ -4016,6 +4024,7 @@ cc_library(
         ":cudnn_fused_conv_rewriter",
         ":cusolver_rewriter",
         ":gemm_algorithm_picker",
+        ":gpu_algebraic_simplifier",
         ":gpu_compiler",
         ":gpu_conv_padding_legalization",
         ":gpu_conv_rewriter",
@@ -4040,6 +4049,8 @@ cc_library(
         "//xla/service:tuple_simplifier",
         "//xla/service/gpu/llvm_gpu_backend",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor:dnn",
         "//xla/stream_executor/rocm:rocm_platform_id",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -4546,13 +4557,10 @@ cc_library(
         "TENSORFLOW_USE_ROCM=1",
     ]),
     deps = if_gpu_is_configured([
+        # keep sorted
         ":buffer_comparator_kernel",
         ":gpu_asm_opts_util",
         ":launch_dimensions",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@eigen_archive//:eigen3",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
@@ -4561,10 +4569,17 @@ cc_library(
         "//xla/stream_executor:device_memory_handle",
         "//xla/stream_executor:typed_kernel_factory",
         "//xla/stream_executor/gpu:asm_compiler",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@eigen_archive//:eigen3",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:ml_dtypes",
         "@local_tsl//tsl/platform:statusor",
+    ]) + if_rocm_is_configured([
+        # keep sorted
+        "@local_config_rocm//rocm:rocm_headers",
     ]),
 )
 

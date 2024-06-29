@@ -166,15 +166,11 @@ class PjRtStreamExecutorDevice : public PjRtDevice {
 
   bool IsAddressable() const override { return local_device_id_ != -1; }
 
-  int local_hardware_id() const override {
-    return local_hardware_id_typed().value();
-  }
-
   PjRtLocalDeviceId local_device_id() const override {
     return local_device_id_;
   }
 
-  PjRtLocalHardwareId local_hardware_id_typed() const override {
+  PjRtLocalHardwareId local_hardware_id() const override {
     return local_hardware_id_;
   }
 
@@ -477,6 +473,14 @@ class PjRtStreamExecutorClient : public PjRtClient {
     std::vector<PjRtDevice*> addressable_devices;
   };
   absl::StatusOr<ExecutableExtras> GetExecutableExtras(CompileOptions* options);
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostBufferInternal(
+      const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
+      std::optional<absl::Span<int64_t const>> byte_strides,
+      HostBufferSemantics host_buffer_semantics,
+      absl::AnyInvocable<void() &&> on_done_with_host_buffer,
+      PjRtDevice* device, const Layout* device_layout,
+      PjRtMemorySpace* memory_space);
 
   const PjRtPlatformId platform_id_;
   const std::string platform_name_;
@@ -854,10 +858,13 @@ class PjRtStreamExecutorBuffer : public PjRtBuffer {
   absl::StatusOr<std::pair<std::unique_ptr<PjRtBuffer>,
                            std::shared_ptr<BufferSequencingEvent>>>
   CopyToDeviceHelper(PjRtDevice* dst_device, LocalDeviceState* dst_local_device,
+                     PjRtMemorySpace* dst_memory_space,
                      LocalDeviceState* transfer_local_device,
                      LocalDeviceState* src_local_device,
                      se::Stream* transfer_stream,
                      std::shared_ptr<TrackedDeviceBuffer> src_device_buffer);
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToDeviceMemorySpace(
+      PjRtDevice* dst_device, PjRtMemorySpace* dst_memory_space = nullptr);
 
   PjRtStreamExecutorClient* const client_;
   const Shape on_device_shape_;
@@ -888,7 +895,8 @@ AllocateDestinationBuffer(
     const Shape& on_host_shape, PjRtDevice* device,
     LocalDeviceState* local_device, se::Stream* copy_stream,
     bool is_uninitialized_create, PjRtStreamExecutorClient* client,
-    std::shared_ptr<BufferSequencingEvent> definition_event = nullptr);
+    std::shared_ptr<BufferSequencingEvent> definition_event = nullptr,
+    PjRtMemorySpace* memory_space = nullptr);
 
 // Wraps one or more XLA LocalExecutables (one per partition, as specified by
 // the build options).

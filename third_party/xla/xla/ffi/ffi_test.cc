@@ -18,6 +18,7 @@ limitations under the License.
 #include <complex>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,6 +36,7 @@ limitations under the License.
 #include "xla/xla_data.pb.h"
 #include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/status_matchers.h"
+#include "tsl/platform/statusor.h"
 #include "tsl/platform/test.h"
 
 namespace xla::ffi {
@@ -94,14 +96,14 @@ TEST(FfiTest, StaticHandlerSymbolRegistration) {
 }
 
 TEST(FfiTest, ForwardError) {
-  auto call_frame = CallFrameBuilder().Build();
+  auto call_frame = CallFrameBuilder(/*num_args=*/0, /*num_rets=*/0).Build();
   auto handler = Ffi::Bind().To([] { return absl::AbortedError("Ooops!"); });
   auto status = Call(*handler, call_frame);
   ASSERT_EQ(status.message(), "Ooops!");
 }
 
 TEST(FfiTest, WrongNumArgs) {
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(se::DeviceMemoryBase(nullptr), PrimitiveType::F32, {});
   auto call_frame = builder.Build();
 
@@ -119,7 +121,7 @@ TEST(FfiTest, WrongNumAttrs) {
   attrs.Insert("i32", 42);
   attrs.Insert("f32", 42.0f);
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -143,7 +145,7 @@ TEST(FfiTest, BuiltinAttributes) {
   attrs.Insert("f64", 42.0);
   attrs.Insert("str", "foo");
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -182,7 +184,7 @@ TEST(FfiTest, BuiltinAttributesAutoBinding) {
   attrs.Insert("f32", 42.0f);
   attrs.Insert("str", "foo");
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -212,7 +214,7 @@ TEST(FfiTest, ArrayAttr) {
   attrs.Insert("arr4", std::vector<float>({1, 2, 3, 4}));
   attrs.Insert("arr5", std::vector<double>({1, 2, 3, 4}));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -251,7 +253,7 @@ TEST(FfiTest, PointerAttr) {
   CallFrameBuilder::AttributesBuilder attrs;
   attrs.Insert("ptr", static_cast<int64_t>(ptr));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -272,7 +274,7 @@ TEST(FfiTest, AttrsAsDictionary) {
   attrs.Insert("f32", 42.0f);
   attrs.Insert("str", "foo");
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -319,7 +321,7 @@ TEST(FfiTest, DictionaryAttr) {
   attrs.Insert("dict0", dict0);
   attrs.Insert("dict1", dict1);
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -368,7 +370,7 @@ TEST(FfiTest, StructAttr) {
   attrs.Insert("str", "foo");
   attrs.Insert("i32_and_f32", dict);
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -394,7 +396,7 @@ TEST(FfiTest, AttrsAsStruct) {
   attrs.Insert("i32", 42);
   attrs.Insert("f32", 42.0f);
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -417,7 +419,7 @@ TEST(FfiTest, DecodingErrors) {
   attrs.Insert("f32", 42.0f);
   attrs.Insert("str", "foo");
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   builder.AddAttributes(attrs.Build());
   auto call_frame = builder.Build();
 
@@ -460,7 +462,7 @@ TEST(FfiTest, AnyBufferArgument) {
   std::vector<float> storage(4, 0.0f);
   se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(float));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -488,7 +490,7 @@ TEST(FfiTest, TypedAndRankedBufferArgument) {
   std::vector<float> storage(4, 0.0f);
   se::DeviceMemoryBase memory(storage.data(), storage.size() * sizeof(float));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -517,7 +519,7 @@ TEST(FfiTest, ComplexBufferArgument) {
   se::DeviceMemoryBase memory(storage.data(),
                               storage.size() * sizeof(std::complex<float>));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::C64, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -533,7 +535,7 @@ TEST(FfiTest, ComplexBufferArgument) {
 }
 
 TEST(FfiTest, TokenArgument) {
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(se::DeviceMemoryBase(), PrimitiveType::TOKEN,
                        /*dims=*/{});
   auto call_frame = builder.Build();
@@ -553,7 +555,7 @@ TEST(FfiTest, WrongRankBufferArgument) {
   std::vector<int32_t> storage(4, 0.0);
   se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(int32_t));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -570,7 +572,7 @@ TEST(FfiTest, WrongTypeBufferArgument) {
   std::vector<int32_t> storage(4, 0.0);
   se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(int32_t));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::S32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -588,7 +590,7 @@ TEST(FfiTest, RemainingArgs) {
   std::vector<float> storage(4, 0.0f);
   se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(float));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/0);
   builder.AddBufferArg(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
@@ -609,7 +611,7 @@ TEST(FfiTest, RemainingRets) {
   std::vector<float> storage(4, 0.0f);
   se::DeviceMemoryBase memory(storage.data(), 4 * sizeof(float));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/2);
   builder.AddBufferRet(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   builder.AddBufferRet(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
@@ -628,7 +630,7 @@ TEST(FfiTest, RemainingRets) {
 }
 
 TEST(FfiTest, RunOptionsCtx) {
-  auto call_frame = CallFrameBuilder().Build();
+  auto call_frame = CallFrameBuilder(/*num_args=*/0, /*num_rets=*/0).Build();
   auto* expected = reinterpret_cast<se::Stream*>(0x01234567);
 
   auto fn = [&](const se::Stream* run_options) {
@@ -654,7 +656,7 @@ TEST(FfiTest, UserData) {
   ExecutionContext execution_context;
   TF_ASSERT_OK(execution_context.Emplace<StrUserData>("foo"));
 
-  CallFrameBuilder builder;
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
   auto call_frame = builder.Build();
 
   auto fn = [&](StrUserData* data) {
@@ -669,6 +671,70 @@ TEST(FfiTest, UserData) {
   auto status = Call(*handler, call_frame, options);
 
   TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, UpdateBufferArgumentsAndResults) {
+  std::vector<float> storage0(4, 0.0f);
+  std::vector<float> storage1(4, 0.0f);
+
+  se::DeviceMemoryBase memory0(storage0.data(), 4 * sizeof(float));
+  se::DeviceMemoryBase memory1(storage1.data(), 4 * sizeof(float));
+
+  std::vector<int64_t> dims = {2, 2};
+
+  auto bind = Ffi::Bind()
+                  .Arg<BufferR2<PrimitiveType::F32>>()
+                  .Ret<BufferR2<PrimitiveType::F32>>()
+                  .Attr<int32_t>("n");
+
+  // `fn0` expects argument to be `memory0` and result to be `memory1`.
+  auto fn0 = [&](BufferR2<PrimitiveType::F32> arg,
+                 Result<BufferR2<PrimitiveType::F32>> ret, int32_t n) {
+    EXPECT_EQ(arg.data.opaque(), storage0.data());
+    EXPECT_EQ(ret->data.opaque(), storage1.data());
+    EXPECT_EQ(arg.dimensions, dims);
+    EXPECT_EQ(ret->dimensions, dims);
+    EXPECT_EQ(n, 42);
+    return absl::OkStatus();
+  };
+
+  // `fn1` expects argument to be `memory1` and result to be `memory0`.
+  auto fn1 = [&](BufferR2<PrimitiveType::F32> arg,
+                 Result<BufferR2<PrimitiveType::F32>> ret, int32_t n) {
+    EXPECT_EQ(arg.data.opaque(), storage1.data());
+    EXPECT_EQ(ret->data.opaque(), storage0.data());
+    EXPECT_EQ(arg.dimensions, dims);
+    EXPECT_EQ(ret->dimensions, dims);
+    EXPECT_EQ(n, 42);
+    return absl::OkStatus();
+  };
+
+  CallFrameBuilder::AttributesBuilder attrs;
+  attrs.Insert("n", 42);
+
+  CallFrameBuilder builder(/*num_args=*/1, /*num_rets=*/1);
+  builder.AddBufferArg(memory0, PrimitiveType::F32, dims);
+  builder.AddBufferRet(memory1, PrimitiveType::F32, dims);
+  builder.AddAttributes(attrs.Build());
+
+  // Keep call frame wrapped in optional to be able to destroy it and test that
+  // updated call frame does not reference any destroyed memory.
+  std::optional<CallFrame> call_frame(builder.Build());
+
+  {  // Call `fn0` with an original call frame.
+    auto handler = bind.To(fn0);
+    auto status = Call(*handler, *call_frame);
+    TF_ASSERT_OK(status);
+  }
+
+  {  // Call `fn1` with swapped buffers for argument and result.
+    auto handler = bind.To(fn1);
+    TF_ASSERT_OK_AND_ASSIGN(
+        CallFrame updated_call_frame,
+        std::move(call_frame)->CopyWithBuffers({memory1}, {memory0}));
+    auto status = Call(*handler, updated_call_frame);
+    TF_ASSERT_OK(status);
+  }
 }
 
 }  // namespace xla::ffi

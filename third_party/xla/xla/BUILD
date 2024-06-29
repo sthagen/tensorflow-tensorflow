@@ -4,6 +4,10 @@ load(
     "tf_proto_library",
 )
 load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
+load(
+    "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
+    "if_cuda_is_configured",
+)
 load("//third_party/compute_library:build_defs.bzl", "if_enable_acl")
 
 # Placeholder: load py_proto_library
@@ -288,6 +292,29 @@ cc_library(
     deps = [
         "@com_google_absl//absl/status",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "fp_util",
+    hdrs = ["fp_util.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        ":util",
+    ],
+)
+
+xla_cc_test(
+    name = "fp_util_test",
+    srcs = ["fp_util_test.cc"],
+    deps = [
+        ":fp_util",
+        ":test",
+        ":util",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/numeric:bits",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
@@ -1066,6 +1093,7 @@ cc_library(
     ],
     hdrs = ["debug_options_flags.h"],
     copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]),
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     visibility = internal_visibility([":friends"]),
     deps =
         [
