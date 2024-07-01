@@ -69,10 +69,10 @@ TEST_F(MlirRowReductionTest, VariadicRowReduce) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2, s3] -> (
+        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
           (d3 * 2 + d0 floordiv 128) floordiv 3,
           (d3 * 2 + d0 floordiv 128) mod 3,
-          (d0 mod 128 + s2 * 128) * 2 + s3)
+          (d0 mod 128 + s1 * 128) * 2 + s2)
         domain:
         d0 in [0, 256)
         d1 in [0, 1)
@@ -81,10 +81,9 @@ TEST_F(MlirRowReductionTest, VariadicRowReduce) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 8)
-        s3 in [0, 2)
-        d0 mod 128 + s2 * 128 in [0, 1024)
+        s1 in [0, 8)
+        s2 in [0, 2)
+        d0 mod 128 + s1 * 128 in [0, 1024)
         d3 * 2 + d0 floordiv 128 in [0, 6)
       )"));
   EXPECT_THAT(
@@ -237,9 +236,9 @@ TEST_F(MlirRowReductionTest, F64RowReduction) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
+        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
           d3 * 8 + d0 floordiv 32,
-          d0 mod 32 + s2 * 32)
+          d0 mod 32 + s1 * 32)
         domain:
         d0 in [0, 256)
         d1 in [0, 1)
@@ -248,9 +247,8 @@ TEST_F(MlirRowReductionTest, F64RowReduction) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 4)
-        d0 mod 32 + s2 * 32 in [0, 128)
+        s1 in [0, 4)
+        d0 mod 32 + s1 * 32 in [0, 128)
         d3 * 8 + d0 floordiv 32 in [0, 100)
       )"));
   EXPECT_THAT(
@@ -271,6 +269,68 @@ TEST_F(MlirRowReductionTest, F64RowReduction) {
   TF_ASSERT_OK(EmitAndCheckIR(kHloString, R"(
     // CHECK-NOT: allocate_shared
   )"));
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
+}
+
+TEST_F(MlirRowReductionTest, RowReductionMinorAndMajor) {
+  constexpr auto kHloString = R"(
+    HloModule Test, is_scheduled=true
+
+    Add {
+      lhs = f32[] parameter(0)
+      rhs = f32[] parameter(1)
+      ROOT add = f32[] add(lhs, rhs)
+    }
+    fused_computation {
+      param_0 = f32[7,100,128] parameter(0)
+      param_1 = f32[] parameter(1)
+      ROOT reduce = f32[100] reduce(param_0, param_1), dimensions={0,2}, to_apply=Add
+    }
+    ENTRY main {
+      a = f32[7,100,128] parameter(0)
+      c = f32[] constant(0)
+      ROOT fusion = f32[100] fusion(a, c), kind=kInput, calls=fused_computation
+    })";
+  auto module = ParseAndReturnVerifiedModule(kHloString).value();
+  auto* root = module->entry_computation()->root_instruction();
+  auto analysis = AnalyzeFusion(*root, device_info_);
+  MlirRowReductionFusion fusion(analysis);
+
+  EXPECT_THAT(
+      fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
+      MatchIndexingString(R"(
+        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
+          s0,
+          d3 * 8 + d0 floordiv 32,
+          (d0 mod 32 + s1 * 32) * 2 + s2
+        )
+        domain:
+        d0 in [0, 256)
+        d1 in [0, 1)
+        d2 in [0, 1)
+        d3 in [0, 13)
+        d4 in [0, 1)
+        d5 in [0, 1)
+        s0 in [0, 7)
+        s1 in [0, 2)
+        s2 in [0, 2)
+        d0 mod 32 + s1 * 32 in [0, 64)
+        d3 * 8 + d0 floordiv 32 in [0, 100)
+      )"));
+  EXPECT_THAT(
+      fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
+      MatchIndexingString(R"(
+        (d0, d1, d2, d3, d4, d5) -> (d3 * 8 + d0 floordiv 32)
+        domain:
+        d0 in [0, 256)
+        d1 in [0, 1)
+        d2 in [0, 1)
+        d3 in [0, 13)
+        d4 in [0, 1)
+        d5 in [0, 1)
+        d0 mod 32 in [0, 1)
+        d3 * 8 + d0 floordiv 32 in [0, 100)
+      )"));
   EXPECT_TRUE(RunAndCompareNoHloPasses(kHloString, ErrorSpec{1e-3}));
 }
 
@@ -464,8 +524,8 @@ TEST_F(MlirRowReductionTest, SideOutput) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2, s3] -> (
-          d3 * 2 + d0 floordiv 128, (d0 mod 128 + s2 * 128) * 2 + s3)
+        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
+          d3 * 2 + d0 floordiv 128, (d0 mod 128 + s1 * 128) * 2 + s2)
         domain:
         d0 in [0, 256)
         d1 in [0, 1)
@@ -474,10 +534,9 @@ TEST_F(MlirRowReductionTest, SideOutput) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 8)
-        s3 in [0, 2)
-        d0 mod 128 + s2 * 128 in [0, 1024)
+        s1 in [0, 8)
+        s2 in [0, 2)
+        d0 mod 128 + s1 * 128 in [0, 1024)
         d3 * 2 + d0 floordiv 128 in [0, 8)
       )"));
   EXPECT_THAT(
@@ -534,8 +593,8 @@ TEST_F(MlirRowReductionTest, UnsignedSideOutput) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2, s3] -> (
-          d3 * 2 + d0 floordiv 128, (d0 mod 128 + s2 * 128) * 2 + s3)
+        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
+          d3 * 2 + d0 floordiv 128, (d0 mod 128 + s1 * 128) * 2 + s2)
           domain:
           d0 in [0, 256)
           d1 in [0, 1)
@@ -544,10 +603,9 @@ TEST_F(MlirRowReductionTest, UnsignedSideOutput) {
           d4 in [0, 1)
           d5 in [0, 1)
           s0 in [0, 1)
-          s1 in [0, 1)
-          s2 in [0, 8)
-          s3 in [0, 2)
-          d0 mod 128 + s2 * 128 in [0, 1024)
+          s1 in [0, 8)
+          s2 in [0, 2)
+          d0 mod 128 + s1 * 128 in [0, 1024)
           d3 * 2 + d0 floordiv 128 in [0, 8)
       )"));
   EXPECT_THAT(
@@ -593,7 +651,7 @@ TEST_F(MlirRowReductionTest, BroadcastSideOutput) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> ()
+        (d0, d1, d2, d3, d4, d5)[s0, s1] -> ()
         domain:
         d0 in [0, 32)
         d1 in [0, 1)
@@ -602,16 +660,15 @@ TEST_F(MlirRowReductionTest, BroadcastSideOutput) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 2)
-        (d0 + s2 * 32) mod 6 in [0, 6)
-        d0 + s2 * 32 in [0, 36)
+        s1 in [0, 2)
+        (d0 + s1 * 32) mod 6 in [0, 6)
+        d0 + s1 * 32 in [0, 36)
       )"));
   EXPECT_THAT(
       fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
-          (d0 + s2 * 32) floordiv 6, (d0 + s2 * 32) mod 6)
+        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+          (d0 + s1 * 32) floordiv 6, (d0 + s1 * 32) mod 6)
         domain:
         d0 in [0, 32)
         d1 in [0, 1)
@@ -620,9 +677,8 @@ TEST_F(MlirRowReductionTest, BroadcastSideOutput) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 2)
-        d0 + s2 * 32 in [0, 36)
+        s1 in [0, 2)
+        d0 + s1 * 32 in [0, 36)
       )"));
   TF_ASSERT_OK(EmitAndCheckIR(kHloString, R"(
     // CHECK: @fused_computation
@@ -666,8 +722,8 @@ TEST_F(MlirRowReductionTest, VariadicMOF) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
-          (d0 + s2 * 32) floordiv 6, (d0 + s2 * 32) mod 6)
+        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+          (d0 + s1 * 32) floordiv 6, (d0 + s1 * 32) mod 6)
         domain:
         d0 in [0, 32)
         d1 in [0, 1)
@@ -676,9 +732,8 @@ TEST_F(MlirRowReductionTest, VariadicMOF) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 2)
-        d0 + s2 * 32 in [0, 36)
+        s1 in [0, 2)
+        d0 + s1 * 32 in [0, 36)
       )"));
   EXPECT_THAT(
       fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
@@ -727,10 +782,10 @@ TEST_F(MlirRowReductionTest, ThreadIndexingOutputLayout) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1, s2, s3] -> (
+        (d0, d1, d2, d3, d4, d5)[s0, s1, s2] -> (
           (d3 * 8 + d0 floordiv 32) floordiv 64,
           (d3 * 8 + d0 floordiv 32) mod 64,
-          (d0 mod 32 + s2 * 32) * 2 + s3)
+          (d0 mod 32 + s1 * 32) * 2 + s2)
         domain:
         d0 in [0, 256)
         d1 in [0, 1)
@@ -739,10 +794,9 @@ TEST_F(MlirRowReductionTest, ThreadIndexingOutputLayout) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 1)
-        s1 in [0, 1)
-        s2 in [0, 8)
-        s3 in [0, 2)
-        d0 mod 32 + s2 * 32 in [0, 256)
+        s1 in [0, 8)
+        s2 in [0, 2)
+        d0 mod 32 + s1 * 32 in [0, 256)
         d3 * 8 + d0 floordiv 32 in [0, 6400)
       )"));
   EXPECT_THAT(
@@ -869,10 +923,10 @@ TEST_F(MlirColumnReductionTest, ColumnReduction) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+        (d0, d1, d2, d3, d4, d5)[s0] -> (
           d3 floordiv 11,
           d0 floordiv 32 + s0 * 32,
-          (d3 mod 11) * 32 + d0 mod 32 + s1
+          (d3 mod 11) * 32 + d0 mod 32
         )
         domain:
         d0 in [0, 1024)
@@ -882,15 +936,14 @@ TEST_F(MlirColumnReductionTest, ColumnReduction) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 33)
-        s1 in [0, 1)
-        (d3 mod 11) * 32 + d0 mod 32 + s1 in [0, 321)
+        (d3 mod 11) * 32 + d0 mod 32 in [0, 321)
         d0 floordiv 32 + s0 * 32 in [0, 1051)
       )"));
   EXPECT_THAT(
       fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
-          d3 floordiv 11, (d3 mod 11) * 32 + d0 floordiv 32 + s1
+        (d0, d1, d2, d3, d4, d5) -> (
+          d3 floordiv 11, (d3 mod 11) * 32 + d0 floordiv 32
         )
         domain:
         d0 in [0, 1024)
@@ -899,9 +952,7 @@ TEST_F(MlirColumnReductionTest, ColumnReduction) {
         d3 in [0, 143)
         d4 in [0, 1)
         d5 in [0, 1)
-        s0 in [0, 1)
-        s1 in [0, 1)
-        (d3 mod 11) * 32 + d0 floordiv 32 + s1 in [0, 321)
+        (d3 mod 11) * 32 + d0 floordiv 32 in [0, 321)
         d0 mod 32 in [0, 1)
       )"));
   TF_ASSERT_OK(EmitAndCheckIR(kHloString, R"(
@@ -988,8 +1039,8 @@ TEST_F(MlirColumnReductionTest, ColumnReductionVectorization) {
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
         (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
-          (d3 floordiv 256) * 2048 + d0 floordiv 32 + s0 * 32,
-          ((d3 mod 256) * 32 + d0 mod 32) * 2 + s1)
+          d0 floordiv 32 + s0 * 32,
+          (d3 * 32 + d0 mod 32) * 2 + s1)
         domain:
         d0 in [0, 1024)
         d1 in [0, 1)
@@ -999,14 +1050,14 @@ TEST_F(MlirColumnReductionTest, ColumnReductionVectorization) {
         d5 in [0, 1)
         s0 in [0, 64)
         s1 in [0, 2)
-        ((d3 mod 256) * 32 + d0 mod 32) * 2 + s1 in [0, 16384)
+        (d3 * 32 + d0 mod 32) * 2 + s1 in [0, 16384)
         d0 floordiv 32 + s0 * 32 in [0, 2048)
       )"));
   EXPECT_THAT(
       fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
         (d0, d1, d2, d3, d4, d5)[s0, s1] ->
-          ((d3 floordiv 256) * 16384 + ((d3 mod 256) * 32 + d0 floordiv 32) * 2 + s1)
+          ((d3 * 32 + d0 floordiv 32) * 2 + s1)
         domain:
         d0 in [0, 1024)
         d1 in [0, 1)
@@ -1016,7 +1067,7 @@ TEST_F(MlirColumnReductionTest, ColumnReductionVectorization) {
         d5 in [0, 1)
         s0 in [0, 1)
         s1 in [0, 2)
-        ((d3 mod 256) * 32 + d0 floordiv 32) * 2 + s1 in [0, 16384)
+        (d3 * 32 + d0 floordiv 32) * 2 + s1 in [0, 16384)
         d0 mod 32 in [0, 1)
       )"));
   TF_ASSERT_OK(EmitAndCheckIR(kHloString, R"(
@@ -1158,10 +1209,10 @@ TEST_F(MlirColumnReductionTest, ThreadIndexingColumn_f64) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+        (d0, d1, d2, d3, d4, d5)[s0] -> (
           d3 floordiv 48,
           d0 floordiv 32 + s0 * 32,
-          (d3 mod 48) * 32 + d0 mod 32 + s1
+          (d3 mod 48) * 32 + d0 mod 32
         )
         domain:
         d0 in [0, 1024)
@@ -1171,8 +1222,7 @@ TEST_F(MlirColumnReductionTest, ThreadIndexingColumn_f64) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 2)
-        s1 in [0, 1)
-        (d3 mod 48) * 32 + d0 mod 32 + s1 in [0, 1536)
+        (d3 mod 48) * 32 + d0 mod 32 in [0, 1536)
         d0 floordiv 32 + s0 * 32 in [0, 64)
       )"));
 }
@@ -1191,10 +1241,10 @@ TEST_F(MlirColumnReductionTest, ThreadIndexingColumn_Complex) {
   EXPECT_THAT(
       fusion.ComputeThreadIdToInputIndexing(0, 0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+        (d0, d1, d2, d3, d4, d5)[s0] -> (
           d3 floordiv 48,
           d0 floordiv 32 + s0 * 32,
-          (d3 mod 48) * 32 + d0 mod 32 + s1
+          (d3 mod 48) * 32 + d0 mod 32
         )
         domain:
         d0 in [0, 1024)
@@ -1204,16 +1254,15 @@ TEST_F(MlirColumnReductionTest, ThreadIndexingColumn_Complex) {
         d4 in [0, 1)
         d5 in [0, 1)
         s0 in [0, 2)
-        s1 in [0, 1)
-        (d3 mod 48) * 32 + d0 mod 32 + s1 in [0, 1536)
+        (d3 mod 48) * 32 + d0 mod 32 in [0, 1536)
         d0 floordiv 32 + s0 * 32 in [0, 64)
       )"));
   EXPECT_THAT(
       fusion.ComputeThreadIdToOutputIndexing(0, &mlir_context_)->ToString(),
       MatchIndexingString(R"(
-        (d0, d1, d2, d3, d4, d5)[s0, s1] -> (
+        (d0, d1, d2, d3, d4, d5) -> (
           d3 floordiv 48,
-          (d3 mod 48) * 32 + d0 floordiv 32 + s1)
+          (d3 mod 48) * 32 + d0 floordiv 32)
         domain:
         d0 in [0, 1024)
         d1 in [0, 1)
@@ -1221,9 +1270,7 @@ TEST_F(MlirColumnReductionTest, ThreadIndexingColumn_Complex) {
         d3 in [0, 9216)
         d4 in [0, 1)
         d5 in [0, 1)
-        s0 in [0, 1)
-        s1 in [0, 1)
-        (d3 mod 48) * 32 + d0 floordiv 32 + s1 in [0, 1536)
+        (d3 mod 48) * 32 + d0 floordiv 32 in [0, 1536)
         d0 mod 32 in [0, 1)
       )"));
 }
