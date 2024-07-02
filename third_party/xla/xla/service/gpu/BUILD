@@ -21,7 +21,7 @@ load(
     "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
     "if_cuda_is_configured",
 )
-load("//xla:xla.bzl", "xla_cc_test", "xla_cub_deps", "xla_internal")
+load("//xla:xla.bzl", "xla_cc_test", "xla_internal")
 load(
     "//xla/service/gpu:build_defs.bzl",
     "build_cub_sort_kernels",
@@ -1182,7 +1182,7 @@ gpu_kernel_library(
         "@eigen_archive//:eigen3",
         "@local_config_cuda//cuda:cuda_headers",
         "@local_tsl//tsl/platform:bfloat16",
-    ] + if_cuda_is_configured(xla_cub_deps()) + if_rocm_is_configured([
+    ] + if_cuda_is_configured(["@local_config_cuda//cuda:cub_headers"]) + if_rocm_is_configured([
         "@local_config_rocm//rocm:rocprim",
     ]),
 )
@@ -5916,7 +5916,6 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/ir:hlo_instruction_utils",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:collective_ops_utils",
         "//xla/service:flatten_call_graph",
@@ -6320,8 +6319,8 @@ cc_library(
     ],
 )
 
-cc_test(
+xla_cc_test(
     name = "gpu_latency_hiding_scheduler_test",
     srcs = ["gpu_latency_hiding_scheduler_test.cc"],
-    deps = ["@com_google_googletest//:gtest_main"],
+    deps = ["//xla/tests:xla_internal_test_main"],
 )
