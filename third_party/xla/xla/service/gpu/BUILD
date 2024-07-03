@@ -1285,7 +1285,7 @@ xla_cc_test(
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:protobuf",
-        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:status_matchers",
     ],
 )
 
@@ -5916,6 +5916,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_instruction_utils",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:collective_ops_utils",
         "//xla/service:flatten_call_graph",

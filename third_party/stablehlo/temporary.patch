@@ -1,3 +1,37 @@
+diff --ruN a/stablehlo/BUILD.bazel b/stablehlo/BUILD.bazel
+--- stablehlo/BUILD.bazel
++++ stablehlo/BUILD.bazel
+@@ -841,12 +841,14 @@
+ STABLEHLO_CAPI_SOURCES = [
+     "stablehlo/integrations/c/StablehloAttributes.cpp",
+     "stablehlo/integrations/c/StablehloDialect.cpp",
++    "stablehlo/integrations/c/StablehloPasses.cpp",
+     "stablehlo/integrations/c/StablehloTypes.cpp",
+ ]
+ 
+ STABLEHLO_CAPI_HEADERS = [
+     "stablehlo/integrations/c/StablehloAttributes.h",
+     "stablehlo/integrations/c/StablehloDialect.h",
++    "stablehlo/integrations/c/StablehloPasses.h",
+     "stablehlo/integrations/c/StablehloTypes.h",
+ ]
+ 
+@@ -857,6 +859,7 @@
+     strip_include_prefix = ".",
+     deps = [
+         ":stablehlo_ops",
++        ":stablehlo_passes",
+         "@llvm-project//mlir:CAPIIR",
+     ],
+ )
+@@ -879,6 +882,7 @@
+     strip_include_prefix = ".",
+     deps = [
+         ":stablehlo_ops",
++        ":stablehlo_passes",
+         "@llvm-project//mlir:CAPIIRObjects",
+     ],
+     alwayslink = True,
 diff --ruN a/stablehlo/CMakeLists.txt b/stablehlo/CMakeLists.txt
 --- stablehlo/CMakeLists.txt
 +++ stablehlo/CMakeLists.txt
@@ -398,7 +432,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloBytecode.cpp b/stablehlo/stabl
 diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/dialect/StablehloOps.cpp
 --- stablehlo/stablehlo/dialect/StablehloOps.cpp
 +++ stablehlo/stablehlo/dialect/StablehloOps.cpp
-@@ -2590,7 +2590,6 @@
+@@ -2581,7 +2581,6 @@
  
  using mlir::hlo::parseComplexOpType;
  using mlir::hlo::parseCustomCallTarget;
@@ -406,7 +440,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/
  using mlir::hlo::parseDotDimensionNumbers;
  using mlir::hlo::parseExponentMantissa;
  using mlir::hlo::parsePairwiseOpType;
-@@ -2602,7 +2601,6 @@
+@@ -2593,7 +2592,6 @@
  using mlir::hlo::parseVariadicSameOperandsAndResultType;
  using mlir::hlo::printComplexOpType;
  using mlir::hlo::printCustomCallTarget;
@@ -414,7 +448,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/
  using mlir::hlo::printDotDimensionNumbers;
  using mlir::hlo::printExponentMantissa;
  using mlir::hlo::printPairwiseOpType;
-@@ -3291,11 +3289,11 @@
+@@ -3282,11 +3280,11 @@
  }  // namespace
  
  void printWindowAttributes(OpAsmPrinter& p, Operation* /*op*/,
@@ -430,7 +464,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/
    using pair_t = std::pair<Attribute, StringRef>;
    std::array<pair_t, 5> printedAttributes = {{
        {windowStrides ? *windowStrides : nullptr, "stride"},
-@@ -3327,20 +3325,12 @@
+@@ -3318,20 +3316,12 @@
    });
  }
  
@@ -456,7 +490,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.cpp b/stablehlo/stablehlo/
    StringRef attributeName;
  
    llvm::StringSet<> allowedAttributeNames{
-@@ -3419,15 +3409,6 @@
+@@ -3410,15 +3400,6 @@
    return success();
  }
  
@@ -521,7 +555,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.h b/stablehlo/stablehlo/di
 diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/dialect/StablehloOps.td
 --- stablehlo/stablehlo/dialect/StablehloOps.td
 +++ stablehlo/stablehlo/dialect/StablehloOps.td
-@@ -1518,7 +1518,7 @@
+@@ -1520,7 +1520,7 @@
    let arguments = (ins
      Variadic<HLO_Tensor>:$inputs, /*reduce_i1*/
      Variadic<HLO_Tensor>:$init_values, /*reduce_i2*/
@@ -530,7 +564,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
    let regions = (region SizedRegion<1>:$body /*reduce_i4*/);
  
-@@ -1669,9 +1669,9 @@
+@@ -1671,9 +1671,9 @@
  
    let arguments = (ins
      HLO_Tensor:$operand,
@@ -543,7 +577,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
  
    let assemblyFormat = [{
-@@ -1702,15 +1702,14 @@
+@@ -1704,15 +1704,14 @@
    let arguments = (ins
      HLO_Tensor:$operand /*dynamic_slice_i1*/,
      Variadic<HLO_ScalarIntTensor>:$start_indices /*dynamic_slice_i2*/,
@@ -561,7 +595,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    }];
  }
  
-@@ -1904,13 +1903,13 @@
+@@ -1906,13 +1905,13 @@
    }];
    let arguments = (ins
      HLO_Tensor:$operand,
@@ -577,7 +611,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  }
-@@ -1933,7 +1932,7 @@
+@@ -1935,7 +1934,7 @@
    }];
    let arguments = (ins
      HLO_TensorOrPerAxisQuantizedTensor:$operand /*broadcast_in_dim_i1*/,
@@ -586,7 +620,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
  
    let results = (outs HLO_StaticShapeTensorOrPerAxisQuantizedTensor);
-@@ -1941,7 +1940,7 @@
+@@ -1943,7 +1942,7 @@
    let hasVerifier = 1;
  
    let assemblyFormat = [{
@@ -595,7 +629,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  
-@@ -1984,9 +1983,9 @@
+@@ -1986,9 +1985,9 @@
    let arguments = (ins
      HLO_TensorOrPerAxisQuantizedTensor:$operand /*dynamic_broadcast_in_dim_i1*/,
      HLO_StaticDimensionTensor:$output_dimensions /*dynamic_broadcast_in_dim_i2*/,
@@ -608,7 +642,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
  
    let results = (outs HLO_TensorOrPerAxisQuantizedTensor);
-@@ -2004,7 +2003,7 @@
+@@ -2006,7 +2005,7 @@
    let hasVerifier = 1;
  
    let assemblyFormat = [{
@@ -617,7 +651,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  
-@@ -2264,15 +2263,15 @@
+@@ -2266,15 +2265,15 @@
      HLO_Tensor:$lhs, /*convolution_i1*/
      HLO_TensorOrPerAxisQuantizedTensor:$rhs, /*convolution_i2*/
      // Default value: one for each of the spatial dimension.
@@ -635,9 +669,9 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
 -    OptionalAttr<GenericDenseBoolArrayAttr>:$window_reversal, /*convolution_i7*/
 +    OptionalAttr<DenseBoolArrayAttr>:$window_reversal, /*convolution_i7*/
      StableHLO_ConvDimensionNumbers:$dimension_numbers, /*convolution_i8...convolution_i16*/
-     I64Attr:$feature_group_count, /*convolution_i17*/
-     I64Attr:$batch_group_count, /*convolution_i18*/
-@@ -2533,13 +2532,13 @@
+     ConfinedAttr<I64Attr, [IntPositive]>:$feature_group_count, /*convolution_c21, convolution_i17*/
+     ConfinedAttr<I64Attr, [IntPositive]>:$batch_group_count, /*convolution_c22, convolution_i18*/
+@@ -2535,13 +2534,13 @@
    let arguments = (ins
      HLO_FpOrComplexTensor:$operand,
      StableHLO_FftTypeAttr:$fft_type,
@@ -653,7 +687,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  
-@@ -2581,7 +2580,7 @@
+@@ -2583,7 +2582,7 @@
      HLO_Tensor:$operand /*gather_i1*/,
      HLO_IntTensor:$start_indices /*gather_i2*/,
      StableHLO_GatherDimensionNumbers:$dimension_numbers /*gather_i3...gather_i8*/,
@@ -662,7 +696,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
      DefaultValuedOptionalAttr<BoolAttr, "false">:$indices_are_sorted /*gather_i10*/
    );
  
-@@ -2646,7 +2645,7 @@
+@@ -2648,7 +2647,7 @@
    }];
    let arguments = (ins
      Variadic<HLO_Tensor>:$inputs /*map_i1*/,
@@ -671,7 +705,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
    let regions = (region SizedRegion<1>:$computation /*map_i3*/);
    let results = (outs HLO_Tensor);
-@@ -2834,8 +2833,8 @@
+@@ -2836,8 +2835,8 @@
      HLO_Tensor:$operand, /*select_and_scatter_i1*/
      HLO_Tensor:$source, /*select_and_scatter_i2*/
      HLO_Tensor:$init_value, /*select_and_scatter_i3*/
@@ -682,7 +716,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
      OptionalAttr<I64ElementsAttr>:$padding /*select_and_scatter_i6*/
    );
  
-@@ -2943,7 +2942,7 @@
+@@ -2945,7 +2944,7 @@
    }];
    let arguments = (ins
      HLO_Tensor:$operand,
@@ -691,7 +725,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
    );
  
    let hasVerifier = 1;
-@@ -2951,7 +2950,7 @@
+@@ -2953,7 +2952,7 @@
    let results = (outs HLO_Tensor:$result);
  
    let assemblyFormat = [{
@@ -700,7 +734,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` custom<SameOperandsAndResultType>(type($operand), type($result))
    }];
  }
-@@ -2980,18 +2979,18 @@
+@@ -2982,18 +2981,18 @@
    let arguments = (ins
      HLO_Tensor:$operand /*pad_i1*/,
      HLO_ScalarTensor:$padding_value /*pad_i2*/,
@@ -725,7 +759,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  }
-@@ -3015,14 +3014,14 @@
+@@ -3017,14 +3016,14 @@
    }];
    let arguments = (ins
      HLO_TensorOrPerAxisQuantizedTensor:$operand,
@@ -742,7 +776,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
        attr-dict `:` functional-type(operands, results)
    }];
  
-@@ -3102,13 +3101,13 @@
+@@ -3104,13 +3103,13 @@
    let arguments = (ins
      Variadic<HLO_Tensor>:$inputs /*reduce_window_i1*/,
      Variadic<HLO_Tensor>:$init_values /*reduce_window_i2*/,
@@ -760,7 +794,7 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
      OptionalAttr<I64ElementsAttr>:$padding /*reduce_window_i7*/
    );
  
-@@ -3530,10 +3529,10 @@
+@@ -3531,10 +3530,10 @@
         HLO_Tensor:$lhs, /*dynamic_conv_i1*/
         HLO_Tensor:$rhs, /*dynamic_conv_i2*/
         HLO_Static2DIntTensor:$padding, /*dynamic_conv_i3*/
@@ -773,8 +807,8 @@ diff --ruN a/stablehlo/stablehlo/dialect/StablehloOps.td b/stablehlo/stablehlo/d
 +       OptionalAttr<DenseI64ArrayAttr>:$rhs_dilation, /*dynamic_conv_i6*/
 +       OptionalAttr<DenseBoolArrayAttr>:$window_reversal, /*dynamic_conv_i7*/
         StableHLO_ConvDimensionNumbers:$dimension_numbers, /*dynamic_conv_i8...dynamic_conv_i16*/
-        I64Attr:$feature_group_count, /*dynamic_conv_i17*/
-        I64Attr:$batch_group_count, /*dynamic_conv_i18*/
+        ConfinedAttr<I64Attr, [IntPositive]>:$feature_group_count, /*dynamic_conv_c21, dynamic_conv_i17*/
+        ConfinedAttr<I64Attr, [IntPositive]>:$batch_group_count, /*dynamic_conv_c22, dynamic_conv_i18*/
 diff --ruN a/stablehlo/stablehlo/experimental/BUILD.bazel b/stablehlo/stablehlo/experimental/BUILD.bazel
 --- stablehlo/stablehlo/experimental/BUILD.bazel
 +++ stablehlo/stablehlo/experimental/BUILD.bazel
@@ -3543,6 +3577,149 @@ diff --ruN a/stablehlo/stablehlo/experimental/transforms/StablehloRefineShapes.c
 +}  // namespace experimental
 +}  // namespace stablehlo
 +}  // namespace mlir
+diff --ruN a/stablehlo/stablehlo/integrations/c/CMakeLists.txt b/stablehlo/stablehlo/integrations/c/CMakeLists.txt
+--- stablehlo/stablehlo/integrations/c/CMakeLists.txt
++++ stablehlo/stablehlo/integrations/c/CMakeLists.txt
+@@ -26,10 +26,12 @@
+   PARTIAL_SOURCES_INTENDED
+   StablehloAttributes.cpp
+   StablehloDialect.cpp
++  StablehloPasses.cpp
+   StablehloTypes.cpp
+ 
+   LINK_LIBS PUBLIC
+   StablehloOps
++  StablehloPasses
+ )
+ 
+ add_mlir_public_c_api_library(VhloCAPI
+diff --ruN a/stablehlo/stablehlo/integrations/c/StablehloPasses.cpp b/stablehlo/stablehlo/integrations/c/StablehloPasses.cpp
+--- stablehlo/stablehlo/integrations/c/StablehloPasses.cpp
++++ stablehlo/stablehlo/integrations/c/StablehloPasses.cpp
+@@ -0,0 +1,17 @@
++/* Copyright 2024 The StableHLO Authors.
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++    http://www.apache.org/licenses/LICENSE-2.0
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++==============================================================================*/
++
++#include "stablehlo/integrations/c/StablehloPasses.h"
++
++#include "stablehlo/transforms/Passes.h"
++
++void mlirRegisterAllStablehloPasses() { mlir::stablehlo::registerPasses(); }
+diff --ruN a/stablehlo/stablehlo/integrations/c/StablehloPasses.h b/stablehlo/stablehlo/integrations/c/StablehloPasses.h
+--- stablehlo/stablehlo/integrations/c/StablehloPasses.h
++++ stablehlo/stablehlo/integrations/c/StablehloPasses.h
+@@ -0,0 +1,30 @@
++/* Copyright 2024 The StableHLO Authors.
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++    http://www.apache.org/licenses/LICENSE-2.0
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++==============================================================================*/
++
++#ifndef STABLEHLO_INTEGRATIONS_C_STABLEHLO_PASSES_H
++#define STABLEHLO_INTEGRATIONS_C_STABLEHLO_PASSES_H
++
++#include "mlir-c/IR.h"
++#include "mlir-c/Support.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/// Register all compiler passes of StableHLO.
++MLIR_CAPI_EXPORTED void mlirRegisterAllStablehloPasses();
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif  // STABLEHLO_INTEGRATIONS_C_STABLEHLO_PASSES_H
+diff --ruN a/stablehlo/stablehlo/integrations/python/StablehloModule.cpp b/stablehlo/stablehlo/integrations/python/StablehloModule.cpp
+--- stablehlo/stablehlo/integrations/python/StablehloModule.cpp
++++ stablehlo/stablehlo/integrations/python/StablehloModule.cpp
+@@ -20,6 +20,7 @@
+ #include "stablehlo/dialect/Serialization.h"
+ #include "stablehlo/integrations/c/StablehloAttributes.h"
+ #include "stablehlo/integrations/c/StablehloDialect.h"
++#include "stablehlo/integrations/c/StablehloPasses.h"
+ #include "stablehlo/integrations/c/StablehloTypes.h"
+ #include "stablehlo/integrations/python/PortableApi.h"
+ #include "stablehlo/reference/Api.h"
+@@ -64,6 +65,13 @@
+         }
+       },
+       py::arg("context"), py::arg("load") = true);
++
++  //
++  // Passes.
++  //
++
++  m.def("register_stablehlo_passes",
++        []() { mlirRegisterAllStablehloPasses(); });
+ 
+   //
+   // Types.
+diff --ruN a/stablehlo/stablehlo/integrations/python/tests/stablehlo.py b/stablehlo/stablehlo/integrations/python/tests/stablehlo.py
+--- stablehlo/stablehlo/integrations/python/tests/stablehlo.py
++++ stablehlo/stablehlo/integrations/python/tests/stablehlo.py
+@@ -17,9 +17,10 @@
+ 
+ # pylint: disable=wildcard-import,undefined-variable
+ 
++import io
+ import re
+-import io
+ from mlir import ir
++from mlir import passmanager as pm
+ from mlir.dialects import stablehlo
+ import numpy as np
+ 
+@@ -304,6 +305,7 @@
+     deserialized = stablehlo.deserialize_portable_artifact(context, serialized)
+     assert module_str == str(deserialized)
+ 
++
+ @run
+ def test_str_serialization_apis():
+   curr_version = stablehlo.get_current_version()
+@@ -323,3 +325,23 @@
+     deserialized = stablehlo.deserialize_portable_artifact(serialized)
+     deserialized_module = ir.Module.parse(deserialized)
+     assert module_str == str(deserialized_module)
++
++
++@run
++def test_register_passes():
++  """Tests pass registration."""
++  with ir.Context() as context:
++    stablehlo.register_dialect(context)
++    module = ir.Module.parse(ASM_FORMAT.format("2xf32"))
++    assert module is not None
++
++    stablehlo.register_stablehlo_passes()
++    pipeline = [
++        "stablehlo-legalize-to-vhlo",
++        "vhlo-legalize-to-stablehlo",
++    ]
++    pipeline = pm.PassManager.parse(f"builtin.module({','.join(pipeline)})")
++
++    cloned_module = module.operation.clone()
++    pipeline.run(cloned_module.operation)
++    assert str(module) == str(cloned_module)
 diff --ruN a/stablehlo/stablehlo/tests/ops_stablehlo_roundtrip.mlir b/stablehlo/stablehlo/tests/ops_stablehlo_roundtrip.mlir
 --- stablehlo/stablehlo/tests/ops_stablehlo_roundtrip.mlir
 +++ stablehlo/stablehlo/tests/ops_stablehlo_roundtrip.mlir
@@ -3609,7 +3786,7 @@ diff --ruN a/stablehlo/stablehlo/tests/ops_stablehlo_roundtrip.mlir b/stablehlo/
 diff --ruN a/stablehlo/stablehlo/transforms/StablehloAggressiveSimplification.cpp b/stablehlo/stablehlo/transforms/StablehloAggressiveSimplification.cpp
 --- stablehlo/stablehlo/transforms/StablehloAggressiveSimplification.cpp
 +++ stablehlo/stablehlo/transforms/StablehloAggressiveSimplification.cpp
-@@ -820,9 +820,9 @@
+@@ -819,9 +819,9 @@
        newInitVals.push_back(op.getOperand(i + numOperandPairs));
      }
  
