@@ -1,4 +1,8 @@
 load("@local_xla//xla/stream_executor:build_defs.bzl", "if_cuda_or_rocm")
+load(
+    "@local_xla//xla/tsl:tsl.bzl",
+    "check_deps",
+)
 load("//tensorflow:tensorflow.bzl", "if_libtpu", "if_with_tpu_support", "tf_cc_test", "tf_copts", "tf_cuda_cc_test", "tf_cuda_only_cc_test")
 load("//tensorflow:tensorflow.default.bzl", "cc_header_only_library", "filegroup", "tf_custom_op_py_strict_library")
 load("//tensorflow/core/platform:build_config.bzl", "tf_additional_all_protos", "tf_proto_library")
@@ -364,6 +368,15 @@ cc_library(
     alwayslink = 1,
 )
 
+check_deps(
+    name = "xla_device_check_deps",
+    disallowed_deps = [
+        "@local_xla//xla/service/gpu:gpu_compiler",
+        "@local_xla//xla/service/cpu:cpu_compiler",
+    ],
+    deps = [":xla_device"],
+)
+
 cc_library(
     name = "xla_device",
     hdrs = [
@@ -613,11 +626,11 @@ cc_library(
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
         "//tensorflow/core:framework_internal",
-        "//tensorflow/core:gpu_runtime",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/common_runtime:dma_helper",
+        "//tensorflow/core/common_runtime:gpu_device_context",
         "//tensorflow/core/common_runtime/gpu:gpu_serving_device_selector",
         "//tensorflow/core/tfrt/common:async_value_tensor",
         "@com_google_absl//absl/algorithm:container",
@@ -1684,6 +1697,7 @@ tf_cuda_only_cc_test(
         ":test_util",
         ":xla_gpu_jit",
         "//tensorflow/core:framework",
+        "//tensorflow/core:gpu_runtime",  # Needed to register DEVICE_GPU
         "//tensorflow/core/tfrt/common:pjrt_util",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:statusor",
@@ -1776,6 +1790,7 @@ tf_cuda_only_cc_test(
         "//tensorflow/compiler/tf2xla:common",
         "//tensorflow/compiler/tf2xla:xla_op_registry",
         "//tensorflow/core:framework_internal",
+        "//tensorflow/core:gpu_runtime",  # Needed to register DEVICE_GPU
         "//tensorflow/core:test",
         "//tensorflow/core/framework:tensor_testutil",
         "@com_google_googletest//:gtest_main",

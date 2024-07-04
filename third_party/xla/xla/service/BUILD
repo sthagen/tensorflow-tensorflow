@@ -7550,6 +7550,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
@@ -7668,6 +7669,7 @@ cc_library(
     srcs = ["scatter_simplifier.cc"],
     hdrs = ["scatter_simplifier.h"],
     deps = [
+        ":call_inliner",
         ":gather_scatter_utils",
         ":hlo_creation_utils",
         ":op_expander_pass",
@@ -7677,6 +7679,7 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -7744,6 +7747,7 @@ cc_library(
     deps = [
         ":hlo_creation_utils",
         ":hlo_pass",
+        "//xla/service/cpu:onednn_convolution_rewriter",
         "//xla/service/cpu:onednn_matmul_rewriter",
     ],
 )

@@ -504,6 +504,7 @@ cc_library(
 cc_library(
     name = "ptx_compiler_stub",
     srcs = [
+        "ptx_compiler.h",
         "ptx_compiler_stub.cc",
     ],
     deps = [
@@ -516,6 +517,7 @@ cc_library(
 cc_library(
     name = "ptx_compiler_impl",
     srcs = [
+        "ptx_compiler.h",
         "ptx_compiler_impl.cc",
     ],
     tags = ["manual"],
@@ -719,8 +721,4 @@ cc_library(
     name = "cudnn_frontend_helpers",
     srcs = ["cudnn_frontend_helpers.cc"],
     hdrs = ["cudnn_frontend_helpers.h"],
-)
-
-cc_library(
-    name = "cuda_nvptxcompiler",
 )
