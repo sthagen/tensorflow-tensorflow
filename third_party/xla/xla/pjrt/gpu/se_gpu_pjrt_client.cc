@@ -123,7 +123,7 @@ class AsyncHostToDeviceTransferManager
  public:
   static absl::StatusOr<std::unique_ptr<AsyncHostToDeviceTransferManager>>
   Create(absl::Span<const Shape> shapes, PjRtStreamExecutorDevice* device,
-         PjRtStreamExecutorClient* client) {
+         PjRtStreamExecutorClient* client, PjRtMemorySpace* memory_space) {
     absl::InlinedVector<std::unique_ptr<PjRtBuffer>, 4> buffers;
     absl::InlinedVector<std::shared_ptr<TrackedDeviceBuffer>, 4> buffer_ptrs;
     absl::InlinedVector<std::shared_ptr<BufferSequencingEvent>, 4>
@@ -151,7 +151,7 @@ class AsyncHostToDeviceTransferManager
                           AllocateDestinationBuffer(
                               compact_shape, device, local_device, h2d_stream,
                               /*is_uninitialized_create=*/true, client,
-                              definition_events.back()));
+                              definition_events.back(), memory_space));
       // Get a temporary hold just so we can fish out a shared_ptr to the
       // TrackedDeviceBuffer. It's ok to drop the hold before return the
       // buffers, because the invariants of this class ensure that the buffer
@@ -548,14 +548,18 @@ StreamExecutorGpuClient::CreateBuffersForAsyncHostToDevice(
   auto* stream_executor_device =
       tensorflow::down_cast<PjRtStreamExecutorDevice*>(device);
   return xla::AsyncHostToDeviceTransferManager::Create(
-      shapes, stream_executor_device, this);
+      shapes, stream_executor_device, this, /*memory_space=*/nullptr);
 }
 
 absl::StatusOr<std::unique_ptr<PjRtClient::AsyncHostToDeviceTransferManager>>
 StreamExecutorGpuClient::CreateBuffersForAsyncHostToDevice(
     absl::Span<const Shape> shapes, PjRtMemorySpace* memory_space) {
   CHECK_EQ(memory_space->devices().size(), 1);
-  return CreateBuffersForAsyncHostToDevice(shapes, memory_space->devices()[0]);
+  PjRtDevice* device = memory_space->devices()[0];
+  auto* stream_executor_device =
+      tensorflow::down_cast<PjRtStreamExecutorDevice*>(device);
+  return xla::AsyncHostToDeviceTransferManager::Create(
+      shapes, stream_executor_device, this, memory_space);
 }
 
 absl::StatusOr<xla::DeviceAssignment>
@@ -798,7 +802,7 @@ StreamExecutorGpuClient::Load(std::unique_ptr<PjRtExecutable> executable) {
 
 namespace {
 
-#if defined(GOOGLE_CUDA) && CUDA_VERSION >= 11020
+#if defined(GOOGLE_CUDA)
 
 absl::StatusOr<std::unique_ptr<se::GpuCudaMallocAsyncAllocator>>
 CreateCudaAsyncAllocator(const LocalDeviceState& device, double memory_fraction,
@@ -843,14 +847,14 @@ CreateCudaAsyncAllocator(const LocalDeviceState& device, double memory_fraction,
   return allocator;
 }
 
-#else  // defined(GOOGLE_CUDA) && CUDA_VERSION >= 11020
+#else  // defined(GOOGLE_CUDA)
 absl::StatusOr<std::unique_ptr<tsl::Allocator>> CreateCudaAsyncAllocator(
     const LocalDeviceState& device, double memory_fraction, bool reserve_memory,
     bool create_new_pool, bool sync_mode, bool compute_stats = true) {
   return FailedPrecondition("CUDA async allocator requires CUDA >= 11.2");
 }
 
-#endif  // defined(GOOGLE_CUDA) && CUDA_VERSION >= 11020
+#endif  // defined(GOOGLE_CUDA)
 
 // Builds a LocalDeviceState for each GPU present.
 absl::StatusOr<std::map<int, std::unique_ptr<LocalDeviceState>>>
@@ -942,7 +946,7 @@ GetStreamExecutorGpuDeviceAllocator(
                             static_cast<int>(se::MemoryType::kHost));
   }
 
-#if defined(GOOGLE_CUDA) && CUDA_VERSION >= 11020
+#if defined(GOOGLE_CUDA)
   const auto& debug_options = xla::GetDebugOptionsFromFlags();
   if (debug_options.xla_gpu_temp_buffer_use_separate_color()) {
     // Add memory allocator to allocate memory buffers with persistent temp

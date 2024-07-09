@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The StableHLO Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,18 +12,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_LITE_DELEGATES_FLEX_ALLOWLISTED_FLEX_OPS_INTERNAL_H_
-#define TENSORFLOW_LITE_DELEGATES_FLEX_ALLOWLISTED_FLEX_OPS_INTERNAL_H_
 
-#include <string>
+#ifndef STABLEHLO_EXT_TRANSFORMS_PASSES_H
+#define STABLEHLO_EXT_TRANSFORMS_PASSES_H
 
-namespace tflite {
-namespace flex {
+#include <memory>
 
-// Return true if op_name is a tf.text op need to be supported by flex delegate.
-bool IsAllowedTFTextOpForFlex(const std::string& op_name);
+#include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/DialectConversion.h"
 
-}  // namespace flex
-}  // namespace tflite
+namespace mlir {
+namespace stablehlo {
+namespace experimental {
 
-#endif  // TENSORFLOW_LITE_DELEGATES_FLEX_ALLOWLISTED_FLEX_OPS_INTERNAL_H_
+#define GEN_PASS_DECL
+#define GEN_PASS_REGISTRATION
+#include "stablehlo_ext/transforms/passes.h.inc"
+
+void createChloLegalizeToStablehloPipeline(OpPassManager &pm);
+
+}  // namespace experimental
+}  // namespace stablehlo
+}  // namespace mlir
+
+#endif  // STABLEHLO_EXT_TRANSFORMS_PASSES_H
