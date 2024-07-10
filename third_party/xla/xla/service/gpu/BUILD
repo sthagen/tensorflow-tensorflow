@@ -2194,8 +2194,11 @@ cc_library(
 
 cc_library(
     name = "gpu_sort_rewriter",
-    srcs = if_gpu_is_configured(["gpu_sort_rewriter.cc"]),
-    hdrs = if_gpu_is_configured(["gpu_sort_rewriter.h"]),
+    srcs = if_gpu_is_configured(
+        ["gpu_sort_rewriter.cc"],
+        ["gpu_sort_rewriter_stub.cc"],
+    ),
+    hdrs = ["gpu_sort_rewriter.h"],
     deps = [
         ":cublas_cudnn",
         "//xla:comparison_util",
@@ -2619,8 +2622,10 @@ xla_cc_test(
         ":backend_configs_cc",
         ":gpu_device_info_for_tests",
         ":softmax_rewriter_triton",
+        ":triton_support",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_query",
         "//xla/service:instruction_fusion",
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
@@ -2628,12 +2633,9 @@ xla_cc_test(
         "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # build_cleaner: keep
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
@@ -3183,6 +3185,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:float_support",
         "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log:check",
     ],
 )
@@ -3699,6 +3702,8 @@ xla_test(
         ":metrics",
         "//xla:autotune_results_proto_cc",
         "//xla:error_spec",
+        "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:executable",
         "//xla/service:hlo_module_config",
@@ -5231,6 +5236,24 @@ xla_test(
         "//xla/service/gpu/tests:gpu_codegen_test",
         "//xla/stream_executor:device_description",
         "//xla/tests:xla_internal_test_main",
+    ],
+)
+
+xla_cc_test(
+    name = "gpu_float_support_test",
+    srcs = ["gpu_float_support_test.cc"],
+    deps = [
+        ":gpu_float_support",
+        "//xla:shape_util",
+        "//xla:test_helpers",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:float_normalization",
+        "//xla/service:hlo_verifier",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:hlo_test_base",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

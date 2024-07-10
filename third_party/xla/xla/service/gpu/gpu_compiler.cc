@@ -643,8 +643,8 @@ absl::Status RunOptimizationPasses(
   pipeline.AddPass<DotDimensionSorter>();
   pipeline.AddPass<DotDecomposer>();
 
-  pipeline.AddPass<OperandUpcaster>(upcaster_filter);
   pipeline.AddPass<ResultCaster>(upcaster_filter);
+  pipeline.AddPass<OperandUpcaster>(upcaster_filter);
 
   // Add the DotOperandConverter after any potential upcasts done as part of
   // the OperandUpcaster, so that the DotOperandConverter becomes a no-op.
@@ -1377,16 +1377,14 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     pipeline.AddPass<AlgorithmChecker>(gpu_version);
     const auto* cuda_cc = std::get_if<se::CudaComputeCapability>(&gpu_version);
 
-    // Rewrite FP8 GEMMs ahead of Triton which currently lacks support for FP8
-    // and may rewrite quantized FP8 GEMMs as higher-precision GEMMs.
-    pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
-                                   /*f8_rewrite=*/true);
     if (debug_options.xla_gpu_enable_triton_gemm() && cuda_cc != nullptr &&
         cuda_cc->IsAtLeast(se::CudaComputeCapability::AMPERE)) {
       pipeline.AddPass<GemvRewriter>();
       pipeline.AddPass<GemmFusion>(gpu_version);
     }
-    // Rewrite non-FP8 GEMMs.
+
+    pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
+                                   /*f8_rewrite=*/true);
     pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
                                    /*f8_rewrite=*/false);
 
@@ -1412,8 +1410,14 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     if (debug_options.xla_gpu_enable_triton_softmax_fusion() &&
         cuda_cc != nullptr &&
         cuda_cc->IsAtLeast(se::CudaComputeCapability::AMPERE)) {
+      // Triton compilation needs normalized operations on bf16 (i.e. converted
+      // to f32).
+      add_float_normalization(pipeline);
       pipeline.AddPass<HloPassFix<GpuAlgebraicSimplifier>>(simplifier_options,
                                                            gpu_version);
+      pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
+      pipeline.AddPass<HloConstantFolding>();
+      pipeline.AddPass<HloDCE>();
       pipeline.AddPass<SoftmaxRewriterTriton>(
           gpu_target_config.device_description, ShapeSizeBytesFunction());
     }
@@ -1449,7 +1453,10 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<CallInliner>();
   // TODO(tdanyluk): Apply CublasPadForGemms to the cuBLAS GEMMs generated
   // here for possibly better cuBLAS performance.
-  pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion());
+  pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
+                                 /*f8_rewrite=*/true);
+  pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
+                                 /*f8_rewrite=*/false);
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
