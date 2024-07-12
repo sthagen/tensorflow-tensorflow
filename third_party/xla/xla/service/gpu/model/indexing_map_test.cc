@@ -628,6 +628,17 @@ TEST_F(IndexingMapTest, AffineMapSimplification_SumOrderRegression) {
   EXPECT_FALSE(indexing_map.Simplify());
 }
 
+TEST_F(IndexingMapTest, AffineMapSimplification_SumOrderRegression2) {
+  // This is a regression test for a bug where we didn't simplify the affine
+  // expression fully after a single iteration.
+  IndexingMap indexing_map = IndexingMap::FromTensorSizes(
+      ParseAffineMap("(d0)[s0] -> ((((s0 + d0) + d0) floordiv 2))",
+                     &mlir_context_),
+      {10, 20}, {30, 40});
+  EXPECT_TRUE(indexing_map.Simplify());
+  EXPECT_FALSE(indexing_map.Simplify());
+}
+
 TEST_F(IndexingMapTest,
        AffineMapSimplification_DivsAndModsIfSmallerThanDivisor) {
   auto serialized_map = "(d0, d1) -> (d0 + d1 floordiv 16, d1 mod 16)";
@@ -806,6 +817,18 @@ TEST_F(IndexingMapTest, AffineMapSimplification_DivDiv) {
       domain:
       s0 in [0, 1234)
       s1 in [0, 128)
+    )"));
+}
+
+TEST_F(IndexingMapTest, AffineMapSimplification_DivSumConstant) {
+  auto serialized_map = "()[s0] -> ((s0 * 6 + 9) floordiv 18)";
+  IndexingMap indexing_map = IndexingMap::FromTensorSizes(
+      ParseAffineMap(serialized_map, &mlir_context_), {}, {1234});
+  EXPECT_TRUE(indexing_map.Simplify());
+  EXPECT_THAT(indexing_map.ToString(printer_), MatchIndexingString(R"(
+      ()[s0] -> ((s0 * 2 + 3) floordiv 6)
+      domain:
+      s0 in [0, 1234)
     )"));
 }
 
@@ -997,9 +1020,14 @@ TEST_F(IndexingMapTest, RescaleSymbolsKeepsHashmapConsistent) {
 }
 
 TEST_F(IndexingMapTest, RangeEvaluatorTest) {
-  RangeEvaluator range_evaluator(
-      {Interval{0, 9}, Interval{-10, -1}, Interval{-1, 2}, Interval{0, 0}}, {},
-      &mlir_context_);
+  auto serialized_map = "(d0, d1, d2, d3)[] -> (0)";
+  IndexingMap indexing_map(ParseAffineMap(serialized_map, &mlir_context_),
+                           {{Interval{0, 9}},
+                            {Interval{-10, -1}},
+                            {Interval{-1, 2}},
+                            {Interval{0, 0}}},
+                           {}, {});
+  RangeEvaluator range_evaluator(indexing_map, &mlir_context_);
   mlir::AffineExpr d0, d1, d2, d3;
   bindDims(&mlir_context_, d0, d1, d2, d3);
 
