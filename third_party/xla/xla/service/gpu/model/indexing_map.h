@@ -162,7 +162,7 @@ class IndexingMap;
 class RangeEvaluator {
  public:
   RangeEvaluator(const IndexingMap& indexing_map,
-                 mlir::MLIRContext* mlir_context);
+                 mlir::MLIRContext* mlir_context, bool use_constraints = true);
 
   // Checks whether an `AffineExpr` always describes a non-negative value.
   bool IsAlwaysPositiveOrZero(mlir::AffineExpr expr);
@@ -179,7 +179,7 @@ class RangeEvaluator {
  private:
   mlir::MLIRContext* mlir_context_;
   const IndexingMap& indexing_map_;
-  llvm::DenseMap<mlir::AffineExpr, Interval> expression_ranges_cache_;
+  bool use_constraints_;
 };
 
 // Dimension variable represents a dimension of a tensor or a GPU grid.
@@ -363,11 +363,6 @@ class IndexingMap {
   bool IsKnownEmpty() const { return is_known_empty_; }
 
   bool IsUndefined() const { return affine_map_ == mlir::AffineMap(); }
-
-  // Removes unused dimensions from the `affine_map_` and constraints.
-  // Returns a bit vector of dimensions that were removed. If none of the
-  // dimensions were removed, returns {}.
-  llvm::SmallBitVector RemoveUnusedDimensions();
 
   // Removes unused symbols from the `affine_map_` and constraints.
   // Returns a bit vector of symbols that were removed. If none of the symbols
