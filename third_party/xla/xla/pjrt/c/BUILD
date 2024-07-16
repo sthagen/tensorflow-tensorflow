@@ -64,6 +64,7 @@ cc_library(
         ":pjrt_c_api_helpers",
         ":pjrt_c_api_wrapper_impl",
         "//xla/ffi:execution_context",
+        "//xla/ffi:type_id_registry",
         "@com_google_absl//absl/status",
     ],
 )
@@ -228,9 +229,7 @@ cc_library(
 xla_cc_binary(
     name = "pjrt_c_api_cpu_plugin.so",
     linkopts = if_macos(
-        [
-            "-Wl,--no-undefined",
-        ],
+        [],
         [
             "-Wl,--version-script,$(location :pjrt_c_api_cpu_version_script.lds)",
             "-Wl,--no-undefined",
@@ -379,6 +378,7 @@ xla_test(
         "//xla:shape_util",
         "//xla/ffi:execution_context",
         "//xla/ffi:ffi_api",
+        "//xla/ffi:type_id_registry",
         "//xla/ffi/api:ffi",
         "//xla/pjrt:pjrt_common",
         "//xla/pjrt:pjrt_future",
