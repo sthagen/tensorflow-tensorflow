@@ -184,9 +184,9 @@ class GpuExecutor : public StreamExecutorCommon {
     return GpuDriver::HostDeallocate(context_, location);
   }
 
-  absl::StatusOr<MemorySpace> GetPointerMemorySpace(const void* ptr) override {
+  absl::StatusOr<MemoryType> GetPointerMemorySpace(const void* ptr) override {
     return GpuDriver::GetPointerMemorySpace(
-        reinterpret_cast<GpuDevicePtr>(ptr));
+        reinterpret_cast<GpuDevicePtr>(const_cast<void*>(ptr)));
   }
 
   bool SynchronizeAllActivity() override;

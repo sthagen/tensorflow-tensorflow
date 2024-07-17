@@ -29,26 +29,26 @@ limitations under the License.
 #include "nvidia/include/NVGPUToLLVM/NVGPUToLLVMPass.h"
 #include "nvidia/include/TritonNVIDIAGPUToLLVM/PTXAsmFormat.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"  // from @llvm-project
-#include "mlir/Conversion/LLVMCommon/Pattern.h"  // from @llvm-project
-#include "mlir/Conversion/LLVMCommon/TypeConverter.h"  // from @llvm-project
-#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
-#include "mlir/Dialect/GPU/IR/GPUDialect.h"  // from @llvm-project
-#include "mlir/Dialect/LLVMIR/NVVMDialect.h"  // from @llvm-project
-#include "mlir/IR/Attributes.h"  // from @llvm-project
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/IR/PatternMatch.h"  // from @llvm-project
-#include "mlir/IR/Types.h"  // from @llvm-project
-#include "mlir/IR/Value.h"  // from @llvm-project
-#include "mlir/Pass/Pass.h"  // from @llvm-project
-#include "mlir/Pass/PassRegistry.h"  // from @llvm-project
-#include "mlir/Support/LLVM.h"  // from @llvm-project
-#include "mlir/Support/LogicalResult.h"  // from @llvm-project
-#include "mlir/Support/TypeID.h"  // from @llvm-project
-#include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
+#include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
+#include "mlir/Conversion/LLVMCommon/Pattern.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassRegistry.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Support/TypeID.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Analysis/Allocation.h"
 #include "triton/Analysis/Membar.h"
 #include "triton/Conversion/TritonGPUToLLVM/TypeConverter.h"
@@ -417,7 +417,7 @@ Value convertLayout(ConversionPatternRewriter &rewriter, Location loc,
 }
 }  // namespace SharedToSparseDotOperand
 
-struct LocalLoadOpConversion
+struct SparseLocalLoadToLLVM
     : public ConvertOpToLLVMPattern<triton::gpu::LocalLoadOp> {
  public:
   using ConvertOpToLLVMPattern<
@@ -456,6 +456,49 @@ struct LocalLoadOpConversion
     rewriter.replaceOp(op, res);
     return success();
   }
+};
+
+class SparseLocalLoadToLLVMPass
+    : public PassWrapper<SparseLocalLoadToLLVMPass, OperationPass<ModuleOp>> {
+ public:
+  SparseLocalLoadToLLVMPass() = default;
+
+  StringRef getArgument() const override { return "sparse-local-load-to-llvm"; }
+
+  void getDependentDialects(mlir::DialectRegistry &registry) const override {
+    registry.insert<LLVM::LLVMDialect, mlir::gpu::GPUDialect,
+                    arith::ArithDialect>();
+  }
+
+  void runOnOperation() override {
+    // Allocate shared memory and set barrier
+    // This is also done in the TritonGPUToLLVMPass but we need to do it before
+    // we write the local load op to LLVM to have barriers in the right place.
+    // See b/351986109.
+    ModuleAllocation allocation(getOperation());
+    ModuleMembarAnalysis membarPass(&allocation);
+    membarPass.run();
+
+    MLIRContext *context = &getContext();
+    ConversionTarget target(*context);
+    target.addLegalDialect<LLVM::LLVMDialect, mlir::gpu::GPUDialect,
+                           arith::ArithDialect>();
+    target.addDynamicallyLegalOp<triton::gpu::LocalLoadOp>(
+        [](triton::gpu::LocalLoadOp op) {
+          return !isa<triton::gpu::SparseDotMetaEncodingAttr>(
+              op.getType().getEncoding());
+        });
+    mlir::LowerToLLVMOptions option(context);
+    TritonGPUToLLVMTypeConverter typeConverter(context, option);
+    auto pattern = std::make_unique<SparseLocalLoadToLLVM>(typeConverter);
+    RewritePatternSet patterns(context, std::move(pattern));
+    if (failed(applyPartialConversion(getOperation(), target,
+                                      std::move(patterns)))) {
+      return signalPassFailure();
+    }
+  }
+
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadToLLVMPass)
 };
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
@@ -791,49 +834,6 @@ struct SparseDotOpConversion
   }
 };
 
-class SparseLocalLoadOpToLLVMPass
-    : public PassWrapper<SparseLocalLoadOpToLLVMPass, OperationPass<ModuleOp>> {
- public:
-  SparseLocalLoadOpToLLVMPass() = default;
-
-  StringRef getArgument() const override { return "sparse-local-load-to-llvm"; }
-
-  void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry.insert<LLVM::LLVMDialect, mlir::gpu::GPUDialect,
-                    arith::ArithDialect>();
-  }
-
-  void runOnOperation() override {
-    // Allocate shared memory and set barrier
-    // This is also done in the TritonGPUToLLVMPass but we need to do it before
-    // we write the local load op to LLVM to have barriers in the right place.
-    // See b/351986109.
-    ModuleAllocation allocation(getOperation());
-    ModuleMembarAnalysis membarPass(&allocation);
-    membarPass.run();
-
-    MLIRContext *context = &getContext();
-    ConversionTarget target(*context);
-    target.addLegalDialect<LLVM::LLVMDialect, mlir::gpu::GPUDialect,
-                           arith::ArithDialect>();
-    target.addDynamicallyLegalOp<triton::gpu::LocalLoadOp>(
-        [](triton::gpu::LocalLoadOp op) {
-          return !isa<triton::gpu::SparseDotMetaEncodingAttr>(
-              op.getType().getEncoding());
-        });
-    mlir::LowerToLLVMOptions option(context);
-    TritonGPUToLLVMTypeConverter typeConverter(context, option);
-    auto pattern = std::make_unique<LocalLoadOpConversion>(typeConverter);
-    RewritePatternSet patterns(context, std::move(pattern));
-    if (failed(applyPartialConversion(getOperation(), target,
-                                      std::move(patterns)))) {
-      return signalPassFailure();
-    }
-  }
-
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadOpToLLVMPass)
-};
-
 class SparseDotOpToLLVMPass
     : public PassWrapper<SparseDotOpToLLVMPass, OperationPass<ModuleOp>> {
  public:
@@ -864,7 +864,7 @@ class SparseDotOpToLLVMPass
     }
   }
 
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadOpToLLVMPass)
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadToLLVMPass)
 };
 
 namespace ttn = mlir::triton::nvgpu;
@@ -973,7 +973,7 @@ class SparseWGMMAOpToLLVMPass
     }
   }
 
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadOpToLLVMPass)
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SparseLocalLoadToLLVMPass)
 };
 
 }  // namespace
@@ -988,8 +988,8 @@ std::unique_ptr<mlir::Pass> xla::gpu::CreateSparseBlockedToMMAPass() {
   return std::make_unique<SparseBlockedToMMAPass>();
 }
 
-std::unique_ptr<mlir::Pass> xla::gpu::CreateSparseLocalLoadOpToLLVMPass() {
-  return std::make_unique<SparseLocalLoadOpToLLVMPass>();
+std::unique_ptr<mlir::Pass> xla::gpu::CreateSparseLocalLoadToLLVMPass() {
+  return std::make_unique<SparseLocalLoadToLLVMPass>();
 }
 
 std::unique_ptr<mlir::Pass> xla::gpu::CreateSparseDotOpToLLVMPass() {
@@ -1003,7 +1003,7 @@ std::unique_ptr<mlir::Pass> xla::gpu::CreateSparseWGMMAOpToLLVMPass() {
 void xla::gpu::RegisterSparsePasses() {
   registerPass([] { return std::make_unique<AddSparseEncodingPass>(); });
   registerPass(CreateSparseBlockedToMMAPass);
-  registerPass(CreateSparseLocalLoadOpToLLVMPass);
+  registerPass(CreateSparseLocalLoadToLLVMPass);
   registerPass(CreateSparseDotOpToLLVMPass);
   registerPass(CreateSparseWGMMAOpToLLVMPass);
 }

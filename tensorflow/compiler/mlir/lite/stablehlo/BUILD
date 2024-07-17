@@ -637,6 +637,7 @@ cc_library(
         ":hlo_legalize_tflite_inc_gen",
         ":passes_inc_gen",
         "//tensorflow/compiler/mlir/lite:tensorflow_lite",
+        "//tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions:conv",
         "//tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions:custom_call",
         "//tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions:dot_general",
         "//tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions:reduce",
@@ -653,6 +654,24 @@ cc_library(
     alwayslink = True,
 )
 
+gentbl_cc_library(
+    name = "prepare_hlo_inc_gen",
+    compatible_with = get_compatible_with_portable(),
+    tbl_outs = [
+        (
+            ["-gen-rewriters"],
+            "transforms/generated_prepare_hlo.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "transforms/prepare_hlo.td",
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncTdFiles",
+        "@local_xla//xla/mlir_hlo:hlo_ops_td_files",
+    ],
+)
+
 cc_library(
     name = "prepare_hlo",
     srcs = [
@@ -666,7 +685,9 @@ cc_library(
     ],
     deps = [
         ":passes_inc_gen",
-        "@llvm-project//mlir:ArithDialect",
+        ":prepare_hlo_inc_gen",
+        "//tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions:conv_util",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
