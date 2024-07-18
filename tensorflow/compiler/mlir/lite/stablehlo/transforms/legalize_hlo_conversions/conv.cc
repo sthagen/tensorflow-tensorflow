@@ -50,10 +50,6 @@ bool AreShapesSupported(const ConvData& data) {
          IsShapeFullyStatic(data.OutputShape());
 }
 
-bool IsStrideSupported(const ConvData& data) {
-  return llvm::all_of(data.Strides(), [](int64_t v) { return v == 1; });
-}
-
 bool IsPaddingSupported(const ConvData& data) {
   return llvm::all_of(data.Padding(), [](const DimPadding& p) {
     return p.Hi() == 0 && p.Lo() == 0;
@@ -62,14 +58,6 @@ bool IsPaddingSupported(const ConvData& data) {
 
 bool IsInputDilationSupported(const ConvData& data) {
   return llvm::all_of(data.InputDilations(), [](int64_t v) { return v == 1; });
-}
-
-bool IsKernelDilationSupported(const ConvData& data) {
-  return llvm::all_of(data.KernelDilations(), [](int64_t v) { return v == 1; });
-}
-
-bool IsFeatureGroupSupported(const ConvData& data) {
-  return data.FeatureGroupCount() == 1;
 }
 
 bool IsBatchGroupSupported(const ConvData& data) {
@@ -87,15 +75,12 @@ bool IsConvLegal(mhlo::ConvolutionOp op) {
   const ConvData data(op);
 
   const bool are_groups_supported =
-      IsFeatureGroupSupported(data) && IsBatchGroupSupported(data);
+      IsStandardFeatureGroup(data) && IsBatchGroupSupported(data);
 
-  const bool are_dilations_supported =
-      IsInputDilationSupported(data) && IsKernelDilationSupported(data);
-
-  return !are_groups_supported || !are_dilations_supported ||
-         !AreShapesSupported(data) || !IsTFLNativeLayout(data) ||
-         !IsStrideSupported(data) || !IsPaddingSupported(data) ||
-         !IsWindowReversalSupported(data) | !IsStandardConv(op);
+  return !are_groups_supported || !IsRankSupported(data) ||
+         !IsInputDilationSupported(data) || !AreShapesSupported(data) ||
+         !IsTFLNativeLayout(data) || !IsPaddingSupported(data) ||
+         !IsWindowReversalSupported(data) || !IsStandardConv(op);
 }
 
 //===----------------------------------------------------------------------===//
