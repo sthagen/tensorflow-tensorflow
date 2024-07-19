@@ -936,7 +936,7 @@ while_body {
   dqa_unscaled = bf16[32,128] multiply(dqa, a_scales)
   mb = bf16[128,128] all-gather(dqa_unscaled), channel_id=1, use_global_device_ids=true, dimensions={0}, replica_groups={{0,1,2,3}}
   ma = bf16[128,128] dynamic-slice(get-tuple-element.395, select.1348, constant.2561), dynamic_slice_sizes={128,128}
-  
+
   qma = f8e4m3fn[128,128] convert(ma)
   dqma = bf16[128,128] convert(qma)
   ma_scale = bf16[] get-tuple-element(param), index=4
@@ -986,7 +986,7 @@ TEST_F(CollectiveOpsTestE2E,
        PostLayoutCollectivePipelinerShouldFlattenCallGraph) {
   // The allgather in the loop has a nested while loop as its operand,
   // when the pipelining happens, the nested while loop will be peeled outside.
-  // However, when a while is cloned, its callsites are still preserved which
+  // However, when a while is cloned, its call sites are still preserved which
   // will error out in alias analysis. When the graph is flattened, the error
   // should not happen.
   absl::string_view kModuleReplicatedStr = R"(
@@ -1052,7 +1052,6 @@ ENTRY entry {
 )";
 
   const int64_t kNumReplicas = 1;
-  const int64_t kNumPartitions = 4;
 
   HloModuleConfig config =
       GetModuleConfigForTest(/*replica_count=*/kNumReplicas);
