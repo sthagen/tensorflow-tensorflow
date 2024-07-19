@@ -25,7 +25,6 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -37,7 +36,6 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_join.h"
-#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/array.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
@@ -50,8 +48,6 @@ limitations under the License.
 #include "xla/hlo/utils/hlo_sharding_util.h"
 #include "xla/protobuf_util.h"
 #include "xla/service/dot_as_convolution_util.h"
-#include "xla/service/hlo_cse.h"
-#include "xla/service/hlo_pass_pipeline.h"
 #include "xla/service/host_memory_offload_annotations.h"
 #include "xla/service/spmd/shard_barrier_partitioner.h"
 #include "xla/shape.h"
@@ -67,94 +63,6 @@ limitations under the License.
 
 namespace xla {
 namespace {
-
-// Remove stale shard group instructions after a module has been changed.
-void RemoveStaleShardGroupInstructions(
-    HloModule* module,
-    const absl::flat_hash_set<absl::string_view>& execution_threads,
-    absl::flat_hash_map<int64_t, absl::flat_hash_set<HloInstruction*>>&
-        shard_group_id_to_shard_group) {
-  absl::flat_hash_map<const HloInstruction*, int64_t>
-      instruction_to_shard_group_id;
-  absl::flat_hash_set<const HloInstruction*> not_stale;
-  for (auto& [shard_group_id, shard_group] : shard_group_id_to_shard_group) {
-    for (HloInstruction* instruction : shard_group) {
-      instruction_to_shard_group_id[instruction] = shard_group_id;
-    }
-  }
-  for (auto computation : module->computations(execution_threads)) {
-    for (auto instruction : computation->instructions()) {
-      if (instruction_to_shard_group_id.contains(instruction)) {
-        not_stale.insert(instruction);
-      }
-    }
-  }
-  for (auto& [instruction, shard_group_id] : instruction_to_shard_group_id) {
-    if (!not_stale.contains(instruction)) {
-      shard_group_id_to_shard_group[shard_group_id].erase(instruction);
-    }
-  }
-}
-
-template <typename T>
-using IsHloInstructionPointer =
-    typename std::enable_if_t<std::is_same_v<HloInstruction*, T> ||
-                              std::is_same_v<const HloInstruction*, T>>;
-
-template <typename K, typename = IsHloInstructionPointer<K>>
-void RemoveStaleSetInstructions(
-    HloModule* module,
-    const absl::flat_hash_set<absl::string_view>& execution_threads,
-    absl::flat_hash_set<K>& set) {
-  absl::flat_hash_set<K> not_stale;
-  for (auto computation : module->computations(execution_threads)) {
-    for (auto instruction : computation->instructions()) {
-      if (set.contains(instruction)) {
-        not_stale.insert(instruction);
-      }
-    }
-  }
-  set = std::move(not_stale);
-}
-
-template <typename K, typename V, typename = IsHloInstructionPointer<K>>
-void RemoveStaleMapInstructions(
-    HloModule* module,
-    const absl::flat_hash_set<absl::string_view>& execution_threads,
-    absl::flat_hash_map<K, V>& map) {
-  absl::flat_hash_set<K> not_stale;
-  for (auto computation : module->computations(execution_threads)) {
-    for (auto instruction : computation->instructions()) {
-      if (map.contains(instruction)) {
-        not_stale.insert(instruction);
-      }
-    }
-  }
-  absl::erase_if(map, [&not_stale](const auto& p) {
-    return !not_stale.contains(p.first);
-  });
-}
-
-void RemoveStaleComputationMap(
-    HloModule* module,
-    const absl::flat_hash_set<absl::string_view>& execution_threads,
-    ShardingPropagation::ComputationMap& computation_map) {
-  absl::flat_hash_set<HloInstruction*> computation_map_instructions;
-  for (auto& [_, instruction] : computation_map) {
-    computation_map_instructions.insert(instruction);
-  }
-  absl::flat_hash_set<HloInstruction*> not_stale;
-  for (auto computation : module->computations(execution_threads)) {
-    for (auto instruction : computation->instructions()) {
-      if (computation_map_instructions.contains(instruction)) {
-        not_stale.insert(instruction);
-      }
-    }
-  }
-  absl::erase_if(computation_map, [&not_stale](const auto& p) {
-    return !not_stale.contains(p.second);
-  });
-}
 
 // Returning the improved sharding of an instruction from some other sharding.
 std::optional<HloSharding> ReturnImprovedSharding(
@@ -1557,10 +1465,29 @@ absl::StatusOr<bool> ProcessShardingInstruction(
     for (auto it = instructions.rbegin(); it != instructions.rend(); ++it) {
       HloInstruction* instruction = *it;
       if (instruction->IsCustomCall("Sharding")) {
-        HloSharding original_sharding = instruction->sharding();
         TF_RET_CHECK(instruction->has_sharding())
             << "Sharding instruction must have a sharding attribute";
+        HloSharding original_sharding = instruction->sharding();
         VLOG(3) << "ProcessShardingInstruction: " << instruction->ToString();
+
+        // Simplify consecutive Sharding custom-call instructions. If both
+        // shardings are tiled, we do not simplify the instruction since these
+        // two shardings can guide the partitioner. An example is
+        // https://github.com/google/jax/issues/21562.
+        HloInstruction* operand = instruction->mutable_operand(0);
+        if (!original_sharding.IsUnknown() &&
+            operand->IsCustomCall("Sharding") && operand->user_count() == 1 &&
+            !(original_sharding.IsTiled() && operand->sharding().IsTiled())) {
+          operand->set_sharding(original_sharding);
+          TF_ASSIGN_OR_RETURN(
+              std::ignore,
+              computation->ReplaceInstruction(
+                  instruction, operand, /*preserve_sharding=*/false,
+                  /*relay_control_dependency=*/false,
+                  /*remove_unused_operands=*/false));
+          changed = true;
+          continue;
+        }
 
         std::vector<int64_t> unspec_dims;
         TF_RETURN_IF_ERROR(sharding_op_util::ParseAttributes(
@@ -3354,40 +3281,6 @@ absl::StatusOr<bool> ShardingPropagation::Run(
   for (int64_t aggressiveness = 0; aggressiveness < 4; ++aggressiveness) {
     TF_RETURN_IF_ERROR(
         run_to_fix_point(aggressiveness, /*propagate_shard_group=*/true));
-  }
-
-  if (changed) {
-    // Run CSE again to remove any duplicate ops with the same sharding or
-    // compatible shardings.
-    HloPassPipeline pass("sharding-propation-cse");
-    pass.AddPass<HloCSE>(
-        /*is_layout_sensitive=*/false,
-        /*only_fusion_computations=*/false,
-        /*ignore_control_dependencies=*/false,
-        /*only_scalars=*/false,
-        /*is_sharding_sensitive=*/true,
-        /*allow_compatible_sharding=*/true,
-        /*instructions_to_skip=*/provided_shardings);
-    TF_RETURN_IF_ERROR(pass.Run(module, execution_threads).status());
-
-    // CSE may invalidate stored HloInstruction pointers, so we need to remove
-    // stale shard group instructions.
-    call_graph = CallGraph::Build(module);
-    RemoveStaleShardGroupInstructions(module, execution_threads,
-                                      shard_group_id_to_shard_as_group);
-    RemoveStaleShardGroupInstructions(module, execution_threads,
-                                      shard_group_id_to_shard_like_group);
-    RemoveStaleSetInstructions(module, execution_threads, provided_shardings);
-    RemoveStaleMapInstructions(module, execution_threads,
-                               instruction_to_shard_group_id);
-    RemoveStaleMapInstructions(module, execution_threads, unspecified_dims);
-    RemoveStaleComputationMap(module, execution_threads, computation_map);
-    if (cse_prevention_only_) {
-      RemoveStaleMapInstructions(module, execution_threads, *original_sharding);
-    }
-    // propagate sharding again to update the sharding of the CSE'd ops.
-    TF_RETURN_IF_ERROR(run_to_fix_point(/*aggressiveness=*/3,
-                                        /*propagate_shard_group=*/false));
   }
 
   // Align the shardings from the same shard_as group so that they will adopt

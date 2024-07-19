@@ -1,4 +1,5 @@
 /* Copyright 2024 The OpenXLA Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -11,26 +12,33 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef XLA_HLO_TRANSFORMS_HLO_BROADCAST_SPLITTER_H_
-#define XLA_HLO_TRANSFORMS_HLO_BROADCAST_SPLITTER_H_
+
+#ifndef XLA_SERVICE_COLLECTIVE_QUANTIZER_H_
+#define XLA_SERVICE_COLLECTIVE_QUANTIZER_H_
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/hlo_pass_interface.h"
 
 namespace xla {
 
-// Splits the broadcast instructions such that they have a single user. This
-// aggressively duplicates all broadcasts and relies on DCE to clean up the
-// duplicates after propagation and partitioning.
-class HloBroadcastSplitter : public HloModulePass {
+// Reduces the amount of data transferred in all-gather, all-to-all,
+// collective-broadcast and collective-permute ops by exchanging the collectives
+// with subsequent quantizations or type conversions to a narrower type. When
+// present, unary ops such as bitcasts, copies, reshapes and slices between
+// collective and quantization/type conversion are shifted, i.e. transforms
+//
+//   collective --> unary --> quantization/type conversion
+//
+// into
+//
+//   quantization/type conversion --> collective --> unary.
+class CollectiveQuantizer : public HloModulePass {
  public:
-  HloBroadcastSplitter() = default;
-  absl::string_view name() const override { return "hlo-broadcast-splitter"; }
-  using HloPassInterface::Run;
+  absl::string_view name() const override { return "collective-quantizer"; }
+
   absl::StatusOr<bool> Run(
       HloModule* module,
       const absl::flat_hash_set<absl::string_view>& execution_threads) override;
@@ -38,4 +46,4 @@ class HloBroadcastSplitter : public HloModulePass {
 
 }  // namespace xla
 
-#endif  // XLA_HLO_TRANSFORMS_HLO_BROADCAST_SPLITTER_H_
+#endif  // XLA_SERVICE_COLLECTIVE_QUANTIZER_H_

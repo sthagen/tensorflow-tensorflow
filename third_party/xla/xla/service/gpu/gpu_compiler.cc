@@ -83,6 +83,7 @@ limitations under the License.
 #include "xla/service/call_inliner.h"
 #include "xla/service/collective_permute_decomposer.h"
 #include "xla/service/collective_pipeliner.h"
+#include "xla/service/collective_quantizer.h"
 #include "xla/service/collectives_schedule_linearizer.h"
 #include "xla/service/comparison_expander.h"
 #include "xla/service/compiler.h"
@@ -299,9 +300,8 @@ absl::StatusOr<AutotuneConfig> GetAutotuneConfig(
     return AutotuneConfig{DeviceConfig{stream_exec, options.device_allocator},
                           debug_options};
   }
-  return AutotuneConfig{
-      DevicelessConfig{gpu_target_config.device_description_str},
-      debug_options};
+  return AutotuneConfig{DevicelessConfig{gpu_target_config.device_description},
+                        debug_options};
 }
 
 se::GpuComputeCapability GetGpuVersion(const se::StreamExecutor* stream_exec) {
@@ -932,6 +932,10 @@ absl::Status RunCollectiveOptimizationPasses(
       {U16, U32}, {S16, S32}};
   collectives_pipeline.AddPass<AllReducePromotion>(ar_promoted_types);
   // Remove dead computations left over after ar/rs promotion.
+  collectives_pipeline.AddPass<HloDCE>();
+
+  collectives_pipeline.AddPass<CollectiveQuantizer>();
+  // Remove dead computations after collective quantization.
   collectives_pipeline.AddPass<HloDCE>();
 
   // Run WhileLoopTripCountAnnotator after collective pipelining and before
@@ -2030,8 +2034,9 @@ absl::StatusOr<GpuCompiler::BackendCompileResult> GpuCompiler::CompileAndLink(
     }
   }
 
-  auto maybe_backend_result = LinkModules(
-      stream_exec, std::move(binaries_to_link), module_config.debug_options());
+  auto maybe_backend_result =
+      LinkModules(gpu_version, stream_exec, std::move(binaries_to_link),
+                  module_config.debug_options());
   if (!maybe_backend_result.ok()) {
     LOG(ERROR) << "The CUDA linking API did not work. Please use XLA_FLAGS="
                   "--xla_gpu_enable_llvm_module_compilation_parallelism=false "

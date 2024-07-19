@@ -184,6 +184,12 @@ GpuExecutor::CreateOrShareConstant(Stream* stream,
   return shared_constant;
 }
 
+absl::StatusOr<std::unique_ptr<EventBasedTimer>>
+GpuExecutor::CreateEventBasedTimer(GpuStream* stream, bool use_delay_kernel) {
+  // TODO(b/301020144) Move this all to the appropriate Executor class.
+  return GpuTimer::CreateEventBasedTimer(stream, use_delay_kernel);
+}
+
 bool GpuExecutor::UnloadGpuBinary(const void* gpu_binary) {
   auto module_it = gpu_binary_to_module_.find(gpu_binary);
   if (gpu_binary_to_module_.end() == module_it) {
@@ -482,25 +488,6 @@ absl::Status GpuExecutor::Memset(Stream* stream, DeviceMemoryBase* location,
   return GpuDriver::AsynchronousMemsetUint8(context_, AsROCmDevicePtr(location),
                                             pattern, size,
                                             AsGpuStreamValue(stream));
-}
-
-bool GpuExecutor::HostCallback(Stream* stream,
-                               absl::AnyInvocable<absl::Status() &&> callback) {
-  auto callback_ptr =
-      new absl::AnyInvocable<void() &&>([cb = std::move(callback)]() mutable {
-        absl::Status s = std::move(cb)();
-        if (!s.ok()) {
-          LOG(WARNING) << "Host callback failed: " << s;
-        }
-      });
-  return GpuDriver::AddStreamCallback(context_, AsGpuStreamValue(stream),
-                                      InternalHostCallback, callback_ptr);
-}
-
-/* static */ void GpuExecutor::InternalHostCallback(void* data) {
-  auto* callback = reinterpret_cast<absl::AnyInvocable<void() &&>*>(data);
-  std::move (*callback)();
-  delete callback;
 }
 
 void GpuExecutor::DeallocateStream(Stream* stream) {

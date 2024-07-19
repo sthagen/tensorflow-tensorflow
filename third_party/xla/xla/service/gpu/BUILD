@@ -587,6 +587,7 @@ xla_test(
         "//xla/service:pattern_matcher",
         "//xla/service:pattern_matcher_gmock",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:device_description_proto_cc",
         "//xla/tests:filecheck",
         "//xla/tests:hlo_test_base",
         "//xla/tests:test_utils",
@@ -3185,6 +3186,7 @@ cc_library(
         "//xla/service:call_inliner",
         "//xla/service:collective_permute_decomposer",
         "//xla/service:collective_pipeliner",
+        "//xla/service:collective_quantizer",
         "//xla/service:collectives_schedule_linearizer",
         "//xla/service:comparison_expander",
         "//xla/service:compiler",
@@ -3477,8 +3479,10 @@ cc_library(
         "//xla/stream_executor/cuda:cuda_asm_compiler",
         "//xla/stream_executor/cuda:cuda_diagnostics",
         "//xla/stream_executor/cuda:cuda_platform_id",
+        "//xla/stream_executor/cuda:ptx_compilation_method",
         "//xla/stream_executor/cuda:ptx_compiler",
         "//xla/stream_executor/cuda:ptx_compiler_support",
+        "//xla/stream_executor/cuda:ptx_linking_method",
         "//xla/stream_executor/gpu:gpu_asm_opts",
         "//xla/stream_executor/gpu:gpu_driver_header",
         "//xla/stream_executor/gpu:gpu_executor_header",
@@ -3497,6 +3501,7 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:IRReader",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:ir_headers",
@@ -3548,6 +3553,50 @@ xla_test(
         "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_test(
+    name = "ptx_compilation_test",
+    srcs = [
+        "ptx_compilation_test.cc",
+    ],
+    backends = [
+        "gpu",
+    ],
+    tags = [
+        "gpu",
+        "no_rocm",
+        "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
+    ],
+    deps = [
+        ":gpu_executable",
+        ":nvptx_compiler_impl",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:executable",
+        "//xla/service:hlo_module_config",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/cuda:ptx_compilation_method",
+        "//xla/stream_executor/cuda:ptx_compiler_support",
+        "//xla/stream_executor/cuda:ptx_linking_method",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/container:btree",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
+        "@llvm-project//llvm:Object",
+        "@llvm-project//llvm:Support",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -5516,6 +5565,11 @@ xla_cc_test(
 xla_cc_test(
     name = "autotuner_util_test",
     srcs = if_cuda_is_configured(["autotuner_util_test.cc"]),
+    data = [
+        "//xla/tools/hlo_opt:gpu_specs/a100_sxm_40.txtpb",
+        "//xla/tools/hlo_opt:gpu_specs/a100_sxm_80.txtpb",
+        "//xla/tools/hlo_opt:gpu_specs/mi200.txtpb",
+    ],
     deps = if_cuda_is_configured([
         # keep sorted
         ":autotuner_util",
@@ -5524,6 +5578,8 @@ xla_cc_test(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_query",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor:device_description_proto_cc",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
         "//xla/stream_executor/host:host_platform",
@@ -5545,6 +5601,7 @@ xla_cc_test(
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
     ]) + [
         "//xla/tests:xla_internal_test_main",  # Keep outside GPU guard
     ],
@@ -5558,6 +5615,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_instruction_utils",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:collective_ops_utils",
         "//xla/service:flatten_call_graph",
