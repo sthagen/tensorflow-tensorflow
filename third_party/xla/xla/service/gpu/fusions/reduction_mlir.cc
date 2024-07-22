@@ -173,10 +173,13 @@ struct MlirReductionFusion::EmitterState {
         builder(entry_function.getLoc(), entry_function),
         computation(computations.FindPartitionedComputation(
             fusion.fused_instructions_computation())) {
-    int index = 0;
-    for (const auto& root : owner.analysis_.fusion_roots()) {
-      fusion_result_index_starts[&root.instruction()] = index;
-      index += root.shape().IsTuple() ? root.shape().tuple_shapes_size() : 1;
+    int output_index = 0;
+    for (const auto& [root_index, root] :
+         llvm::enumerate(owner.analysis_.fusion_roots())) {
+      root_indices[&root.instruction()] = root_index;
+      fusion_result_index_starts[&root.instruction()] = output_index;
+      output_index +=
+          root.shape().IsTuple() ? root.shape().tuple_shapes_size() : 1;
     }
   }
 
@@ -225,6 +228,7 @@ struct MlirReductionFusion::EmitterState {
   ImplicitLocOpBuilder builder;
   const mlir_converter::PartitionedComputation& computation;
   absl::flat_hash_map<const HloInstruction*, int> fusion_result_index_starts;
+  absl::flat_hash_map<const HloInstruction*, int> root_indices;
   SmallVector<Value> thread_and_block_ids;
 };
 
@@ -624,7 +628,7 @@ SmallVector<Value> MlirReductionFusion::EvaluateEpilogue(
 
   auto values = EmitEpilogue(group_id, state.computations, state.entry_function,
                              results, epilogue_input_indices, b);
-  int first_root_index = state.OutputIndex(epilogue.roots.front(), 0);
+  int first_root_index = state.root_indices[epilogue.roots.front()];
   auto thread_has_output = mlir_converter::CheckConstraints(
       *ComputeThreadIdToOutputIndexing(first_root_index, b.getContext()),
       state.thread_and_block_ids, symbol_values, b);
@@ -738,7 +742,12 @@ MlirMultiRowReductionFusion::MlirMultiRowReductionFusion(
   // This vector size is always valid: we know that the reduced dimension is a
   // power of 2, since otherwise RowReductionGetRowsPerWarp would have
   // returned 1.
-  int vector_size = 32 / smallest_input_or_output_bits;
+  // Our codegen can't currently deal with vectorization across rows, so we
+  // limit the vector size to the size of the row. Note that this emitter
+  // essentially reverts to the loop emitter in this case, except for side
+  // outputs.
+  int vector_size = std::min(static_cast<int>(input_shape_[kRowMinorReduced]),
+                             32 / smallest_input_or_output_bits);
 
   // We target 8 warps per block, which means there could be up to 8 blocks per
   // SM, but we have no good way of knowing. In practice, enabling vectorization
