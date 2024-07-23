@@ -12,24 +12,20 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#ifndef TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_GATHER_H_
+#define TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_GATHER_H_
 
-#ifndef TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_REDUCE_H_
-#define TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_REDUCE_H_
-
+#include "mlir/IR/PatternMatch.h"  // from @llvm-project
 #include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
-#include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"  // IWYU pragma: keep
-#include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"  // IWYU pragma: keep
 
-namespace mlir {
-namespace odml {
+namespace mlir::odml {
 
-void PopulateReduceArgMinMaxTFPatterns(MLIRContext* ctx,
-                                       RewritePatternSet& patterns);
-
-void PopulateReducePatterns(MLIRContext* ctx, RewritePatternSet& patterns,
+// Patterns to legalize mhlo.gather to TFL
+//
+// Emits: tfl.gather_nd or a combination of tfl.slice, tfl.squeeze, tfl.concat
+void PopulateGatherPatterns(MLIRContext* ctx, RewritePatternSet& patterns,
                             ConversionTarget& target);
 
-}  // namespace odml
-}  // namespace mlir
+}  // namespace mlir::odml
 
-#endif  // TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_REDUCE_H_
+#endif  // TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_GATHER_H_

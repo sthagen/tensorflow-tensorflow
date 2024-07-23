@@ -16,22 +16,29 @@ limitations under the License.
 #ifndef XLA_SERVICE_ALGEBRAIC_SIMPLIFIER_H_
 #define XLA_SERVICE_ALGEBRAIC_SIMPLIFIER_H_
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/literal.h"
 #include "xla/service/hlo_pass_interface.h"
+#include "xla/shape.h"
+#include "xla/shape_util.h"
 #include "xla/util.h"
 
 namespace xla {
@@ -100,6 +107,14 @@ class AlgebraicSimplifierOptions {
 
   double associative_reordering_threshold() const {
     return associative_reordering_threshold_;
+  }
+
+  void set_use_convert_constant_folding(bool use_convert_constant_folding) {
+    use_convert_constant_folding_ = use_convert_constant_folding;
+  }
+
+  bool use_convert_constant_folding() const {
+    return use_convert_constant_folding_;
   }
 
   // Enable dot simplification on platforms where it is profitable.
@@ -286,6 +301,7 @@ class AlgebraicSimplifierOptions {
   bool minmax_propagate_nan_{true};
   bool enable_unconditional_reduce_of_concat_replacement_{true};
   bool use_associative_reordering_{false};
+  bool use_convert_constant_folding_{false};
   bool executing_on_cpu_{false};
   double associative_reordering_threshold_{2.0};
   Metadata metadata_;

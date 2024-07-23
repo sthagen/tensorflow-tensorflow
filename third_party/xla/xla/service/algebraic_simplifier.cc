@@ -52,7 +52,6 @@ limitations under the License.
 #include "xla/layout.h"
 #include "xla/layout_util.h"
 #include "xla/literal.h"
-#include "xla/literal_comparison.h"
 #include "xla/literal_util.h"
 #include "xla/overflow_util.h"
 #include "xla/permutation_util.h"
@@ -5198,6 +5197,22 @@ absl::Status AlgebraicSimplifierVisitor::HandleConvert(
   if (IsConvertPairNoOp(convert)) {
     return ReplaceInstruction(convert,
                               convert->mutable_operand(0)->mutable_operand(0));
+  }
+
+  // Try to replace convert(constant) with a constant of the right type to begin
+  // with. Disallow moving sub-byte types since they may not be supported for
+  // some ops.
+  HloInstruction* constant;
+  if (options_.use_convert_constant_folding() &&
+      Match(convert, m::Convert(m::Constant(&constant))) &&
+      primitive_util::BitWidth(dest_type) <=
+          primitive_util::BitWidth(src_type) &&
+      constant->user_count() == 1 && primitive_util::BitWidth(dest_type) >= 8) {
+    TF_ASSIGN_OR_RETURN(Literal dest_literal,
+                        constant->literal().Convert(dest_type));
+    VLOG(10) << "Replacing convert(constant) with constant";
+    return ReplaceWithNewInstruction(
+        convert, HloInstruction::CreateConstant(std::move(dest_literal)));
   }
 
   return TryRemoveUpcastAndDowncastSurroundingBinaryOp(convert);
