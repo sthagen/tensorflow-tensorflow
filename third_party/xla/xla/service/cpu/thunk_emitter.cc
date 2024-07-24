@@ -181,6 +181,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
     case HloOpcode::kSetDimensionSize:
       return EmitSetDimensionSizeThunk(instruction);
 
+    case HloOpcode::kBatchNormGrad:
+      return EmitBatchNormGradThunk(instruction);
+    case HloOpcode::kBatchNormTraining:
+      return EmitBatchNormTrainingThunk(instruction);
+
     // Simple HLO instructions lowered to elemental host kernels (plain loops
     // behind the HostKernel API).
     case HloOpcode::kAbs:
@@ -288,6 +293,9 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
 
     case HloOpcode::kRngGetAndUpdateState:
       return EmitRngGetAndUpdateStateThunk(instruction);
+
+    case HloOpcode::kStochasticConvert:
+      return EmitStochasticConvertThunk(instruction);
 
     case HloOpcode::kInfeed:
       return EmitInfeedThunk(instruction);
@@ -523,6 +531,16 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSetDimensionSizeThunk(
   return Unimplemented("SetDimensionSize should be rewritten for CPU.");
 }
 
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitBatchNormGradThunk(
+    const HloInstruction* instruction) {
+  return Unimplemented("BatchNormGrad should be rewritten for CPU.");
+}
+
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitBatchNormTrainingThunk(
+    const HloInstruction* instruction) {
+  return Unimplemented("BatchNormTraining should be rewritten for CPU.");
+}
+
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConvolutionThunk(
     const HloInstruction* instruction) {
   // NOTE: The following code (along with TODOs and comments) partially
@@ -634,6 +652,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitRngGetAndUpdateStateThunk(
   auto* rng_state = Cast<HloRngGetAndUpdateStateInstruction>(instruction);
   return ThunkSequence::Of<RngGetAndUpdateStateThunk>(
       ThunkInfo(instruction), state_buffer, rng_state->delta());
+}
+
+absl::StatusOr<ThunkSequence> ThunkEmitter::EmitStochasticConvertThunk(
+    const HloInstruction* instruction) {
+  return Unimplemented("StochasticConvert should be decomposed for CPU.");
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitInfeedThunk(
