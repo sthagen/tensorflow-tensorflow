@@ -180,15 +180,16 @@ inline bool ValidStandardConvOutFeatureDims(const ConvData& data) {
 }
 
 inline bool ValidStandardConvInFeatureDims(const ConvData& data) {
+  // kernel_in_features * feature_groups = input_features by definition.
+  const int64_t input_features =
+      data.InputLayout().SpecialDim2(data.InputShape());
+
+  const bool trivial_kernel_in_features =
+      data.FeatureGroupCount() == input_features;
+  const bool is_grouped_conv = data.FeatureGroupCount() != 1;
+
   const int64_t rank = data.InputLayout().Rank();
-  const int64_t kernel_in_features =
-      data.KernelLayout().SpecialDim1(data.KernelShape());
-  // mhlo requires in_features / feature_group_count == kernel_features.
-  // tfl.conv_2d permits "grouped" behavior, but tfl.conv_3d does not.
-  // input_channels == feature_group_count (equivalantly kernel_in_features ==
-  // 1) codes for depthwise.
-  return data.FeatureGroupCount() == 1 ||
-         (rank != 5 && kernel_in_features != 1);
+  return !trivial_kernel_in_features && (!is_grouped_conv || rank == 4);
 }
 
 inline bool HasStandardFeatureGroup(const ConvData& data) {
@@ -199,10 +200,6 @@ inline bool HasStandardFeatureGroup(const ConvData& data) {
 // Does this convolution map to a standard conv_2d or conv_3d
 // (not depthwise or tranpose conv).
 inline bool IsStandardConv(const ConvData& data) {
-  const int64_t rank = data.InputLayout().Rank();
-  if (rank != 4 && rank != 5) {
-    return false;
-  }
   const bool trivial_lhs_dilate =
       llvm::all_of(data.InputDilations(), [](auto d) { return d == 1; });
 
@@ -280,10 +277,6 @@ inline mhlo::ConvDimensionNumbersAttr CloneDnumsWithOutputLayout(
       dnums.getKernelSpatialDimensions(), layout.SpecialDim1(),
       layout.SpecialDim2(), layout.Spatials());
 }
-
-// Wraps the lhs of given conv op in an explicit pad op matching the same
-// behavior implicit in the paddings attribute. Gets result of new pad op.
-Value CreatePadOpFromConvPadding(OpBuilder& b, mhlo::ConvolutionOp op);
 
 }  // namespace mlir::odml
 
