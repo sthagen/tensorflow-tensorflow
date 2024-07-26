@@ -2099,11 +2099,13 @@ xla_test(
     tags = ["test_xla_cpu_thunks"],
     deps = [
         ":client_library_test_base",
+        ":hlo_test_base",
         ":literal_test_util",
         ":test_macros_header",
         ":xla_internal_test_main",
         "//xla:array2d",
         "//xla:array4d",
+        "//xla:error_spec",
         "//xla:literal_util",
         "//xla:reference_util",
         "//xla:shape_util",
@@ -2116,6 +2118,21 @@ xla_test(
         "//xla/client:xla_computation",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_test(
+    name = "dynamic_reshape_test",
+    srcs = ["dynamic_reshape_test.cc"],
+    disabled_backends = ["interpreter"],
+    tags = ["test_xla_cpu_thunks"],
+    deps = [
+        ":hlo_test_base",
+        ":xla_internal_test_main",  # fixdeps: keep
+        "//xla:literal",
+        "//xla:literal_util",
+        "//xla:test",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -2301,7 +2318,7 @@ xla_test(
     args = ["--xla_force_host_platform_device_count=4"],
     backend_tags = {
         # This test is tagged "manual" because it requires multiple GPUs, and Forge only supports
-        # single-GPU tests. Guitar skips "manual" tests unless they're also tagged "guitar".
+        # single-GPU tests.  Guitar skips "manual" tests unless they're also tagged "guitar".
         "gpu": [
             "guitar",
             "manual",
@@ -2325,14 +2342,18 @@ xla_test(
         ":test_utils",
         ":verified_hlo_module",
         ":xla_internal_test_main",
+        "//xla:error_spec",
         "//xla:literal",
         "//xla:literal_util",
         "//xla:shape_util",
+        "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/service:executable",
         "//xla/service:hlo_module_config",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -2630,6 +2651,7 @@ xla_test(
         "cpu",
         "gpu",
     ],
+    tags = ["test_xla_cpu_thunks"],
     deps = [
         ":hlo_test_base",
         "//xla:literal_util",
@@ -2640,10 +2662,10 @@ xla_test(
         "//xla/service:llvm_compiler",
         "//xla/stream_executor",
         "@com_google_absl//absl/status",
-        "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Core",
         "@local_tsl//tsl/platform:casts",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
 )
