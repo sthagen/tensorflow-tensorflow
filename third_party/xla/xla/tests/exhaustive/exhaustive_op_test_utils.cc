@@ -35,14 +35,25 @@ limitations under the License.
 #include "Eigen/Core"
 #include "xla/literal.h"
 #include "xla/types.h"
+#include "tsl/platform/test.h"
 
 namespace xla {
 namespace exhaustive_op_test {
+
+int eup_version = 0;
+
+int GetEupVersion() { return eup_version; }
 
 bool IsSubnormalReal(xla::complex64 value) { return IsSubnormal(value.real()); }
 
 bool IsSubnormalReal(xla::complex128 value) {
   return IsSubnormal(value.real());
+}
+
+bool IsMinNormalReal(xla::complex64 value) { return IsMinNormal(value.real()); }
+
+bool IsMinNormalReal(xla::complex128 value) {
+  return IsMinNormal(value.real());
 }
 
 bool IsSubnormalImaginary(xla::complex64 value) {
@@ -51,6 +62,14 @@ bool IsSubnormalImaginary(xla::complex64 value) {
 
 bool IsSubnormalImaginary(xla::complex128 value) {
   return IsSubnormal(value.imag());
+}
+
+bool IsMinNormalImaginary(xla::complex64 value) {
+  return IsMinNormal(value.imag());
+}
+
+bool IsMinPositiveImaginary(xla::complex128 value) {
+  return IsMinNormal(value.imag());
 }
 
 // For f64, f32, f16, and bf16, we need 17, 9, 5, and 4 decimal places of

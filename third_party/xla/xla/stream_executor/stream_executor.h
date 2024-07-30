@@ -156,12 +156,6 @@ class StreamExecutor {
     return absl::UnimplementedError("Not Implemented");
   }
 
-  // Submits command buffer for execution to the underlying platform driver.
-  virtual absl::Status Submit(Stream* stream,
-                              const CommandBuffer& command_buffer) {
-    return absl::UnimplementedError("Not Implemented");
-  }
-
   // Releases any state associated with the previously loaded kernel.
   virtual void UnloadKernel(const Kernel* kernel) {}
 
@@ -207,7 +201,7 @@ class StreamExecutor {
       uint64_t size) = 0;
 
   // Deallocates a region of host memory allocated by HostMemoryAllocate().
-  virtual void HostMemoryDeallocate(void* mem) = 0;
+  virtual void HostMemoryDeallocate(void* mem, uint64_t size) = 0;
 
   // Returns the memory space of the given pointer.
   virtual absl::StatusOr<MemoryType> GetPointerMemorySpace(const void* ptr) {
