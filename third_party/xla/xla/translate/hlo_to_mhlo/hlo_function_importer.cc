@@ -2501,24 +2501,6 @@ absl::Status HloFunctionImporter::ConvertShapeToMlirLayout(
   return Internal("Couldn't convert layout.");
 }
 
-// std::string FrontendAttributesToString(
-//     const FrontendAttributes& frontend_attributes) {
-//   std::vector<std::pair<std::string, std::string>> sorted_attributes(
-//       frontend_attributes.map().begin(), frontend_attributes.map().end());
-//   absl::c_sort(sorted_attributes);
-//   const auto formatter = [](std::string* out,
-//                             const std::pair<std::string, std::string>& item)
-//                             {
-//     if (LexesAsJsonDict(item.second)) {
-//       absl::StrAppend(out, item.first, "=", item.second);
-//     } else {
-//       absl::StrAppend(out, item.first, "=\"", item.second, "\"");
-//     }
-//   };
-//   return absl::StrFormat("{%s}",
-//                          absl::StrJoin(sorted_attributes, ",", formatter));
-// }
-
 mlir::Attribute ConvertInputOutputAlias(const HloInputOutputAliasConfig& alias,
                                         mlir::Builder* builder) {
   llvm::SmallVector<mlir::Attribute> element_attrs;
