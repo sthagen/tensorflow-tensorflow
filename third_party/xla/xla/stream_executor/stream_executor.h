@@ -158,9 +158,6 @@ class StreamExecutor {
     return absl::UnimplementedError("Not Implemented");
   }
 
-  // Releases any state associated with the previously loaded kernel.
-  virtual void UnloadKernel(const Kernel* kernel) {}
-
   // Synchronously allocates size bytes on the underlying platform and returns
   // a DeviceMemoryBase representing that allocation. In the case of failure,
   // nullptr is returned.
@@ -236,14 +233,6 @@ class StreamExecutor {
   absl::Status SynchronousMemcpyD2H(const DeviceMemoryBase& device_src,
                                     int64_t size, void* host_dst) {
     return SynchronousMemcpy(host_dst, device_src, size);
-  }
-
-  // Enqueues an operation onto stream to set 8-bit patterns starting at
-  // location, for byte count given by size.  Returns whether the operation was
-  // successfully enqueued onto the stream.
-  virtual absl::Status Memset(Stream* stream, DeviceMemoryBase* location,
-                              uint8_t pattern, uint64_t size) {
-    return absl::InternalError("Not implemented");
   }
 
   // Deallocates stream resources on the underlying platform.
