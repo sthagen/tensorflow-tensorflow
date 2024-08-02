@@ -45,6 +45,10 @@ struct ThunkExecutorOptions {
   // `execute_sequential_buffer_threshold`, we mark execution as sequential, as
   // concurrency overheads will likely dominate the overall execution time.
   size_t execute_sequential_buffer_threshold = 512;
+
+  // Use sorted ready queue to execute nodes according to their priority. By
+  // default we use FIFO ready queue.
+  bool use_sorted_ready_queue = false;
 };
 }  // namespace internal
 
@@ -72,6 +76,7 @@ class ThunkExecutor {
   // NodeDef defines an execution order for all thunks in a sequence.
   struct NodeDef {
     NodeId id = kInvalidNodeId;
+    int64_t priority = 0;
     std::vector<NodeId> in_edges;
     std::vector<NodeId> out_edges;
   };
@@ -97,6 +102,47 @@ class ThunkExecutor {
 
   bool is_sequential() const { return is_sequential_; }
 
+  // A ready queue that executes nodes in FIFO order.
+  class FifoReadyQueue {
+   public:
+    explicit FifoReadyQueue(absl::Span<const NodeId> ready_nodes);
+
+    void Push(NodeId id);
+
+    NodeId Pop();
+    FifoReadyQueue PopHalf();
+
+    size_t Size() const;
+    bool Empty() const;
+
+    FifoReadyQueue CreateEmptyReadyQueue() const;
+
+   private:
+    absl::InlinedVector<NodeId, 8> queue_;
+    size_t head_ = 0;
+  };
+
+  // A ready queue that executes nodes sorted by NodeDef priority.
+  class SortedReadyQueue {
+   public:
+    SortedReadyQueue(absl::Span<const NodeDef> nodes_defs,
+                     absl::Span<const NodeId> ready_nodes);
+
+    void Push(NodeId id);
+
+    NodeId Pop();
+    SortedReadyQueue PopHalf();
+
+    size_t Size() const;
+    bool Empty() const;
+
+    SortedReadyQueue CreateEmptyReadyQueue() const;
+
+   private:
+    absl::Span<const NodeDef> nodes_defs_;
+    absl::InlinedVector<NodeId, 8> queue_;
+  };
+
  private:
   // Align all atomic counters to a cache line boundary to avoid false
   // sharing between multiple worker threads.
@@ -106,8 +152,6 @@ class ThunkExecutor {
 #else
       64;
 #endif
-
-  using ReadyQueue = absl::InlinedVector<NodeId, 8>;
 
   // A struct to keep the state of a running ThunkExecutor.
   struct ExecuteState {
@@ -162,26 +206,29 @@ class ThunkExecutor {
                                tsl::AsyncValueRef<ExecuteEvent> event);
 
   // Executes nodes in the ready queue with given thunk parameters.
+  template <typename ReadyQueue>
   void Execute(ExecuteState* state, const Thunk::ExecuteParams& params,
                ReadyQueue ready_queue, Thunk::ExecuteSession::Lock lock);
 
   // Splits ready queue starting from `start_index` into ThunkExecutor tasks and
   // offloads them to the task runner.
+  template <typename ReadyQueue>
   void SplitReadyQueue(ExecuteState* state, const Thunk::ExecuteParams& params,
-                       int64_t start_index, ReadyQueue& ready_queue);
+                       ReadyQueue& ready_queue, int64_t split_threshold);
 
   // Processes out edges of a completed `node` and updates `ready_queue` with
   // nodes that are ready to execute. If `event` is in error state, aborts the
   // execution and records the error status to forward it to the caller.
+  template <typename ReadyQueue>
   void ProcessOutEdges(ExecuteState* state,
                        tsl::AsyncValuePtr<Thunk::ExecuteEvent> node_event,
                        ExecuteState::Node& node, ReadyQueue& ready_queue);
 
-  // Runs a transitive reduction on the NodeDef graph to remove redundant edges.
-  // Returns the number of removed edges.
+  // Runs a transitive reduction on the NodeDef graph to remove redundant edges,
+  // and updates nodes priorities. Returns the number of removed edges.
   //
   // See: https://en.wikipedia.org/wiki/Transitive_reduction
-  int64_t TransitiveReduction();
+  int64_t RunTransitiveReductionAndUpdatePriorities();
 
   ThunkSequence thunk_sequence_;
   Options options_;

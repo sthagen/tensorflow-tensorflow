@@ -230,7 +230,7 @@ class CStreamExecutor : public StreamExecutorCommon {
     return std::make_unique<HostMemoryAllocation>(buffer, size, this);
   }
 
-  void HostMemoryDeallocate(void* mem, uint64_t size) override {
+  void HostMemoryDeallocate(void* mem) override {
     stream_executor_->host_memory_deallocate(&device_, mem);
   }
 
@@ -432,7 +432,6 @@ CPlatform::CPlatform(SP_Platform platform,
       name_(platform.name) {}
 
 CPlatform::~CPlatform() {
-  executor_cache_.DestroyAllExecutors();
   platform_fns_.destroy_device_fns(&platform_, &device_fns_);
   platform_fns_.destroy_stream_executor(&platform_, &stream_executor_);
   platform_fns_.destroy_timer_fns(&platform_, &timer_fns_);

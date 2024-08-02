@@ -13,22 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/stream_executor/host_memory_allocation.h"
+#ifndef XLA_SORT_JSON_H_
+#define XLA_SORT_JSON_H_
 
-#include <cstdint>
+#include <string>
 
-#include "xla/stream_executor/stream_executor.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 
-namespace stream_executor {
+namespace xla {
 
-HostMemoryAllocation::HostMemoryAllocation(void* ptr, uint64_t size,
-                                           StreamExecutor* executor)
-    : ptr_(ptr), size_(size), executor_(executor) {}
+// Sorts the given JSON string or returns an error if the JSON could not be
+// parsed. Note that this function expects the input JSON to be valid and not
+// all forms of invalid JSON are correctly recognized. This function completely
+// ignores whitespace and the resulting JSON does not have any whitespace.
+// Comments are not supported in the input JSON.
+absl::StatusOr<std::string> SortJson(absl::string_view json);
 
-HostMemoryAllocation::~HostMemoryAllocation() {
-  if (ptr_ != nullptr && executor_ != nullptr) {
-    executor_->HostMemoryDeallocate(ptr_);
-  }
-}
+}  // namespace xla
 
-}  // namespace stream_executor
+#endif  // XLA_SORT_JSON_H_
