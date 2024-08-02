@@ -29,6 +29,7 @@ cc_library(
     deps = [
         "//xla:bit_cast",
         "//xla:executable_run_options",
+        "//xla:fp_util",
         "//xla:literal",
         "//xla:literal_util",
         "//xla:shape_util",
@@ -184,6 +185,7 @@ xla_test(
     deps = [
         ":exhaustive_op_test_utils",
         "//xla:literal",
+        "//xla:types",
         "//xla/client:xla_builder",
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/util:command_line_flags",
