@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_CPU_ONEDNN_MATMUL_REWRITER_H_
-#define XLA_SERVICE_CPU_ONEDNN_MATMUL_REWRITER_H_
+#ifndef XLA_SERVICE_CPU_ONEDNN_CONTRACTION_REWRITER_H_
+#define XLA_SERVICE_CPU_ONEDNN_CONTRACTION_REWRITER_H_
 #if defined(INTEL_MKL) && defined(ENABLE_ONEDNN_V3)
 
 #include <optional>
@@ -29,23 +29,26 @@ limitations under the License.
 namespace xla {
 namespace cpu {
 
-// This pass pattern-matches HLO Dot instructions and rewrites into custom
-// calls.
-class OneDnnMatMulRewriter : public HloModulePass {
+// This pass pattern-matches HLO Dot and Convolution instructions and rewrites
+// them into custom calls.
+class OneDnnContractionRewriter : public HloModulePass {
  public:
-  OneDnnMatMulRewriter(int intra_op_parallelism,
-                       const tsl::thread::ThreadPool* compile_threadpool)
+  OneDnnContractionRewriter(int intra_op_parallelism,
+                            const tsl::thread::ThreadPool* compile_threadpool)
       : intra_op_parallelism_(intra_op_parallelism),
         compile_threadpool_(compile_threadpool) {}
-  OneDnnMatMulRewriter() = default;
-  absl::string_view name() const override { return "onednn-matmul-rewriter"; }
+  OneDnnContractionRewriter() = default;
+  absl::string_view name() const override {
+    return "onednn-contraction-rewriter";
+  }
 
   using HloPassInterface::Run;
   absl::StatusOr<bool> Run(
       HloModule* module,
       const absl::flat_hash_set<absl::string_view>& execution_threads) override;
 
-  static bool ShouldRewrite(const HloInstruction* dot_instr);
+  static bool ShouldRewriteDot(const HloInstruction* dot_instr);
+  static bool ShouldRewriteConv(const HloInstruction* conv_instr);
 
  private:
   int intra_op_parallelism_;
@@ -56,4 +59,4 @@ class OneDnnMatMulRewriter : public HloModulePass {
 }  // namespace xla
 
 #endif  // INTEL_MKL && ENABLE_ONEDNN_V3
-#endif  // XLA_SERVICE_CPU_ONEDNN_MATMUL_REWRITER_H_
+#endif  // XLA_SERVICE_CPU_ONEDNN_CONTRACTION_REWRITER_H_

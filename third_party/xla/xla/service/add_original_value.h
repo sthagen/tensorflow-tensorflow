@@ -12,39 +12,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef XLA_SERVICE_CPU_ONEDNN_CONVOLUTION_REWRITER_H_
-#define XLA_SERVICE_CPU_ONEDNN_CONVOLUTION_REWRITER_H_
-#if defined(INTEL_MKL) && defined(ENABLE_ONEDNN_V3)
 
-#include <optional>
+#ifndef XLA_SERVICE_ADD_ORIGINAL_VALUE_H_
+#define XLA_SERVICE_ADD_ORIGINAL_VALUE_H_
 
-#include "absl/algorithm/container.h"
 #include "absl/status/statusor.h"
-#include "xla/hlo/ir/hlo_instructions.h"
-#include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/hlo_pass_interface.h"
 
 namespace xla {
-namespace cpu {
 
-// This pass converts hlo convolution instructions into a single oneDNN
-// operation and rewrites into custom calls.
-class OneDnnConvolutionRewriter : public HloModulePass {
+// This pass adds to each op in the HLO graph the original_value attribute,
+// which is used for HLO value tracking. See go/hlo-value-tracking for more
+// details.
+class AddOriginalValue : public HloModulePass {
  public:
-  absl::string_view name() const override {
-    return "onednn-convolution-rewriter";
-  }
-
+  absl::string_view name() const override { return "add-original-value"; }
   using HloPassInterface::Run;
   absl::StatusOr<bool> Run(
       HloModule* module,
       const absl::flat_hash_set<absl::string_view>& execution_threads) override;
-
-  static bool ShouldRewrite(const HloInstruction* instr);
 };
 
-}  // namespace cpu
 }  // namespace xla
 
-#endif  // INTEL_MKL && ENABLE_ONEDNN_V3
-#endif  // XLA_SERVICE_CPU_ONEDNN_CONVOLUTION_REWRITER_H_
+#endif  // XLA_SERVICE_ADD_ORIGINAL_VALUE_H_
