@@ -92,9 +92,11 @@ bool IsDivisible(const HloInstruction* ins, const Array<int64_t>& device_mesh,
 // Append elements of `array` to `result`. The `indices` is a generalized
 // multi-dimensional index that can index a whole row (use -1 to indicate this).
 template <typename T>
-void AppendFlattenElements(std::vector<T>* result, const Array<T>& array,
-                           absl::Span<const int64_t> indices, int cur_depth,
-                           std::vector<int64_t> cur_indices) {
+void AppendFlattenElementsInternal(std::vector<T>* result,
+                                   const Array<T>& array,
+                                   absl::Span<const int64_t> indices,
+                                   int cur_depth,
+                                   std::vector<int64_t> cur_indices) {
   if (cur_depth == array.num_dimensions() - 1) {
     result->push_back(array(cur_indices));
   } else {
@@ -104,13 +106,23 @@ void AppendFlattenElements(std::vector<T>* result, const Array<T>& array,
     if (index == -1) {
       for (int64_t i = 0; i < array.dim(next_depth); ++i) {
         cur_indices[next_depth] = i;
-        AppendFlattenElements(result, array, indices, next_depth, cur_indices);
+        AppendFlattenElementsInternal(result, array, indices, next_depth,
+                                      cur_indices);
       }
     } else {
       cur_indices[next_depth] = index;
-      AppendFlattenElements(result, array, indices, next_depth, cur_indices);
+      AppendFlattenElementsInternal(result, array, indices, next_depth,
+                                    cur_indices);
     }
   }
+}
+
+template <typename T>
+void AppendFlattenElements(std::vector<T>* result, const Array<T>& array,
+                           absl::Span<const int64_t> indices) {
+  std::vector<int64_t> tmp_indices(array.num_dimensions(), 0);
+  AppendFlattenElementsInternal(result, array, indices,
+                                /*cur_depth=*/-1, tmp_indices);
 }
 
 // Return the index of key in a span. -1 means not found.
@@ -199,11 +211,6 @@ inline void ReplaceOperand(HloInstruction* inst,
   }
 }
 
-// Return whether this instruction is a custom call marker introduced by us.
-inline bool IsCustomCallMarker(const HloInstruction* inst) {
-  return inst->IsCustomCall({kPipelineMarker, kIdentityMarker});
-}
-
 // Return whether this instruction is a TopK custom call.
 inline bool IsTopKCustomCall(const HloInstruction* inst) {
   return inst->opcode() == HloOpcode::kCustomCall &&
@@ -216,70 +223,6 @@ inline bool IsPartialReduceCustomCall(const HloInstruction* inst) {
          inst->custom_call_target() == "PartialReduce";
 }
 
-// Pass through the custom call marker and get the source instruction
-inline const HloInstruction* PassThroughCustomCallMarkerGetSource(
-    const HloInstruction* ins) {
-  while (ins->opcode() == HloOpcode::kGetTupleElement &&
-         IsCustomCallMarker(ins->operand(0))) {
-    const HloInstruction* custom_call = ins->operand(0);
-    const HloInstruction* tuple = custom_call->operand(0);
-    while (IsCustomCallMarker(tuple)) {
-      tuple = tuple->operand(0);
-    }
-    ins = tuple->operand(ins->tuple_index());
-  }
-  return ins;
-}
-
-// Pass through the custom call marker and get the acutal operand.
-inline HloInstruction* PassThroughCustomCallMarkerOperand(
-    HloInstruction* raw_operand, const HloInstruction* inst) {
-  if (!IsCustomCallMarker(raw_operand)) {
-    return raw_operand;
-  }
-
-  CHECK_EQ(inst->opcode(), HloOpcode::kGetTupleElement);
-
-  int index = inst->tuple_index();
-  return raw_operand->mutable_operand(0)->mutable_operand(index);
-}
-
-// Return whether the tuple is only used by a custom call marker.
-inline bool IsCustomCallMarkerTuple(const HloInstruction* inst) {
-  return inst->opcode() == HloOpcode::kTuple && inst->users().size() == 1 &&
-         IsCustomCallMarker(inst->users().front());
-}
-
-// Pass through the custom call marker and get the actual user.
-inline HloInstruction* PassThroughCustomCallMarkerUser(
-    HloInstruction* raw_user, const HloInstruction* inst) {
-  if (!IsCustomCallMarkerTuple(raw_user)) {
-    return raw_user;
-  }
-
-  const HloInstruction* custom_call = raw_user->users().front();
-
-  int index = -1;
-  for (int i = 0; i < raw_user->operand_count(); i++) {
-    if (raw_user->operand(i) == inst) {
-      index = i;
-      break;
-    }
-  }
-  CHECK_NE(index, -1);
-
-  HloInstruction* ret = nullptr;
-  for (HloInstruction* user : custom_call->users()) {
-    CHECK_EQ(user->opcode(), HloOpcode::kGetTupleElement);
-    if (user->tuple_index() == index) {
-      CHECK_EQ(ret, nullptr);
-      ret = user;
-    }
-  }
-
-  return ret == nullptr ? raw_user : ret;
-}
-
 // Return the users of an instruction and its alias,
 // excluding the final output tuple.
 inline InstructionSet UsersWithAlias(const HloInstruction* inst,
@@ -287,8 +230,7 @@ inline InstructionSet UsersWithAlias(const HloInstruction* inst,
                                      const HloInstruction* output) {
   InstructionSet users;
   for (HloInstruction* user : inst->users()) {
-    HloInstruction* pass_through_user =
-        PassThroughCustomCallMarkerUser(user, inst);
+    HloInstruction* pass_through_user = user;
     if (pass_through_user == output) {
       continue;
     }
@@ -298,8 +240,7 @@ inline InstructionSet UsersWithAlias(const HloInstruction* inst,
   auto iter = alias_map.find(inst);
   if (iter != alias_map.end()) {
     for (HloInstruction* user : iter->second->users()) {
-      HloInstruction* pass_through_user =
-          PassThroughCustomCallMarkerUser(user, iter->second);
+      HloInstruction* pass_through_user = user;
       if (pass_through_user == output) {
         continue;
       }
@@ -501,6 +442,11 @@ absl::StatusOr<std::vector<int64_t>> GetTensorDimToMeshDimNoCrash(
     int64_t tensor_shape_rank, const HloSharding& spec,
     const Array<int64_t>& device_mesh,
     bool consider_reverse_device_meshes = false);
+
+HloSharding Tile(const Shape& tensor_shape,
+                 absl::Span<const int64_t> tensor_dims,
+                 const std::vector<std::vector<int64_t>>& mesh_dims,
+                 const Array<int64_t>& device_mesh);
 
 HloSharding Tile(const Shape& tensor_shape,
                  absl::Span<const int64_t> tensor_dims,

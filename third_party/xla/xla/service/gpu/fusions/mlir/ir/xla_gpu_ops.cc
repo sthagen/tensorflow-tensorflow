@@ -123,7 +123,8 @@ void ApplyIndexingOp::build(OpBuilder& builder, OperationState& result,
 }
 
 void ApplyIndexingOp::build(OpBuilder& builder, OperationState& result,
-                            ValueRange operands, IndexingMap indexing_map) {
+                            ValueRange operands,
+                            const IndexingMap& indexing_map) {
   SmallVector<Type, 2> result_types(indexing_map.GetAffineMap().getNumResults(),
                                     builder.getIndexType());
   IndexingMapAttr indexing_map_attr =
@@ -220,10 +221,7 @@ LogicalResult ApplyIndexingOp::verify() {
 }
 
 IndexingMap ApplyIndexingOp::getIndexingMap() {
-  return IndexingMap(getIndexingMapAttr().getMap(),
-                     getIndexingMapAttr().getDimVars(),
-                     getIndexingMapAttr().getRangeVars(),
-                     /*rt_vars=*/{});
+  return getIndexingMapAttr().getIndexingMap();
 }
 
 namespace {
@@ -694,10 +692,7 @@ LogicalResult LoopOp::verify() {
 }
 
 IndexingMap LoopOp::getIndexingMap() {
-  return IndexingMap(getIndexingMapAttr().getMap(),
-                     getIndexingMapAttr().getDimVars(),
-                     getIndexingMapAttr().getRangeVars(),
-                     /*rt_vars=*/{}, getIndexingMapAttr().getConstraints());
+  return getIndexingMapAttr().getIndexingMap();
 }
 
 }  // namespace gpu
