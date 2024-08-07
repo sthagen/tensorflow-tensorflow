@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,26 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/fusions/triton/passes.h"
+#ifndef TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_SORT_H_
+#define TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_SORT_H_
 
-#include "llvm/ADT/STLFunctionalExtras.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/Visitors.h"
+#include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
 
-namespace xla::gpu {
-namespace {
+namespace mlir::odml {
 
-using ::mlir::WalkResult;
+void PopulateSortPatterns(MLIRContext* ctx, RewritePatternSet& patterns,
+                          ConversionTarget& target);
 
-}  // namespace
+}  // namespace mlir::odml
 
-bool ContainsOp(mlir::Operation* op,
-                llvm::function_ref<bool(mlir::Operation*)> fn) {
-  return op
-      ->walk([&](mlir::Operation* nested_op) {
-        return fn(nested_op) ? WalkResult::interrupt() : WalkResult::advance();
-      })
-      .wasInterrupted();
-}
-
-}  // namespace xla::gpu
+#endif  // TENSORFLOW_COMPILER_MLIR_LITE_STABLEHLO_TRANSFORMS_LEGALIZE_HLO_CONVERSIONS_SORT_H_
