@@ -20,6 +20,7 @@ limitations under the License.
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -364,7 +365,7 @@ TEST(FfiTest, RemainingRets) {
   builder.AddBufferRet(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
-  auto fn = [&](Result<AnyBuffer> ret, RemainingResults rets) {
+  auto fn = [&](Result<AnyBuffer> ret, RemainingRets rets) {
     EXPECT_EQ(rets.size(), 1);
 
     ErrorOr<Result<AnyBuffer>> ret0 = rets.get<AnyBuffer>(0);
@@ -376,7 +377,7 @@ TEST(FfiTest, RemainingRets) {
     return Error::Success();
   };
 
-  auto handler = Ffi::Bind().Ret<AnyBuffer>().RemainingResults().To(fn);
+  auto handler = Ffi::Bind().Ret<AnyBuffer>().RemainingRets().To(fn);
   auto status = Call(*handler, call_frame);
 
   TF_ASSERT_OK(status);
@@ -510,6 +511,150 @@ TEST(FfiTest, ArrayAttr) {
                      .Attr<Span<const float>>("arr4")
                      .Attr<Span<const double>>("arr5")
                      .To(fn);
+  auto status = Call(*handler, call_frame);
+
+  TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, AttrsAsDictionary) {
+  CallFrameBuilder::AttributesBuilder attrs;
+  attrs.Insert("i32", 42);
+  attrs.Insert("f32", 42.0f);
+  attrs.Insert("str", "foo");
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  builder.AddAttributes(attrs.Build());
+  auto call_frame = builder.Build();
+
+  auto fn = [&](Dictionary dict) {
+    EXPECT_EQ(dict.size(), 3);
+
+    EXPECT_TRUE(dict.contains("i32"));
+    EXPECT_TRUE(dict.contains("f32"));
+    EXPECT_TRUE(dict.contains("str"));
+
+    ErrorOr<int32_t> i32 = dict.get<int32_t>("i32");
+    ErrorOr<float> f32 = dict.get<float>("f32");
+    ErrorOr<std::string_view> str = dict.get<std::string_view>("str");
+
+    EXPECT_TRUE(i32.has_value());
+    EXPECT_TRUE(f32.has_value());
+    EXPECT_TRUE(str.has_value());
+
+    if (i32.has_value()) EXPECT_EQ(*i32, 42);
+    if (f32.has_value()) EXPECT_EQ(*f32, 42.0f);
+    if (str.has_value()) EXPECT_EQ(*str, "foo");
+
+    EXPECT_FALSE(dict.contains("i64"));
+    EXPECT_FALSE(dict.get<int64_t>("i32").has_value());
+    EXPECT_FALSE(dict.get<int64_t>("i64").has_value());
+
+    return Error::Success();
+  };
+
+  auto handler = Ffi::Bind().Attrs().To(fn);
+  auto status = Call(*handler, call_frame);
+
+  TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, DictionaryAttr) {
+  CallFrameBuilder::FlatAttributesMap dict0;
+  dict0.try_emplace("i32", 42);
+
+  CallFrameBuilder::FlatAttributesMap dict1;
+  dict1.try_emplace("f32", 42.0f);
+
+  CallFrameBuilder::AttributesBuilder attrs;
+  attrs.Insert("dict0", dict0);
+  attrs.Insert("dict1", dict1);
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  builder.AddAttributes(attrs.Build());
+  auto call_frame = builder.Build();
+
+  auto fn = [&](Dictionary dict0, Dictionary dict1) {
+    EXPECT_EQ(dict0.size(), 1);
+    EXPECT_EQ(dict1.size(), 1);
+
+    EXPECT_TRUE(dict0.contains("i32"));
+    EXPECT_TRUE(dict1.contains("f32"));
+
+    ErrorOr<int32_t> i32 = dict0.get<int32_t>("i32");
+    ErrorOr<float> f32 = dict1.get<float>("f32");
+
+    EXPECT_TRUE(i32.has_value());
+    EXPECT_TRUE(f32.has_value());
+
+    if (i32.has_value()) EXPECT_EQ(*i32, 42);
+    if (f32.has_value()) EXPECT_EQ(*f32, 42.0f);
+
+    return Error::Success();
+  };
+
+  auto handler =
+      Ffi::Bind().Attr<Dictionary>("dict0").Attr<Dictionary>("dict1").To(fn);
+
+  auto status = Call(*handler, call_frame);
+
+  TF_ASSERT_OK(status);
+}
+
+struct PairOfI32AndF32 {
+  int32_t i32;
+  float f32;
+};
+
+XLA_FFI_REGISTER_STRUCT_ATTR_DECODING(PairOfI32AndF32,
+                                      StructMember<int32_t>("i32"),
+                                      StructMember<float>("f32"));
+
+TEST(FfiTest, StructAttr) {
+  CallFrameBuilder::FlatAttributesMap dict;
+  dict.try_emplace("i32", 42);
+  dict.try_emplace("f32", 42.0f);
+
+  CallFrameBuilder::AttributesBuilder attrs;
+  attrs.Insert("str", "foo");
+  attrs.Insert("i32_and_f32", dict);
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  builder.AddAttributes(attrs.Build());
+  auto call_frame = builder.Build();
+
+  auto fn = [&](std::string_view str, PairOfI32AndF32 i32_and_f32) {
+    EXPECT_EQ(str, "foo");
+    EXPECT_EQ(i32_and_f32.i32, 42);
+    EXPECT_EQ(i32_and_f32.f32, 42.0f);
+    return Error::Success();
+  };
+
+  auto handler = Ffi::Bind()
+                     .Attr<std::string_view>("str")
+                     .Attr<PairOfI32AndF32>("i32_and_f32")
+                     .To(fn);
+
+  auto status = Call(*handler, call_frame);
+
+  TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, AttrsAsStruct) {
+  CallFrameBuilder::AttributesBuilder attrs;
+  attrs.Insert("i32", 42);
+  attrs.Insert("f32", 42.0f);
+
+  CallFrameBuilder builder(/*num_args=*/0, /*num_rets=*/0);
+  builder.AddAttributes(attrs.Build());
+  auto call_frame = builder.Build();
+
+  auto fn = [&](PairOfI32AndF32 i32_and_f32) {
+    EXPECT_EQ(i32_and_f32.i32, 42);
+    EXPECT_EQ(i32_and_f32.f32, 42.0f);
+    return Error::Success();
+  };
+
+  auto handler = Ffi::Bind().Attrs<PairOfI32AndF32>().To(fn);
   auto status = Call(*handler, call_frame);
 
   TF_ASSERT_OK(status);
@@ -735,6 +880,19 @@ TEST(FfiTest, ScratchAllocator) {
 
   TF_ASSERT_OK(status);
   EXPECT_EQ(allocator.count, 0);
+}
+
+TEST(FfiTest, ScratchAllocatorUnimplemented) {
+  auto fn = [&](ScratchAllocator scratch_allocator) {
+    auto mem = scratch_allocator.Allocate(1024);
+    EXPECT_FALSE(mem.has_value());
+    return Error::Success();
+  };
+  auto handler = Ffi::Bind().Ctx<ScratchAllocator>().To(fn);
+  CallFrame call_frame =
+      CallFrameBuilder(/*num_args=*/0, /*num_rets=*/0).Build();
+  auto status = Call(*handler, call_frame);
+  TF_ASSERT_OK(status);
 }
 
 //===----------------------------------------------------------------------===//

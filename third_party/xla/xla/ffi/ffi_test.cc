@@ -317,21 +317,21 @@ TEST(FfiTest, AttrsAsDictionary) {
     EXPECT_TRUE(dict.contains("f32"));
     EXPECT_TRUE(dict.contains("str"));
 
-    auto i32 = dict.get<int32_t>("i32");
-    auto f32 = dict.get<float>("f32");
-    auto str = dict.get<std::string_view>("str");
+    absl::StatusOr<int32_t> i32 = dict.get<int32_t>("i32");
+    absl::StatusOr<float> f32 = dict.get<float>("f32");
+    absl::StatusOr<std::string_view> str = dict.get<std::string_view>("str");
 
-    EXPECT_TRUE(i32.has_value());
-    EXPECT_TRUE(f32.has_value());
-    EXPECT_TRUE(str.has_value());
+    EXPECT_TRUE(i32.ok());
+    EXPECT_TRUE(f32.ok());
+    EXPECT_TRUE(str.ok());
 
-    if (i32) EXPECT_EQ(*i32, 42);
-    if (f32) EXPECT_EQ(*f32, 42.0f);
-    if (str) EXPECT_EQ(*str, "foo");
+    if (i32.ok()) EXPECT_EQ(*i32, 42);
+    if (f32.ok()) EXPECT_EQ(*f32, 42.0f);
+    if (str.ok()) EXPECT_EQ(*str, "foo");
 
     EXPECT_FALSE(dict.contains("i64"));
-    EXPECT_FALSE(dict.get<int64_t>("i32").has_value());
-    EXPECT_FALSE(dict.get<int64_t>("i64").has_value());
+    EXPECT_FALSE(dict.get<int64_t>("i32").ok());
+    EXPECT_FALSE(dict.get<int64_t>("i64").ok());
 
     return absl::OkStatus();
   };
@@ -364,14 +364,14 @@ TEST(FfiTest, DictionaryAttr) {
     EXPECT_TRUE(dict0.contains("i32"));
     EXPECT_TRUE(dict1.contains("f32"));
 
-    auto i32 = dict0.get<int32_t>("i32");
-    auto f32 = dict1.get<float>("f32");
+    absl::StatusOr<int32_t> i32 = dict0.get<int32_t>("i32");
+    absl::StatusOr<float> f32 = dict1.get<float>("f32");
 
-    EXPECT_TRUE(i32.has_value());
-    EXPECT_TRUE(f32.has_value());
+    EXPECT_TRUE(i32.ok());
+    EXPECT_TRUE(f32.ok());
 
-    if (i32) EXPECT_EQ(*i32, 42);
-    if (f32) EXPECT_EQ(*f32, 42.0f);
+    if (i32.ok()) EXPECT_EQ(*i32, 42);
+    if (f32.ok()) EXPECT_EQ(*f32, 42.0f);
 
     return absl::OkStatus();
   };
@@ -657,7 +657,7 @@ TEST(FfiTest, RemainingRets) {
   builder.AddBufferRet(memory, PrimitiveType::F32, /*dims=*/{2, 2});
   auto call_frame = builder.Build();
 
-  auto fn = [&](Result<AnyBuffer> ret, RemainingResults rets) {
+  auto fn = [&](Result<AnyBuffer> ret, RemainingRets rets) {
     EXPECT_EQ(rets.size(), 1);
 
     absl::StatusOr<Result<AnyBuffer>> ret0 = rets.get<AnyBuffer>(0);
@@ -670,7 +670,7 @@ TEST(FfiTest, RemainingRets) {
     return absl::OkStatus();
   };
 
-  auto handler = Ffi::Bind().Ret<AnyBuffer>().RemainingResults().To(fn);
+  auto handler = Ffi::Bind().Ret<AnyBuffer>().RemainingRets().To(fn);
   auto status = Call(*handler, call_frame);
 
   TF_ASSERT_OK(status);
