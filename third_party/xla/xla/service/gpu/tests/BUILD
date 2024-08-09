@@ -162,44 +162,6 @@ xla_test(
     ],
 )
 
-xla_cc_test(
-    name = "gpu_reduce_scatter_creator_test",
-    srcs = ["gpu_reduce_scatter_creator_test.cc"],
-    deps = [
-        "//xla:util",
-        "//xla/hlo/ir:hlo",
-        "//xla/service:hlo_module_config",
-        "//xla/service:pattern_matcher",
-        "//xla/service:pattern_matcher_gmock",
-        "//xla/service/gpu:gpu_reduce_scatter_creator",
-        "//xla/tests:hlo_test_base",
-        "//xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:statusor",
-    ],
-)
-
-xla_cc_test(
-    name = "gpu_all_gather_optimizer_test",
-    srcs = ["gpu_all_gather_optimizer_test.cc"],
-    deps = [
-        "//xla:util",
-        "//xla/hlo/ir:hlo",
-        "//xla/service:hlo_module_config",
-        "//xla/service/gpu:gpu_all_gather_optimizer",
-        "//xla/tests:hlo_test_base",
-        "//xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
-    ],
-)
-
 xla_test(
     name = "gpu_spmd_e2e_compile_test",
     size = "small",
@@ -238,51 +200,6 @@ xla_test(
     ],
 )
 
-xla_cc_test(
-    name = "reduction_degenerate_dim_remover_test",
-    srcs = [
-        "reduction_degenerate_dim_remover_test.cc",
-    ],
-    deps = [
-        "//xla/service/gpu:reduction_degenerate_dim_remover",
-        "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/strings:string_view",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
-)
-
-xla_test(
-    name = "reduction_layout_normalizer_test",
-    srcs = [
-        "reduction_layout_normalizer_test.cc",
-    ],
-    backends = ["gpu"],
-    deps = [
-        "//xla:error_spec",
-        "//xla/service/gpu:reduction_layout_normalizer",
-        "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/strings:string_view",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
-)
-
-xla_cc_test(
-    name = "tree_reduction_rewriter_test",
-    srcs = [
-        "tree_reduction_rewriter_test.cc",
-    ],
-    deps = [
-        "//xla/service/gpu:tree_reduction_rewriter",
-        "//xla/stream_executor:device_description",
-        "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
-)
-
 xla_test(
     name = "swap_conv_operands_test",
     srcs = [
@@ -311,20 +228,6 @@ xla_test(
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
-    ],
-)
-
-xla_cc_test(
-    name = "reduction_dimension_grouper_test",
-    srcs = [
-        "reduction_dimension_grouper_test.cc",
-    ],
-    deps = [
-        "//xla/service/gpu:reduction_dimension_grouper",
-        "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -581,7 +484,7 @@ xla_test(
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:gpu_device_info_for_tests",
         "//xla/service/gpu:gpu_fusible",
-        "//xla/service/gpu:instruction_fusion",
+        "//xla/service/gpu/transforms:instruction_fusion",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -597,9 +500,9 @@ xla_test(
         "//xla/service:hlo_cost_analysis",
         "//xla/service:hlo_pass_pipeline",
         "//xla/service/gpu:gpu_device_info_for_tests",
-        "//xla/service/gpu:instruction_fusion",
-        "//xla/service/gpu:multi_output_fusion",
         "//xla/service/gpu/transforms:fusion_merger",
+        "//xla/service/gpu/transforms:instruction_fusion",
+        "//xla/service/gpu/transforms:multi_output_fusion",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:test_main",
@@ -912,7 +815,7 @@ xla_test(
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
-        "//xla/service/gpu:gpu_sort_rewriter",
+        "//xla/service/gpu/transforms:sort_rewriter",
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
