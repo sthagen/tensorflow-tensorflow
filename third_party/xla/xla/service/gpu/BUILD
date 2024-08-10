@@ -659,6 +659,7 @@ cc_library(
         "//xla/service/llvm_ir:llvm_type_conversion_util",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor:device_description",
+        "//xla/tsl/lib/strings:proto_serialization",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
@@ -670,7 +671,6 @@ cc_library(
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:TargetParser",
-        "@local_tsl//tsl/lib/strings:proto_serialization",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -1625,7 +1625,7 @@ cc_library(
 
 xla_test(
     name = "gpu_compiler_test",
-    srcs = if_gpu_is_configured(["gpu_compiler_test.cc"]),
+    srcs = ["gpu_compiler_test.cc"],
     backends = ["gpu"],
     data = ["gpu_compiler_test_autotune_db.textproto"],
     deps = [
@@ -1847,7 +1847,6 @@ xla_test(
         "gpu_a100",
     ],
     tags = [
-        "gpu",
         "no_rocm",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
     ],
@@ -1886,7 +1885,6 @@ xla_test(
         "gpu",
     ],
     tags = [
-        "gpu",
         "no_rocm",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
     ],
