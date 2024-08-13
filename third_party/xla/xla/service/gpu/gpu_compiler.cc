@@ -1399,10 +1399,12 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
       pipeline.AddPass<GemmFusion>(gpu_version);
     }
 
-    pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
-                                   /*f8_rewrite=*/true);
-    pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
-                                   /*f8_rewrite=*/false);
+    pipeline.AddPass<GemmRewriter>(
+        gpu_version, GetToolkitVersion(),
+        GemmRewriterOptions{GemmRewriterOptions::DType::kFp8Only});
+    pipeline.AddPass<GemmRewriter>(
+        gpu_version, GetToolkitVersion(),
+        GemmRewriterOptions{GemmRewriterOptions::DType::kNonFp8Only});
 
     // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
     pipeline.AddPass<GemmBroadcastFoldingRewriter>();
@@ -1470,10 +1472,12 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<CallInliner>();
   // TODO(tdanyluk): Apply CublasPadForGemms to the cuBLAS GEMMs generated
   // here for possibly better cuBLAS performance.
-  pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
-                                 /*f8_rewrite=*/true);
-  pipeline.AddPass<GemmRewriter>(gpu_version, GetToolkitVersion(),
-                                 /*f8_rewrite=*/false);
+  pipeline.AddPass<GemmRewriter>(
+      gpu_version, GetToolkitVersion(),
+      GemmRewriterOptions{GemmRewriterOptions::DType::kFp8Only});
+  pipeline.AddPass<GemmRewriter>(
+      gpu_version, GetToolkitVersion(),
+      GemmRewriterOptions{GemmRewriterOptions::DType::kNonFp8Only});
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
@@ -2150,8 +2154,8 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   }};
   BinaryMap dnn_compiled_graphs;
   if (stream_exec) {
-    TF_RETURN_IF_ERROR(RunCudnnFusionCompilerPass(module.get(), stream_exec,
-                                                  &dnn_compiled_graphs));
+    TF_RETURN_IF_ERROR(RunCudnnCompilerPasses(module.get(), stream_exec,
+                                              &dnn_compiled_graphs));
   }
 
   const DebugOptions& debug_opts = module->config().debug_options();
