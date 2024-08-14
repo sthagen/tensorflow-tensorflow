@@ -220,7 +220,6 @@ gpu_only_cc_library(
         "//xla/stream_executor:host_memory_allocation",
         "//xla/stream_executor:kernel",
         "//xla/stream_executor:kernel_spec",
-        "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:memory_allocation",
         "//xla/stream_executor:module_spec",
         "//xla/stream_executor:platform",
@@ -308,7 +307,6 @@ gpu_only_cc_library(
     deps = [
         ":gpu_event_header",
         ":gpu_executor_header",
-        ":gpu_kernel_header",
         ":gpu_types_header",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:event",
@@ -761,6 +759,7 @@ xla_test(
     ]),
     deps = [
         "//xla/stream_executor",
+        "//xla/stream_executor:stream_finder",
         "//xla/stream_executor/host:host_platform",
         "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/platform:statusor",
