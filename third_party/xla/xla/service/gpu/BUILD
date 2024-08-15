@@ -2088,6 +2088,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/profiler/lib:traceme",
         "@local_tsl//tsl/profiler/protobuf:profiled_instructions_proto_cc",
     ],
 )
@@ -2722,11 +2723,7 @@ cc_library(
 xla_test(
     name = "dot_algorithm_support_test",
     srcs = if_gpu_is_configured(["dot_algorithm_support_test.cc"]),
-    backends = [
-        "gpu_v100",
-        "gpu_a100",
-        "gpu_amd_any",
-    ],
+    backends = ["gpu"],
     tags = [
         "nomac",
     ],

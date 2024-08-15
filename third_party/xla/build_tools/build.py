@@ -390,17 +390,25 @@ def main():
             "github/xla/.bazelrc",
         ],
     )
+    sh(
+        [
+            "sed",
+            "-i",
+            r"s/8\.9\.7\.29/9.1.1/g",
+            "github/xla/.bazelrc",
+        ],
+    )
     sh(["nvidia-smi"])
 
-    build.docker_image.pull_and_run(
-        _CONTAINER_NAME,
-        workdir=f"/github/{repo_name}",
-        **_DEFAULT_DOCKER_OPTIONS,
-    )
-    docker_exec = lambda cmd: sh(["docker", "exec", _CONTAINER_NAME, *cmd])
-    docker_exec(build.bazel_test_command())
-    docker_exec(["bazel", "analyze-profile", "profile.json.gz"])
-    sh(["docker", "stop", _CONTAINER_NAME])
+  build.docker_image.pull_and_run(
+      _CONTAINER_NAME,
+      workdir=f"/github/{repo_name}",
+      **_DEFAULT_DOCKER_OPTIONS,
+  )
+  docker_exec = lambda cmd: sh(["docker", "exec", _CONTAINER_NAME, *cmd])
+  docker_exec(build.bazel_test_command())
+  docker_exec(["bazel", "analyze-profile", "profile.json.gz"])
+  sh(["docker", "stop", _CONTAINER_NAME])
 
 
 if __name__ == "__main__":
