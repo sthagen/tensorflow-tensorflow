@@ -687,6 +687,7 @@ xla_cc_test(
         "//xla:shape_util",
         "//xla:types",
         "//xla/hlo/ir:backend_config",
+        "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
@@ -1424,6 +1425,7 @@ cc_library(
         "//xla/service/gpu/transforms:all_reduce_blueconnect",
         "//xla/service/gpu/transforms:all_reduce_splitter",
         "//xla/service/gpu/transforms:async_collective_annotator",
+        "//xla/service/gpu/transforms:async_wrapper",
         "//xla/service/gpu/transforms:collective_permute_cycle_decomposer",
         "//xla/service/gpu/transforms:collective_permute_valid_iteration_annotator",
         "//xla/service/gpu/transforms:command_buffer_scheduling",
@@ -1457,6 +1459,7 @@ cc_library(
         "//xla/service/gpu/transforms:stream_attribute_async_wrapper",
         "//xla/service/gpu/transforms:topk_specializer",
         "//xla/service/gpu/transforms:topk_splitter",
+        "//xla/service/gpu/transforms:transpose_dimension_grouper",
         "//xla/service/gpu/transforms:tree_reduction_rewriter",
         "//xla/service/gpu/transforms:triton_fusion_numerics_verifier",
         "//xla/service/gpu/transforms:windowed_einsum_handler",

@@ -37,19 +37,6 @@ enum class StreamPriority { Default = 0, Lowest, Highest };
 // Returns a printable description of StreamPriority.
 std::string StreamPriorityToString(StreamPriority priority);
 
-// StreamExecutorConfig encapsulates the set of options for constructing a
-// StreamExecutor for a given platform.
-struct StreamExecutorConfig {
-  // Sets members to defaults: -1 for ordinal (must be changed).
-  StreamExecutorConfig();
-
-  // Simple ordinal-setting constructor.
-  explicit StreamExecutorConfig(int ordinal);
-
-  // The ordinal of the device to be managed by the returned StreamExecutor.
-  int ordinal;
-};
-
 // Abstract base class for a platform registered with the PlatformManager.
 class Platform {
  public:
@@ -107,19 +94,13 @@ class Platform {
     return absl::NotFoundError("Not implemented for this platform.");
   }
 
-  // Returns a device with the given ordinal on this platform with a default
-  // plugin configuration or, if none can be found with the given ordinal or
-  // there is an error in opening a context to communicate with the device, an
-  // error status is returned.
+  // Returns a device with the given ordinal on this platform or, if none can
+  // be found with the given ordinal or there is an error in opening a context
+  // to communicate with the device, an error status is returned.
   //
   // Ownership of the executor is NOT transferred to the caller --
   // the Platform owns the executors in a singleton-like fashion.
   virtual absl::StatusOr<StreamExecutor*> ExecutorForDevice(int ordinal) = 0;
-
-  // Returns a device constructed with the options specified in "config".
-  // Ownership of the executor is NOT transferred to the caller.
-  virtual absl::StatusOr<StreamExecutor*> GetExecutor(
-      const StreamExecutorConfig& config) = 0;
 };
 
 }  // namespace stream_executor
