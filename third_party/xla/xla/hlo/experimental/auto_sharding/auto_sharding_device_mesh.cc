@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "xla/hlo/experimental/auto_sharding/auto_sharding_device_mesh.h"
+
 #include <cstdint>
 
-extern "C" __global__ void add(int32_t* a, int32_t* b, int32_t* c) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
-  c[index] = a[index] + b[index];
+#include "absl/types/span.h"
+#include "xla/array.h"
+
+namespace xla {
+namespace spmd {
+
+namespace {
+bool AreValuesIota(const absl::Span<const int64_t> values) {
+  for (int i = 1; i < values.size(); ++i) {
+    if (values[i] - values[i - 1] != 1) {
+      return false;
+    }
+  }
+  return true;
 }
+}  // namespace
+
+void DeviceMesh::SetValues(absl::Span<const int64_t> values) {
+  device_array.SetValues(values);
+  is_iota = AreValuesIota(values);
+}
+}  // namespace spmd
+}  // namespace xla
