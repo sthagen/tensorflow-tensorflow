@@ -407,8 +407,14 @@ xla_test(
 
 cc_library(
     name = "triton_support",
-    srcs = ["triton_support.cc"],
-    hdrs = ["triton_support.h"],
+    srcs = [
+        "triton_support.cc",
+        "triton_support_legacy.cc",
+    ],
+    hdrs = [
+        "triton_support.h",
+        "triton_support_legacy.h",
+    ],
     deps = [
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
@@ -448,8 +454,10 @@ xla_cc_test(
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:status_matchers",
