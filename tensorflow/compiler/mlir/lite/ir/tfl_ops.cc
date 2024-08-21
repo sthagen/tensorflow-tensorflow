@@ -2489,9 +2489,30 @@ OpFoldResult SubOp::fold(FoldAdaptor adaptor) {
   auto operands = adaptor.getOperands();
   // TODO(b/142478136): Handle fused ops.
   if (getFusedActivationFunction() != "NONE") return {};
-  return ConstFoldBinaryOp(
-      getType(), operands, [](APFloat a, APFloat b) { return a - b; },
-      [](APInt a, APInt b) { return a - b; });
+
+  auto lhs = llvm::dyn_cast_or_null<DenseElementsAttr>(adaptor.getLhs());
+  auto rhs = llvm::dyn_cast_or_null<DenseElementsAttr>(adaptor.getRhs());
+
+  if (lhs && rhs) {
+    return ConstFoldBinaryOp(
+        getType(), operands, [](APFloat a, APFloat b) { return a - b; },
+        [](APInt a, APInt b) { return a - b; });
+  }
+
+  auto is_zero = [](Attribute a) {
+    return matchPattern(a, m_Zero()) || matchPattern(a, m_AnyZeroFloat());
+  };
+
+  if (llvm::isa<quant::QuantizedType>(getType().getElementType())) {
+    // Quant types not supported for the following.
+    return {};
+  }
+
+  if (rhs && is_zero(rhs) && getLhs().getType() == getType()) {
+    return getLhs();
+  }
+
+  return {};
 }
 
 int64_t SubOp::GetArithmeticCount(Operation* op) {
@@ -3209,6 +3230,36 @@ OpFoldResult SquareOp::fold(FoldAdaptor adaptor) {
 
   auto compute = [](APFloat value) -> APFloat { return value * value; };
   return ConstFoldUnaryOp(result_type, operands[0], compute);
+}
+
+//===----------------------------------------------------------------------===//
+// ReluOp
+//===----------------------------------------------------------------------===//
+
+template <typename T>
+T ComputeRelu(T val) {
+  return std::max(static_cast<T>(0), val);
+}
+
+// TODO: b/361137571 - Add folding for quantized types if it is needed.
+OpFoldResult ReluOp::fold(FoldAdaptor adaptor) {
+  auto data = mlir::dyn_cast_or_null<DenseElementsAttr>(adaptor.getX());
+  if (!data) {
+    return {};
+  }
+
+  if (getType().getElementType().isSignlessInteger(32)) {
+    return DenseIntElementsAttr::get(
+        data.getType(),
+        llvm::map_to_vector(data.getValues<int32_t>(), ComputeRelu<int32_t>));
+  }
+  if (getType().getElementType().isF32()) {
+    return DenseFPElementsAttr::get(
+        data.getType(),
+        llvm::map_to_vector(data.getValues<float>(), ComputeRelu<float>));
+  }
+
+  return {};
 }
 
 //===----------------------------------------------------------------------===//

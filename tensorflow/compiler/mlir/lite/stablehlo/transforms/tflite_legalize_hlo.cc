@@ -39,6 +39,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/custom_call.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/dot_general.h"  // IWYU pragma: keep
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/gather.h"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/get_dimension_size.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/iota.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/pad.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/reduce.h"
@@ -46,6 +47,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/slice.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/sort.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/util.h"  // IWYU pragma: keep
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/while.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"  // IWYU pragma: keep
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"  // IWYU pragma: keep
@@ -213,7 +215,6 @@ void AddRoundingOpsAsUnknown(ConversionTarget& target) {
       mhlo::AddOp,
       mhlo::BroadcastInDimOp,
       mhlo::ConstantOp,
-      mhlo::DivOp,
       mhlo::FloorOp,
       mhlo::MulOp,
       mhlo::RemOp,
@@ -297,6 +298,7 @@ void LegalizeHloToTfLitePass::runOnOperation() {
       // go/keep-sorted start
       // clang-format off
       mhlo::ClampOp,
+      mhlo::DivOp,
       mhlo::DotGeneralOp,
       mhlo::DotOp,
       mhlo::DynamicReshapeOp,
@@ -308,6 +310,7 @@ void LegalizeHloToTfLitePass::runOnOperation() {
       mhlo::ReshapeOp,
       mhlo::ShiftRightArithmeticOp,
       mhlo::ShiftRightLogicalOp,
+      mhlo::SubtractOp,
       mhlo::TransposeOp
       // clang-format on
       // go/keep-sorted end
@@ -325,6 +328,8 @@ void LegalizeHloToTfLitePass::runOnOperation() {
   PopulateLegalizeSlicePatterns(context, patterns, target);
   PopulateSortPatterns(context, patterns, target);
   PopulateIotaPatterns(context, patterns, target);
+  PopulateWhilePatterns(context, patterns, target);
+  PopulateGetDimensionSizePatterns(context, patterns, target);
 
   if (failed(applyPartialConversion(getOperation(), target,
                                     std::move(patterns)))) {
