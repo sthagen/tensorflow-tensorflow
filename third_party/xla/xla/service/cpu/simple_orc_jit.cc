@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +52,7 @@ limitations under the License.
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
 #include "mlir/ExecutionEngine/CRunnerUtils.h"
@@ -94,8 +96,7 @@ extern "C" uint16_t __truncsfbf2(float);
 // Converts an F64 value to a BF16.
 extern "C" uint16_t __truncdfbf2(double);
 
-namespace xla {
-namespace cpu {
+namespace xla::cpu {
 
 std::vector<std::string> DetectMachineAttributes() {
   std::vector<std::string> result;
@@ -321,6 +322,13 @@ SimpleOrcJIT::InferTargetMachineForJIT(
   return target_machine;
 }
 
+static CompilerFunctor::TargetMachineBuilder CreateTargetMachineBuilder(
+    llvm::TargetOptions target_options, llvm::CodeGenOptLevel opt_level) {
+  return [target_options, opt_level]() {
+    return SimpleOrcJIT::InferTargetMachineForJIT(target_options, opt_level);
+  };
+}
+
 SimpleOrcJIT::SimpleOrcJIT(
     std::unique_ptr<llvm::orc::ExecutorProcessControl> target_process_control,
     std::unique_ptr<llvm::orc::ExecutionSession> execution_session,
@@ -331,7 +339,9 @@ SimpleOrcJIT::SimpleOrcJIT(
     LLVMCompiler::ModuleHook post_optimization_hook,
     absl::AnyInvocable<void(const llvm::object::ObjectFile&)> post_codegen_hook,
     size_t num_jit_dylibs)
-    : target_machine_(InferTargetMachineForJIT(target_options, opt_level)),
+    : target_machine_builder_(
+          CreateTargetMachineBuilder(target_options, opt_level)),
+      target_machine_(target_machine_builder_()),
       target_triple_(target_machine_->getTargetTriple()),
       data_layout_(target_machine_->createDataLayout()),
       target_process_control_(std::move(target_process_control)),
@@ -344,7 +354,7 @@ SimpleOrcJIT::SimpleOrcJIT(
       compile_layer_(
           *execution_session_, object_layer_,
           std::make_unique<CompilerFunctor>(
-              target_machine_.get(), static_cast<int>(opt_level),
+              [&] { return target_machine_; }, static_cast<int>(opt_level),
               optimize_for_size, disable_expensive_passes,
               disable_slp_vectorizer, fast_math_flags,
               std::move(pre_optimization_hook),
@@ -381,6 +391,8 @@ SimpleOrcJIT::SimpleOrcJIT(
     }
   };
 
+  // Always create at least one dylib.
+  num_jit_dylibs = std::max(size_t{1}, num_jit_dylibs);
   jit_dylibs_.resize(num_jit_dylibs);
   for (size_t i = 0; i < num_jit_dylibs; ++i) {
     jit_dylibs_[i] = &execution_session_->createBareJITDylib(
@@ -704,7 +716,6 @@ bool RegisterKnownJITSymbols() {
 }
 
 bool unused = RegisterKnownJITSymbols();
-}  // namespace
 
-}  // namespace cpu
-}  // namespace xla
+}  // namespace
+}  // namespace xla::cpu

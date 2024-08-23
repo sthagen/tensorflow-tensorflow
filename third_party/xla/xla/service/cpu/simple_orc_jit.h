@@ -45,10 +45,10 @@ limitations under the License.
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Triple.h"
+#include "xla/service/cpu/compiler_functor.h"
 #include "xla/service/llvm_compiler.h"
 
-namespace xla {
-namespace cpu {
+namespace xla::cpu {
 
 // Simplified LLVM JIT based on the new Orc API.
 //
@@ -103,11 +103,6 @@ class SimpleOrcJIT : public llvm::JITEventListener {
   llvm::Error AddModule(llvm::orc::ThreadSafeModule module,
                         size_t dylib_index = 0);
 
-  // Moves context ownership to the JIT.
-  void SetContext(llvm::orc::ThreadSafeContext context) {
-    context_ = std::move(context);
-  }
-
   // Discards objects we no longer need once we are done compiling.
   void DoneCompiling();
 
@@ -141,9 +136,11 @@ class SimpleOrcJIT : public llvm::JITEventListener {
       const llvm::RuntimeDyld::LoadedObjectInfo& object_info) override;
   void notifyFreeingObject(llvm::JITEventListener::ObjectKey key) override;
 
-  llvm::orc::ThreadSafeContext context_;
+  // Target machine builder that is used to construct target machines for this
+  // instance of SimpleOrcJIT, and to construct `target_machine_`.
+  CompilerFunctor::TargetMachineBuilder target_machine_builder_;
+  std::shared_ptr<llvm::TargetMachine> target_machine_;
 
-  std::unique_ptr<llvm::TargetMachine> target_machine_;
   llvm::Triple target_triple_;
   const llvm::DataLayout data_layout_;
   std::unique_ptr<llvm::orc::ExecutorProcessControl> target_process_control_;
@@ -172,7 +169,6 @@ class SimpleOrcJIT : public llvm::JITEventListener {
 
 std::vector<std::string> DetectMachineAttributes();
 
-}  // namespace cpu
-}  // namespace xla
+}  // namespace xla::cpu
 
 #endif  // XLA_SERVICE_CPU_SIMPLE_ORC_JIT_H_

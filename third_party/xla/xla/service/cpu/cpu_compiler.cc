@@ -45,8 +45,11 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
@@ -55,6 +58,7 @@ limitations under the License.
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBufferRef.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -200,6 +204,8 @@ limitations under the License.
 #include "tsl/platform/logging.h"  // IWYU pragma: keep
 #include "tsl/platform/status.h"
 #include "tsl/platform/statusor.h"
+#include "tsl/profiler/lib/traceme.h"
+#include "tsl/profiler/lib/traceme_encode.h"
 
 #ifdef TF_LLVM_X86_AVAILABLE
 #include "llvm/TargetParser/X86TargetParser.h"
@@ -213,8 +219,10 @@ limitations under the License.
 #endif
 
 namespace xla {
-
 namespace {
+
+using tsl::profiler::TraceMe;
+using tsl::profiler::TraceMeEncode;
 
 // For each computation in the module, determines whether that computation
 // calls a custom-call function, either directly or indirectly (e.g. because it
@@ -1127,8 +1135,68 @@ CreateConstantAllocations(const BufferAssignment& assignment) {
   return constants;
 }
 
+// Removes unused globals and function declarations from the LLVM module.
+//
+// After splitting LLVM module into multiple parts, we end up with unused
+// symbols in each part: external globals and function declarations. We don't
+// support linking across modules added to SimpleOrcJIT, and we don't need it,
+// because we never construct LLVM IR that might require cross-module linking,
+// so we can just remove unused symbols from each part.
+static void RemoveUnusedSymbols(llvm::Module& module) {
+  llvm::SmallVector<llvm::GlobalVariable*> unused_globals;
+  llvm::SmallVector<llvm::Function*> unused_functions;
+
+  for (llvm::GlobalVariable& gv : module.globals()) {
+    if (gv.use_empty()) unused_globals.push_back(&gv);
+  }
+  for (llvm::Function& f : module.functions()) {
+    if (f.isDeclaration() && f.use_empty()) unused_functions.push_back(&f);
+  }
+
+  for (auto* gv : unused_globals) {
+    module.eraseGlobalVariable(gv);
+  }
+  for (auto* f : unused_functions) {
+    f->eraseFromParent();
+  }
+}
+
+// Clones a ThreadSafeModule from the given LLVM module in a new LLVM context.
+//
+// To enable parallel compilation, each LLVM module has to be owned by a
+// separate LLVM context. We take each part of the original module after a
+// split, and clone it into a new LLVM context.
+static llvm::orc::ThreadSafeModule CloneAsThreadSafeModule(
+    int64_t part, std::unique_ptr<llvm::Module> module) {
+  TraceMe trace([&] {
+    return TraceMeEncode("CpuCompiler::CloneAsThreadSafeModule",
+                         {{"part", part}});
+  });
+
+  // There is no way to clone a module from one context to another, so we need
+  // to serialize the module to bitcode and parse it back into the new context.
+  llvm::SmallString<0> bc;
+  llvm::raw_svector_ostream bcos(bc);
+  llvm::WriteBitcodeToFile(*module, bcos);
+
+  // Parse module back into its own LLVM context.
+  auto clone_context = std::make_unique<llvm::LLVMContext>();
+  auto clone_module = llvm::parseBitcodeFile(
+      llvm::MemoryBufferRef(llvm::StringRef(bc.data(), bc.size()),
+                            absl::StrCat("__compute_module_part_", part)),
+      *clone_context);
+
+  return llvm::orc::ThreadSafeModule(std::move(*clone_module),
+                                     std::move(clone_context));
+}
+
 absl::StatusOr<std::unique_ptr<CpuExecutable>>
 CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
+  TraceMe trace([&] {
+    return TraceMeEncode("CpuCompiler::CompileLegacyCpuExecutable",
+                         {{"name", module->name()}});
+  });
+
   ModuleHook pre_optimization_ir_hook;
   ModuleHook post_optimization_ir_hook;
   std::tie(pre_optimization_ir_hook, post_optimization_ir_hook) =
@@ -1149,10 +1217,8 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
 
   // We split LLVM module and distribute it across separate DyLibs to enable
   // parallel compilation at run time.
-  //
-  // TODO(b/359659598): Increase the number of dylibs to 32 and make compilation
-  // truly parallel. For now we use 2 dylibs to do basic sanity check.
-  constexpr size_t num_jit_dylibs = 2;
+  size_t parallel_codegen_split_count =
+      debug_options.xla_cpu_parallel_codegen_split_count();
 
   auto jit = SimpleOrcJIT::Create(
       CompilerTargetOptions(module->config()),
@@ -1163,7 +1229,7 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
       llvm_ir::GetCpuFastMathFlags(module->config()), pre_optimization_ir_hook,
       post_optimization_ir_hook,
       CreateOrcJITPostCompilationHook(module.get(), &obj_files),
-      num_jit_dylibs);
+      parallel_codegen_split_count);
   if (!jit) {
     return Internal("Creating JIT failed: %s", llvm::toString(jit.takeError()));
   }
@@ -1196,7 +1262,7 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
 
   // Select an order for emitting the HLO instructions for each
   // computation. Using this sequence enables tighter buffer liveness analysis
-  // and reduced memory usage (as compared to using DependencyHloOrdering).
+  // and reduced memory usage (as compared to using `DependencyHloOrdering`).
   TF_ASSIGN_OR_RETURN(
       HloSchedule schedule,
       ScheduleModule(module.get(), BufferSizeBytesFunction(),
@@ -1279,10 +1345,12 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
     TF_RETURN_IF_ERROR(VerifyLlvmModule(*llvm_module));
 
     // We define the number of module parts based on the total number of
-    // external functions (kernels and comparators) that are called from thunks.
+    // external functions (kernels and comparators) that are called from thunks,
+    // and the maximum number of parts that we want to split the module into.
     size_t num_external_function =
         ir_emitter2.kernels().size() + ir_emitter2.comparators().size();
-    size_t num_parts = std::min(num_external_function, num_jit_dylibs);
+    size_t num_parts =
+        std::min(num_external_function, parallel_codegen_split_count);
 
     // JIT compile the LLVM IR module to in-memory machine code. We split the
     // module into `num_jit_dylibs` parts to allow parallel compilation. In
@@ -1290,27 +1358,34 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
     // other, so we can compile each individual part in parallel. We split
     // module preserving locals, which should guarantee that all thread local
     // computations end up in the same module with the corresponding kernel.
-    llvm::orc::ThreadSafeContext thread_safe_context(std::move(llvm_context));
 
     if (num_parts > 1) {
-      VLOG(2) << "Splitting module into " << num_parts
-              << " parts before codegen to enable parallel compilation";
+      VLOG(3) << "Splitting LLVM module into " << num_parts
+              << " parts before codegen to enable parallel compilation"
+              << " (max split count: " << parallel_codegen_split_count << ")";
+
+      TraceMe trace([&] {
+        return TraceMeEncode("SplitModule", {{"num_parts", num_parts}});
+      });
+
       llvm::SplitModule(
           *llvm_module, num_parts,
-          [&, dylib_index = 0](auto llvm_module_part) mutable {
-            cantFail((*jit)->AddModule(
-                llvm::orc::ThreadSafeModule(std::move(llvm_module_part),
-                                            thread_safe_context),
-                dylib_index++ % num_jit_dylibs));
-          },
-          /*PreserveLocals=*/true);
-    } else {
-      cantFail((*jit)->AddModule(llvm::orc::ThreadSafeModule(
-          std::move(llvm_module), thread_safe_context)));
-    }
+          [&, n = 0](std::unique_ptr<llvm::Module> llvm_module_part) mutable {
+            // Remove unused symbols left in the module after splitting.
+            RemoveUnusedSymbols(*llvm_module_part);
 
-    // Move ownership of the LLVM context to the JIT.
-    (*jit)->SetContext(std::move(thread_safe_context));
+            // Clone LLVM module part into its own thread safe context.
+            auto tsm = CloneAsThreadSafeModule(n, std::move(llvm_module_part));
+            cantFail((*jit)->AddModule(std::move(tsm), /*dylib_index=*/n++));
+          },
+          /*PreserveLocals=*/true, /*RoundRobin=*/true);
+
+    } else {
+      VLOG(3) << "Compiled LLVM module without splitting (max split count: "
+              << parallel_codegen_split_count << ")";
+      cantFail((*jit)->AddModule(llvm::orc::ThreadSafeModule(
+          std::move(llvm_module), std::move(llvm_context))));
+    }
 
     auto mangle = [&](std::string_view name) {
       llvm::SmallVector<char, 40> mangled;
@@ -1328,9 +1403,13 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
     }
 
     // TODO(ezhulenev): We should be able to make it lazy on-demand, but today
-    // we capture obj_files by reference and it leads to asan errors. Figure out
-    // lifetime issues and move compilation to Thunk initialization stage.
+    // we capture obj_files by reference and it leads to asan errors. Figure
+    // out lifetime issues and move compilation to Thunk initialization stage.
     for (const auto& kernel : ir_emitter2.kernels()) {
+      TraceMe trace([&] {
+        return TraceMeEncode("CpuCompiler::Codegen", {{"kernel", kernel.name}});
+      });
+
       if (auto s = (*jit)->FindCompiledSymbol(mangle(kernel.name)); !s) {
         return Internal("Failed to find compiled symbol for kernel %s",
                         kernel.name);
@@ -1339,6 +1418,11 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
 
     // Compile auxiliary comparator functions used by sort thunks.
     for (const auto& comparator : ir_emitter2.comparators()) {
+      TraceMe trace([&] {
+        return TraceMeEncode("CpuCompiler::Codegen",
+                             {{"comparator", comparator.name}});
+      });
+
       if (auto s = (*jit)->FindCompiledSymbol(mangle(comparator.name)); !s) {
         return Internal("Failed to find compiled symbol for comparator %s",
                         comparator.name);
@@ -1538,7 +1622,7 @@ CpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
       break;
   }
   llvm::CodeGenOptLevel opt_level = CodeGenOptLevel(modules[0]->config());
-  std::unique_ptr<llvm::TargetMachine> target_machine =
+  std::shared_ptr<llvm::TargetMachine> target_machine =
       absl::WrapUnique(target->createTargetMachine(
           triple.getTriple(), options.cpu_name(), options.features(),
           CompilerTargetOptions(modules[0]->config()), reloc_model,
@@ -1670,7 +1754,7 @@ CpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
       };
 
       CompilerFunctor compiler_functor(
-          target_machine.get(), static_cast<int>(opt_level),
+          [&] { return target_machine; }, static_cast<int>(opt_level),
           options::OptimizeForSizeRequested(module->config()),
           module->config().debug_options().xla_llvm_disable_expensive_passes(),
           options::SlpVectorizerDisabled(module->config()),
