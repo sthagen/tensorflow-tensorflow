@@ -3103,6 +3103,17 @@ func.func @div(%arg0: tensor<2xi32>) -> tensor<2xi32> {
 
 // -----
 
+// CHECK-LABEL: atan2
+func.func @atan2(%arg0: tensor<4xf32>) -> tensor<4xf32> {
+  %0 = mhlo.atan2 %arg0, %arg0 : tensor<4xf32>
+  func.return %0 : tensor<4xf32>
+}
+
+// CHECK: "tfl.atan2"(%arg0, %arg0)
+// CHECK-NOT: mhlo
+
+// -----
+
 //===----------------------------------------------------------------------===//
 // mhlo ternary ops
 //===----------------------------------------------------------------------===//
@@ -3212,7 +3223,7 @@ func.func @while_with_reduce(%arg0: tensor<1x256xf32>, %arg1: tensor<1xf32>) -> 
 // -----
 
 //===----------------------------------------------------------------------===//
-// mhlo.get_dimension_size
+// data movement and shaping
 //===----------------------------------------------------------------------===//
 
 // CHECK-LABEL: func @get_dimension_size(
@@ -3228,3 +3239,47 @@ func.func @get_dimension_size(%arg0: tensor<4x256x?xf32>) -> tensor<i32> {
 // CHECK:     %2 = "tfl.cast"(%1) : (tensor<1xi64>) -> tensor<1xi32>
 // CHECK:     %3 = "tfl.squeeze"(%2) <{squeeze_dims = [0]}> : (tensor<1xi32>) -> tensor<i32>
 // CHECK:     return %3 : tensor<i32>
+
+// -----
+
+// CHECK-LABEL: reverse
+func.func @reverse(%arg0: tensor<3x2xi32>) -> tensor<3x2xi32> {
+  %0 = "mhlo.reverse"(%arg0) <{dimensions = dense<0> : tensor<1xi64>}> : (tensor<3x2xi32>) -> tensor<3x2xi32>
+  func.return %0 : tensor<3x2xi32>
+}
+
+// CHECK: %cst = arith.constant dense<0> : tensor<1xi64>
+// CHECK: %0 = "tfl.cast"(%cst) : (tensor<1xi64>) -> tensor<1xi32>
+// CHECK: %1 = "tfl.reverse_v2"(%arg0, %0) : (tensor<3x2xi32>, tensor<1xi32>) -> tensor<3x2xi32>
+// CHECK: return %1 : tensor<3x2xi32>
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// mhlo.if
+//===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: if
+func.func @if(%arg0: tensor<i1>) -> (tensor<i32>) {
+  %cst_0 = arith.constant dense<0> : tensor<i32>
+  %cst_1 = arith.constant dense<1000> : tensor<i32>
+  %0 = mhlo.add %cst_0, %cst_1 : tensor<i32>
+  %1 = "mhlo.if"(%arg0) ({
+    "mhlo.return"(%0) : (tensor<i32>) -> ()
+  }, {
+    %2 = mhlo.multiply %cst_0, %cst_1 : tensor<i32>
+    "mhlo.return"(%2) : (tensor<i32>) -> ()
+  }) : (tensor<i1>) -> tensor<i32>
+  func.return %1: tensor<i32>
+}
+
+// CHECK: %[[CST:.*]] = arith.constant dense<0> : tensor<i32>
+// CHECK: %[[CST_0:.*]] = arith.constant dense<1000> : tensor<i32>
+// CHECK: %[[VAL_0:.*]] = mhlo.add %[[CST]], %[[CST_0]] : tensor<i32>
+// CHECK: %[[VAL_1:.*]] = "tfl.if"(%arg0) ({
+// CHECK:  "tfl.yield"(%[[VAL_0]]) : (tensor<i32>) -> ()
+// CHECK: }, {
+// CHECK: %[[VAL_2:.*]] = tfl.mul %cst, %cst_0 {fused_activation_function = "NONE"} : tensor<i32>
+// CHECK:  "tfl.yield"(%[[VAL_2]]) : (tensor<i32>) -> ()
+// CHECK: }) : (tensor<i1>) -> tensor<i32>
+// CHECK: return %[[VAL_1]] : tensor<i32>

@@ -44,7 +44,7 @@ limitations under the License.
 #include "xla/service/call_graph.h"
 #include "xla/shape.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/status.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace spmd {
@@ -497,6 +497,9 @@ size_t VectorGreaterThanOneElementCount(absl::Span<const int64_t> span,
 std::vector<int64_t> VectorGreaterThanOneElementIndices(
     absl::Span<const int64_t> span, bool omit_last_dim = false);
 
+std::vector<int64_t> VectorGreaterThanOneElements(
+    absl::Span<const int64_t> span, bool omit_last_dim = false);
+
 // Computes bytes size of a shape recursively if it is sharded according to an
 // optionally provided sharding
 int64_t ByteSizeOfShapeWithSharding(const Shape& shape,
@@ -526,15 +529,17 @@ HloInstruction* FindInstruction(
 absl::StatusOr<bool> AdjustShardingsWithPartialMeshShape(
     const std::vector<HloInstruction*>& instructions,
     const absl::flat_hash_set<const HloInstruction*>& instructions_to_shard,
-    const std::vector<int64_t>& mesh_shape, int64_t total_num_devices,
-    bool crash_on_error);
+    const std::vector<int64_t>& mesh_shape,
+    const DeviceMesh& original_device_mesh, bool crash_on_error);
 
 inline bool AdjustShardingsWithPartialMeshShape(
     const std::vector<HloInstruction*>& instructions,
     const absl::flat_hash_set<const HloInstruction*>& instructions_to_shard,
-    const std::vector<int64_t>& mesh_shape, int64_t total_num_devices) {
+    const std::vector<int64_t>& mesh_shape,
+    const DeviceMesh& original_device_mesh) {
   absl::StatusOr<bool> result = AdjustShardingsWithPartialMeshShape(
-      instructions, instructions_to_shard, mesh_shape, total_num_devices, true);
+      instructions, instructions_to_shard, mesh_shape, original_device_mesh,
+      /*crash_on_error=*/true);
   CHECK_OK(result);
   return *result;
 }
