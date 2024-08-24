@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
@@ -65,6 +66,86 @@ arith::ConstantOp ShapeToConst(PatternRewriter& rewriter, Value value) {
                                          rewriter.getIntegerType(64));
   auto attr = DenseElementsAttr::get(attr_type, shape);
   return rewriter.create<arith::ConstantOp>(value.getLoc(), attr_type, attr);
+}
+
+// Returns true if broadcast_dimensions obey Tensorflow convention, as in new
+// dimensions are added as prefix.
+bool IsTFLStyleBroadcast(DenseIntElementsAttr broadcast_dimensions,
+                         Value output) {
+  // broadcast_dimensions is an increasing list by definition, thus it suffices
+  // to check the first element.
+  int64_t input_rank = broadcast_dimensions.getNumElements();
+  int64_t output_rank = mlir::cast<ShapedType>(output.getType()).getRank();
+  return input_rank == 0 ||
+         (broadcast_dimensions.getValues<APInt>()[0].getSExtValue() ==
+          output_rank - input_rank);
+}
+
+// Returns the intermediate shape that input tensor should be reshaped to during
+// legalization of BroadcastInDimOp.
+arith::ConstantOp ExpandedShape(OpBuilder& b, Value input,
+                                DenseIntElementsAttr broadcast_dimensions,
+                                Value output) {
+  // Initialize expanded shape with output rank and dimensions of 1.
+  llvm::SmallVector<Attribute> expanded_shape(
+      llvm::cast<ShapedType>(output.getType()).getRank(),
+      /*Value=*/b.getI32IntegerAttr(1));
+
+  // Set dimension sizes specified by broadcast_dimensions.
+  auto input_shape = llvm::cast<ShapedType>(input.getType()).getShape();
+
+  for (auto x : llvm::enumerate(broadcast_dimensions)) {
+    expanded_shape[x.value().getSExtValue()] =
+        b.getI32IntegerAttr(static_cast<int32_t>(input_shape[x.index()]));
+  }
+
+  // Create the expanded type wrapped in a arith::ConstantOp.
+  auto attr_type = RankedTensorType::get(
+      {static_cast<int64_t>(expanded_shape.size())}, b.getIntegerType(32));
+  auto attr = DenseElementsAttr::get(attr_type, expanded_shape);
+  return b.create<arith::ConstantOp>(output.getLoc(), attr_type, attr);
+}
+
+Value ExpandedDynamicShape(OpBuilder& b, Value input,
+                           DenseIntElementsAttr broadcast_dimensions,
+                           Value output) {
+  int64_t output_rank = mlir::cast<ShapedType>(output.getType()).getRank();
+  llvm::SmallVector<int64_t, 4> expanded_dimensions;
+  llvm::SmallSet<int64_t, 4> broadcast_dimensions_values;
+
+  for (auto x : llvm::enumerate(broadcast_dimensions)) {
+    broadcast_dimensions_values.insert(x.value().getSExtValue());
+  }
+
+  for (int64_t i = 0; i < output_rank; i++) {
+    if (!broadcast_dimensions_values.contains(i)) {
+      expanded_dimensions.push_back(i);
+    }
+  }
+
+  Value expanded_input = input;
+
+  for (int64_t i : expanded_dimensions) {
+    auto index_attr = DenseIntElementsAttr::get(
+        RankedTensorType::get({}, b.getI64Type()), {i});
+    Value index = b.create<arith::ConstantOp>(output.getLoc(), index_attr);
+
+    auto cur_type = llvm::cast<ShapedType>(expanded_input.getType());
+    auto cur_shape = cur_type.getShape();
+    llvm::SmallVector<int64_t> new_shape;
+
+    auto begin = cur_shape.begin();
+    new_shape.append(begin, begin + i);
+    new_shape.push_back(1);
+    new_shape.append(begin + i, cur_shape.end());
+
+    auto new_type = RankedTensorType::get(new_shape, cur_type.getElementType());
+
+    expanded_input = b.create<TFL::ExpandDimsOp>(output.getLoc(), new_type,
+                                                 expanded_input, index);
+  }
+
+  return expanded_input;
 }
 
 bool IsSign(APInt a, APInt sign) {
@@ -214,7 +295,6 @@ void AddRoundingOpsAsUnknown(ConversionTarget& target) {
       // go/keep-sorted start
       // clang-format off
       mhlo::AddOp,
-      mhlo::BroadcastInDimOp,
       mhlo::ConstantOp,
       mhlo::FloorOp,
       mhlo::MulOp,
@@ -299,10 +379,13 @@ void LegalizeHloToTfLitePass::runOnOperation() {
       // go/keep-sorted start
       // clang-format off
       mhlo::Atan2Op,
+      mhlo::BroadcastInDimOp,
       mhlo::ClampOp,
+      mhlo::ConcatenateOp,
       mhlo::DivOp,
       mhlo::DotGeneralOp,
       mhlo::DotOp,
+      mhlo::DynamicBroadcastInDimOp,
       mhlo::DynamicReshapeOp,
       mhlo::MaxOp,
       mhlo::MinOp,
@@ -311,6 +394,7 @@ void LegalizeHloToTfLitePass::runOnOperation() {
       mhlo::RemOp,
       mhlo::ReshapeOp,
       mhlo::ReverseOp,
+      mhlo::RoundNearestEvenOp,
       mhlo::SelectOp,
       mhlo::ShiftRightArithmeticOp,
       mhlo::ShiftRightLogicalOp,

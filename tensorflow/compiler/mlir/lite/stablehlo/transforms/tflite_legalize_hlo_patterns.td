@@ -39,6 +39,28 @@ def : Pat<
       (TFL_ConstOp $perm)))>;
 
 def : Pat<
+  (MHLO_ReverseOp $input, $dims),
+  (TFL_ReverseV2Op $input,
+    (CreateTFLCastToInt32Op
+      (Arith_ConstantOp $dims)))>;
+
+def I64AttrToI32Attr:
+  NativeCodeCall<
+    "$_builder.getI32IntegerAttr("
+      "static_cast<int32_t>($0.cast<IntegerAttr>().getInt()))">;
+
+def : Pat<
+  (MHLO_ConcatenateOp $inputs, $dim),
+  (TFL_ConcatenationOp
+    $inputs,
+    (I64AttrToI32Attr $dim),
+    TFL_AF_None)>;
+
+//
+// Reshapes
+//
+
+def : Pat<
   (MHLO_ReshapeOp:$output $input),
   (TFL_ReshapeOp $input,
     (CreateTFLCastToInt32Op
@@ -49,11 +71,73 @@ def : Pat<
   (TFL_ReshapeOp $input,
     (CreateTFLCastToInt32Op $shape))>;
 
+//
+// Broadcasts
+//
+
+def IsTFLStyleBroadcast :
+  Constraint<CPred<"IsTFLStyleBroadcast($0, $1)">>;
+
+def IsNotTFLStyleBroadcast :
+  Constraint<Neg<IsTFLStyleBroadcast.predicate>>;
+
+def ExpandedShape :
+  NativeCodeCall<"ExpandedShape($_builder, $0, $1, $2)">;
+
+def ExpandedDynamicShape :
+  NativeCodeCall<"ExpandedDynamicShape($_builder, $0, $1, $2)">;
+
 def : Pat<
-  (MHLO_ReverseOp $input, $dims),
-  (TFL_ReverseV2Op $input,
-    (CreateTFLCastToInt32Op
-      (Arith_ConstantOp $dims)))>;
+  (MHLO_BroadcastInDimOp:$output
+    $input,
+    $broadcast_dimensions),
+  (TFL_BroadcastToOp
+    $input,
+    (ShapeToConst $output)),
+  [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+def : Pat<
+  (MHLO_BroadcastInDimOp:$output
+    $input,
+    $broadcast_dimensions),
+  (TFL_BroadcastToOp
+    (TFL_ReshapeOp
+        $input,
+        (ExpandedShape
+          $input,
+          $broadcast_dimensions,
+          $output)),
+    (ShapeToConst $output)),
+  [(IsNotTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+def : Pat<
+  (MHLO_DynamicBroadcastInDimOp:$output
+    $input,
+    $output_dimensions,
+    $broadcast_dimensions,
+    $expanding_dimensions_unused,
+    $nonexpanding_dimensions_unused),
+  (TFL_BroadcastToOp
+    $input,
+    $output_dimensions),
+  [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+def : Pat<
+  (MHLO_DynamicBroadcastInDimOp:$output
+    $input,
+    $output_dimensions,
+    $broadcast_dimensions,
+    $expanding_dimensions_unused,
+    $nonexpanding_dimensions_unused),
+  (TFL_BroadcastToOp
+    (ExpandedDynamicShape
+      $input,
+      $broadcast_dimensions,
+      $output),
+    $output_dimensions),
+  [(IsNotTFLStyleBroadcast $broadcast_dimensions, $output)]>;
+
+
 
 //===----------------------------------------------------------------------===//
 // logical and bitwise ops
@@ -273,6 +357,9 @@ def TensorIsSign :
 def ValueGreaterThanZero :
   Constraint<CPred<"ValueGreaterThanZero($0)">>;
 
+def : Pat<
+  (MHLO_RoundNearestEvenOp $input),
+  (TFL_RoundOp $input)>;
 
 // Converts a dag of HLOs representing banker rounding (round x.5 to nearest
 // even) to tfl.round. This only supports float types because mhlo.floor only
