@@ -7,6 +7,7 @@ load(
     "if_gpu_is_configured",
 )
 load("//xla/tests:build_defs.bzl", "xla_test")
+load("//xla/tsl:tsl.bzl", "if_google")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -202,7 +203,6 @@ xla_test(
     shard_count = 20,
     tags = [
         "no_mac",
-        "no_rocm",
     ],
     deps = [
         ":triton_fusion_emitter",
@@ -253,7 +253,6 @@ xla_test(
     ],
     tags = [
         "no_mac",
-        "no_rocm",
     ],
     deps = [
         ":triton_fusion_emitter",
@@ -364,8 +363,9 @@ xla_test(
         "no_mac",
         "no_oss",  # requires-mem:16g tag doesn't work in open source
         "nozapfhahn",  # Times out under coverage
+    ] + if_google([
         "requires-mem:16g",
-    ],
+    ]),
     deps = [
         "//xla:error_spec",
         "//xla:xla_proto_cc",

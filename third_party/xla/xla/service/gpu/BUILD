@@ -1653,7 +1653,6 @@ xla_test(
         "//xla/service:hlo_cost_analysis",
         "//xla/service:hlo_memory_scheduler",
         "//xla/service:hlo_rematerialization",
-        "//xla/service/gpu/transforms:stream_attribute_annotator",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/lib/core:status_test_util",
@@ -1904,11 +1903,12 @@ xla_cc_test(
     ]),
     tags = [
         "gpu",
-        "ignore_for_dep=third_party/tensorflow/compiler/xla/service/gpu/amdgpu_compiler.h",
         "no_oss",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
         "requires-gpu-nvidia",
-    ],
+    ] + if_google([
+        "ignore_for_dep=third_party/tensorflow/compiler/xla/service/gpu/amdgpu_compiler.h",
+    ]),
     deps = if_cuda_is_configured([
         ":nvptx_compiler_impl",
     ]) + if_rocm_is_configured([
@@ -2506,11 +2506,9 @@ xla_cc_test(
 xla_test(
     name = "float_support_test",
     srcs = ["float_support_test.cc"],
-    backend_tags = {"gpu": [
-        "requires-gpu-sm80",
-    ]},
     backends = [
-        "gpu",
+        "gpu_a100",
+        "gpu_h100",
     ],
     deps = [
         ":variant_visitor",

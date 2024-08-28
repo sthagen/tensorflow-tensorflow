@@ -716,7 +716,6 @@ xla_test(
         "gpu_a100": [
             "noasan",
             "nomsan",
-            "no_rocm",
         ],
     },
     backends = [
@@ -808,12 +807,8 @@ cc_library(
 xla_test(
     name = "cudnn_fused_mha_rewriter_test",
     srcs = ["cudnn_fused_mha_rewriter_test.cc"],
-    backend_tags = {"gpu": [
-        "requires-gpu-nvidia",
-        "no_rocm",
-    ]},
     backends = [
-        "gpu",
+        "gpu_any",
     ],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
@@ -2080,12 +2075,12 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:dump",
-        "//xla/service:fusion_queue",
         "//xla/service:hlo_cost_analysis",
         "//xla/service:hlo_graph_dumper",
         "//xla/service:hlo_pass",
         "//xla/service:instruction_fusion",
         "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu:fusion_deduplication_cache",
         "//xla/service/gpu:fusion_process_dump_proto_cc",
         "//xla/service/gpu:gpu_fusible",
         "//xla/service/gpu:hlo_fusion_analysis",
@@ -2097,7 +2092,6 @@ cc_library(
         "//xla/service/gpu/model:gpu_indexing_performance_model",
         "//xla/service/gpu/model:gpu_performance_model",
         "//xla/service/gpu/model:gpu_performance_model_base",
-        "//xla/service/gpu/model:symbolic_tile_analysis",
         "//xla/service/gpu/model:tiled_hlo_instruction_or_computation",
         "//xla/service/gpu/model:triton_emitter_constraints",
         "//xla/stream_executor:device_description",
@@ -2794,6 +2788,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -2909,10 +2904,10 @@ cc_library(
 xla_test(
     name = "triton_fusion_numerics_verifier_test",
     srcs = ["triton_fusion_numerics_verifier_test.cc"],
-    backend_tags = {"gpu": [
-        "requires-gpu-sm80",
-    ]},
-    backends = ["gpu"],
+    backends = [
+        "gpu_a100",
+        "gpu_h100",
+    ],
     deps = [
         ":triton_fusion_numerics_verifier",
         "//xla:shape_util",
