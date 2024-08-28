@@ -109,8 +109,8 @@ xla_test(
         "gpu",
     ],
     tags = [
+        "no_mac",
         "no_rocm",
-        "nomac",
     ],
     deps = [
         ":autotuner_compile_util",
@@ -235,6 +235,7 @@ cc_library(
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:mutex",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:statusor",
@@ -484,7 +485,6 @@ xla_test(
 tf_proto_library(
     name = "gpu_autotuning_proto",
     srcs = ["gpu_autotuning.proto"],
-    cc_api_version = 2,
     protodeps = [
         "//xla/service/gpu:backend_configs",
         "//xla:xla_data_proto",

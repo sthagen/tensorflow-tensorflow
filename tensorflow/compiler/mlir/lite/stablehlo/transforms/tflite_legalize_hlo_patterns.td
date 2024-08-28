@@ -214,6 +214,10 @@ def : Pat<
   (TFL_RightShiftOp $l, $r)>;
 
 def : Pat<
+  (MHLO_Atan2Op $l, $r),
+  (TFL_Atan2Op $l, $r)>;
+
+def : Pat<
   (MHLO_RemOp $l, $r),
   (TFL_FloorModOp $l, $r)>;
 
@@ -222,22 +226,58 @@ foreach pair = [
   [MHLO_MaxOp, TFL_MaximumOp],
   [MHLO_MinOp, TFL_MinimumOp],
   [MHLO_PowOp, TFL_PowOp],
-  [MHLO_Atan2Op, TFL_Atan2Op],
 ] in {
   def : Pat<
     (pair[0] $l, $r),
-    (pair[1] $l, $r)>;
+    (pair[1] $l, $r)>; 
+
+  def : Pat<
+    (pair[0] 
+      (MHLO_BroadcastInDimOp:$output
+        $bcast_operand,
+        $broadcast_dimensions),
+      $r),
+    (pair[1] $bcast_operand, $r),
+    [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>; 
+
+  def : Pat<
+    (pair[0] 
+      $l,
+      (MHLO_BroadcastInDimOp:$output
+        $bcast_operand,
+        $broadcast_dimensions)),
+    (pair[1] $l, $bcast_operand),
+    [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>; 
 }
 
 // Binary ops with fused activiation attr.
 foreach pair = [
   [MHLO_DivOp, TFL_DivOp],
+  [MHLO_AddOp, TFL_AddOp],
   [MHLO_MulOp, TFL_MulOp],
   [MHLO_SubtractOp, TFL_SubOp],
 ] in {
   def : Pat<
     (pair[0] $l, $r),
     (pair[1] $l, $r, TFL_AF_None)>;
+
+  def : Pat<
+    (pair[0] 
+      (MHLO_BroadcastInDimOp:$output
+        $bcast_operand,
+        $broadcast_dimensions),
+      $r),
+    (pair[1] $bcast_operand, $r, TFL_AF_None),
+    [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>; 
+
+  def : Pat<
+    (pair[0] 
+      $l,
+      (MHLO_BroadcastInDimOp:$output
+        $bcast_operand,
+        $broadcast_dimensions)),
+    (pair[1] $l, $bcast_operand, TFL_AF_None),
+    [(IsTFLStyleBroadcast $broadcast_dimensions, $output)]>; 
 }
 
 

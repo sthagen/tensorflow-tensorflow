@@ -439,7 +439,6 @@ cc_library(
 tf_proto_library(
     name = "executable_proto",
     srcs = ["executable.proto"],
-    cc_api_version = 2,
     protodeps = [
         ":xla_framework_proto",
         "//xla/service:hlo_proto",
@@ -450,7 +449,6 @@ tf_proto_library(
 tf_proto_library(
     name = "xla_framework_proto",
     srcs = ["xla_framework.proto"],
-    cc_api_version = 2,
 )
 
 cc_library(
@@ -704,6 +702,7 @@ xla_cc_test(
         ":ir_emitter",
         ":ir_emitter2",
         ":target_machine_features_fake",
+        "//xla:cpu_function_runtime",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -719,6 +718,7 @@ xla_cc_test(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
@@ -1717,13 +1717,11 @@ xla_cc_test(
 tf_proto_library(
     name = "onednn_config_proto",
     srcs = ["onednn_config.proto"],
-    cc_api_version = 2,
 )
 
 tf_proto_library(
     name = "backend_config_proto",
     srcs = ["backend_config.proto"],
-    cc_api_version = 2,
     protodeps = [
         ":onednn_config_proto",
     ],
