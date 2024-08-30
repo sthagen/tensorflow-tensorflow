@@ -943,6 +943,22 @@ Value EmitTiledReshape(ImplicitLocOpBuilder& b,
       .getResult();
 }
 
+Value EmitTiledTranspose(ImplicitLocOpBuilder& b,
+                         const TiledHloInstruction& tiled_transpose,
+                         Value input) {
+  Type input_element_type =
+      mlir::cast<ShapedType>(input.getType()).getElementType();
+  Type output_tensor_type = mlir::RankedTensorType::get(
+      tiled_transpose.tile_sizes(), input_element_type);
+
+  auto transpose =
+      ::xla::Cast<const HloTransposeInstruction>(tiled_transpose.hlo());
+  SmallVector<int32_t> order =
+      llvm::to_vector_of<int32_t>(transpose->dimensions());
+
+  return b.create<mt::TransOp>(output_tensor_type, input, order);
+}
+
 absl::StatusOr<Value> EmitTiledHloInstruction(
     ImplicitLocOpBuilder& b, absl::string_view libdevice_path,
     const se::DeviceDescription& device_info,
@@ -1014,11 +1030,17 @@ absl::StatusOr<Value> EmitTiledHloInstruction(
     return EmitTiledReshape(b, tiled_hlo, values[tiled_hlo.operand(0)]);
   }
 
+  if (hlo->opcode() == HloOpcode::kTranspose) {
+    return EmitTiledTranspose(b, tiled_hlo, values[tiled_hlo.operand(0)]);
+  }
   // All these operations are currently supported only as operations on indices
   // which are pushed to loads and stores. We don't generate any further code
   // for these operations here.
-  std::vector<HloOpcode> passthrough_opcodes(
-      {HloOpcode::kPad, HloOpcode::kSlice, HloOpcode::kTranspose});
+  std::vector<HloOpcode> passthrough_opcodes({
+      HloOpcode::kPad,
+      // TODO(b/363166438) Add slice back once support is implemented.
+      // HloOpcode::kSlice
+  });
   if (absl::c_linear_search(passthrough_opcodes, hlo->opcode())) {
     return values[tiled_hlo.operand(0)];
   }
@@ -2658,32 +2680,6 @@ absl::Status EmitMatMul(mlir::OpBuilder builder,
   return absl::OkStatus();
 }
 
-// Computes the base pointer offset for the given tile multi-index and hlo shape
-// taking into account the physical layout of the hlo buffer.
-absl::StatusOr<Value> ComputeBasePtrOffset(
-    ImplicitLocOpBuilder b, ValueRange tile_multi_index,
-    const TiledHloInstruction& tiled_hlo) {
-  const Shape& shape = tiled_hlo.hlo()->shape();
-  Shape linear_shape = ShapeUtil::MakeShape(shape.element_type(),
-                                            {ShapeUtil::ElementsIn(shape)});
-
-  // Bitcast map gives an indexing map from linear index to the parameter shape
-  // index respecting physical layout of the memory.
-  auto bitcast_map = GetBitcastMap(shape, linear_shape, b.getContext());
-
-  TF_ASSIGN_OR_RETURN(IndexingMap tile_offsets_indexing,
-                      tiled_hlo.tile_offsets_indexing());
-
-  auto compose_indexing_maps =
-      ComposeIndexingMaps(tile_offsets_indexing, bitcast_map);
-  compose_indexing_maps.Simplify();
-
-  return b.create<ma::IndexCastUIOp>(
-      b.getI64Type(), mlir_converter::ApplyIndexing(compose_indexing_maps,
-                                                    /*dims=*/tile_multi_index,
-                                                    /*symbols=*/{}, b)[0]);
-}
-
 namespace ir_emitter_triton_internal {
 
 SmallVector<Value, 3> ComputeDelinearizedTileIndex(
@@ -2710,14 +2706,7 @@ SmallVector<Value, 3> ComputeDelinearizedTileIndex(
 
 absl::StatusOr<MakeTensorPtrOpAndBoundaryChecks> CreateMakeTensorPtrOp(
     ImplicitLocOpBuilder& b, ValueRange tile_multi_index,
-    const TiledHloInstruction& tiled_hlo, Value argument_block) {
-  llvm::SmallVector<Value> sizes;
-  llvm::SmallVector<Value> strides;
-  llvm::SmallVector<Value> offsets;
-  llvm::SmallVector<int32_t> power2_sizes;
-  llvm::SmallVector<int32_t> order;
-  llvm::SmallVector<int32_t> boundary_checks;
-
+    const TiledHloInstruction& tiled_hlo, Value parent_base_ptr) {
   const llvm::SmallVector<int64_t>& tile_strides = tiled_hlo.tile_strides();
   const Shape& shape = tiled_hlo.hlo()->shape();
 
@@ -2726,55 +2715,49 @@ absl::StatusOr<MakeTensorPtrOpAndBoundaryChecks> CreateMakeTensorPtrOp(
   // taking into account physical layout.
   // TODO(b/331332678): Compute indexing maps to physical layout indexing in
   // SymbolicTileAnalysis.
-  llvm::SmallVector<int64_t> physical_strides(tile_strides.size(), 1);
+  llvm::SmallVector<Value> strides(tile_strides.size());
   int64_t current_stride = 1;
   for (int64_t cur_dim : LayoutUtil::MinorToMajor(shape)) {
-    physical_strides[cur_dim] = tile_strides[cur_dim] * current_stride;
+    strides[cur_dim] =
+        CreateConst(b, b.getI64Type(), tile_strides[cur_dim] * current_stride);
     current_stride *= shape.dimensions(cur_dim);
   }
 
-  for (auto [size, stride] :
-       llvm::zip(tiled_hlo.tile_sizes(), physical_strides)) {
-    int dimension_index = sizes.size();
+  TF_ASSIGN_OR_RETURN(IndexingMap tile_offsets_indexing,
+                      tiled_hlo.tile_offsets_indexing());
+  auto tile_offsets_as_indices =
+      mlir_converter::ApplyIndexing(tile_offsets_indexing,
+                                    /*dims=*/tile_multi_index,
+                                    /*symbols=*/{}, b);
 
-    sizes.push_back(CreateConst(b, b.getI64Type(), size));
-    strides.push_back(CreateConst(b, b.getI64Type(), stride));
-    // TODO(b/332649307): Explore using proper offsets instead of manually
-    // computing the block pointer.
-    //
-    // In general, there are two options for computing a block:
-    //   - Output a TensorPtr whose base pointer is the base pointer of the
-    //     TiledHloInstruction and provide the necessary offsets so that Triton
-    //     can compute the pointer to the block specific to the given pid. This
-    //     option yields simpler code, but relies on Triton to correctly handle
-    //     higher-dimensional blocks and degenerate dimensions of size 1, which
-    //     Triton doesn't always do well.
-    //   - Output a TensorPtr that points directly to the tile specific to the
-    //     pid. All offset computation is done here instead of by Triton. Triton
-    //     sees 0 offsets. This is what we do now. It's a bit of extra code to
-    //     compute the right offsets, but it's possible to ensure that we
-    //     generate a block with minimal dimensions (all dimensions of size 1
-    //     are folded into the offset computation).
-    offsets.push_back(CreateConst(b, b.getI32Type(), 0));
+  llvm::SmallVector<Value> parent_shape;
+  llvm::SmallVector<Value> offsets;
+  llvm::SmallVector<int32_t> power2_sizes;
+  llvm::SmallVector<int32_t> order;
+  llvm::SmallVector<int32_t> boundary_checks;
+  for (auto size : tiled_hlo.tile_sizes()) {
+    int dimension_index = offsets.size();
+
+    parent_shape.push_back(
+        CreateConst(b, b.getI64Type(), shape.dimensions(dimension_index)));
+    offsets.push_back(b.create<ma::IndexCastOp>(
+        b.getI32Type(), tile_offsets_as_indices[dimension_index]));
+
     // Triton requires that all block dimensions are a power of 2.
     power2_sizes.push_back(llvm::PowerOf2Ceil(size));
+
     // TODO(b/342989850): Clarify and comment what `order` exactly is. It's not
     // entirely clear from the Triton docs.
     order.insert(order.begin(), dimension_index);
-    if (size != power2_sizes.back()) {
+
+    if (shape.dimensions(dimension_index) % power2_sizes.back() != 0) {
       boundary_checks.push_back(dimension_index);
     }
   }
 
-  // Manually compute pointer offset to avoid materialized fully parallel
-  // dimensions in the tile. Current codegen tried to avoid size-1 dims.
-  TF_ASSIGN_OR_RETURN(Value ptr_offset,
-                      ComputeBasePtrOffset(b, tile_multi_index, tiled_hlo));
-  auto tile_ptr = AddPtr(b, argument_block, ptr_offset);
-
   return MakeTensorPtrOpAndBoundaryChecks{b.create<mt::MakeTensorPtrOp>(
-                                              /*base=*/tile_ptr,
-                                              /*shape=*/sizes,
+                                              /*base=*/parent_base_ptr,
+                                              /*shape=*/parent_shape,
                                               /*strides=*/strides,
                                               /*offsets=*/offsets,
                                               /*tensorShape=*/power2_sizes,
