@@ -1000,11 +1000,14 @@ absl::StatusOr<Value> EmitTiledHloInstruction(
     return parameter;
   }
 
-  if (hlo->opcode() == HloOpcode::kConstant &&
-      ShapeUtil::IsEffectiveScalar(hlo->shape())) {
-    TF_ASSIGN_OR_RETURN(Value constant, EmitConstant(b, *hlo));
-    // Splat makes it a tensor to avoid type mismatches.
-    return Splat(b, constant, {});
+  if (hlo->opcode() == HloOpcode::kConstant) {
+    if (ShapeUtil::IsScalar(hlo->shape())) {
+      TF_ASSIGN_OR_RETURN(Value constant, EmitConstant(b, *hlo));
+      // Splat makes it a tensor to avoid type mismatches.
+      return Splat(b, constant, {});
+    }
+    return absl::UnimplementedError(
+        absl::StrCat("Unsupported non-scalar constant ", hlo->ToString()));
   }
 
   if (hlo->opcode() == HloOpcode::kBroadcast) {
@@ -1034,10 +1037,9 @@ absl::StatusOr<Value> EmitTiledHloInstruction(
     return EmitTiledTranspose(b, tiled_hlo, values[tiled_hlo.operand(0)]);
   }
 
-  // All these operations are currently supported only as operations on indices
-  // which are pushed to loads and stores. We don't generate any further code
-  // for these operations here.
-  if (hlo->opcode() == HloOpcode::kPad || IsSliceWithUnitStrides(hlo)) {
+  // Slice is currently supported only as an operation on indices
+  // which is pushed to loads and stores. We don't generate any further code.
+  if (IsSliceWithUnitStrides(hlo)) {
     return values[tiled_hlo.operand(0)];
   }
 
@@ -2865,20 +2867,10 @@ absl::StatusOr<std::unique_ptr<llvm::Module>> TranslateLLVMToLLVMIR(
   if (!llvmModule) {
     return Internal("Failed to emit LLVM IR.");
   }
-
-  // Link external libraries before performing optimizations.
-  TF_RETURN_IF_ERROR(nvptx::LinkLibdeviceIfNecessary(
-      llvmModule.get(), std::string(libdevice_path)));
-
-  auto optPipeline = mlir::makeOptimizingTransformer(
-      /*optLevel=*/3, /*sizeLevel=*/0,
-      /*targetMachine=*/nullptr);
-
-  if (auto err = optPipeline(llvmModule.get())) {
-    llvm::errs() << err;
-    return Internal("Failed to optimize LLVM IR.");
-  }
-
+  // TODO: b/363203060 - Upstream Triton sets specific flags for the LLVM
+  // optimizer to get best performance. Figure out if we can gain any of it by
+  // propagating these flags to
+  // xla/service/gpu/llvm_gpu_backend/gpu_backend_lib.cc.
   return llvmModule;
 }
 
