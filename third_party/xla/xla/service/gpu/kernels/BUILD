@@ -135,6 +135,7 @@ xla_test(
         "//xla/service/gpu/transforms:custom_kernel_fusion_rewriter",
         "//xla/tests:hlo_test_base",
         "//xla/tests:verified_hlo_module",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:test",
@@ -380,7 +381,6 @@ cc_library(
         ":cutlass_gemm_kernel_bf16xbf16_to_bf16",
         ":cutlass_gemm_kernel_bf16xbf16_to_bf16_sm80",
         ":cutlass_gemm_kernel_bf16xbf16_to_f32",
-        ":cutlass_gemm_kernel_bf16xf32_to_f32",
         ":cutlass_gemm_kernel_bf16xs8_to_f32",
         ":cutlass_gemm_kernel_f32xbf16_to_f32",
         ":cutlass_gemm_kernel_f32xf32_to_f32",
@@ -472,24 +472,6 @@ cuda_library(
 cuda_library(
     name = "cutlass_gemm_kernel_bf16xbf16_to_f32",
     srcs = ["cutlass_gemm_kernel_bf16xbf16_to_f32.cu.cc"],
-    copts = [
-        "-mllvm",
-        "-unroll-threshold=100000",
-    ] + if_windows(
-        [],
-        ["-Wno-unknown-attributes"],
-    ),
-    tags = ["no_rocm"],
-    deps = [
-        ":cutlass_gemm_adaptor",
-        "@cutlass_archive//:cutlass",
-        "@local_config_cuda//cuda:cuda_headers",
-    ],
-)
-
-cuda_library(
-    name = "cutlass_gemm_kernel_bf16xf32_to_f32",
-    srcs = ["cutlass_gemm_kernel_bf16xf32_to_f32.cu.cc"],
     copts = [
         "-mllvm",
         "-unroll-threshold=100000",
