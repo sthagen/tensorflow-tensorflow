@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <string_view>
+#include "tensorflow/lite/core/c/common.h"
+#include "tensorflow/lite/kernels/stablehlo_elementwise.h"
 
-namespace stream_executor::gpu {
+namespace tflite::ops::builtin {
 
-std::string_view GetSetIfConditionKernel() { return "<unsupported>"; }
-std::string_view GetSetIfElseConditionKernel() { return "<unsupported>"; }
-std::string_view GetSetCaseConditionKernel() { return "<unsupported>"; }
-std::string_view GetSetForConditionKernel() { return "<unsupported>"; }
-std::string_view GetSetWhileConditionKernel() { return "<unsupported>"; }
-
-}  // namespace stream_executor::gpu
+TfLiteRegistration* Register_STABLEHLO_AND() {
+  static TfLiteRegistration r = {nullptr, nullptr, ElementwisePrepare,
+                                 ElementwiseEval<ComputationType::kAnd>};
+  return &r;
+}
+}  // namespace tflite::ops::builtin

@@ -194,6 +194,7 @@ cuda_only_cc_library(
         "@local_tsl//tsl/platform:numbers",
         "@local_tsl//tsl/platform:stacktrace",
         "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -524,8 +525,12 @@ cuda_only_cc_library(
 )
 
 cc_library(
-    name = "cuda_conditional_kernels",
-    srcs = ["cuda_conditional_kernels.cc"],
+    name = "command_buffer_kernels",
+    srcs = ["command_buffer_kernels.cc"],
+    deps = [
+        "//xla/stream_executor:kernel_spec",
+        "@com_google_absl//absl/status:statusor",
+    ],
 )
 
 # TODO(leary) we likely need to canonicalize/eliminate this.
@@ -808,10 +813,9 @@ cuda_only_cc_library(
         "//xla:util",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/gpu:context",
         "//xla/stream_executor/gpu:gpu_asm_opts",
-        "//xla/stream_executor/gpu:gpu_driver_header",
-        "//xla/stream_executor/gpu:gpu_types_header",
         "//xla/stream_executor/gpu:scoped_activate_context",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",

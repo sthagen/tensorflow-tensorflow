@@ -72,11 +72,9 @@ class GpuDriver {
                                                       int priority = 0);
 
   // Destroys a CUDA/HIP stream associated with the given context.
-  // stream is owned by the caller, must not be null, and *stream is set to null
-  // if the stream is successfully destroyed.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__STREAM.html#group__CUDA__STREAM_1g244c8833de4596bcd31a06cdf21ee758
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#stream-management
-  static void DestroyStream(Context* context, GpuStreamHandle* stream);
+  static void DestroyStream(Context* context, GpuStreamHandle stream);
 
   // CUDA/HIP events can explicitly disable event TSC retrieval for some
   // presumed performance improvement if timing is unnecessary.
@@ -594,9 +592,10 @@ class GpuDriver {
   static bool AsynchronousMemcpyH2D(Context* context, GpuDevicePtr gpu_dst,
                                     const void* host_src, uint64_t size,
                                     GpuStreamHandle stream);
-  static bool AsynchronousMemcpyD2D(Context* context, GpuDevicePtr gpu_dst,
-                                    GpuDevicePtr gpu_src, uint64_t size,
-                                    GpuStreamHandle stream);
+  static absl::Status AsynchronousMemcpyD2D(Context* context,
+                                            GpuDevicePtr gpu_dst,
+                                            GpuDevicePtr gpu_src, uint64_t size,
+                                            GpuStreamHandle stream);
 
   // The CUDA stream callback type signature.
   // The data passed to AddStreamCallback is subsequently passed to this

@@ -1255,21 +1255,19 @@ absl::StatusOr<GpuStreamHandle> GpuDriver::CreateStream(Context* context,
   return stream;
 }
 
-/* static */ void GpuDriver::DestroyStream(Context* context,
-                                           GpuStreamHandle* stream) {
-  if (*stream == nullptr) {
+void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
+  if (stream == nullptr) {
     return;
   }
 
-  ScopedActivateContext activated{context};
-  hipError_t res = wrap::hipStreamDestroy(*stream);
+  ScopedActivateContext activated(context);
+  hipError_t res = wrap::hipStreamDestroy(stream);
   if (res != hipSuccess) {
     LOG(ERROR) << "failed to destroy ROCM stream for device "
                << context->device_ordinal() << ": " << ToString(res);
   } else {
-    VLOG(2) << "successfully destroyed stream " << *stream << " for device "
+    VLOG(2) << "successfully destroyed stream " << stream << " for device "
             << context->device_ordinal();
-    *stream = nullptr;
   }
 }
 
@@ -1573,35 +1571,24 @@ absl::StatusOr<GpuStreamHandle> GpuDriver::CreateStream(Context* context,
   return true;
 }
 
-/* static */ bool GpuDriver::AsynchronousMemcpyD2D(Context* context,
-                                                   hipDeviceptr_t gpu_dst,
-                                                   hipDeviceptr_t gpu_src,
-                                                   uint64_t size,
-                                                   GpuStreamHandle stream) {
+absl::Status GpuDriver::AsynchronousMemcpyD2D(Context* context,
+                                              hipDeviceptr_t gpu_dst,
+                                              hipDeviceptr_t gpu_src,
+                                              uint64_t size,
+                                              GpuStreamHandle stream) {
   ScopedActivateContext activation{context};
-  hipError_t result = wrap::hipMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream);
-  if (result != hipSuccess) {
-    LOG(ERROR) << absl::StrFormat(
-        "failed to enqueue async memcpy from device to device: %s"
-        "; Gpu dst: %p on %s %s"
-        "; Gpu src: %p on %s %s"
-        "; can access? %s; size: %llu=0x%llx",
-        ToString(result).c_str(), absl::bit_cast<void*>(gpu_dst),
-        ROCMPointerToMemorySpaceString(gpu_dst).c_str(),
-        ROCMPointerToDeviceString(gpu_dst).c_str(),
-        absl::bit_cast<void*>(gpu_src),
-        ROCMPointerToMemorySpaceString(gpu_src).c_str(),
-        ROCMPointerToDeviceString(gpu_src).c_str(),
-        ROCMPointersToCanAccessString(gpu_src, gpu_dst).c_str(), size, size);
-
-    return false;
-  }
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream),
+      absl::StrFormat("failed to enqueue async memcpy from device to device: "
+                      "Gpu dst: %p ; Gpu src: %p ; size: %llu=0x%llx",
+                      absl::bit_cast<void*>(gpu_dst),
+                      absl::bit_cast<void*>(gpu_src), size, size));
 
   VLOG(2) << "successfully enqueued async memcpy d2d of " << size
           << " bytes from " << absl::bit_cast<void*>(gpu_src) << " to "
           << absl::bit_cast<void*>(gpu_dst) << " on stream " << stream
           << " device: " << context->device_ordinal();
-  return true;
+  return absl::OkStatus();
 }
 
 /* static */ absl::Status GpuDriver::InitEvent(Context* context,

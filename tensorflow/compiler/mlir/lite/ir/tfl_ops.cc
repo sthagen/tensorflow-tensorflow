@@ -3502,11 +3502,19 @@ OpFoldResult ReluOp::fold(FoldAdaptor adaptor) {
 OpFoldResult MaximumOp::fold(FoldAdaptor adaptor) {
   auto lhs_type = getLhs().getType();
   auto rhs_type = getRhs().getType();
-  // Only constant fold for float tensors of the same type is implemented.
-  if (lhs_type != rhs_type || !IsFloatShapedType(lhs_type)) return nullptr;
 
   auto lhs = mlir::dyn_cast_or_null<DenseElementsAttr>(adaptor.getLhs());
   auto rhs = mlir::dyn_cast_or_null<DenseElementsAttr>(adaptor.getRhs());
+
+  if (lhs && rhs) {
+    return ConstFoldBinaryOp(
+        getType(), adaptor.getOperands(),
+        [](APFloat a, APFloat b) { return llvm::maximum(a, b); },
+        [](APInt a, APInt b) { return a.slt(b) ? b : a; });
+  }
+  // Only constant fold for float tensors of the same type is implemented.
+  if (lhs_type != rhs_type || !IsFloatShapedType(lhs_type)) return nullptr;
+
   if (lhs && lhs.isSplat()) {
     APFloat lhs_value = lhs.getSplatValue<APFloat>();
     lhs_value.changeSign();
@@ -3527,11 +3535,18 @@ OpFoldResult MaximumOp::fold(FoldAdaptor adaptor) {
 OpFoldResult MinimumOp::fold(FoldAdaptor adaptor) {
   auto lhs_type = getLhs().getType();
   auto rhs_type = getRhs().getType();
-  // Only constant fold for float tensors of the same type is implemented.
-  if (lhs_type != rhs_type || !IsFloatShapedType(lhs_type)) return nullptr;
 
   auto lhs = mlir::dyn_cast_or_null<DenseElementsAttr>(adaptor.getLhs());
   auto rhs = mlir::dyn_cast_or_null<DenseElementsAttr>(adaptor.getRhs());
+  if (lhs && rhs) {
+    return ConstFoldBinaryOp(
+        getType(), adaptor.getOperands(),
+        [](APFloat a, APFloat b) { return llvm::minimum(a, b); },
+        [](APInt a, APInt b) { return a.slt(b) ? a : b; });
+  }
+
+  if (lhs_type != rhs_type || !IsFloatShapedType(lhs_type)) return nullptr;
+
   if (lhs && lhs.isSplat()) {
     auto splat = lhs.getSplatValue<APFloat>();
     if (splat.isLargest() || splat.isInfinity()) return getRhs();
@@ -3553,6 +3568,11 @@ OpFoldResult LessOp::fold(FoldAdaptor adaptor) {
         getType(), adaptor.getLhs(), adaptor.getRhs(),
         [](int32_t lhs, int32_t rhs) { return lhs < rhs; });
   }
+  if (getLhs().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getLhs(), adaptor.getRhs(),
+        [](int64_t lhs, int64_t rhs) { return lhs < rhs; });
+  }
   if (getLhs().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
         getType(), adaptor.getLhs(), adaptor.getRhs(),
@@ -3566,6 +3586,11 @@ OpFoldResult LessEqualOp::fold(FoldAdaptor adaptor) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, int32_t, bool>(
         getType(), adaptor.getLhs(), adaptor.getRhs(),
         [](int32_t lhs, int32_t rhs) { return lhs <= rhs; });
+  }
+  if (getLhs().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getLhs(), adaptor.getRhs(),
+        [](int64_t lhs, int64_t rhs) { return lhs <= rhs; });
   }
   if (getLhs().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
@@ -3581,6 +3606,11 @@ OpFoldResult GreaterOp::fold(FoldAdaptor adaptor) {
         getType(), adaptor.getLhs(), adaptor.getRhs(),
         [](int32_t lhs, int32_t rhs) { return lhs > rhs; });
   }
+  if (getLhs().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getLhs(), adaptor.getRhs(),
+        [](int64_t lhs, int64_t rhs) { return lhs > rhs; });
+  }
   if (getLhs().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
         getType(), adaptor.getLhs(), adaptor.getRhs(),
@@ -3594,6 +3624,11 @@ OpFoldResult GreaterEqualOp::fold(FoldAdaptor adaptor) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, int32_t, bool>(
         getType(), adaptor.getLhs(), adaptor.getRhs(),
         [](int32_t lhs, int32_t rhs) { return lhs >= rhs; });
+  }
+  if (getLhs().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getLhs(), adaptor.getRhs(),
+        [](int64_t lhs, int64_t rhs) { return lhs >= rhs; });
   }
   if (getLhs().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
@@ -3609,6 +3644,11 @@ OpFoldResult EqualOp::fold(FoldAdaptor adaptor) {
         getType(), adaptor.getX(), adaptor.getY(),
         [](int32_t lhs, int32_t rhs) { return lhs == rhs; });
   }
+  if (getX().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getX(), adaptor.getY(),
+        [](int64_t lhs, int64_t rhs) { return lhs == rhs; });
+  }
   if (getX().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
         getType(), adaptor.getX(), adaptor.getY(),
@@ -3622,6 +3662,11 @@ OpFoldResult NotEqualOp::fold(FoldAdaptor adaptor) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, int32_t, bool>(
         getType(), adaptor.getLhs(), adaptor.getRhs(),
         [](int32_t lhs, int32_t rhs) { return lhs != rhs; });
+  }
+  if (getLhs().getType().getElementType().isInteger(64)) {
+    return ConstFoldBinaryOp<DenseIntElementsAttr, int64_t, bool>(
+        getType(), adaptor.getLhs(), adaptor.getRhs(),
+        [](int64_t lhs, int64_t rhs) { return lhs != rhs; });
   }
   if (getLhs().getType().getElementType().isF32()) {
     return ConstFoldBinaryOp<DenseIntElementsAttr, float, bool>(
@@ -3869,14 +3914,17 @@ OpFoldResult CastIntToInt(DenseIntElementsAttr data, IntegerType in_type,
 
 OpFoldResult CastFloatToInt(DenseFPElementsAttr data, FloatType in_type,
                             IntegerType out_type) {
-  const bool from_f32 = in_type.isF32();
-  const bool to_i32 = out_type.isSignlessInteger(32);
-  if (!from_f32 || !to_i32) {
+  if (!in_type.isF32()) {
+    return {};
+  }
+
+  const auto out_width = out_type.getWidth();
+  if (out_width != 64 && out_width != 32) {
     return {};
   }
 
   auto cast = [&](APFloat value) -> APInt {
-    APSInt result(32, false);
+    APSInt result(out_width, false);
     bool is_exact;
     value.convertToInteger(result, llvm::RoundingMode::TowardZero, &is_exact);
     return result;
