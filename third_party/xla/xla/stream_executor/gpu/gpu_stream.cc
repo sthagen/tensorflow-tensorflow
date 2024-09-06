@@ -106,27 +106,17 @@ absl::Status GpuStream::Memcpy(DeviceMemoryBase* gpu_dst,
 
 absl::Status GpuStream::Memcpy(DeviceMemoryBase* gpu_dst, const void* host_src,
                                uint64_t size) {
-  bool ok = GpuDriver::AsynchronousMemcpyH2D(
+  return GpuDriver::AsynchronousMemcpyH2D(
       parent_->gpu_context(), reinterpret_cast<GpuDevicePtr>(gpu_dst->opaque()),
       host_src, size, gpu_stream());
-  if (!ok) {
-    return absl::InternalError("Failed to memcpy from device to host.");
-  }
-  return absl::OkStatus();
 }
 
 absl::Status GpuStream::Memcpy(void* host_dst, const DeviceMemoryBase& gpu_src,
                                uint64_t size) {
-  bool ok = GpuDriver::AsynchronousMemcpyD2H(
+  return GpuDriver::AsynchronousMemcpyD2H(
       parent_->gpu_context(), host_dst,
       reinterpret_cast<GpuDevicePtr>(const_cast<void*>(gpu_src.opaque())), size,
       gpu_stream());
-  // TODO(b/326130105): Change AsynchronousMemcpyD2H calls to return
-  // absl::Status.
-  if (!ok) {
-    return absl::InternalError("Failed to memcpy from device to host.");
-  }
-  return absl::OkStatus();
 }
 
 absl::Status GpuStream::WaitFor(Stream* other) {

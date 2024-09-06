@@ -1618,44 +1618,32 @@ absl::Status GpuDriver::SynchronousMemcpyH2D(Context* context,
   return absl::OkStatus();
 }
 
-bool GpuDriver::AsynchronousMemcpyD2H(Context* context, void* host_dst,
-                                      CUdeviceptr gpu_src, uint64_t size,
-                                      CUstream stream) {
+absl::Status GpuDriver::AsynchronousMemcpyD2H(Context* context, void* host_dst,
+                                              CUdeviceptr gpu_src,
+                                              uint64_t size, CUstream stream) {
   ScopedActivateContext activation(context);
-  auto status =
-      cuda::ToStatus(cuMemcpyDtoHAsync(host_dst, gpu_src, size, stream));
-  if (!status.ok()) {
-    LOG(ERROR) << absl::StrFormat(
-        "failed to enqueue async memcpy from device to host: %s; host dst: %p; "
-        "GPU src: %p; size: %u=0x%x",
-        status.ToString(), host_dst, absl::bit_cast<void*>(gpu_src), size,
-        size);
-    return false;
-  }
+
+  TF_RETURN_IF_ERROR(
+      cuda::ToStatus(cuMemcpyDtoHAsync(host_dst, gpu_src, size, stream)));
+
   VLOG(2) << "successfully enqueued async memcpy d2h of " << size
           << " bytes from " << absl::bit_cast<void*>(gpu_src) << " to "
           << host_dst << " on stream " << stream;
-  return true;
+  return absl::OkStatus();
 }
 
-bool GpuDriver::AsynchronousMemcpyH2D(Context* context, CUdeviceptr gpu_dst,
-                                      const void* host_src, uint64_t size,
-                                      CUstream stream) {
+absl::Status GpuDriver::AsynchronousMemcpyH2D(Context* context,
+                                              CUdeviceptr gpu_dst,
+                                              const void* host_src,
+                                              uint64_t size, CUstream stream) {
   ScopedActivateContext activation(context);
-  auto status =
-      cuda::ToStatus(cuMemcpyHtoDAsync(gpu_dst, host_src, size, stream));
-  if (!status.ok()) {
-    LOG(ERROR) << absl::StrFormat(
-        "failed to enqueue async memcpy from host to device: %s; GPU dst: %p; "
-        "host src: %p; size: %u=0x%x",
-        status.ToString(), absl::bit_cast<void*>(gpu_dst), host_src, size,
-        size);
-    return false;
-  }
+  TF_RETURN_IF_ERROR(
+      cuda::ToStatus(cuMemcpyHtoDAsync(gpu_dst, host_src, size, stream)));
+
   VLOG(2) << "successfully enqueued async memcpy h2d of " << size << " bytes"
           << " from " << host_src << " to " << absl::bit_cast<void*>(gpu_dst)
           << " on stream " << stream;
-  return true;
+  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::AsynchronousMemcpyD2D(Context* context,
