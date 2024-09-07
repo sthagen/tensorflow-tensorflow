@@ -42,6 +42,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/Sequence.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -4869,6 +4870,69 @@ int64_t MaxPool2DOp::GetArithmeticCount(Operation* op) {
 }
 
 //===----------------------------------------------------------------------===//
+// ReverseV2Op
+//===----------------------------------------------------------------------===//
+
+OpFoldResult ReverseV2Op::fold(FoldAdaptor adaptor) {
+  auto input = adaptor.getInput();
+  auto axis = adaptor.getAxis();
+
+  if (!input || !axis) {
+    return {};
+  }
+
+  auto axis_val = llvm::cast<DenseIntElementsAttr>(axis);
+  llvm::SetVector<int32_t> axis_set(axis_val.value_begin<int32_t>(),
+                                    axis_val.value_end<int32_t>());
+
+  auto input_type = getInput().getType();
+
+  auto get_shaped_ind = [&](int64_t flat_ind) -> llvm::SmallVector<int64_t> {
+    llvm::SmallVector<int64_t> result;
+    result.reserve(input_type.getRank());
+    auto num_els = input_type.getNumElements();
+    for (auto d : input_type.getShape()) {
+      num_els /= d;
+      result.push_back(flat_ind / num_els);
+      flat_ind %= num_els;
+    }
+    return result;
+  };
+
+  auto get_flat_ind = [&](llvm::ArrayRef<int64_t> shaped_ind) -> int64_t {
+    auto num_els = input_type.getNumElements();
+    int64_t result = 0;
+    for (auto [max_dim, ind_dim] :
+         llvm::zip(input_type.getShape(), shaped_ind)) {
+      num_els /= max_dim;
+      result += num_els * ind_dim;
+    }
+    return result;
+  };
+
+  std::vector<Attribute> new_data(input_type.getNumElements());
+  auto input_data = llvm::cast<DenseElementsAttr>(input);
+
+  for (auto [i, val] : llvm::enumerate(input_data.getValues<Attribute>())) {
+    auto shaped_ind = get_shaped_ind(i);
+
+    for (int d = 0; d < shaped_ind.size(); ++d) {
+      if (!axis_set.contains(d)) {
+        continue;
+      }
+
+      shaped_ind[d] = input_type.getDimSize(d) - 1 - shaped_ind[d];
+    }
+
+    auto new_flat_ind = get_flat_ind(shaped_ind);
+
+    new_data[new_flat_ind] = val;
+  }
+
+  return DenseElementsAttr::get(getType(), new_data);
+}
+
+//===----------------------------------------------------------------------===//
 // L2NormalizationOp
 //===----------------------------------------------------------------------===//
 
@@ -4893,6 +4957,39 @@ OpFoldResult PadOp::fold(FoldAdaptor) {
     return getInput();
 
   return {};
+}
+
+// When padding amounts are constants, cast them to i32. XNN can only
+// consume i32 pad amounts in some cases.
+struct CastConstPadAmounts : public OpRewritePattern<PadOp> {
+  using OpRewritePattern<PadOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(PadOp op,
+                                PatternRewriter& rewriter) const override {
+    auto padding_amount_op = op.getPadding().getDefiningOp();
+    if (!padding_amount_op ||
+        !padding_amount_op->hasTrait<OpTrait::ConstantLike>()) {
+      return failure();
+    }
+
+    auto padding_type = op.getPadding().getType();
+    if (!padding_type.getElementType().isSignlessInteger(64)) {
+      return failure();
+    }
+
+    auto cast = rewriter.createOrFold<CastOp>(
+        padding_amount_op->getLoc(),
+        padding_type.clone(rewriter.getIntegerType(32)), op.getPadding());
+
+    rewriter.modifyOpInPlace(op, [&]() { op->setOperand(1, cast); });
+
+    return success();
+  }
+};
+
+void PadOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                        MLIRContext* context) {
+  results.add<CastConstPadAmounts>(context);
 }
 
 //===----------------------------------------------------------------------===//

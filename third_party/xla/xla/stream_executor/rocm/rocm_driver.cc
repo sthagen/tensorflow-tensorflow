@@ -1185,14 +1185,13 @@ absl::Status GpuDriver::AsynchronousMemsetUint32(Context* context,
   return absl::OkStatus();
 }
 
-bool GpuDriver::AddStreamCallback(Context* context, GpuStreamHandle stream,
-                                  StreamCallback callback, void* data) {
-  hipError_t res = wrap::hipLaunchHostFunc(stream, (hipHostFn_t)callback, data);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "unable to add host callback: " << ToString(res);
-    return false;
-  }
-  return true;
+absl::Status GpuDriver::AddStreamCallback(Context* context,
+                                          GpuStreamHandle stream,
+                                          StreamCallback callback, void* data) {
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipLaunchHostFunc(stream, (hipHostFn_t)callback, data),
+      "unable to add host callback");
+  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::GetModuleFunction(Context* context, hipModule_t module,
@@ -1250,9 +1249,13 @@ void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   if (stream == nullptr) {
     return;
   }
+  hipError_t res = wrap::hipStreamQuery(stream);
+  if (res != hipSuccess) {
+    LOG(ERROR) << "stream not idle on destroy: " << ToString(res);
+  }
 
   ScopedActivateContext activated(context);
-  hipError_t res = wrap::hipStreamDestroy(stream);
+  res = wrap::hipStreamDestroy(stream);
   if (res != hipSuccess) {
     LOG(ERROR) << "failed to destroy ROCM stream for device "
                << context->device_ordinal() << ": " << ToString(res);
@@ -1407,9 +1410,9 @@ absl::Status GpuDriver::RecordEvent(Context* context, GpuEventHandle event,
   }
 }
 
-bool GpuDriver::GetEventElapsedTime(Context* context,
-                                    float* elapsed_milliseconds,
-                                    GpuEventHandle start, GpuEventHandle stop) {
+absl::StatusOr<float> GpuDriver::GetEventElapsedTime(Context* context,
+                                                     GpuEventHandle start,
+                                                     GpuEventHandle stop) {
   ScopedActivateContext activated{context};
   // The stop event must have completed in order for hipEventElapsedTime to
   // work.
@@ -1418,38 +1421,28 @@ bool GpuDriver::GetEventElapsedTime(Context* context,
     LOG(ERROR) << "failed to synchronize the stop event: " << ToString(res);
     return false;
   }
-  res = wrap::hipEventElapsedTime(elapsed_milliseconds, start, stop);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to get elapsed time between events: "
-               << ToString(res);
-    return false;
-  }
+  float elapsed_milliseconds;
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipEventElapsedTime(&elapsed_milliseconds, start, stop),
+      "failed to get elapsed time between events");
 
-  return true;
+  return elapsed_milliseconds;
 }
 
-bool GpuDriver::WaitStreamOnEvent(Context* context, GpuStreamHandle stream,
-                                  GpuEventHandle event) {
+absl::Status GpuDriver::WaitStreamOnEvent(Context* context,
+                                          GpuStreamHandle stream,
+                                          GpuEventHandle event) {
   ScopedActivateContext activation{context};
-  hipError_t res = wrap::hipStreamWaitEvent(stream, event, 0 /* = flags */);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "could not wait stream on event: " << ToString(res);
-    return false;
-  }
-
-  return true;
+  RETURN_IF_ROCM_ERROR(wrap::hipStreamWaitEvent(stream, event, 0 /* = flags */),
+                       "could not wait stream on event");
+  return absl::OkStatus();
 }
 
-bool GpuDriver::SynchronizeContext(Context* context) {
+absl::Status GpuDriver::SynchronizeContext(Context* context) {
   ScopedActivateContext activation{context};
-  hipError_t res = wrap::hipDeviceSynchronize();
-  if (res != hipSuccess) {
-    LOG(ERROR) << "could not synchronize on ROCM device: " << ToString(res)
-               << " :: " << tsl::CurrentStackTrace();
-    return false;
-  }
-
-  return true;
+  RETURN_IF_ROCM_ERROR(wrap::hipDeviceSynchronize(),
+                       "could not synchronize on ROCM device");
+  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::SynchronizeStream(Context* context,
@@ -1461,20 +1454,6 @@ absl::Status GpuDriver::SynchronizeStream(Context* context,
   VLOG(2) << "successfully synchronized stream " << stream << " on device "
           << context->device_ordinal();
   return absl::OkStatus();
-}
-
-bool GpuDriver::IsStreamIdle(Context* context, GpuStreamHandle stream) {
-  ScopedActivateContext activated{context};
-  CHECK(stream != nullptr);
-  hipError_t res = wrap::hipStreamQuery(stream);
-  if (res == hipSuccess) {
-    return true;
-  }
-
-  if (res != hipErrorNotReady) {
-    LOG(ERROR) << "stream in bad state on status query: " << ToString(res);
-  }
-  return false;
 }
 
 absl::Status GpuDriver::SynchronousMemcpyD2H(Context* context, void* host_dst,
@@ -1703,22 +1682,6 @@ absl::Status GpuDriver::GetGpuGCNArchName(hipDevice_t device,
   *gcnArchName = "";
   return absl::InternalError(absl::StrFormat(
       "failed to determine AMDGpu GCN Arch Name for device %d", device));
-}
-
-absl::StatusOr<bool> GpuDriver::GetMFMASupport() {
-  hipDeviceProp_t props;
-  int dev = 0;
-  hipError_t result = wrap::hipGetDevice(&dev);
-  result = wrap::hipGetDeviceProperties(&props, dev);
-  if (result == hipSuccess) {
-    std::string gcnArchName = props.gcnArchName;
-    VLOG(3) << "GCN arch name " << gcnArchName;
-    auto compute_capability = RocmComputeCapability(gcnArchName);
-    VLOG(3) << "GCN arch name (stripped) " << compute_capability.gfx_version();
-    return compute_capability.gfx9_mi100_or_later();
-  }
-  return absl::InternalError(absl::StrFormat(
-      "failed to determine AMDGpu GCN Arch Name for device %d", dev));
 }
 
 // Helper function that turns the integer output of hipDeviceGetAttribute to

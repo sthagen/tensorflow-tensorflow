@@ -1320,15 +1320,10 @@ absl::Status GpuDriver::AsynchronousMemsetUint32(Context* context,
                         "Failed to enqueue async memset operation");
 }
 
-bool GpuDriver::AddStreamCallback(Context* context, CUstream stream,
-                                  StreamCallback callback, void* data) {
+absl::Status GpuDriver::AddStreamCallback(Context* context, CUstream stream,
+                                          StreamCallback callback, void* data) {
   // Note: flags param is required to be zero according to CUDA 6.0.
-  auto status = cuda::ToStatus(cuLaunchHostFunc(stream, callback, data));
-  if (!status.ok()) {
-    LOG(ERROR) << "unable to add host callback: " << status;
-    return false;
-  }
-  return true;
+  return cuda::ToStatus(cuLaunchHostFunc(stream, callback, data));
 }
 
 absl::Status GpuDriver::GetModuleFunction(Context* context, CUmodule module,
@@ -1393,6 +1388,11 @@ void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   }
 
   ScopedActivateContext activated{context};
+  CUresult res = cuStreamQuery(stream);
+  if (res != CUDA_SUCCESS) {
+    LOG(ERROR) << "stream not idle on destroy: " << cuda::ToStatus(res);
+  }
+
   auto status = cuda::ToStatus(cuStreamDestroy(stream));
   if (!status.ok()) {
     LOG(ERROR) << "failed to destroy CUDA stream for context " << context
@@ -1521,9 +1521,9 @@ absl::Status GpuDriver::RecordEvent(Context* context, CUevent event,
                         "Error recording CUDA event");
 }
 
-bool GpuDriver::GetEventElapsedTime(Context* context,
-                                    float* elapsed_milliseconds, CUevent start,
-                                    CUevent stop) {
+absl::StatusOr<float> GpuDriver::GetEventElapsedTime(Context* context,
+                                                     CUevent start,
+                                                     CUevent stop) {
   ScopedActivateContext activated{context};
   // The stop event must have completed in order for cuEventElapsedTime to
   // work.
@@ -1532,39 +1532,24 @@ bool GpuDriver::GetEventElapsedTime(Context* context,
     LOG(ERROR) << "failed to synchronize the stop event: " << status;
     return false;
   }
-  status =
-      cuda::ToStatus(cuEventElapsedTime(elapsed_milliseconds, start, stop));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to get elapsed time between events: " << status;
-    return false;
-  }
 
-  return true;
+  float elapsed_milliseconds;
+
+  TF_RETURN_IF_ERROR(
+      cuda::ToStatus(cuEventElapsedTime(&elapsed_milliseconds, start, stop)));
+
+  return elapsed_milliseconds;
 }
 
-bool GpuDriver::WaitStreamOnEvent(Context* context, CUstream stream,
-                                  CUevent event) {
+absl::Status GpuDriver::WaitStreamOnEvent(Context* context, CUstream stream,
+                                          CUevent event) {
   ScopedActivateContext activation(context);
-  auto status =
-      cuda::ToStatus(cuStreamWaitEvent(stream, event, 0 /* = flags */));
-  if (!status.ok()) {
-    LOG(ERROR) << "could not wait stream on event: " << status;
-    return false;
-  }
-
-  return true;
+  return cuda::ToStatus(cuStreamWaitEvent(stream, event, 0 /* = flags */));
 }
 
-bool GpuDriver::SynchronizeContext(Context* context) {
+absl::Status GpuDriver::SynchronizeContext(Context* context) {
   ScopedActivateContext activation(context);
-  auto status = cuda::ToStatus(cuCtxSynchronize());
-  if (!status.ok()) {
-    LOG(ERROR) << "could not synchronize on CUDA context: " << status
-               << " :: " << tsl::CurrentStackTrace();
-    return false;
-  }
-
-  return true;
+  return cuda::ToStatus(cuCtxSynchronize());
 }
 
 absl::Status GpuDriver::SynchronizeStream(Context* context, CUstream stream) {
@@ -1572,21 +1557,6 @@ absl::Status GpuDriver::SynchronizeStream(Context* context, CUstream stream) {
   CHECK(stream != nullptr);
   return cuda::ToStatus(cuStreamSynchronize(stream),
                         "Could not synchronize CUDA stream");
-}
-
-bool GpuDriver::IsStreamIdle(Context* context, CUstream stream) {
-  ScopedActivateContext activated{context};
-  CHECK(stream != nullptr);
-  CUresult res = cuStreamQuery(stream);
-  if (res == CUDA_SUCCESS) {
-    return true;
-  }
-
-  if (res != CUDA_ERROR_NOT_READY) {
-    LOG(ERROR) << "stream in bad state on status query: "
-               << cuda::ToStatus(res);
-  }
-  return false;
 }
 
 absl::Status GpuDriver::SynchronousMemcpyD2H(Context* context, void* host_dst,
@@ -1659,7 +1629,8 @@ absl::Status GpuDriver::AsynchronousMemcpyD2D(Context* context,
   if ((gpu_dst == 0 || gpu_src == 0) || is_capturing) {
     // GetContextMap()->GetAnyContext() doesn't works when ptr == 0.
     // This happens when the size is 0.
-    return cuda::ToStatus(cuMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream));
+    TF_RETURN_IF_ERROR(
+        cuda::ToStatus(cuMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream)));
   } else {
     // Any context work here.
     CUcontext dst_context =
@@ -1670,10 +1641,11 @@ absl::Status GpuDriver::AsynchronousMemcpyD2D(Context* context,
     if (dst_context == src_context) {
       // Since the CUDA context is the same, the src and dst are within the same
       // GPU. So we can use cuMemcpyDtoD.
-      return cuda::ToStatus(cuMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream));
+      TF_RETURN_IF_ERROR(
+          cuda::ToStatus(cuMemcpyDtoDAsync(gpu_dst, gpu_src, size, stream)));
     } else {
-      return cuda::ToStatus(cuMemcpyPeerAsync(gpu_dst, dst_context, gpu_src,
-                                              src_context, size, stream));
+      TF_RETURN_IF_ERROR(cuda::ToStatus(cuMemcpyPeerAsync(
+          gpu_dst, dst_context, gpu_src, src_context, size, stream)));
     }
   }
 
