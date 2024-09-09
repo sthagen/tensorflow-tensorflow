@@ -270,6 +270,7 @@ cc_library(
     local_defines = if_rocm_is_configured(["TENSORFLOW_USE_ROCM=1"]),
     deps = [
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:semantic_version",
     ],
 )
 
@@ -1563,6 +1564,7 @@ cc_library(
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/stream_executor:dnn",
         "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:semantic_version",
         "//xla/translate/hlo_to_mhlo:hlo_utils",
         "//xla/translate/mhlo_to_hlo:location_exporter",
         "//xla:autotune_results_proto_cc",
@@ -2730,7 +2732,7 @@ cc_library(
 
 xla_test(
     name = "dot_algorithm_support_test",
-    srcs = if_gpu_is_configured(["dot_algorithm_support_test.cc"]),
+    srcs = ["dot_algorithm_support_test.cc"],
     backends = [
         "gpu_v100",
         "gpu_a100",
@@ -2745,6 +2747,7 @@ xla_test(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:semantic_version",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_absl//absl/strings",
