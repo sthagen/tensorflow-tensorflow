@@ -842,6 +842,48 @@ func.func @FuseReshapeAroundBMMNagativeTest2(%arg0: tensor<2x1536xf32>) -> tenso
   // CHECK: return %3 : tensor<2x768xf32>
 }
 
+// CHECK-LABEL: @convert_bmm_rhs_transpose_into_fc
+// FOLD-LABEL: @convert_bmm_rhs_transpose_into_fc
+func.func @convert_bmm_rhs_transpose_into_fc(%arg0: tensor<8x256xf32>, %arg1: tensor<256x256xf32>) -> (tensor<8x256xf32>) {
+  %10 = "tfl.pseudo_const"() <{value = dense<[1, 0]> : tensor<2xi32>}> : () -> tensor<2xi32>
+  %11 = "tfl.transpose"(%arg1, %10) : (tensor<256x256xf32>, tensor<2xi32>) -> tensor<256x256xf32>
+  %14 = "tfl.batch_matmul"(%arg0, %11) <{adj_x = false, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<8x256xf32>, tensor<256x256xf32>) -> tensor<8x256xf32>
+  return %14 : tensor<8x256xf32>
+  // CHECK:  %0 = "tfl.pseudo_const"() <{value = dense<[1, 0]> : tensor<2xi32>}> : () -> tensor<2xi32>
+  // CHECK:  %1 = "tfl.transpose"(%arg1, %0) : (tensor<256x256xf32>, tensor<2xi32>) -> tensor<256x256xf32>
+  // CHECK:  %2 = "tfl.batch_matmul"(%arg0, %1) <{adj_x = false, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<8x256xf32>, tensor<256x256xf32>) -> tensor<8x256xf32>
+  // CHECK:  return %2 : tensor<8x256xf32>
+
+  // FOLD:  %0 = "tfl.no_value"() <{value}> : () -> none
+  // FOLD:  %1 = "tfl.fully_connected"(%arg0, %arg1, %0) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"}> : (tensor<8x256xf32>, tensor<256x256xf32>, none) -> tensor<8x256xf32>
+  // FOLD:  return %1 : tensor<8x256xf32>
+}
+
+// CHECK-LABEL: @convert_bmm_rhs_transpose_into_fc_negative
+func.func @convert_bmm_rhs_transpose_into_fc_negative(%arg0: tensor<2x1x256xf32>, %arg1: tensor<256x256x2xf32>) -> (tensor<2x1x256xf32>) {
+  %10 = "tfl.pseudo_const"() <{value = dense<[2, 1, 0]> : tensor<3xi32>}> : () -> tensor<3xi32>
+  %11 = "tfl.transpose"(%arg1, %10) : (tensor<256x256x2xf32>, tensor<3xi32>) -> tensor<2x256x256xf32>
+  %14 = "tfl.batch_matmul"(%arg0, %11) <{adj_x = false, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<2x1x256xf32>, tensor<2x256x256xf32>) -> tensor<2x1x256xf32>
+  return %14 : tensor<2x1x256xf32>
+  // CHECK:  %0 = "tfl.pseudo_const"() <{value = dense<[2, 1, 0]> : tensor<3xi32>}> : () -> tensor<3xi32>
+  // CHECK:  %1 = "tfl.transpose"(%arg1, %0) : (tensor<256x256x2xf32>, tensor<3xi32>) -> tensor<2x256x256xf32>
+  // CHECK:  %2 = "tfl.batch_matmul"(%arg0, %1) <{adj_x = false, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<2x1x256xf32>, tensor<2x256x256xf32>) -> tensor<2x1x256xf32>
+  // CHECK:  return %2 : tensor<2x1x256xf32>
+}
+
+
+// CHECK-LABEL: @convert_bmm_rhs_transpose_into_fc_negative_adjx_true
+func.func @convert_bmm_rhs_transpose_into_fc_negative_adjx_true(%arg0: tensor<16x16xf32>, %arg1: tensor<16x16xf32>) -> (tensor<16x16xf32>) {
+  %cst = arith.constant dense<[1, 0]> : tensor<2xi32>
+  %0 = "tfl.transpose"(%arg1, %cst) : (tensor<16x16xf32>, tensor<2xi32>) -> tensor<16x16xf32>
+  %1 = "tfl.batch_matmul"(%arg0, %0) <{adj_x = true, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<16x16xf32>, tensor<16x16xf32>) -> tensor<16x16xf32>
+  return %1 : tensor<16x16xf32>
+  // CHECK:  %cst = arith.constant dense<[1, 0]> : tensor<2xi32>
+  // CHECK:  %0 = "tfl.transpose"(%arg1, %cst) : (tensor<16x16xf32>, tensor<2xi32>) -> tensor<16x16xf32>
+  // CHECK:  %1 = "tfl.batch_matmul"(%arg0, %0) <{adj_x = true, adj_y = false, asymmetric_quantize_inputs = false}> : (tensor<16x16xf32>, tensor<16x16xf32>) -> tensor<16x16xf32>
+  // CHECK:  return %1 : tensor<16x16xf32>
+}
+
 // CHECK-LABEL: @FuseBMMInputReshape_WithTwoRhsDims
 func.func @FuseBMMInputReshape_WithTwoRhsDims(%arg0: tensor<8x1792x256xf32>, %arg1: tensor<1x1x1792xf32>) -> (tensor<1x1x8x256xf32>) {
   %cst = arith.constant dense<[1, 1, 8, 256]> : tensor<4xi32>
@@ -1046,6 +1088,44 @@ func.func @FuseFullyConnectedReshapeAddConstWithOptionalAttribute(%arg0: tensor<
 
   // FOLD: %[[cst:.*]] = arith.constant dense<5.000000e+00> : tensor<40x40xf32>
   // FOLD: %[[fc:.*]] = "tfl.fully_connected"(%arg0, %arg1, %[[cst]]) <{asymmetric_quantize_inputs = true,
+}
+
+// CHECK-LABEL: @fuse_fc_and_lhs_reshape
+// FOLD-LABEL: @fuse_fc_and_lhs_reshape
+func.func @fuse_fc_and_lhs_reshape(%arg0: tensor<1x128x14336xf32>) -> tensor<128x1792xf32> {
+  %3 = "tfl.no_value"() <{value}> : () -> none
+  %41 = "tfl.pseudo_const"() <{value = dense<[128, 14336]> : tensor<2xi32>}> : () -> tensor<2xi32>
+  %42 = "tfl.reshape"(%arg0, %41) : (tensor<1x128x14336xf32>, tensor<2xi32>) -> tensor<128x14336xf32>
+  %43 = "tfl.pseudo_const"() <{value = dense<9.0> : tensor<1792x14336xf32>}> : () -> tensor<1792x14336xf32>
+  %44 = "tfl.fully_connected"(%42, %43, %3) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"}> : (tensor<128x14336xf32>, tensor<1792x14336xf32>, none) -> tensor<128x1792xf32>
+  return %44 : tensor<128x1792xf32>
+  // CHECK:  %0 = "tfl.pseudo_const"() <{value = dense<9.000000e+00> : tensor<1792x14336xf32>}> : () -> tensor<1792x14336xf32>
+  // CHECK:  %1 = "tfl.no_value"() <{value}> : () -> none
+  // CHECK:  %2 = "tfl.pseudo_const"() <{value = dense<[128, 14336]> : tensor<2xi32>}> : () -> tensor<2xi32>
+  // CHECK:  %3 = "tfl.reshape"(%arg0, %2) : (tensor<1x128x14336xf32>, tensor<2xi32>) -> tensor<128x14336xf32>
+  // CHECK:  %4 = "tfl.fully_connected"(%3, %0, %1) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"}> : (tensor<128x14336xf32>, tensor<1792x14336xf32>, none) -> tensor<128x1792xf32>
+  // CHECK:  return %4 : tensor<128x1792xf32>
+
+  //FOLD:  %cst = arith.constant dense<9.000000e+00> : tensor<1792x14336xf32>
+  //FOLD:  %0 = "tfl.no_value"() <{value}> : () -> none
+  //FOLD:  %1 = "tfl.fully_connected"(%arg0, %cst, %0) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = false, weights_format = "DEFAULT"}> : (tensor<1x128x14336xf32>, tensor<1792x14336xf32>, none) -> tensor<128x1792xf32>
+  //FOLD:  return %1 : tensor<128x1792xf32>
+}
+
+// CHECK-LABEL: @fuse_fc_and_lhs_reshape_negative
+func.func @fuse_fc_and_lhs_reshape_negative(%arg0: tensor<1x2x3x128x14336xf32>)->(tensor<2x3x128x1792xf32>){
+  %3 = "tfl.no_value"() <{value}> : () -> none
+  %41 = "tfl.pseudo_const"() <{value = dense<[2, 3, 128, 14336]> : tensor<4xi32>}> : () -> tensor<4xi32>
+  %42 = "tfl.reshape"(%arg0, %41) : (tensor<1x2x3x128x14336xf32>, tensor<4xi32>) -> tensor<2x3x128x14336xf32>
+  %43 = "tfl.pseudo_const"() <{value = dense<9.0> : tensor<1792x14336xf32>}> : () -> tensor<1792x14336xf32>
+  %44 = "tfl.fully_connected"(%42, %43, %3) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"}> : (tensor<2x3x128x14336xf32>, tensor<1792x14336xf32>, none) -> tensor<2x3x128x1792xf32>
+  return %44 : tensor<2x3x128x1792xf32>
+  // CHECK:  %0 = "tfl.pseudo_const"() <{value = dense<9.000000e+00> : tensor<1792x14336xf32>}> : () -> tensor<1792x14336xf32>
+  // CHECK:  %1 = "tfl.no_value"() <{value}> : () -> none
+  // CHECK:  %2 = "tfl.pseudo_const"() <{value = dense<[2, 3, 128, 14336]> : tensor<4xi32>}> : () -> tensor<4xi32>
+  // CHECK:  %3 = "tfl.reshape"(%arg0, %2) : (tensor<1x2x3x128x14336xf32>, tensor<4xi32>) -> tensor<2x3x128x14336xf32>
+  // CHECK:  %4 = "tfl.fully_connected"(%3, %0, %1) <{asymmetric_quantize_inputs = false, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"}> : (tensor<2x3x128x14336xf32>, tensor<1792x14336xf32>, none) -> tensor<2x3x128x1792xf32>
+  // CHECK:  return %4 : tensor<2x3x128x1792xf32>
 }
 
 // CHECK-LABEL: @FuseFullyConnectedReshapeAddConstWithActivation
