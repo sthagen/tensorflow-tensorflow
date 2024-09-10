@@ -39,7 +39,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
-#include "third_party/gpus/cuda/include/cuda.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
@@ -185,12 +184,11 @@ class MatmulBfloat16Support : public FloatSupport {
 
 }  // namespace
 
-int32_t NVPTXCompiler::GetToolkitVersion() const { return CUDA_VERSION; }
-
 absl::Status NVPTXCompiler::OptimizeHloConvolutionCanonicalization(
     HloModule* hlo_module, se::GpuComputeCapability gpu_version,
     se::dnn::VersionInfo dnn_version,
-    se::DeviceMemoryAllocator* device_allocator) {
+    se::DeviceMemoryAllocator* device_allocator,
+    const se::SemanticVersion& toolkit_version) {
   auto cuda_compute_capability =
       std::get<se::CudaComputeCapability>(gpu_version);
   // Convert convolutions into CustomCalls to cudnn, then canonicalize them
@@ -211,7 +209,7 @@ absl::Status NVPTXCompiler::OptimizeHloConvolutionCanonicalization(
   pipeline.AddPass<GpusolverRewriter>();
   pipeline.AddPass<ConvRewriter>(cuda_compute_capability);
   pipeline.AddPass<CudnnFusedConvRewriter>(cuda_compute_capability, dnn_version,
-                                           GetToolkitVersion());
+                                           toolkit_version);
   pipeline.AddPass<ConvPaddingLegalization>();
   pipeline.AddPass<CudnnPadForConvolutions>(cuda_compute_capability);
   pipeline.AddPass<CudnnVectorizeConvolutions>(cuda_compute_capability,
