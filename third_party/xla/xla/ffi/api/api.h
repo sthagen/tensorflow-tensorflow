@@ -22,6 +22,7 @@ limitations under the License.
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
@@ -34,6 +35,7 @@ limitations under the License.
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // This is a header-only base C++ library that defines templates for decoding
@@ -214,7 +216,7 @@ class Ffi {
   static auto BindTo(Fn fn, std::initializer_list<Traits> traits = {});
 
   virtual ~Ffi() = default;
-  virtual XLA_FFI_Error* Call(const XLA_FFI_CallFrame* call_frame) const = 0;
+  virtual XLA_FFI_Error* Call(XLA_FFI_CallFrame* call_frame) const = 0;
 
   // Registers FFI handler bundle with an XLA runtime under the given name on a
   // given platform.
@@ -882,15 +884,31 @@ struct CtxDecoding;
 // Example: encoding `absl::Status` result
 //
 //   template<ExecutionStage stage>
-//   struct ResultEncoding<absl::Status> {
+//   struct ResultEncoding<stage, absl::Status> {
 //     XLA_FFI_Error* Encode(const XLA_FFI_Api* api,
 //                           XLA_FFI_ExecutionContext* ctx,
-//.                          absl::Status status) {...}
+//                           absl::Status status) {...}
 //   }
 //
 // Result encoding is execution stage specific, for example at instantiation
 // stage FFI handler can return an FFI handler state, while at execution stage
 // we only support returning a status-like type.
+//
+// Asynchronous FFI handlers can return encoded result as an `XLA_FFI_Future*`
+// or as an `std::variant` of `XLA_FFI_Error*` and `XLA_FFI_Future*`, where an
+// error can be used to return synchronous errors (i.e., invalid arguments), and
+// a future can be used to return asynchronous completion. See example of such
+// encoding in result encoding for `Future`.
+//
+// Example: encoding `xla::ffi::Future` result
+//
+//   template<ExecutionStage stage>
+//   struct ResultEncoding<state, xla::ffi::Future> {
+//     std::variant<XLA_FFI_Error*, XLA_FFI_Future*> Encode(
+//       const XLA_FFI_Api* api, XLA_FFI_ExecutionContext* ctx,
+//       xla::ffi::Future future) {...}
+//   }
+//
 template <ExecutionStage stage, typename T>
 struct ResultEncoding;
 
@@ -1327,7 +1345,14 @@ class Handler : public Ffi {
   using ResultType = std::invoke_result_t<Fn, FnArgType<Ts>...>;
 
  public:
-  XLA_FFI_Error* Call(const XLA_FFI_CallFrame* call_frame) const override {
+  // We deliberately opt-out from the cognitive complexity check, as this
+  // function is on a hot path, any any attempt to split it leads to measurable
+  // regressions in microbenchmarks. It is a straight line block of mostly
+  // constexpr conditionals, that gets optimized to a much smaller code size in
+  // all template instantiations.
+  //
+  // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+  XLA_FFI_Error* Call(XLA_FFI_CallFrame* call_frame) const override {
     // Sanity checking call frame struct size.
     if (XLA_FFI_Error* err = CheckStructSize(
             call_frame->api, "XLA_FFI_CallFrame", XLA_FFI_CallFrame_STRUCT_SIZE,
@@ -1429,16 +1454,19 @@ class Handler : public Ffi {
  private:
   XLA_FFI_Error* PopulateMetadata(const XLA_FFI_Api* api,
                                   XLA_FFI_Metadata_Extension* extension) const {
-    if (XLA_FFI_Error* err = StructSizeIsGreaterOrEqual(
-            api, "XLA_FFI_Metadata_Extension",
-            XLA_FFI_Metadata_Extension_STRUCT_SIZE, extension->struct_size)) {
+    if (XLA_FFI_Error* err =
+            StructSizeIsGreaterOrEqual(api, "XLA_FFI_Metadata_Extension",
+                                       XLA_FFI_Metadata_Extension_STRUCT_SIZE,
+                                       extension->extension_base.struct_size)) {
       return err;
     }
+
     if (XLA_FFI_Error* err = StructSizeIsGreaterOrEqual(
             api, "XLA_FFI_Metadata", XLA_FFI_Metadata_STRUCT_SIZE,
             extension->metadata->struct_size)) {
       return err;
     }
+
     extension->metadata->api_version = XLA_FFI_Api_Version{
         XLA_FFI_Api_Version_STRUCT_SIZE,
         /*extension_start=*/nullptr,
@@ -1457,7 +1485,7 @@ class Handler : public Ffi {
 
   template <size_t... Is>
   XLA_FFI_ATTRIBUTE_ALWAYS_INLINE XLA_FFI_Error* Call(
-      const XLA_FFI_CallFrame* call_frame, std::index_sequence<Is...>) const {
+      XLA_FFI_CallFrame* call_frame, std::index_sequence<Is...>) const {
     // A helper structure to allow each decoder find the correct offset.
     internal::DecodingOffsets offsets;
 
@@ -1480,8 +1508,46 @@ class Handler : public Ffi {
     }
 
     ResultType result = fn_(std::move(*std::get<Is>(args))...);
-    return ResultEncoding<stage, ResultType>::Encode(
+    auto encoded = ResultEncoding<stage, ResultType>::Encode(
         call_frame->api, call_frame->ctx, std::move(result));
+
+    // We do support three kinds of FFI result encodings:
+    //   (1) Synchronous handlers that return result encoded as XLA_FFI_Error*
+    //   (2) Asynchronous handlers that return result encoded as XLA_FFI_Future*
+    //   (3) Handlers that can return either (1) or (2)
+    static constexpr bool kIsEncodedError =
+        std::is_same_v<decltype(encoded), XLA_FFI_Error*>;
+    static constexpr bool kIsEncodedFuture =
+        std::is_same_v<decltype(encoded), XLA_FFI_Future*>;
+    static constexpr bool kIsEncodedErrorOrFuture =
+        std::is_same_v<decltype(encoded),
+                       std::variant<XLA_FFI_Error*, XLA_FFI_Future*>>;
+
+    static_assert(
+        kIsEncodedError || kIsEncodedFuture || kIsEncodedErrorOrFuture,
+        "Unsupported result encoding type");
+
+    if constexpr (kIsEncodedError) {
+      return encoded;
+    }
+
+    if constexpr (kIsEncodedFuture) {
+      call_frame->future = encoded;
+      assert(call_frame->future != nullptr);
+      return nullptr;
+    }
+
+    if constexpr (kIsEncodedErrorOrFuture) {
+      if (encoded.index() == 0) {
+        return std::get<0>(encoded);
+      } else {
+        call_frame->future = std::get<1>(encoded);
+        assert(call_frame->future != nullptr);
+        return nullptr;
+      }
+    }
+
+    std::abort();  // unreachable
   }
 
   XLA_FFI_Error* FailedDecodeError(const XLA_FFI_CallFrame* call_frame,

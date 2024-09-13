@@ -33,6 +33,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h"
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/transforms.h"
 #include "tensorflow/compiler/mlir/lite/transforms/pass.h"
+#include "tensorflow/compiler/mlir/lite/transforms/pass_registry_utils.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"
 #include "tensorflow/compiler/mlir/lite/transforms/toco_pass_options_setter.h"
 #include "tensorflow/compiler/mlir/lite/utils/fake_quant_utils.h"
@@ -97,16 +98,16 @@ void AddQuantizationPasses(const mlir::TFL::PassConfig& pass_config,
       mlir::TFL::CreateOptimizeOpOrderPass());
   // Add optimization pass after quantization for additional fusing
   // opportunities.
+  // Add TFLite optimize pass.
+  pass_manager.addNestedPass<mlir::func::FuncOp>(
+      mlir::TFL::CreateOptimizePass());
 
   if (!pass_config.unfold_batch_matmul) {
-    // Enable an optimization pass that transforms FC to BatchMatmul only when
+    // Enable an optimization pass that transforms BatchMatmul to FC only when
     // `unfold_batch_matmul=false`.
     pass_manager.addNestedPass<mlir::func::FuncOp>(
         mlir::TFL::CreateOptimizeBatchMatmulPass());
   }
-  // Add TFLite optimize pass.
-  pass_manager.addNestedPass<mlir::func::FuncOp>(
-      mlir::TFL::CreateOptimizePass());
 }
 
 void AddVariableFreezingFromGlobalTensorsPasses(
@@ -154,16 +155,16 @@ void AddDynamicRangeQuantizationPasses(const mlir::TFL::PassConfig& pass_config,
       mlir::TFL::CreateOptimizeOpOrderPass());
   // Add optimization pass after quantization for additional fusing
   // opportunities.
+  // Add TFLite optimize pass.
+  pass_manager.addNestedPass<mlir::func::FuncOp>(
+      mlir::TFL::CreateOptimizePass());
+
   if (!pass_config.unfold_batch_matmul) {
-    // Enable an optimization pass that transforms FC to BatchMatmul only when
+    // Enable an optimization pass that transforms BatchMatmul to FC only when
     // `unfold_batch_matmul=false`.
     pass_manager.addNestedPass<mlir::func::FuncOp>(
         mlir::TFL::CreateOptimizeBatchMatmulPass());
   }
-
-  // Add TFLite optimize pass.
-  pass_manager.addNestedPass<mlir::func::FuncOp>(
-      mlir::TFL::CreateOptimizePass());
 }
 
 void AddPytorchPasses(mlir::OpPassManager& pass_manager) {
@@ -520,21 +521,22 @@ void AddPostVariableFreezingTFToTFLConversionPasses(
                                                               pass_config);
 
     auto add_tfl_optimization_passes = [&]() {
-      if (!pass_config.unfold_batch_matmul) {
-        // Enable an optimization pass that transforms FC to BatchMatmul only
-        // when `unfold_batch_matmul=false`.
-        pass_manager->addNestedPass<mlir::func::FuncOp>(
-            mlir::TFL::CreateOptimizeBatchMatmulPass());
-      }
       pass_manager->addPass(mlir::TFL::CreatePushTransposeThroughEwisePass());
 
       // Add TFLite optimize pass.
-      std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>> optimize_pass =
-          mlir::TFL::CreateOptimizePass();
+      std::unique_ptr<mlir::Pass> optimize_pass =
+          mlir::TFL::Create<mlir::TFL::OptimizePass>();
       auto pass_ptr =
           dynamic_cast<mlir::TFL::MutableOptionsPass*>(optimize_pass.get());
       if (pass_ptr) pass_ptr->ApplyOptionsVisitor(toco_pass_options_setter);
       pass_manager->addNestedPass<mlir::func::FuncOp>(std::move(optimize_pass));
+
+      if (!pass_config.unfold_batch_matmul) {
+        // Enable an optimization pass that transforms BatchMatmul to FC only
+        // when `unfold_batch_matmul=false`.
+        pass_manager->addNestedPass<mlir::func::FuncOp>(
+            mlir::TFL::CreateOptimizeBatchMatmulPass());
+      }
     };
 
     // Run TFL optimization passes set multiple times as op fusion and

@@ -297,6 +297,7 @@ cc_library(
         "//xla/hlo/utils:hlo_query",
         "//xla/service:float_normalization",
         "//xla/service:hlo_pass_pipeline",
+        "//xla/service/gpu:backend_configs_cc",
         "//xla/service/gpu:gpu_device_info_for_tests",
         "//xla/service/gpu:gpu_float_support",
         "//xla/service/gpu:ir_emission_utils",
@@ -390,6 +391,7 @@ xla_test(
     tags = ["no_mac"],
     deps = [
         ":triton_support",
+        ":triton_test_utils",
         "//xla:comparison_util",
         "//xla:error_spec",
         "//xla:xla_data_proto_cc",

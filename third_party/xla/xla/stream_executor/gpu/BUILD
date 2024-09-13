@@ -50,13 +50,15 @@ load(
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = internal_visibility([
+        "//learning/dist_belief_extra/gpu:__subpackages__",
         "//tensorflow/compiler/tf2xla:__subpackages__",
         "//xla:__subpackages__",
         "//tensorflow/core/kernels:__subpackages__",
         "//xla/pjrt:__subpackages__",
         "//xla/service/gpu:__subpackages__",
         "//xla/stream_executor:__subpackages__",
-        "//tensorflow/core/common_runtime/gpu:__subpackages__",
+        "//tensorflow/core:__subpackages__",
+        "//third_party/sparse_conv:__subpackages__",
         "//waymo/ml/compiler/triton:__subpackages__",
     ]),
     licenses = ["notice"],
@@ -123,6 +125,8 @@ cc_library(
     hdrs = ["scoped_activate_context.h"],
     deps = [
         ":context",
+        ":gpu_executor_header",
+        "//xla/stream_executor:stream_executor_h",
         "@com_google_absl//absl/log:check",
         "@local_tsl//tsl/platform:logging",
     ],
@@ -143,15 +147,9 @@ xla_cc_test(
 
 gpu_only_cc_library(
     name = "gpu_activation",
-    srcs = ["gpu_activation.cc"],
     hdrs = ["gpu_activation.h"],
     deps = [
-        ":context",
-        ":gpu_activation_header",
-        ":gpu_driver_header",
-        ":gpu_executor_header",
         ":scoped_activate_context",
-        "//xla/stream_executor",
     ],
 )
 
@@ -625,9 +623,9 @@ cc_library(
     deps = [
         ":gpu_init_impl",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/stream_executor/cuda:cuda_activation",
         "//xla/stream_executor/cuda:cuda_executor",
         "//xla/stream_executor/cuda:cuda_status",
+        "//xla/stream_executor/gpu:scoped_activate_context",
         "//xla/tsl/framework:allocator",
         "//xla/tsl/framework:device_id",
         "//xla/tsl/util:env_var",

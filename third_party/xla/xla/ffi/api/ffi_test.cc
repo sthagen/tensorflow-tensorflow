@@ -23,6 +23,7 @@ limitations under the License.
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
@@ -232,6 +233,106 @@ TEST(FfiTest, Expected) {
   EXPECT_FALSE(error.has_value());
   EXPECT_TRUE(error.has_error());
   EXPECT_THAT(error.error().message(), HasSubstr("Test error"));
+}
+
+TEST(FfiTest, FutureSetAvailable) {
+  Promise promise;
+  Future future(promise);
+
+  promise.SetAvailable();
+  future.OnReady([](const std::optional<Error>& error) {
+    EXPECT_FALSE(error.has_value());
+  });
+}
+
+TEST(FfiTest, FutureSetError) {
+  Promise promise;
+  Future future(promise);
+
+  promise.SetError(Error(ErrorCode::kInternal, "Test error"));
+  future.OnReady([](const std::optional<Error>& error) {
+    EXPECT_TRUE(error.has_value());
+    EXPECT_THAT(error->message(), HasSubstr("Test error"));
+  });
+}
+
+TEST(FfiTest, FutureSetAvailableFromThreadPool) {
+  tsl::thread::ThreadPool pool(tsl::Env::Default(), "ffi-test", 2);
+
+  Promise promise;
+  Future future(promise);
+
+  // We write and read to and from the shared variable to check that `OnReady`
+  // callback is correctly synchronized with memory writes done in a thread
+  // that completes the promise.
+  int32_t value = 0;
+
+  absl::BlockingCounter counter(1);
+
+  future.OnReady([&](const std::optional<Error>& error) {
+    EXPECT_FALSE(error.has_value());
+    EXPECT_EQ(value, 42);
+    counter.DecrementCount();
+  });
+
+  pool.Schedule([&]() {
+    value = 42;
+    promise.SetAvailable();
+  });
+
+  counter.Wait();
+}
+
+TEST(FfiTest, FutureSetErrorFromThreadPool) {
+  tsl::thread::ThreadPool pool(tsl::Env::Default(), "ffi-test", 2);
+
+  Promise promise;
+  Future future(promise);
+
+  // We write and read to and from the shared variable to check that `OnReady`
+  // callback is correctly synchronized with memory writes done in a thread
+  // that completes the promise.
+  int32_t value = 0;
+
+  absl::BlockingCounter counter(1);
+
+  future.OnReady([&](const std::optional<Error>& error) {
+    EXPECT_TRUE(error.has_value());
+    EXPECT_THAT(error->message(), HasSubstr("Test error"));
+    EXPECT_EQ(value, 42);
+    counter.DecrementCount();
+  });
+
+  pool.Schedule([&]() {
+    value = 42;
+    promise.SetError(Error(ErrorCode::kInternal, "Test error"));
+  });
+
+  counter.Wait();
+}
+
+TEST(FfiTest, FutureRace) {
+  tsl::thread::ThreadPool pool(tsl::Env::Default(), "ffi-test", 2);
+
+  // Schedule `SetAvailable` and `OnReady` on a thread pool to detect
+  // potential data races. Do this in a loop to make sure that we have
+  // a good chance of triggering a data race if there is one.
+  for (int32_t i = 0; i < 1000; ++i) {
+    Promise promise;
+    Future future(promise);
+
+    absl::BlockingCounter counter(1);
+
+    pool.Schedule([&]() { promise.SetAvailable(); });
+    pool.Schedule([&]() {
+      future.OnReady([&](const std::optional<Error>& error) {
+        EXPECT_FALSE(error.has_value());
+        counter.DecrementCount();
+      });
+    });
+
+    counter.Wait();
+  }
 }
 
 TEST(FfiTest, ReturnError) {
@@ -1047,7 +1148,7 @@ TEST(FfiTest, ScratchAllocatorUnimplemented) {
 }
 
 TEST(FfiTest, ThreadPool) {
-  tsl::thread::ThreadPool pool(tsl::Env::Default(), "XLAEigen", 2);
+  tsl::thread::ThreadPool pool(tsl::Env::Default(), "ffi-test", 2);
   Eigen::ThreadPoolDevice device(pool.AsEigenThreadPool(), pool.NumThreads());
 
   auto fn = [&](ThreadPool thread_pool) {
@@ -1076,6 +1177,38 @@ TEST(FfiTest, ThreadPool) {
 
   auto status = Call(*handler, call_frame, options);
   TF_ASSERT_OK(status);
+}
+
+TEST(FfiTest, AsyncHandler) {
+  tsl::thread::ThreadPool pool(tsl::Env::Default(), "ffi-test", 2);
+  Eigen::ThreadPoolDevice device(pool.AsEigenThreadPool(), pool.NumThreads());
+
+  int32_t value = 0;
+
+  // Handler completes execution asynchronously on a given thread pool.
+  auto fn = [&](ThreadPool thread_pool) -> Future {
+    Promise promise;
+    Future future(promise);
+
+    thread_pool.Schedule([&, promise = std::move(promise)]() mutable {
+      value = 42;
+      promise.SetAvailable();
+    });
+
+    return future;
+  };
+
+  auto handler = Ffi::Bind().Ctx<ThreadPool>().To(fn);
+  CallFrame call_frame =
+      CallFrameBuilder(/*num_args=*/0, /*num_rets=*/0).Build();
+
+  CallOptions options;
+  options.backend_options = CallOptions::CpuOptions{&device};
+
+  auto status = Call(*handler, call_frame, options);
+  TF_ASSERT_OK(status);
+
+  EXPECT_EQ(value, 42);
 }
 
 TEST(FfiTest, Metadata) {
