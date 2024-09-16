@@ -60,6 +60,7 @@ package(
         "//tensorflow/core:__subpackages__",
         "//third_party/sparse_conv:__subpackages__",
         "//waymo/ml/compiler/triton:__subpackages__",
+        "//waymo/research/representation/threed:__subpackages__",
     ]),
     licenses = ["notice"],
 )
@@ -220,6 +221,7 @@ gpu_only_cc_library(
         ":gpu_kernel_header",
         ":gpu_stream",
         ":gpu_types_header",
+        "//xla:util",
         "//xla/stream_executor",
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:kernel_spec",
