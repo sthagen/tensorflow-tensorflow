@@ -1060,11 +1060,23 @@ LogicalResult InsertOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// ReindexOp
+//===----------------------------------------------------------------------===//
+
+void ReindexOp::build(mlir::OpBuilder& builder, mlir::OperationState& result,
+                      mlir::Type type, mlir::Value operand, mlir::Value padding,
+                      const xla::gpu::IndexingMap& indexing_map) {
+  IndexingMapAttr indexing_map_attr =
+      IndexingMapAttr::get(builder.getContext(), indexing_map);
+  build(builder, result, type, operand, padding, indexing_map_attr);
+}
+
+//===----------------------------------------------------------------------===//
 // ReduceOp
 //===----------------------------------------------------------------------===//
 
-SmallVector<Type> inferReductionResultTypes(TypeRange input_types,
-                                            ArrayRef<int64_t> reduced_dims) {
+SmallVector<Type, 2> inferReductionResultTypes(TypeRange input_types,
+                                               ArrayRef<int64_t> reduced_dims) {
   auto input_shape =
       mlir::cast<RankedTensorType>(input_types.front()).getShape();
   auto num_reduced_dims = reduced_dims.size();
@@ -1072,7 +1084,7 @@ SmallVector<Type> inferReductionResultTypes(TypeRange input_types,
   output_shape.reserve(input_shape.size() - num_reduced_dims);
   int reduce_dim = 0;
   for (int64_t i = 0; i < input_shape.size(); ++i) {
-    if (reduce_dim >= num_reduced_dims || i == reduced_dims[reduce_dim]) {
+    if (reduce_dim < num_reduced_dims && i == reduced_dims[reduce_dim]) {
       ++reduce_dim;
       continue;
     }
@@ -1088,7 +1100,7 @@ SmallVector<Type> inferReductionResultTypes(TypeRange input_types,
   return result_types;
 }
 
-SmallVector<Type> inferReductionInitTypes(TypeRange input_types) {
+SmallVector<Type, 2> inferReductionInitTypes(TypeRange input_types) {
   SmallVector<Type, 2> init_types;
   init_types.reserve(input_types.size());
   for (auto input_type : input_types) {
@@ -1176,6 +1188,45 @@ LogicalResult ReduceOp::verify() {
                          << " but got " << combiner.getFunctionType();
   }
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// ShuffleReduceOp
+//===----------------------------------------------------------------------===//
+
+ParseResult ShuffleReduceOp::parse(OpAsmParser& parser,
+                                   OperationState& result) {
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> inputs;
+  mlir::StringAttr combiner;
+  int64_t max_distance;
+  SmallVector<Type, 2> operand_types;
+  mlir::SMLoc loc = parser.getCurrentLocation();
+  if (parser.parseLParen() || parseOperands(parser, &inputs) ||
+      parser.parseRParen() || parser.parseKeyword("to") ||
+      parser.parseInteger(max_distance) || parser.parseKeyword("combiner") ||
+      parser.parseEqual() || parser.parseSymbolName(combiner) ||
+      parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColonTypeList(operand_types) ||
+      parser.resolveOperands(inputs, operand_types, loc, result.operands)) {
+    return failure();
+  }
+  auto ctx = result.getContext();
+  mlir::OperationName opname(ShuffleReduceOp::getOperationName(), ctx);
+  result.addAttribute(ShuffleReduceOp::getCombinerAttrName(opname),
+                      mlir::FlatSymbolRefAttr::get(ctx, combiner));
+  result.addAttribute(
+      ShuffleReduceOp::getMaxDistanceAttrName(opname),
+      mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 64), max_distance));
+  result.addTypes(operand_types);
+  return success();
+}
+
+void ShuffleReduceOp::print(OpAsmPrinter& p) {
+  p << '(' << getOperands() << ") to " << getMaxDistance() << " combiner=@"
+    << getCombiner();
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          {getCombinerAttrName(), getMaxDistanceAttrName()});
+  p << " : " << TypeRange(getResultTypes());
 }
 
 }  // namespace gpu

@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef XLA_SERVICE_SHARDING_PROPAGATION_H_
 #define XLA_SERVICE_SHARDING_PROPAGATION_H_
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -35,17 +36,15 @@ namespace xla {
 // Infers the shardings for a dot HLO op from the shardings on its operands,
 // which are expected to have sharding annotations.
 bool InferDotShardingFromOperands(
-    HloInstruction* instruction, const CallGraph& call_graph,
+    HloInstruction* instruction,
     const dot_as_convolution_util::DotConvolutionDimsInfo& dnums,
-    bool may_combine_partial_sharding, bool is_spmd);
+    int64_t aggressiveness, bool may_combine_partial_sharding);
 
 // Infers the shardings for a convolution HLO op from the shardings on its
 // operands, which are expected to have sharding annotations.
 bool InferConvolutionShardingFromOperands(HloInstruction* instruction,
-                                          const CallGraph& call_graph,
                                           int64_t aggressiveness,
-                                          bool may_combine_partial_sharding,
-                                          bool is_spmd);
+                                          bool may_combine_partial_sharding);
 
 // Remove Sharding custom-call instruction by folding the sharding attribute
 // to its operand. If the operand already has a different sharding, insert a
@@ -168,6 +167,15 @@ class ShardingPropagation : public HloModulePass {
       absl::flat_hash_map<int64_t, absl::flat_hash_set<HloInstruction*>>&
           shard_group_id_to_shard_like_group,
       int64_t& iterations);
+
+  // If instruction is a while, or the root or a parameter of a while body,
+  // then propagate its sharding to the while instruction, to its body root,
+  // and to its condition parameter.
+  void MaybeComputationPropagation(
+      const ComputationMap& computation_map,
+      const absl::flat_hash_set<const HloInstruction*>& provided_shardings,
+      HloInstruction* instruction,
+      absl::flat_hash_set<HloInstruction*>* changed);
 
   // Gets instructions that are related through a computation and need to share
   // the same sharding.
