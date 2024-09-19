@@ -123,6 +123,9 @@ class GpuCompiler : public LLVMCompiler {
     return false;
   }
 
+  static AlgebraicSimplifierOptions GetAlgebraicSimplifierOptions(
+      const HloModuleConfig& config);
+
  protected:
   struct BackendCompileResult {
     std::string asm_text;
@@ -152,7 +155,8 @@ class GpuCompiler : public LLVMCompiler {
 
   // Add autotuning passes for convolution and gemm (except triton).
   virtual absl::Status AddConvAndGemmAutotuningPasses(
-      HloPassPipeline* pipeline, HloModule* hlo_module,
+      HloPassPipeline* pipeline, const se::GpuComputeCapability& gpu_version,
+      const CompileOptions& options, HloModule* hlo_module,
       AutotuneConfig& autotune_config, tsl::thread::ThreadPool* thread_pool) {
     return absl::OkStatus();
   }
@@ -178,9 +182,6 @@ class GpuCompiler : public LLVMCompiler {
                                               BinaryMap* dnn_compiled_graphs) {
     return absl::OkStatus();
   }
-
-  AlgebraicSimplifierOptions GetAlgebraicSimplifierOptions(
-      const HloModuleConfig& config);
 
  private:
   struct CompileResultWithMetadata {
@@ -212,6 +213,8 @@ class GpuCompiler : public LLVMCompiler {
 
   absl::Status RunPreSchedulingPasses(HloModule* module,
                                       se::StreamExecutor* stream_exec);
+  absl::Status RunCollectiveScheduleLinearizerPasses(
+      HloModule* hlo_module, se::StreamExecutor* stream_exec);
 
   // During compilation with device, stream_exec != null and autotune_results
   // == null. During deviceless AOT compilation, stream_exec == null and
