@@ -144,7 +144,6 @@ limitations under the License.
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/transforms/algebraic_simplifier.h"
 #include "xla/service/gpu/transforms/algorithm_checker.h"
-#include "xla/service/gpu/transforms/all_gather_dynamic_slice_simplifier.h"
 #include "xla/service/gpu/transforms/all_gather_optimizer.h"
 #include "xla/service/gpu/transforms/all_reduce_blueconnect.h"
 #include "xla/service/gpu/transforms/all_reduce_splitter.h"
@@ -904,7 +903,6 @@ absl::Status RunCollectiveOptimizationPasses(
   HloPassPipeline collectives_pipeline("collective-optimizations");
   collectives_pipeline.AddPass<AllReduceFolder>();
   collectives_pipeline.AddPass<AllReduceSplitter>();
-  collectives_pipeline.AddPass<AllGatherDynamicSliceSimplifier>();
   collectives_pipeline.AddPass<AllGatherOptimizer>();
   collectives_pipeline.AddPass<AllReduceReassociate>(
       debug_options.xla_gpu_enable_reassociation_for_converted_ar());
@@ -1472,9 +1470,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     const auto* rocm_cc = std::get_if<se::RocmComputeCapability>(&gpu_version);
 
     if (debug_options.xla_gpu_enable_triton_gemm() &&
-        ((cuda_cc != nullptr &&
-          cuda_cc->IsAtLeast(se::CudaComputeCapability::AMPERE)) ||
-         rocm_cc != nullptr)) {
+        (cuda_cc != nullptr &&
+         cuda_cc->IsAtLeast(se::CudaComputeCapability::AMPERE))) {
       pipeline.AddPass<GemvRewriter>();
       pipeline.AddPass<GemmFusion>(gpu_version);
     } else if (cuda_cc != nullptr &&
