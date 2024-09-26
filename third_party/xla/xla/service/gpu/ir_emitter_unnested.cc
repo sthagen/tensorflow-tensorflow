@@ -159,12 +159,12 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_blas_lt.h"
 #include "xla/stream_executor/integrations/device_mem_allocator.h"
 #include "xla/stream_executor/launch_dim.h"
+#include "xla/tsl/protobuf/dnn.pb.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/human_readable_json.h"
 #include "tsl/platform/statusor.h"
-#include "tsl/protobuf/dnn.pb.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -2140,7 +2140,9 @@ absl::Status IrEmitterUnnested::EmitNcclThunk(
       thunk_info.profile_annotation = async_start->name();
     }
     auto thunk = std::make_unique<NcclThunkType>(
-        thunk_info, NcclApi::Default(), inst, /*buffers=*/std::move(buffers));
+        thunk_info, NcclApi::Default(), inst,
+        /*buffers=*/std::move(buffers),
+        ir_emitter_context_->debug_options().xla_gpu_use_memcpy_local_p2p());
     GetCollectivesAsyncEvents().insert({async_start, thunk->async_events()});
     AddThunkToThunkSequence(std::move(thunk));
     return absl::OkStatus();

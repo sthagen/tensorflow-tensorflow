@@ -477,10 +477,12 @@ cc_library(
         "//xla/service:hlo_parser",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_googlesource_code_re2//:re2",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -851,6 +853,7 @@ xla_test(
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/protobuf:status_proto_cc",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
@@ -862,7 +865,6 @@ xla_test(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
-        "@local_tsl//tsl/protobuf:status_proto_cc",
     ] + if_google(["@com_google_protobuf//:duration_cc_proto"]),
 )
 
@@ -894,6 +896,7 @@ xla_test(
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/protobuf:status_proto_cc",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:path",
@@ -901,7 +904,6 @@ xla_test(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
-        "@local_tsl//tsl/protobuf:status_proto_cc",
     ],
 )
 

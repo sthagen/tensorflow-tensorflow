@@ -2573,32 +2573,39 @@ std::string PrintSolutionMemoryUsage(const LivenessSet& liveness_set,
   return str;
 }
 
-void SaveShardingForInstruction(
+absl::Status SaveShardingForInstruction(
     const HloInstruction* inst, bool save_for_copy_users,
     absl::flat_hash_map<std::string, std::vector<HloSharding>>&
         preserve_shardings) {
-  auto save_sharding = [&preserve_shardings](const HloInstruction* inst) {
+  auto save_sharding =
+      [&preserve_shardings](const HloInstruction* inst) -> absl::Status {
     if (!inst->has_sharding()) {
-      return;
+      return absl::OkStatus();
+    }
+    if (inst->sharding().IsUnknown()) {
+      return absl::UnimplementedError(
+          "Auto-sharding currently does not support shard_as/shard_like "
+          "sharding annotations");
     }
     if (!inst->sharding().IsTuple()) {
       preserve_shardings[inst->name()] = {inst->sharding()};
     } else {
       preserve_shardings[inst->name()] = inst->sharding().tuple_elements();
     }
+    return absl::OkStatus();
   };
 
-  save_sharding(inst);
+  TF_RETURN_IF_ERROR(save_sharding(inst));
 
+  // Also preserve the shardings of copy  users of theinstruction.
   if (save_for_copy_users) {
     for (const auto user : inst->users()) {
-      // Also preserve the shardings of copy ops that are the users of those
-      // instructions.
       if (user->opcode() == HloOpcode::kCopy) {
-        save_sharding(user);
+        TF_RETURN_IF_ERROR(save_sharding(user));
       }
     }
   }
+  return absl::OkStatus();
 }
 
 // Check whether the shardings that need to be preserved are preserved.
@@ -3272,13 +3279,14 @@ bool HasReduceScatterOpportunity(const HloInstruction* inst,
 
 }  // namespace spmd
 
-std::pair<absl::flat_hash_map<std::string, std::vector<HloSharding>>, bool>
+absl::StatusOr<AutoShardingImplementation::SaveShardingAnnotationsResult>
 AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
     HloModule* module,
     const absl::flat_hash_set<const HloInstruction*>& instructions_to_shard,
     const absl::flat_hash_set<std::string>& replicated_small_tensors,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
-  absl::flat_hash_map<std::string, std::vector<HloSharding>> preserve_shardings;
+  absl::flat_hash_map<std::string, std::vector<HloSharding>>
+      preserved_shardings;
   absl::flat_hash_set<HloInstruction*> keep_inst;
 
   for (const HloComputation* computation :
@@ -3289,16 +3297,16 @@ AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
           inst->opcode() == HloOpcode::kRecvDone ||
           inst->opcode() == HloOpcode::kSend ||
           inst->opcode() == HloOpcode::kSendDone) {
-        spmd::SaveShardingForInstruction(inst,
-                                         /* save_for_copy_users */ false,
-                                         preserve_shardings);
+        TF_RETURN_IF_ERROR(spmd::SaveShardingForInstruction(
+            inst,
+            /*save_for_copy_users=*/false, preserved_shardings));
         continue;
       }
       if (spmd::IsInstructionBeforeSPMDFullToShardShapeCustomCall(inst) ||
           spmd::IsSPMDShardToFullShapeCustomCall(inst)) {
-        spmd::SaveShardingForInstruction(inst,
-                                         /* save_for_copy_users */ false,
-                                         preserve_shardings);
+        TF_RETURN_IF_ERROR(spmd::SaveShardingForInstruction(
+            inst,
+            /*save_for_copy_users=*/false, preserved_shardings));
       }
       if (inst->has_sharding() &&
           spmd::IsShardingMisaligned(inst->sharding(), inst->shape()) &&
@@ -3318,12 +3326,12 @@ AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
     for (const HloComputation* computation :
          module->computations(execution_threads)) {
       for (const auto inst : computation->instructions()) {
-        spmd::SaveShardingForInstruction(inst,
-                                         /* save_for_copy_users */ true,
-                                         preserve_shardings);
+        TF_RETURN_IF_ERROR(spmd::SaveShardingForInstruction(
+            inst,
+            /*save_for_copy_users=*/true, preserved_shardings));
       }
     }
-    return std::make_pair(preserve_shardings, /* module_is_changed */ false);
+    return SaveShardingAnnotationsResult{preserved_shardings, false};
   }
 
   bool module_is_changed = false;
@@ -3335,23 +3343,23 @@ AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
       // they are small tensors
       if (replicated_small_tensors.count(ins->name())) {
         keep_inst.insert(ins);
-        spmd::SaveShardingForInstruction(ins,
-                                         /* save_for_copy_users */ false,
-                                         preserve_shardings);
+        TF_RETURN_IF_ERROR(spmd::SaveShardingForInstruction(
+            ins,
+            /*save_for_copy_users=*/false, preserved_shardings));
         continue;
       }
       // Do not remove entry computation's parameter and root instruction's
-      // sharding if preserve_shardings is kKeepInputOutputShardings.
+      // sharding if preserved_shardings is kKeepInputOutputShardings.
       if (option_.preserve_shardings ==
               AutoShardingOption::PreserveShardingsType::
                   kKeepInputOutputShardings &&
           is_entry_computation &&
           (ins->opcode() == HloOpcode::kParameter || ins->IsRoot())) {
         keep_inst.insert(ins);
-        spmd::SaveShardingForInstruction(
+        TF_RETURN_IF_ERROR(spmd::SaveShardingForInstruction(
             ins,
-            /* save_for_copy_users */ ins->opcode() == HloOpcode::kParameter,
-            preserve_shardings);
+            /*save_for_copy_users=*/ins->opcode() == HloOpcode::kParameter,
+            preserved_shardings));
         continue;
       }
 
@@ -3375,7 +3383,7 @@ AutoShardingImplementation::SaveAndRemoveShardingAnnotation(
       }
     }
   }
-  return std::make_pair(preserve_shardings, module_is_changed);
+  return SaveShardingAnnotationsResult{preserved_shardings, module_is_changed};
 }
 
 absl::Status AutoShardingImplementation::CanonicalizeLayouts(
@@ -3527,7 +3535,14 @@ absl::StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
       ProcessShardingInstruction(
           module, execution_threads, /*replace_sharding_with_copy=*/true,
           &unspecified_dims, /*saved_root_shardings=*/nullptr,
-          /*saved_parameter_shardings=*/nullptr));
+          /*saved_parameter_shardings=*/nullptr,
+          /*instruction_to_shard_group_id=*/nullptr,
+          /*shard_group_id_to_shard_as_group=*/nullptr,
+          /*shard_group_id_to_shard_like_group=*/nullptr,
+          /*allow_spmd_sharding_propagation_to_parameters_vector=*/nullptr,
+          /*remove_unknown_shardings=*/true));
+
+  DumpHloModuleIfEnabled(*module, "after_spmd_calls");
   if (changed) {
     module_is_changed = true;
     VLOG(3) << "CustomCalls with custom_call_target=Sharding are removed and "
@@ -3584,13 +3599,13 @@ absl::StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
   const absl::flat_hash_set<const HloInstruction*>& instructions_to_shard =
       ComputeInstructionsToShard(*module, sequence);
 
-  std::pair<absl::flat_hash_map<std::string, std::vector<HloSharding>>, bool>
-      preserve_shardings_result = SaveAndRemoveShardingAnnotation(
-          module, instructions_to_shard, replicated_small_tensors,
-          execution_threads);
+  TF_ASSIGN_OR_RETURN(SaveShardingAnnotationsResult saved_sharding_result,
+                      SaveAndRemoveShardingAnnotation(
+                          module, instructions_to_shard,
+                          replicated_small_tensors, execution_threads));
   absl::flat_hash_map<std::string, std::vector<HloSharding>>
-      preserve_shardings = std::move(preserve_shardings_result.first);
-  module_is_changed |= preserve_shardings_result.second;
+      preserve_shardings = std::move(saved_sharding_result.preserved_shardings);
+  module_is_changed |= saved_sharding_result.module_is_changed;
 
   absl::flat_hash_map<const HloInstruction*, int64_t>
       instruction_execution_counts = spmd::ComputeInstructionExecutionCounts(
@@ -3867,7 +3882,8 @@ absl::StatusOr<AutoShardingResult> AutoShardingImplementation::RunAutoSharding(
       CHECK(instruction->has_sharding());
       CHECK(!instruction->sharding().IsManual());
       CHECK(instruction->operand(0)->has_sharding());
-      CHECK(instruction->operand(0)->sharding().IsManual());
+      CHECK(instruction->operand(0)->sharding().IsManual())
+          << instruction->ToString();
     }
   }
 
@@ -3950,14 +3966,45 @@ absl::Status MoveComputationsFromModuleToModule(HloModule* from_module,
 AutoSharding::AutoSharding(const AutoShardingOption& option)
     : option_(option) {}
 
+absl::Time DumpModuleAndRecordPassStart(const HloModule* module) {
+  XLA_VLOG_LINES(6,
+                 absl::StrCat("Before auto sharding:\n", module->ToString()));
+  DumpHloModuleIfEnabled(*module, "before_auto_spmd_sharding");
+
+  // TODO(b/348372403) Explore replacing these with a runtime check, per
+  // go/no-ifdefs-in-xla
+#if !defined(__APPLE__)
+  // Streamz metrics.
+  metrics::RecordAutoShardingInvocations();
+#endif
+  return absl::Now();
+}
+
+void RecordPassEndAndDumpModule(absl::Time start_time,
+                                const HloModule* module) {
+  absl::Time end_time = absl::Now();
+  absl::Duration duration = end_time - start_time;
+  LOG(INFO) << "Auto Sharding took " << absl::ToInt64Seconds(duration)
+            << " seconds";
+  // TODO(b/348372403) Explore replacing these with a runtime check, per
+  // go/no-ifdefs-in-xla
+#if !defined(__APPLE__)
+  metrics::RecordAutoShardingCompilationTime(
+      absl::ToInt64Microseconds(duration));
+#endif
+
+  XLA_VLOG_LINES(6, absl::StrCat("After auto sharding:\n", module->ToString()));
+  DumpHloModuleIfEnabled(*module, "after_auto_spmd_sharding");
+}
+
 absl::StatusOr<bool> AutoSharding::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   if (!option_.enable) {
     return false;
   }
-  LOG(INFO) << "Starting the auto sharding pass";
 
+  LOG(INFO) << "Starting the auto sharding pass";
   // TODO(b/332951306): Remove this check once nested tuples are supported
   // everywhere
   if (HasUnsupportedNestedTuples(*module)) {
@@ -3967,15 +4014,7 @@ absl::StatusOr<bool> AutoSharding::Run(
     return false;
   }
 
-  XLA_VLOG_LINES(6,
-                 absl::StrCat("Before auto sharding:\n", module->ToString()));
-  DumpHloModuleIfEnabled(*module, "before_auto_spmd_sharding");
-
-  absl::Time start_time = absl::Now();
-#if !defined(__APPLE__)
-  // Streamz metrics.
-  metrics::RecordAutoShardingInvocations();
-#endif
+  absl::Time start_time = DumpModuleAndRecordPassStart(module);
 
   TF_RETURN_IF_ERROR(module->RemoveUnusedComputations());
   TF_RETURN_IF_ERROR(option_.CheckAndSetup());
@@ -4079,9 +4118,8 @@ absl::StatusOr<bool> AutoSharding::Run(
     }
   }
 
-  size_t num_meshes = mesh_shapes.size();
-  std::vector<absl::StatusOr<AutoShardingResult>> changed(
-      num_meshes, AutoShardingResult::kModuleUnchanged);
+  absl::StatusOr<AutoShardingResult> min_mesh_pass_result =
+      AutoShardingResult::kModuleUnchanged;
 
   VLOG(1) << "Original mesh shape "
           << spmd::ToString(option_.device_mesh_shape);
@@ -4104,15 +4142,14 @@ absl::StatusOr<bool> AutoSharding::Run(
     absl::StatusOr<AutoShardingResult> pass_result =
         pass->RunAutoSharding(module_clone.get(), replicated_small_tensors,
                               execution_threads, sharding_propagation_solution);
-
-    changed[i] = pass_result;
-    double this_mesh_objective_value = pass->GetSolverOptimalObjectiveValue();
     if (!pass_result.ok()) {
       VLOG(1) << "Mesh shape " << spmd::ToString(mesh_shapes[i])
               << " led to the following error: "
               << pass_result.status().message();
       continue;
     }
+
+    double this_mesh_objective_value = pass->GetSolverOptimalObjectiveValue();
     VLOG(1) << "Mesh shape " << spmd::ToString(mesh_shapes[i])
             << " has objective value " << this_mesh_objective_value;
     if (this_mesh_objective_value >= 0 &&
@@ -4120,6 +4157,7 @@ absl::StatusOr<bool> AutoSharding::Run(
       min_mesh_shape_index = i;
       min_mesh_shape_module = std::move(module_clone);
       min_objective_value = this_mesh_objective_value;
+      min_mesh_pass_result = pass_result;
     }
     if (*pass_result !=
         AutoShardingResult::kModuleUnchangedNoShardingPerformed) {
@@ -4127,59 +4165,45 @@ absl::StatusOr<bool> AutoSharding::Run(
     }
   }
 
-  absl::StatusOr<bool> module_is_changed;
   if (skip_auto_sharding) {
-    module_is_changed = false;  // The auto-sharding solver timed out.
-  } else {
-    std::string trying_to_find =
-        option_.try_multiple_mesh_shapes
-            ? "a device mesh (and the corresponding shardings)"
-            : "shardings";
-    CHECK_GE(min_mesh_shape_index, 0)
-        << "The auto-sharding pass could not find " << trying_to_find
-        << " that works for this input. This could be the result of a low "
-           "memory budget (please refer to the "
-           "`--xla_tpu_auto_spmd_partitioning_memory_budget_ratio` flag to set "
-           "a higher budget). If you think you have set a reasonably large "
-           "memory budget, please report this as a bug.";
-
-    if (!changed[min_mesh_shape_index].ok()) {
-      module_is_changed = changed[min_mesh_shape_index].status();
-    } else {
-      solver_optimal_objective_value_ = min_objective_value;
-      if (changed[min_mesh_shape_index].value() ==
-          AutoShardingResult::kModuleChangedShardingPerformed) {
-        VLOG(1) << "Choosing mesh shape "
-                << spmd::ToString(mesh_shapes[min_mesh_shape_index])
-                << " which had the minimal solver objective value of "
-                << min_objective_value;
-        chosen_mesh_shape_ = mesh_shapes[min_mesh_shape_index];
-        TF_RETURN_IF_ERROR(MoveComputationsFromModuleToModule(
-            min_mesh_shape_module.get(), module));
-        module_is_changed = true;
-      } else {
-        module_is_changed = false;
-      }
-    }
-  }
-
-  absl::Time end_time = absl::Now();
-  absl::Duration duration = end_time - start_time;
-  LOG(INFO) << "Auto Sharding took " << absl::ToInt64Seconds(duration)
-            << " seconds";
-#if !defined(__APPLE__)
-  metrics::RecordAutoShardingCompilationTime(
-      absl::ToInt64Microseconds(duration));
-#endif
-
-  XLA_VLOG_LINES(6, absl::StrCat("After auto sharding:\n", module->ToString()));
-  DumpHloModuleIfEnabled(*module, "after_auto_spmd_sharding");
-
-  if (skip_auto_sharding) {
+    RecordPassEndAndDumpModule(start_time, module);
     LOG(FATAL) << "The auto-sharding solver has timed out without a solution.";
   }
 
-  return module_is_changed;
+  std::string trying_to_find =
+      option_.try_multiple_mesh_shapes
+          ? "a device mesh (and the corresponding shardings)"
+          : "shardings";
+  CHECK_GE(min_mesh_shape_index, 0)
+      << "The auto-sharding pass could not find " << trying_to_find
+      << " that works for this input. This could be the result of a low memory "
+         "budget (please refer to the "
+         "`--xla_tpu_auto_spmd_partitioning_memory_budget_ratio` flag to set a "
+         "higher budget). If you think you have set a reasonably large memory "
+         "budget, please report this as a bug.";
+
+  if (!min_mesh_pass_result.ok()) {
+    RecordPassEndAndDumpModule(start_time, module);
+    return min_mesh_pass_result.status();
+  }
+
+  absl::StatusOr<bool> module_is_changed;
+  solver_optimal_objective_value_ = min_objective_value;
+  if (*min_mesh_pass_result !=
+      AutoShardingResult::kModuleChangedShardingPerformed) {
+    RecordPassEndAndDumpModule(start_time, module);
+    return false;
+  }
+
+  VLOG(1) << "Choosing mesh shape "
+          << spmd::ToString(mesh_shapes[min_mesh_shape_index])
+          << " which had the minimal solver objective value of "
+          << min_objective_value;
+  chosen_mesh_shape_ = mesh_shapes[min_mesh_shape_index];
+  TF_RETURN_IF_ERROR(
+      MoveComputationsFromModuleToModule(min_mesh_shape_module.get(), module));
+  RecordPassEndAndDumpModule(start_time, module);
+  return true;
 }
 
 }  // namespace xla

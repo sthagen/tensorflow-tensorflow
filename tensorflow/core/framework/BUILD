@@ -1807,7 +1807,6 @@ tf_proto_library(
 # py_proto_library(
 #     name = "function_proto_py_pb2",
 #     has_services = 0,
-#     api_version = 2,
 #     deps = [
 #         ":function_proto",
 #     ],
@@ -1823,9 +1822,9 @@ tf_proto_library(
         ":tensor_proto",
         ":tensor_shape_proto",
         ":types_proto",
-        "@local_tsl//tsl/protobuf:histogram_proto",
+        "@local_xla//xla/tsl/protobuf:histogram_proto",
     ],
-    exports = ["@local_tsl//tsl/protobuf:histogram_proto"],
+    exports = ["@local_xla//xla/tsl/protobuf:histogram_proto"],
 )
 
 tf_proto_library(

@@ -27,6 +27,7 @@ package_group(
         "//third_party/iree/...",
         "//third_party/odml/infra/...",
         "//tensorflow/compiler/mlir/...",
+        "//tensorflow/lite/experimental/lrt/...",
         "//tensorflow/lite/python/...",
         "//waymo/accelerator/alpine/tools/...",
         "//waymo/ml/compiler/mlir/...",
@@ -1599,7 +1600,7 @@ cc_library(
         "//tensorflow/compiler/mlir/lite/stablehlo:build_stablehlo_composite",
         "//tensorflow/compiler/mlir/lite/stablehlo:compose_uniform_quantized_type_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:composite_lowering",
-        "//tensorflow/compiler/mlir/lite/stablehlo:fold_broadcasting_op_pass",  # buildcleaner: keep
+        "//tensorflow/compiler/mlir/lite/stablehlo:fold_broadcast_to_pass",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/stablehlo:legalize_stablehlo_composite_to_tfl_custom",
         "//tensorflow/compiler/mlir/lite/stablehlo:legalize_tf_xla_call_module_to_stablehlo_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:lift_callsite_loc_caller",
@@ -1882,21 +1883,18 @@ tf_proto_library(
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "types_py_proto",
-#     api_version = 2,
 #     visibility = ["//visibility:public"],
 #     deps = [":types_proto"],
 # )
 #
 # py_proto_library(
 #     name = "model_flags_py_proto",
-#     api_version = 2,
 #     visibility = ["//visibility:public"],
 #     deps = [":model_flags_proto"],
 # )
 #
 # py_proto_library(
 #     name = "converter_flags_py_proto",
-#     api_version = 2,
 #     visibility = ["//visibility:public"],
 #     deps = [":converter_flags_proto"],
 # )

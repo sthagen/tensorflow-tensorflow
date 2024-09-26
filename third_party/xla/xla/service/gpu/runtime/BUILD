@@ -300,6 +300,7 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -823,7 +824,10 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:collective_ops_utils",
         "//xla/service/gpu:ir_emission_utils",
+        "//xla/service/gpu/runtime:nccl_clique_key",
         "//xla/stream_executor",
+        "//xla/tsl/concurrency:async_value",
+        "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@llvm-project//mlir:IR",
