@@ -276,8 +276,8 @@ xla_cc_test(
         "//xla/hlo/utils:hlo_matchers",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -8648,6 +8648,7 @@ cc_library(
     srcs = ["infeed_token_propagation.cc"],
     hdrs = ["infeed_token_propagation.h"],
     deps = [
+        ":call_graph",
         ":hlo_dce",
         ":tuple_simplifier",
         "//xla:shape_util",
