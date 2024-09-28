@@ -1747,7 +1747,7 @@ std::unique_ptr<StrategyGroup> CreateReshapeStrategies(
   return strategy_group;
 }
 
-AutoShardingSolverResult CallSolver(
+AutoShardingSolverResult CreateAutoShardingSolverRequestAndCallSolver(
     const HloModule& hlo_module, const HloLiveRange& hlo_live_range,
     const StrategyMap& strategy_map, const StrategyGroups& strategy_groups,
     const CostGraph& cost_graph, const AliasSet& alias_set,
@@ -1969,7 +1969,7 @@ AutoShardingSolverResult CallSolver(
 
   PopulateTemporalValues(cost_graph, request);
 
-  return CallORToolsSolver(request);
+  return FormulateAndSolveMIPFromSolverRequest(request);
 }
 
 void CheckHloSharding(
@@ -2572,7 +2572,8 @@ absl::Status SaveShardingForInstruction(
     if (!inst->has_sharding()) {
       return absl::OkStatus();
     }
-    if (inst->sharding().IsUnknown()) {
+    if (inst->sharding().IsUnknown() &&
+        (inst->sharding().IsShardLike() || inst->sharding().IsShardAs())) {
       return absl::UnimplementedError(
           "Auto-sharding currently does not support shard_as/shard_like "
           "sharding annotations");
