@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,24 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/framework/op.h"
+syntax = "proto3";
 
-namespace tensorflow {
+package xla.ifrt;
 
-REGISTER_OP("MyAddN")
-    .Input("inputs: N * T")
-    .Output("sum: T")
-    .Attr("N: int >= 1")
-    .Attr("T: {numbertype, variant}")
-    .SetIsCommutative()
-    .SetIsAggregate();
+message ExecuteOptionsProto {
+  bool untuple_result = 2;
+  int32 launch_id = 3;
+  repeated int32 non_donatable_input_indices = 7;
 
-REGISTER_OP("MyBiasedDense")
-    .Input("input: T")
-    .Input("weight: T")
-    .Input("bias: T")
-    .Output("out: T")
-    .Attr("T: {float, int8}")
-    .Attr("act: {'', 'relu', 'relu6'} = ''");
-
-}  // namespace tensorflow
+  reserved 1, 4 to 6, 8;
+}
