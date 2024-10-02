@@ -51,6 +51,7 @@ cc_library(
         "//xla/hlo/utils:hlo_query",
         "//xla/mlir_hlo",
         "//xla/mlir_hlo:map_mhlo_to_scalar_op",
+        "//xla/mlir_hlo:transformation_helpers",
         "//xla/service:algorithm_util",
         "//xla/service:dump",
         "//xla/service:hlo_module_config",
@@ -291,7 +292,7 @@ cc_library(
     deps = [
         "//xla/backends/profiler/gpu:cupti_collector",
         "//xla/backends/profiler/gpu:cupti_tracer",
-        "@local_tsl//tsl/profiler/utils:time_utils",
+        "//xla/tsl/profiler/utils:time_utils",
     ],
 )
 
@@ -336,6 +337,7 @@ cc_library(
         "//xla/tests:filecheck",
         "//xla/tests:hlo_test_base",
         "//xla/tests:verified_hlo_module",
+        "//xla/tsl/profiler/utils:time_utils",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -348,7 +350,6 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/profiler/utils:time_utils",
     ],
 )
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include <memory>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/optimization.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -35,7 +36,6 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
 #include "xla/stream_executor/gpu/scoped_activate_context.h"
-#include "xla/stream_executor/platform/dso_loader.h"
 #include "xla/stream_executor/platform/initialize.h"
 #include "xla/stream_executor/plugin_registry.h"
 #include "xla/stream_executor/rocm/rocm_diagnostics.h"
@@ -1966,7 +1966,7 @@ class MixinBase<void> {};
 }  // namespace
 
 #define RETURN_IF_MIOPEN_ERROR(STATUS, ...)                                   \
-  if (!SE_PREDICT_TRUE((STATUS) == miopenStatusSuccess)) {                    \
+  if (!ABSL_PREDICT_TRUE((STATUS) == miopenStatusSuccess)) {                  \
     std::string error_msg = absl::StrCat(ToString(STATUS), " ", __VA_ARGS__); \
     SetFailure(::absl::UnknownError(error_msg));                              \
     LOG(ERROR) << error_msg;                                                  \

@@ -30,11 +30,14 @@ limitations under the License.
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "xla/stream_executor/data_type.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/numeric_options.h"
 #include "xla/stream_executor/platform/port.h"
+#include "xla/stream_executor/scratch_allocator.h"
+#include "xla/stream_executor/stream.h"
 #include "xla/tsl/protobuf/dnn.pb.h"
 #include "tsl/platform/errors.h"
 
@@ -49,15 +52,6 @@ struct BlasLt;
 struct MatrixDescriptor;
 struct OutputMatrixDescriptor;
 }  // namespace gpu
-
-class Stream;
-class ScratchAllocator;
-
-template <typename ElemT>
-class DeviceMemory;
-
-template <typename ElemT>
-class HostOrDeviceScalar;
 
 template <typename T>
 using DeviceMemorySlice = absl::Span<DeviceMemory<T> *const>;
@@ -221,6 +215,10 @@ class BlasSupport {
   virtual ~BlasSupport() {}
 
   virtual gpu::BlasLt *GetBlasLt() = 0;
+
+  // For tests only: sets *is_main_stream to true if the underlying Blas library
+  // has stream 0 set as its current stream.
+  virtual absl::StatusOr<bool> IsMainStreamSet() const = 0;
 
   // Computes the product of a vector by a scalar: x <- a*x.
   virtual bool DoBlasScal(Stream *stream, uint64_t elem_count, float alpha,
@@ -727,6 +725,7 @@ class BlasSupport {
 // Macro used to quickly declare overrides for abstract virtuals in the
 // BlasSupport base class.
 #define TENSORFLOW_STREAM_EXECUTOR_GPU_BLAS_SUPPORT_OVERRIDES                  \
+  absl::StatusOr<bool> IsMainStreamSet() const override;                       \
   bool DoBlasScal(Stream *stream, uint64_t elem_count, float alpha,            \
                   DeviceMemory<float> *x, int incx) override;                  \
   bool DoBlasScal(Stream *stream, uint64_t elem_count, double alpha,           \

@@ -722,6 +722,7 @@ cc_library(
         "//learning/deepmind/tensorflow/queues:__pkg__",
         "//learning/deepmind/tensorflow/sstable:__pkg__",
         "//learning/deepmind/video/tensorflow:__pkg__",
+        "//learning/sibyl/tfx/state/kernels:__pkg__",
         "//learning/sibyl/tfx/transformation/kernels:__pkg__",
         "//tensorflow/compiler/mlir/tools/kernel_gen:__pkg__",
         "//tensorflow/compiler/tf2xla:__pkg__",
@@ -1410,7 +1411,7 @@ tf_cc_tests(
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/profiler/utils:xplane_utils",
+        "@local_xla//xla/tsl/profiler/utils:xplane_utils",
     ],
 )
 

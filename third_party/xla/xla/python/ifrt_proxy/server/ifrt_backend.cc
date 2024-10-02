@@ -1058,6 +1058,12 @@ IfrtBackend::HandleLoadedExecutableExecuteRequest(
   TF_ASSIGN_OR_RETURN(auto execute_options,
                       xla::ifrt::LoadedExecutable::ExecuteOptions::FromProto(
                           execute.execute_options()));
+  // Force the old behavior where `fill_status` was implicitly true before
+  // protocol version 6. Can be cleaned up once version 6 is outside the
+  // compatibility window.
+  if (version_.protocol_version() < 6) {
+    execute_options.fill_status = true;
+  }
 
   std::optional<tsl::RCReference<DeviceList>> devices;
   if (!execute.device_ids().empty()) {
@@ -1082,7 +1088,10 @@ IfrtBackend::HandleLoadedExecutableExecuteRequest(
   // `CheckFuture` exactly once to check for its status and erase it. In future,
   // we may introduce separate mechanisms to remove futures from `futures_`
   // without checking its status for situations where futures are not used.
-  {
+  //
+  // Starting protocol version 6, the client tells the server whether the status
+  // future needs to be populated or not.
+  if (version_.protocol_version() < 6 || execute_options.fill_status) {
     absl::MutexLock lock(&futures_mutex_);
     execute_response->set_status_handle(handle_generator_.New());
     futures_.insert(
