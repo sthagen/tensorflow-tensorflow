@@ -160,6 +160,7 @@ limitations under the License.
 #include "xla/service/gpu/transforms/dot_operand_converter.h"
 #include "xla/service/gpu/transforms/double_buffer_loop_unrolling.h"
 #include "xla/service/gpu/transforms/dynamic_slice_fusion_rewriter.h"
+#include "xla/service/gpu/transforms/fusion_block_level_rewriter.h"
 #include "xla/service/gpu/transforms/fusion_wrapper.h"
 #include "xla/service/gpu/transforms/gemm_broadcast_folding_rewriter.h"
 #include "xla/service/gpu/transforms/gemm_fusion.h"
@@ -224,7 +225,6 @@ limitations under the License.
 #include "xla/service/slice_sinker.h"
 #include "xla/service/slow_operation_alarm.h"
 #include "xla/service/sort_simplifier.h"
-#include "xla/service/spmd/shardy/shardy_call_inliner.h"
 #include "xla/service/stable_sort_expander.h"
 #include "xla/service/stochastic_convert_decomposer.h"
 #include "xla/service/sub_byte_normalization.h"
@@ -552,7 +552,7 @@ absl::Status RunPreSPMDPartitionerPasses(HloModule* hlo_module) {
   // passes.
   pre_spmd_pipeline.AddPass<CuDnnCustomCallConverter>();
   pre_spmd_pipeline.AddPass<ConvertMemoryPlacementToInternalAnnotations>();
-  pre_spmd_pipeline.AddPass<ShardyCallInliner>();
+  pre_spmd_pipeline.AddPass<CallInliner>();
   pre_spmd_pipeline.AddPass<ZeroSizedHloElimination>();
   pre_spmd_pipeline.AddPass<ConditionalCanonicalizer>();
 
@@ -709,7 +709,7 @@ absl::Status RunOptimizationPasses(
   pipeline.AddPass<DynamicIndexSplitter>();
 
   // TODO(b/64094172): make Call work on GPU instead of inlining.
-  pipeline.AddPass<ShardyCallInliner>();
+  pipeline.AddPass<CallInliner>();
 
   pipeline.AddPass<StochasticConvertDecomposer>();
 
@@ -1594,7 +1594,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
       options.key_value_store,
       gpu_target_config.device_description.runtime_version()));
   // Inline back the calls which have better performance with cuBLAS.
-  pipeline.AddPass<ShardyCallInliner>();
+  pipeline.AddPass<CallInliner>();
   // TODO(tdanyluk): Apply CublasPadForGemms to the cuBLAS GEMMs generated
   // here for possibly better cuBLAS performance.
   AddGemmRewriterPasses(pipeline, debug_options, gpu_version,
@@ -1726,6 +1726,20 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
                                        options, gpu_target_config));
 
   TF_RETURN_IF_ERROR(PrepareHloModuleForIrEmitting(module.get()));
+
+  // This needs to run after every pass affecting fusions, which includes
+  // `CopyFusion`, which itself must run in the `PrepareHloModuleForIrEmitting`
+  // pipeline.
+  if (module->config()
+          .debug_options()
+          .xla_gpu_experimental_enable_fusion_block_level_rewriter()) {
+    // Even though this is a single pass, we need to create a pipeline in order
+    // to make sure the pass's run is recorded in the `HloModuleMetadata`.
+    HloPassPipeline pipeline("fusion-block-level-rewriter-pipeline");
+    pipeline.AddPass<FusionBlockLevelRewriter>(
+        gpu_target_config.device_description, ShapeSizeBytesFunction());
+    TF_RETURN_IF_ERROR(pipeline.Run(module.get()).status());
+  }
 
   uint64_t end_usecs = tsl::Env::Default()->NowMicros();
 

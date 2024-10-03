@@ -960,6 +960,7 @@ cc_library(
         "@local_tsl//tsl/platform:tensor_float_32_hdr_lib",
     ]) + if_rocm_is_configured([
         #keep sorted
+        "//xla/stream_executor/platform:dso_loader",
         "//xla/stream_executor/rocm:amdhipblaslt_plugin",
         "//xla/stream_executor/rocm:hipblas_lt_header",
         "@local_config_rocm//rocm:rocm_headers",
@@ -1438,6 +1439,7 @@ cc_library(
         "//xla/service/gpu/transforms:dot_operand_converter",
         "//xla/service/gpu/transforms:double_buffer_loop_unrolling",
         "//xla/service/gpu/transforms:dynamic_slice_fusion_rewriter",
+        "//xla/service/gpu/transforms:fusion_block_level_rewriter",
         "//xla/service/gpu/transforms:fusion_wrapper",
         "//xla/service/gpu/transforms:gemm_broadcast_folding_rewriter",
         "//xla/service/gpu/transforms:gemm_fusion",
@@ -1465,7 +1467,6 @@ cc_library(
         "//xla/service/gpu/transforms:triton_fusion_numerics_verifier",
         "//xla/service/gpu/transforms:windowed_einsum_handler",
         "//xla/service/llvm_ir:llvm_util",
-        "//xla/service/spmd/shardy:shardy_call_inliner",
         "//xla/service/spmd:collective_permute_motion",
         "//xla/service:algebraic_simplifier",
         "//xla/service:all_gather_broadcast_reorder",
