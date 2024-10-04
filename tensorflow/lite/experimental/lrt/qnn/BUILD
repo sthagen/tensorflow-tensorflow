@@ -12,110 +12,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//tensorflow/lite/experimental/lrt/qnn_sdk:ungrte_qnn.bzl", "ungrte_cc_library_with_qnn", "ungrte_cc_test_with_qnn")
+
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = ["//tensorflow/lite/experimental/lrt:__subpackages__"],
+    default_visibility = ["//visibility:private"],
 )
 
-# TODO: Put common copts/linkopts behind custom macro/rule.
-QNN_SDK_LINKOPTS = [
-    "-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
-    "-Wl,--version-script=$(location {})".format(":lrt.lds"),
-]
-
-# NOTE: Currently the user needs to supply shared libraries from their own
-# SDK.
-
-# copybara:uncomment QNN_SDK_LIB_HTP_LINUX = "//third_party/qairt:lib/x86_64-linux-clang/libQnnHtp.so"
-
-cc_library(
-    name = "qnn_sdk_libcpp",
-    srcs = [
-        # copybara:uncomment "//third_party/qairt:lib/x86_64-linux-clang/libc++.so.1",
-        # copybara:uncomment "//third_party/qairt:lib/x86_64-linux-clang/libc++abi.so.1",
-    ],
-    # TODO: Replace no builder with constraint on only linux systems.
-    tags = ["nobuilder"],
-)
-
-cc_library(
-    name = "load_sdk",
-    srcs = ["load_sdk.cc"],
-    hdrs = ["load_sdk.h"],
-    # copybara:uncomment data = [QNN_SDK_LIB_HTP_LINUX],
-    # copybara:uncomment defines = ["QNN_SDK_LIB_HTP=\\\"$(location {})\\\"".format(QNN_SDK_LIB_HTP_LINUX)],
-    linkopts = [
-        "-ldl",
-    ],
-    tags = ["nobuilder"],
-    deps = [
-        ":qnn_sdk_libcpp",  # buildcleaner: keep
-        "@com_google_absl//absl/strings:string_view",
-        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
-    ],
-)
-
-cc_library(
-    name = "qnn_manager",
-    srcs = ["qnn_manager.cc"],
-    hdrs = ["qnn_manager.h"],
-    tags = ["nobuilder"],
-    deps = [
-        ":load_sdk",
-        ":log",
-        ":qnn_sdk_libcpp",  # buildcleaner: keep
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:span",
-        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
-        "//tensorflow/lite/experimental/lrt/core:api_internal",
-    ],
-)
-
-cc_library(
-    name = "log",
-    srcs = ["log.cc"],
-    hdrs = ["log.h"],
-    tags = ["nobuilder"],
-    deps = [
-        ":qnn_sdk_libcpp",  # buildcleaner: keep
-        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
-    ],
-)
-
-cc_library(
+ungrte_cc_library_with_qnn(
     name = "qnn_compiler_plugin",
     srcs = ["qnn_compiler_plugin.cc"],
-    hdrs = ["//tensorflow/lite/experimental/lrt/c:lite_rt_compiler_plugin.h"],
-    linkopts = QNN_SDK_LINKOPTS,
-    tags = ["nobuilder"],
+    visibility = ["//tensorflow/lite/experimental/lrt:__subpackages__"],
     deps = [
-        ":lrt.lds",
-        ":qnn_manager",
-        ":qnn_sdk_libcpp",  # buildcleaner: keep
+        ":qnn_compose_graph",
+        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
         "//tensorflow/lite/experimental/lrt/core:api_internal",
         "//tensorflow/lite/experimental/lrt/core:graph_tools",
+        "//tensorflow/lite/experimental/lrt/qnn_sdk:qnn_manager",
     ],
 )
 
-# NOTE: cc_test realistically will never link properly with the extra qnn libc++ needed. Need to find
-# a long term solution for testing and packaging everything.
-# TODO: In the short term we can wrap this in an "sh_test".
-cc_binary(
-    name = "qnn_compiler_pugin_manual_test",
-    testonly = 1,
+ungrte_cc_test_with_qnn(
+    name = "qnn_compiler_plugin_test",
     srcs = [
-        "qnn_compiler_plugin_manual_test.cc",
+        "qnn_compiler_plugin_test.cc",
     ],
-    linkopts = QNN_SDK_LINKOPTS,
-    tags = ["nobuilder"],
     deps = [
-        ":lrt.lds",
         ":qnn_compiler_plugin",  # buildcleaner: keep
-        ":qnn_sdk_libcpp",  # buildcleaner: keep
+        "@com_google_absl//absl/log:absl_check",
+        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
         "//tensorflow/lite/experimental/lrt/core:api_internal",
         "//tensorflow/lite/experimental/lrt/core:graph_tools",
         "//tensorflow/lite/experimental/lrt/core:model",
+        "//tensorflow/lite/experimental/lrt/qnn_sdk:qnn_manager",
         "//tensorflow/lite/experimental/lrt/test_data:test_data_util",
-        "@com_google_absl//absl/log:absl_check",
+    ],
+)
+
+ungrte_cc_library_with_qnn(
+    name = "qnn_compose_graph",
+    srcs = ["qnn_compose_graph.cc"],
+    hdrs = ["qnn_compose_graph.h"],
+    deps = [
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+        # copybara:uncomment "//third_party/qairt:qnn_lib_headers",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "//tensorflow/lite/experimental/lrt/core:graph_tools",
+        "//tensorflow/lite/experimental/lrt/qnn/IR:qnn_op",
+        "//tensorflow/lite/experimental/lrt/qnn/IR:qnn_tensor",
+        "//tensorflow/lite/experimental/lrt/qnn_sdk:qnn_manager",
     ],
 )
