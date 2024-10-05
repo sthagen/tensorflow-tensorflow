@@ -32,4 +32,25 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "tensor_buffer",
+    hdrs = [
+        "lite_rt_tensor_buffer.h",
+    ],
+    deps = [
+        ":event",
+        ":lite_rt_c_api",
+    ],
+)
+
+cc_library(
+    name = "event",
+    hdrs = [
+        "lite_rt_event.h",
+    ],
+    deps = [
+        ":lite_rt_c_api",
+    ],
+)
+
 exports_files(srcs = glob(["lite_rt*.h"]))
