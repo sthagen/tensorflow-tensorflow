@@ -23,6 +23,7 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/service/spmd/shardy/mhlo_round_trip/export_shardings.h"
+#include "xla/service/spmd/shardy/round_trip_common/export_named_computations.h"
 #include "xla/service/spmd/shardy/round_trip_common/pipeline_passes.h"
 #include "xla/service/spmd/shardy/sdy_round_trip/export_ops.h"
 #include "xla/service/spmd/shardy/sdy_round_trip/export_shardy_attrs.h"
@@ -37,11 +38,9 @@ namespace sdy {
 using ::mlir::PassPipelineRegistration;
 
 void addSdyRoundTripExportPipeline(mlir::OpPassManager& pm) {
+  pm.addPass(createExportNamedComputationsPass());
   // Run canonicalizer to simplify `ManualComputationOp`s.
   pm.addPass(mlir::createCanonicalizerPass());
-  // We save `sdy.sharding`s on those custom calls during
-  // `createSdyRoundTripExportShardyAttrsPass` and make use of
-  // `createSdyRoundTripImportShardyAttrsPass` to import them.
   pm.addPass(createSdyRoundTripExportOpsPass());
   pm.addPass(createSdyRoundTripShardMapExportPass());
   // Preserve the SDY shardings for `createExportMhloShardingsPass` so that
