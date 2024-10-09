@@ -56,7 +56,6 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_kernel.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
-#include "xla/stream_executor/gpu/gpu_timer.h"
 #include "xla/stream_executor/gpu/gpu_types.h"
 #include "xla/stream_executor/gpu/read_numa_node.h"
 #include "xla/stream_executor/gpu/scoped_activate_context.h"
@@ -69,12 +68,14 @@ limitations under the License.
 #include "xla/stream_executor/platform/initialize.h"
 #include "xla/stream_executor/plugin_registry.h"
 #include "xla/stream_executor/rocm/rocm_diagnostics.h"
-#include "xla/stream_executor/rocm/rocm_driver.h"
 #include "xla/stream_executor/rocm/rocm_driver_wrapper.h"
 #include "xla/stream_executor/rocm/rocm_event.h"
 #include "xla/stream_executor/rocm/rocm_kernel.h"
 #include "xla/stream_executor/rocm/rocm_platform_id.h"
 #include "xla/stream_executor/rocm/rocm_runtime.h"
+#include "xla/stream_executor/rocm/rocm_status.h"
+#include "xla/stream_executor/rocm/rocm_stream.h"
+#include "xla/stream_executor/rocm/rocm_timer.h"
 #include "xla/stream_executor/rocm/rocm_version_parser.h"
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/stream_executor/stream.h"
@@ -178,14 +179,54 @@ absl::Status LoadHsaco(Context* context, const char* hsaco_contents,
 
   return returned_status;
 }
+
+// Retrieves a named kernel from a loaded module, and places the resulting
+// handle into function (outparam) on success. Neither kernel_name nor
+// function may be null. No ownership is taken of kernel_name.
+absl::Status GetModuleFunction(Context* context, hipModule_t module,
+                               const char* kernel_name,
+                               hipFunction_t* function) {
+  ScopedActivateContext activated{context};
+  CHECK(module != nullptr && kernel_name != nullptr);
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipModuleGetFunction(function, module, kernel_name),
+      "Failed to get kernel");
+  return absl::OkStatus();
+}
+
+// Retrieves a named global/constant symbol from a loaded module, and returns
+// a device pointer and size of the symbol on success. symbol_name may not be
+// null. At least one of dptr or bytes should not be null. No ownership is
+// taken of symbol_name.
+absl::Status GetModuleSymbol(Context* context, hipModule_t module,
+                             const char* symbol_name, hipDeviceptr_t* dptr,
+                             size_t* bytes) {
+  ScopedActivateContext activated{context};
+  CHECK(module != nullptr && symbol_name != nullptr &&
+        (dptr != nullptr || bytes != nullptr));
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipModuleGetGlobal(dptr, bytes, module, symbol_name),
+      absl::StrCat("Failed to get symbol '", symbol_name, "'"));
+  return absl::OkStatus();
+}
+
+// Unloads module from the current context via cuModuleUnload.
+void UnloadRocmModule(Context* context, hipModule_t module) {
+  ScopedActivateContext activated{context};
+  hipError_t res = wrap::hipModuleUnload(module);
+  if (res != hipSuccess) {
+    LOG(ERROR) << "failed to unload module " << module
+               << "; leaking: " << ToString(res);
+  }
+}
 }  // namespace
 
 RocmExecutor::~RocmExecutor() {
   for (auto& it : disk_modules_) {
-    GpuDriver::UnloadModule(gpu_context(), it.second);
+    UnloadRocmModule(gpu_context(), it.second);
   }
   for (auto& it : in_memory_modules_) {
-    GpuDriver::UnloadModule(gpu_context(), it.second);
+    UnloadRocmModule(gpu_context(), it.second);
   }
   if (gpu_context() != nullptr) {
     GpuDriver::DestroyContext(gpu_context());
@@ -258,9 +299,9 @@ absl::StatusOr<std::unique_ptr<EventBasedTimer>>
 RocmExecutor::CreateEventBasedTimer(GpuStream* stream, bool use_delay_kernel) {
   TF_ASSIGN_OR_RETURN(auto start_event, CreateGpuEvent(/*allow_timing=*/true));
   TF_ASSIGN_OR_RETURN(auto stop_event, CreateGpuEvent(/*allow_timing=*/true));
-  TF_RETURN_IF_ERROR(start_event->Record(stream->gpu_stream()));
-  return std::make_unique<GpuTimer>(gpu_context(), std::move(start_event),
-                                    std::move(stop_event), stream);
+  TF_RETURN_IF_ERROR(stream->RecordEvent(start_event.get()));
+  return std::make_unique<RocmTimer>(gpu_context(), std::move(start_event),
+                                     std::move(stop_event), stream);
 }
 
 bool RocmExecutor::UnloadGpuBinary(const void* gpu_binary) {
@@ -274,7 +315,7 @@ bool RocmExecutor::UnloadGpuBinary(const void* gpu_binary) {
   VLOG(3) << "Found HSACO module " << module << " with refcount " << refcount;
   if (--refcount == 0) {
     VLOG(3) << "Unloading  HSACO module " << module;
-    GpuDriver::UnloadModule(gpu_context(), module);
+    UnloadRocmModule(gpu_context(), module);
     gpu_binary_to_module_.erase(module_it);
     const char* mem_it = nullptr;
     for (auto x : in_memory_modules_) {
@@ -357,8 +398,8 @@ absl::StatusOr<std::unique_ptr<Kernel>> RocmExecutor::LoadKernel(
   if (!spec.has_in_process_symbol()) {
     VLOG(2) << "getting function " << *kernel_name << " from module " << module;
     GpuFunctionHandle function;
-    TF_RETURN_IF_ERROR(GpuDriver::GetModuleFunction(
-        gpu_context(), module, kernel_name->c_str(), &function));
+    TF_RETURN_IF_ERROR(GetModuleFunction(gpu_context(), module,
+                                         kernel_name->c_str(), &function));
     rocm_kernel->set_gpu_function(function);
   }
 
@@ -443,7 +484,7 @@ void RocmExecutor::Deallocate(DeviceMemoryBase* mem) {
 }
 
 bool RocmExecutor::SynchronizeAllActivity() {
-  return GpuDriver::SynchronizeContext(gpu_context()).ok();
+  return gpu_context()->Synchronize().ok();
 }
 
 absl::Status RocmExecutor::SynchronousMemZero(DeviceMemoryBase* location,
@@ -572,16 +613,16 @@ absl::StatusOr<DeviceMemoryBase> RocmExecutor::GetSymbol(
   if (static_cast<bool>(module_handle)) {
     auto it = gpu_binary_to_module_.find(module_handle.id());
     CHECK(it != gpu_binary_to_module_.end());
-    TF_RETURN_IF_ERROR(GpuDriver::GetModuleSymbol(
-        gpu_context(), it->second.first, symbol_name.c_str(),
-        reinterpret_cast<hipDeviceptr_t*>(&mem), &bytes));
+    TF_RETURN_IF_ERROR(
+        GetModuleSymbol(gpu_context(), it->second.first, symbol_name.c_str(),
+                        reinterpret_cast<hipDeviceptr_t*>(&mem), &bytes));
     return DeviceMemoryBase(mem, bytes);
   }
 
   for (auto& it : gpu_binary_to_module_) {
-    TF_RETURN_IF_ERROR(GpuDriver::GetModuleSymbol(
-        gpu_context(), it.second.first, symbol_name.c_str(),
-        reinterpret_cast<hipDeviceptr_t*>(&mem), &bytes));
+    TF_RETURN_IF_ERROR(
+        GetModuleSymbol(gpu_context(), it.second.first, symbol_name.c_str(),
+                        reinterpret_cast<hipDeviceptr_t*>(&mem), &bytes));
     return DeviceMemoryBase(mem, bytes);
   }
 
@@ -621,9 +662,9 @@ absl::StatusOr<std::unique_ptr<Event>> RocmExecutor::CreateEvent() {
 absl::StatusOr<std::unique_ptr<Stream>> RocmExecutor::CreateStream(
     std::optional<std::variant<StreamPriority, int>> priority) {
   TF_ASSIGN_OR_RETURN(auto event, CreateGpuEvent(/*allow_timing=*/false));
-  auto stream = std::make_unique<GpuStream>(this, std::move(event), priority);
+  TF_ASSIGN_OR_RETURN(auto stream,
+                      RocmStream::Create(this, std::move(event), priority));
   absl::MutexLock l(&alive_gpu_streams_mu_);
-  TF_RETURN_IF_ERROR(stream->Init());
   auto gpu_stream = stream->gpu_stream();
   alive_gpu_streams_[gpu_stream] = stream.get();
   return std::move(stream);

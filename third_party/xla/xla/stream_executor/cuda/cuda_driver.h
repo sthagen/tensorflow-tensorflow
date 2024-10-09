@@ -26,47 +26,38 @@ limitations under the License.
 #include "absl/container/node_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "xla/stream_executor/cuda/cuda_status.h"
 #include "xla/stream_executor/gpu/context.h"
 #include "xla/stream_executor/gpu/gpu_driver.h"
 
-namespace stream_executor {
-namespace gpu {
+namespace stream_executor::gpu {
 
-// CUDAContext wraps a cuda CUcontext handle, and includes a unique id. The
-// unique id is positive, and ids are not repeated within the process.
-class GpuContext : public Context {
+// CudaContext implements the Context class for CUDA GPUs.
+class CudaContext : public Context {
  public:
-  GpuContext(CUcontext context, int device_ordinal)
+  CudaContext(CUcontext context, int device_ordinal)
       : context_(context), device_ordinal_(device_ordinal) {}
 
   void SetActive() override;
   bool IsActive() const override;
   CUcontext context() const { return context_; }
   int device_ordinal() const override { return device_ordinal_; }
+  absl::Status Synchronize() override;
 
   // Disallow copying and moving.
-  GpuContext(GpuContext&&) = delete;
-  GpuContext(const GpuContext&) = delete;
-  GpuContext& operator=(GpuContext&&) = delete;
-  GpuContext& operator=(const GpuContext&) = delete;
+  CudaContext(CudaContext&&) = delete;
+  CudaContext(const CudaContext&) = delete;
+  CudaContext& operator=(CudaContext&&) = delete;
+  CudaContext& operator=(const CudaContext&) = delete;
 
  private:
   CUcontext const context_;
   const int device_ordinal_;
 };
 
-}  // namespace gpu
-
-namespace cuda {
-
-using CUDADriver = gpu::GpuDriver;
-
-using CudaContext = gpu::GpuContext;
-
-}  // namespace cuda
-}  // namespace stream_executor
+}  // namespace stream_executor::gpu
 
 #endif  // XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_H_

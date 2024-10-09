@@ -34,26 +34,23 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_driver.h"
 #include "xla/stream_executor/gpu/scoped_activate_context.h"
 #include "xla/stream_executor/rocm/rocm_driver_wrapper.h"
+#include "xla/stream_executor/rocm/rocm_status.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
+#include "tsl/platform/macros.h"
 #include "tsl/platform/numbers.h"
 #include "tsl/platform/stacktrace.h"
 #include "tsl/platform/threadpool.h"
 
-#define RETURN_IF_ROCM_ERROR(expr, ...)                                  \
-  do {                                                                   \
-    hipError_t _res = (expr);                                            \
-    if (TF_PREDICT_FALSE(_res != hipSuccess)) {                          \
-      if (_res == hipErrorOutOfMemory)                                   \
-        return absl::ResourceExhaustedError(absl::StrCat(                \
-            __VA_ARGS__, ":", ::stream_executor::gpu::ToString(_res)));  \
-      else                                                               \
-        return absl::InternalError(absl::StrCat(                         \
-            __VA_ARGS__, ": ", ::stream_executor::gpu::ToString(_res))); \
-    }                                                                    \
+#define RETURN_IF_ROCM_ERROR(expr, ...)                         \
+  do {                                                          \
+    absl::Status _res = ::stream_executor::gpu::ToStatus(expr); \
+    if (TF_PREDICT_FALSE(!_res.ok())) {                         \
+      return _res;                                              \
+    }                                                           \
   } while (0)
 
 #define FAIL_IF_ROCM_ERROR(expr, ...)                       \
@@ -93,72 +90,7 @@ ContextMap<hipCtx_t, GpuContext>* GetContextMap() {
       });
   return context_map;
 }
-
 }  // namespace
-
-// Formats hipError_t to output prettified values into a log stream.
-// Error summaries taken from:
-std::string ToString(hipError_t result) {
-#define OSTREAM_ROCM_ERROR(__name) \
-  case hipError##__name:           \
-    return "HIP_ERROR_" #__name;
-
-  switch (result) {
-    OSTREAM_ROCM_ERROR(InvalidValue)
-    OSTREAM_ROCM_ERROR(OutOfMemory)
-    OSTREAM_ROCM_ERROR(NotInitialized)
-    OSTREAM_ROCM_ERROR(Deinitialized)
-    OSTREAM_ROCM_ERROR(NoDevice)
-    OSTREAM_ROCM_ERROR(InvalidDevice)
-    OSTREAM_ROCM_ERROR(InvalidImage)
-    OSTREAM_ROCM_ERROR(InvalidContext)
-    OSTREAM_ROCM_ERROR(InvalidHandle)
-    OSTREAM_ROCM_ERROR(NotFound)
-    OSTREAM_ROCM_ERROR(NotReady)
-    OSTREAM_ROCM_ERROR(NoBinaryForGpu)
-
-    // Encountered an uncorrectable ECC error during execution.
-    OSTREAM_ROCM_ERROR(ECCNotCorrectable)
-
-    // Load/store on an invalid address. Must reboot all context.
-    case 700:
-      return "ROCM_ERROR_ILLEGAL_ADDRESS";
-    // Passed too many / wrong arguments, too many threads for register count.
-    case 701:
-      return "ROCM_ERROR_LAUNCH_OUT_OF_RESOURCES";
-
-      OSTREAM_ROCM_ERROR(ContextAlreadyInUse)
-      OSTREAM_ROCM_ERROR(PeerAccessUnsupported)
-      OSTREAM_ROCM_ERROR(Unknown)  // Unknown internal error to ROCM.
-#if TF_ROCM_VERSION >= 60200
-      OSTREAM_ROCM_ERROR(LaunchTimeOut)
-      OSTREAM_ROCM_ERROR(PeerAccessAlreadyEnabled)
-      OSTREAM_ROCM_ERROR(PeerAccessNotEnabled)
-      OSTREAM_ROCM_ERROR(SetOnActiveProcess)
-      OSTREAM_ROCM_ERROR(ContextIsDestroyed)
-      OSTREAM_ROCM_ERROR(Assert)
-      OSTREAM_ROCM_ERROR(HostMemoryAlreadyRegistered)
-      OSTREAM_ROCM_ERROR(HostMemoryNotRegistered)
-      OSTREAM_ROCM_ERROR(LaunchFailure)
-      OSTREAM_ROCM_ERROR(CooperativeLaunchTooLarge)
-      OSTREAM_ROCM_ERROR(NotSupported)
-      OSTREAM_ROCM_ERROR(StreamCaptureUnsupported)
-      OSTREAM_ROCM_ERROR(StreamCaptureInvalidated)
-      OSTREAM_ROCM_ERROR(StreamCaptureMerge)
-      OSTREAM_ROCM_ERROR(StreamCaptureUnmatched)
-      OSTREAM_ROCM_ERROR(StreamCaptureUnjoined)
-      OSTREAM_ROCM_ERROR(StreamCaptureIsolation)
-      OSTREAM_ROCM_ERROR(StreamCaptureImplicit)
-      OSTREAM_ROCM_ERROR(CapturedEvent)
-      OSTREAM_ROCM_ERROR(StreamCaptureWrongThread)
-      OSTREAM_ROCM_ERROR(GraphExecUpdateFailure)
-      OSTREAM_ROCM_ERROR(RuntimeMemory)
-      OSTREAM_ROCM_ERROR(RuntimeOther)
-#endif  // TF_ROCM_VERSION >= 60200
-    default:
-      return absl::StrCat("hipError_t(", static_cast<int>(result), ")");
-  }
-}
 
 namespace {
 
@@ -209,6 +141,13 @@ void GpuContext::SetActive() {
 }
 
 bool GpuContext::IsActive() const { return CurrentContext() == context_; }
+
+absl::Status GpuContext::Synchronize() {
+  ScopedActivateContext activation(this);
+  RETURN_IF_ROCM_ERROR(wrap::hipDeviceSynchronize(),
+                       "could not synchronize on ROCM device");
+  return absl::OkStatus();
+}
 
 namespace {
 
@@ -939,57 +878,6 @@ absl::Status GpuDriver::AddStreamCallback(Context* context,
   return absl::OkStatus();
 }
 
-absl::Status GpuDriver::GetModuleFunction(Context* context, hipModule_t module,
-                                          const char* kernel_name,
-                                          hipFunction_t* function) {
-  ScopedActivateContext activated{context};
-  CHECK(module != nullptr && kernel_name != nullptr);
-  RETURN_IF_ROCM_ERROR(
-      wrap::hipModuleGetFunction(function, module, kernel_name),
-      "Failed to get kernel");
-  return absl::OkStatus();
-}
-
-absl::Status GpuDriver::GetModuleSymbol(Context* context, hipModule_t module,
-                                        const char* symbol_name,
-                                        hipDeviceptr_t* dptr, size_t* bytes) {
-  ScopedActivateContext activated{context};
-  CHECK(module != nullptr && symbol_name != nullptr &&
-        (dptr != nullptr || bytes != nullptr));
-  RETURN_IF_ROCM_ERROR(
-      wrap::hipModuleGetGlobal(dptr, bytes, module, symbol_name),
-      absl::StrCat("Failed to get symbol '", symbol_name, "'"));
-  return absl::OkStatus();
-}
-
-void GpuDriver::UnloadModule(Context* context, hipModule_t module) {
-  ScopedActivateContext activated{context};
-  hipError_t res = wrap::hipModuleUnload(module);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to unload module " << module
-               << "; leaking: " << ToString(res);
-  }
-}
-
-absl::StatusOr<GpuStreamHandle> GpuDriver::CreateStream(Context* context,
-                                                        int priority) {
-  ScopedActivateContext activated(context);
-  GpuStreamHandle stream;
-  if (priority == 0) {
-    RETURN_IF_ROCM_ERROR(
-        wrap::hipStreamCreateWithFlags(&stream, hipStreamDefault),
-        "Failed to create stream");  // switch to hipStreamNonBlocking?
-  } else {
-    RETURN_IF_ROCM_ERROR(
-        wrap::hipStreamCreateWithPriority(&stream, hipStreamDefault, priority),
-        "Failed to create stream");  // switch to hipStreamNonBlocking?
-  }
-
-  VLOG(2) << "successfully created stream " << stream << " for device "
-          << context->device_ordinal() << " on thread";
-  return stream;
-}
-
 void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   if (stream == nullptr) {
     return;
@@ -1095,23 +983,6 @@ void GpuDriver::HostDeallocate(Context* context, void* location) {
   }
 }
 
-int GpuDriver::GetGpuStreamPriority(
-    Context* context, stream_executor::StreamPriority stream_priority) {
-  ScopedActivateContext activation(context);
-  if (stream_priority == stream_executor::StreamPriority::Default) {
-    return 0;
-  }
-  int lowest, highest;
-  hipError_t res = wrap::hipDeviceGetStreamPriorityRange(&lowest, &highest);
-  if (res != hipSuccess) {
-    LOG(ERROR)
-        << "Could not query stream priority range. Returning default priority.";
-    return 0;
-  }
-  return stream_priority == stream_executor::StreamPriority::Highest ? highest
-                                                                     : lowest;
-}
-
 absl::Status GpuDriver::DestroyEvent(Context* context, GpuEventHandle* event) {
   if (*event == nullptr) {
     return absl::InvalidArgumentError("input event cannot be null");
@@ -1134,60 +1005,6 @@ absl::Status GpuDriver::DestroyEvent(Context* context, GpuEventHandle* event) {
           absl::StrFormat("error destroying ROCM event in device %d: %s",
                           context->device_ordinal(), ToString(res).c_str()));
   }
-}
-
-absl::Status GpuDriver::RecordEvent(Context* context, GpuEventHandle event,
-                                    GpuStreamHandle stream) {
-  ScopedActivateContext activated{context};
-  hipError_t res = wrap::hipEventRecord(event, stream);
-  switch (res) {
-    case hipSuccess:
-      return absl::OkStatus();
-    case hipErrorDeinitialized:
-    case hipErrorNotInitialized:
-      return absl::FailedPreconditionError(
-          absl::StrFormat("error recording ROCM event on stream %p: %s", stream,
-                          ToString(res).c_str()));
-    default:
-      return absl::InvalidArgumentError(
-          absl::StrFormat("error recording ROCM event on stream %p: %s", stream,
-                          ToString(res).c_str()));
-  }
-}
-
-absl::StatusOr<float> GpuDriver::GetEventElapsedTime(Context* context,
-                                                     GpuEventHandle start,
-                                                     GpuEventHandle stop) {
-  ScopedActivateContext activated{context};
-  // The stop event must have completed in order for hipEventElapsedTime to
-  // work.
-  hipError_t res = wrap::hipEventSynchronize(stop);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to synchronize the stop event: " << ToString(res);
-    return false;
-  }
-  float elapsed_milliseconds;
-  RETURN_IF_ROCM_ERROR(
-      wrap::hipEventElapsedTime(&elapsed_milliseconds, start, stop),
-      "failed to get elapsed time between events");
-
-  return elapsed_milliseconds;
-}
-
-absl::Status GpuDriver::WaitStreamOnEvent(Context* context,
-                                          GpuStreamHandle stream,
-                                          GpuEventHandle event) {
-  ScopedActivateContext activation{context};
-  RETURN_IF_ROCM_ERROR(wrap::hipStreamWaitEvent(stream, event, 0 /* = flags */),
-                       "could not wait stream on event");
-  return absl::OkStatus();
-}
-
-absl::Status GpuDriver::SynchronizeContext(Context* context) {
-  ScopedActivateContext activation{context};
-  RETURN_IF_ROCM_ERROR(wrap::hipDeviceSynchronize(),
-                       "could not synchronize on ROCM device");
-  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::SynchronizeStream(Context* context,

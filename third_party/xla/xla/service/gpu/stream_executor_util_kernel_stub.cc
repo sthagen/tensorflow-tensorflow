@@ -1,4 +1,4 @@
-/* Copyright 2019 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,23 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// This file contains APIs that assume a StreamExecutor is backed by a GPU
-// implementation. It ensures the underlying GPU context is active.
+namespace xla::gpu::repeat_buffer_kernel {
 
-#ifndef XLA_STREAM_EXECUTOR_GPU_GPU_ACTIVATION_H_
-#define XLA_STREAM_EXECUTOR_GPU_GPU_ACTIVATION_H_
+// Stub to make CPU build linker find undefined symbol.
+void* kernel() { return nullptr; }
 
-#include "xla/stream_executor/gpu/scoped_activate_context.h"
-
-namespace stream_executor {
-
-class StreamExecutor;
-
-namespace gpu {
-
-using ScopedActivateExecutorContext = ScopedActivateContext;
-
-}  // namespace gpu
-}  // namespace stream_executor
-
-#endif  // XLA_STREAM_EXECUTOR_GPU_GPU_ACTIVATION_H_
+}  // namespace xla::gpu::repeat_buffer_kernel

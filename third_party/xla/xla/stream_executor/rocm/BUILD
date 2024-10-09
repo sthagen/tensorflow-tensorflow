@@ -67,7 +67,7 @@ cc_library(
         "manual",
     ]),
     deps = [
-        ":rocm_diagnostics",
+        ":rocm_status",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:context",
         "//xla/stream_executor/gpu:context_map",
@@ -81,13 +81,14 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
-        "@local_config_rocm//rocm:hip",
+        "@local_config_rocm//rocm:hip",  # buildcleaner: keep
         "@local_config_rocm//rocm:rocm_headers",
         "@local_tsl//tsl/platform:casts",
         "@local_tsl//tsl/platform:dso_loader",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
+        "@local_tsl//tsl/platform:macros",
         "@local_tsl//tsl/platform:numbers",
         "@local_tsl//tsl/platform:stacktrace",
     ],
@@ -106,13 +107,12 @@ cc_library(
     ]),
     deps = [
         ":rocm_driver",
+        ":rocm_status",
         "//xla/stream_executor",
         "//xla/stream_executor/gpu:context",
         "//xla/stream_executor/gpu:gpu_driver_header",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/log",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -137,11 +137,15 @@ cc_library(
     ]),
     deps = [
         ":rocm_driver",
-        "//xla/stream_executor",
+        ":rocm_status",
+        "//xla/stream_executor:event",
         "//xla/stream_executor/gpu:context",
         "//xla/stream_executor/gpu:gpu_event_header",
-        "//xla/stream_executor/gpu:gpu_stream_header",
         "//xla/stream_executor/gpu:scoped_activate_context",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/status",
+        "@local_config_rocm//rocm:rocm_headers",
+        "@local_tsl//tsl/platform:errors",
     ],
 )
 
@@ -163,6 +167,9 @@ cc_library(
         ":rocm_kernel",
         ":rocm_platform_id",
         ":rocm_runtime",
+        ":rocm_status",
+        ":rocm_stream",
+        ":rocm_timer",
         ":rocm_version_parser",
         "//xla/stream_executor",
         "//xla/stream_executor:blas",
@@ -186,7 +193,6 @@ cc_library(
         "//xla/stream_executor/gpu:gpu_executor_header",
         "//xla/stream_executor/gpu:gpu_kernel_header",
         "//xla/stream_executor/gpu:gpu_stream",
-        "//xla/stream_executor/gpu:gpu_timer",
         "//xla/stream_executor/gpu:gpu_types_header",
         "//xla/stream_executor/gpu:read_numa_node",
         "//xla/stream_executor/gpu:scoped_activate_context",
@@ -901,6 +907,108 @@ cc_test(
     deps = [
         ":rocm_version_parser",
         "//xla/stream_executor:semantic_version",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@local_config_rocm//rocm:rocm_headers",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "rocm_stream",
+    srcs = ["rocm_stream.cc"],
+    hdrs = ["rocm_stream.h"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ] + if_google([
+        # TODO(b/360374983): Remove this tag once the target can be built without --config=rocm.
+        "manual",
+    ]),
+    deps = [
+        ":rocm_driver",
+        ":rocm_status",
+        "//xla/stream_executor:event",
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream",
+        "//xla/stream_executor/gpu:context",
+        "//xla/stream_executor/gpu:gpu_event",
+        "//xla/stream_executor/gpu:gpu_executor_header",
+        "//xla/stream_executor/gpu:gpu_stream",
+        "//xla/stream_executor/gpu:scoped_activate_context",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@local_config_rocm//rocm:rocm_headers",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "rocm_timer",
+    srcs = ["rocm_timer.cc"],
+    hdrs = ["rocm_timer.h"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ] + if_google([
+        # TODO(b/360374983): Remove this tag once the target can be built without --config=rocm.
+        "manual",
+    ]),
+    deps = [
+        ":rocm_driver",
+        ":rocm_event",
+        ":rocm_status",
+        "//xla/stream_executor:event_based_timer",
+        "//xla/stream_executor/gpu:context",
+        "//xla/stream_executor/gpu:gpu_event",
+        "//xla/stream_executor/gpu:gpu_stream",
+        "//xla/stream_executor/gpu:scoped_activate_context",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@local_config_rocm//rocm:rocm_headers",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "rocm_status",
+    srcs = ["rocm_status.cc"],
+    hdrs = ["rocm_status.h"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ] + if_google([
+        # TODO(b/360374983): Remove this tag once the target can be built without --config=rocm.
+        "manual",
+    ]),
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_config_rocm//rocm:rocm_headers",
+    ],
+)
+
+cc_test(
+    name = "rocm_status_test",
+    srcs = ["rocm_status_test.cc"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ] + if_google([
+        # TODO(b/360374983): Remove this tag once the target can be built without --config=rocm.
+        "manual",
+    ]),
+    deps = [
+        ":rocm_status",
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
         "@local_config_rocm//rocm:rocm_headers",

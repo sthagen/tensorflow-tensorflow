@@ -2073,6 +2073,13 @@ absl::Status AlgebraicSimplifierVisitor::HandleConstant(
 absl::Status AlgebraicSimplifierVisitor::HandleSubtract(HloInstruction* sub) {
   HloInstruction *lhs, *rhs;
   CHECK(Match(sub, m::Subtract(m::Op(&lhs), m::Op(&rhs))));
+  // A - A => 0
+  if (options_.enable_fast_math() ||
+      ShapeUtil::ElementIsIntegral(sub->shape())) {
+    if (lhs == rhs) {
+      return ReplaceInstruction(sub, MakeScalarLike(sub, 0));
+    }
+  }
   // A - 0 => A
   VLOG(10) << "trying transform [A - 0 => A]: " << sub->ToString();
   if (IsAll(rhs, 0) && ReplaceInstructionIfCompatible(sub, lhs)) {
@@ -5330,6 +5337,16 @@ absl::Status AlgebraicSimplifierVisitor::HandleCustomCall(
         custom_call,
         HloInstruction::CreateUnary(custom_call->shape(), HloOpcode::kCopy,
                                     custom_call->mutable_operand(0)));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status AlgebraicSimplifierVisitor::HandleExp(
+    HloInstruction* exponential) {
+  // Exp(0) => 1
+  if (Match(exponential, m::Exp(m::ConstantScalar(0))) ||
+      Match(exponential, m::Exp(m::Broadcast(m::ConstantScalar(0))))) {
+    return ReplaceInstruction(exponential, MakeScalarLike(exponential, 1.0));
   }
   return absl::OkStatus();
 }
