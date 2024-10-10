@@ -37,6 +37,8 @@ ungrte_cc_test_with_qnn(
     srcs = [
         "qnn_compiler_plugin_test.cc",
     ],
+    # Sanitizer runtime doesn't work with anything that loads libQnnHtp.so.
+    tags = ["nosan"],
     deps = [
         ":qnn_compiler_plugin",  # buildcleaner: keep
         "@com_google_absl//absl/log:absl_check",
@@ -45,7 +47,7 @@ ungrte_cc_test_with_qnn(
         "//tensorflow/lite/experimental/lrt/core:graph_tools",
         "//tensorflow/lite/experimental/lrt/core:model",
         "//tensorflow/lite/experimental/lrt/qnn_sdk:qnn_manager",
-        "//tensorflow/lite/experimental/lrt/test_data:test_data_util",
+        "//tensorflow/lite/experimental/lrt/test:common",
     ],
 )
 
