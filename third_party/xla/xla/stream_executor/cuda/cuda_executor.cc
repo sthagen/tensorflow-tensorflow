@@ -55,7 +55,6 @@ limitations under the License.
 #include "xla/stream_executor/cuda/cuda_stream.h"
 #include "xla/stream_executor/cuda/cuda_timer.h"
 #include "xla/stream_executor/cuda/cuda_version_parser.h"
-#include "xla/stream_executor/cuda/delay_kernel.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/dnn.h"
@@ -65,10 +64,8 @@ limitations under the License.
 #include "xla/stream_executor/gpu/context.h"
 #include "xla/stream_executor/gpu/gpu_command_buffer.h"
 #include "xla/stream_executor/gpu/gpu_driver.h"
-#include "xla/stream_executor/gpu/gpu_event.h"
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_kernel.h"
-#include "xla/stream_executor/gpu/gpu_semaphore.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
 #include "xla/stream_executor/gpu/gpu_types.h"
 #include "xla/stream_executor/gpu/read_numa_node.h"
@@ -263,6 +260,98 @@ absl::StatusOr<int> GetDeviceAttribute(CUdevice_attribute attribute,
       cuda::ToStatus(cuDeviceGetAttribute(&val, attribute, device)));
   return val;
 }
+
+// Returns the name of the device.
+absl::StatusOr<std::string> GetDeviceName(CUdevice device) {
+  static const size_t kCharLimit = 64;
+  absl::InlinedVector<char, 4> chars(kCharLimit);
+  TF_RETURN_IF_ERROR(
+      cuda::ToStatus(cuDeviceGetName(chars.begin(), kCharLimit - 1, device),
+                     "Failed to get device name"));
+  chars[kCharLimit - 1] = '\0';
+  return chars.begin();
+}
+
+// Returns the compute capability for the device; i.e (3, 5).
+absl::Status GetComputeCapability(int* cc_major, int* cc_minor,
+                                  CUdevice device) {
+  *cc_major = 0;
+  *cc_minor = 0;
+
+  TF_RETURN_IF_ERROR(cuda::ToStatus(cuDeviceGetAttribute(
+      cc_major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device)));
+
+  return cuda::ToStatus(cuDeviceGetAttribute(
+      cc_minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+}
+
+// Helper function that turns the integer output of cuDeviceGetAttribute to type
+// T and wraps it in a absl::StatusOr.
+template <typename T>
+static absl::StatusOr<T> GetSimpleAttribute(CUdevice device,
+                                            CUdevice_attribute attribute) {
+  int value = -1;
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuDeviceGetAttribute(&value, attribute, device),
+      absl::StrCat("Could not retrieve CUDA device attribute (", attribute)));
+  T converted = value;
+  return converted;
+}
+
+// Returns the number of multiprocessors on the device (note that the device
+// may be multi-GPU-per-board).
+absl::StatusOr<int> GetMultiprocessorCount(CUdevice device) {
+  return GetSimpleAttribute<int>(device,
+                                 CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT);
+}
+
+absl::StatusOr<int64_t> GetMaxSharedMemoryPerCore(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(
+      device, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
+}
+
+absl::StatusOr<int64_t> GetMaxSharedMemoryPerBlock(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(
+      device, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK);
+}
+
+absl::StatusOr<int64_t> GetMaxSharedMemoryPerBlockOptin(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(
+      device, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
+}
+
+absl::StatusOr<int64_t> GetMaxThreadsPerMultiprocessor(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(
+      device, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR);
+}
+
+absl::StatusOr<int64_t> GetMaxRegistersPerBlock(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(
+      device, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK);
+}
+
+absl::StatusOr<int64_t> GetThreadsPerWarp(CUdevice device) {
+  return GetSimpleAttribute<int64_t>(device, CU_DEVICE_ATTRIBUTE_WARP_SIZE);
+}
+
+absl::Status GetGridLimits(int* x, int* y, int* z, CUdevice device) {
+  int value;
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, device),
+      "Could not get device attribute"));
+  *x = value;
+
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y, device),
+      "Could not get device attribute"));
+  *y = value;
+
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z, device),
+      "Could not get device attribute"));
+  *z = value;
+  return absl::OkStatus();
+}
 }  // namespace
 
 // Given const GPU memory, returns a libcuda device pointer datatype, suitable
@@ -292,8 +381,7 @@ absl::Status CudaExecutor::Init() {
   TF_ASSIGN_OR_RETURN(Context * context,
                       CudaContext::Create(device_ordinal(), device_));
   set_context(context);
-  TF_RETURN_IF_ERROR(
-      GpuDriver::GetComputeCapability(&cc_major_, &cc_minor_, device_));
+  TF_RETURN_IF_ERROR(GetComputeCapability(&cc_major_, &cc_minor_, device_));
   TF_ASSIGN_OR_RETURN(delay_kernels_supported_, DelayKernelIsSupported());
   return absl::OkStatus();
 }
@@ -427,18 +515,15 @@ absl::StatusOr<std::unique_ptr<Kernel>> CudaExecutor::LoadKernel(
 
 absl::StatusOr<std::unique_ptr<EventBasedTimer>>
 CudaExecutor::CreateEventBasedTimer(GpuStream* stream, bool use_delay_kernel) {
-  GpuSemaphore semaphore{};
+  const CudaTimer::TimerType timer_type =
+      (use_delay_kernel && ShouldLaunchDelayKernel() &&
+       delay_kernels_supported_)
+          ? CudaTimer::TimerType::kDelayKernel
+          : CudaTimer::TimerType::kEventBased;
 
-  if (use_delay_kernel && ShouldLaunchDelayKernel() &&
-      delay_kernels_supported_) {
-    TF_ASSIGN_OR_RETURN(semaphore, LaunchDelayKernel(stream));
-  }
-  TF_ASSIGN_OR_RETURN(auto start_event, CreateGpuEvent(/*allow_timing=*/true));
-  TF_ASSIGN_OR_RETURN(auto stop_event, CreateGpuEvent(/*allow_timing=*/true));
-  TF_RETURN_IF_ERROR(stream->RecordEvent(start_event.get()));
-  return std::make_unique<CudaTimer>(gpu_context(), std::move(start_event),
-                                     std::move(stop_event), stream,
-                                     std::move(semaphore));
+  TF_ASSIGN_OR_RETURN(CudaTimer timer,
+                      CudaTimer::Create(gpu_context(), stream, timer_type));
+  return std::make_unique<CudaTimer>(std::move(timer));
 }
 
 bool CudaExecutor::UnloadGpuBinary(const void* gpu_binary) {
@@ -810,29 +895,21 @@ absl::Status FillBlockDimLimit(GpuDeviceHandle device,
   // (as opposed to ThreadDim which expresses the dimensions of threads
   // within a block).
   int x, y, z;
-  TF_RETURN_IF_ERROR(GpuDriver::GetGridLimits(&x, &y, &z, device));
+  TF_RETURN_IF_ERROR(GetGridLimits(&x, &y, &z, device));
   block_dim_limit->x = x;
   block_dim_limit->y = y;
   block_dim_limit->z = z;
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::unique_ptr<GpuEvent>> CudaExecutor::CreateGpuEvent(
-    bool allow_timing) {
-  auto gpu_event = std::make_unique<CudaEvent>(gpu_context());
-  TF_RETURN_IF_ERROR(gpu_event->Init(allow_timing));
-  return std::move(gpu_event);
-}
-
 absl::StatusOr<std::unique_ptr<Event>> CudaExecutor::CreateEvent() {
-  return CreateGpuEvent(/*allow_timing=*/false);
+  TF_ASSIGN_OR_RETURN(auto event, CudaEvent::Create(gpu_context(), false));
+  return std::make_unique<CudaEvent>(std::move(event));
 }
 
 absl::StatusOr<std::unique_ptr<Stream>> CudaExecutor::CreateStream(
     std::optional<std::variant<StreamPriority, int>> priority) {
-  TF_ASSIGN_OR_RETURN(auto event, CreateGpuEvent(/*allow_timing=*/false));
-  TF_ASSIGN_OR_RETURN(auto stream,
-                      CudaStream::Create(this, std::move(event), priority));
+  TF_ASSIGN_OR_RETURN(auto stream, CudaStream::Create(this, priority));
   absl::MutexLock l(&alive_gpu_streams_mu_);
   auto gpu_stream = stream->gpu_stream();
   alive_gpu_streams_[gpu_stream] = stream.get();
@@ -858,8 +935,7 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
 
   int cc_major;
   int cc_minor;
-  TF_RETURN_IF_ERROR(
-      GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device));
+  TF_RETURN_IF_ERROR(GetComputeCapability(&cc_major, &cc_minor, device));
 
   DeviceDescription desc;
 
@@ -935,8 +1011,7 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
   }
 
   {
-    std::string device_name;
-    TF_RETURN_IF_ERROR(GpuDriver::GetDeviceName(device, &device_name));
+    TF_ASSIGN_OR_RETURN(std::string device_name, GetDeviceName(device));
     desc.set_name(device_name);
   }
 
@@ -949,20 +1024,17 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
 
   desc.set_device_vendor("NVIDIA Corporation");
   desc.set_cuda_compute_capability(cc_major, cc_minor);
-  desc.set_shared_memory_per_core(
-      GpuDriver::GetMaxSharedMemoryPerCore(device).value());
-  desc.set_shared_memory_per_block(
-      GpuDriver::GetMaxSharedMemoryPerBlock(device).value());
+  desc.set_shared_memory_per_core(GetMaxSharedMemoryPerCore(device).value());
+  desc.set_shared_memory_per_block(GetMaxSharedMemoryPerBlock(device).value());
   desc.set_shared_memory_per_block_optin(
-      GpuDriver::GetMaxSharedMemoryPerBlockOptin(device).value());
-  int core_count = GpuDriver::GetMultiprocessorCount(device).value();
+      GetMaxSharedMemoryPerBlockOptin(device).value());
+  int core_count = GetMultiprocessorCount(device).value();
   desc.set_core_count(core_count);
   desc.set_fpus_per_core(fpus_per_core(cc_major, cc_minor));
   desc.set_threads_per_core_limit(
-      GpuDriver::GetMaxThreadsPerMultiprocessor(device).value());
-  desc.set_registers_per_block_limit(
-      GpuDriver::GetMaxRegistersPerBlock(device).value());
-  desc.set_threads_per_warp(GpuDriver::GetThreadsPerWarp(device).value());
+      GetMaxThreadsPerMultiprocessor(device).value());
+  desc.set_registers_per_block_limit(GetMaxRegistersPerBlock(device).value());
+  desc.set_threads_per_warp(GetThreadsPerWarp(device).value());
   desc.set_registers_per_core_limit(
       GetDeviceAttribute(CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR,
                          device)
@@ -977,7 +1049,7 @@ CudaExecutor::CreateDeviceDescription(int device_ordinal) {
   // identifier for the GPU model.  But getting this requires using NVML or
   // other hacks, which we don't have access to in OSS TensorFlow.
   //
-  // Alternatively you might be tempted to use GpuDriver::GetDeviceName as a
+  // Alternatively you might be tempted to use GetDeviceName as a
   // unique identifier, but this is not stable across GPU VBIOS versions.
   //
   // For now, this identifier is good enough.
