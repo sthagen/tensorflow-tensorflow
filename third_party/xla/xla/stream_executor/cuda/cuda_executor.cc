@@ -79,6 +79,7 @@ limitations under the License.
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "tsl/platform/casts.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/fingerprint.h"
@@ -352,6 +353,76 @@ absl::Status GetGridLimits(int* x, int* y, int* z, CUdevice device) {
   *z = value;
   return absl::OkStatus();
 }
+
+// Returns the device associated with the given device_ordinal.
+absl::StatusOr<CUdevice> GetDevice(int device_ordinal) {
+  CUdevice device;
+  TF_RETURN_IF_ERROR(cuda::ToStatus(cuDeviceGet(&device, device_ordinal),
+                                    "Failed call to cuDeviceGet"));
+  return device;
+}
+
+// Returns the device associated with the given context.
+absl::StatusOr<CUdevice> DeviceFromContext(Context* context) {
+  ScopedActivateContext activated{context};
+  CUdevice device = -1;
+  auto status = cuda::ToStatus(cuCtxGetDevice(&device));
+  if (status.ok()) {
+    return device;
+  }
+
+  return status;
+}
+
+bool CanEnablePeerAccess(CUdevice from, CUdevice to) {
+  int can_access_peer = -1;
+  auto status =
+      cuda::ToStatus(cuDeviceCanAccessPeer(&can_access_peer, from, to));
+  if (!status.ok()) {
+    LOG(ERROR) << "failed to detect peer access capability: " << status;
+    return false;
+  }
+  return can_access_peer;
+}
+
+bool CanEnablePeerAccess(Context* from, Context* to) {
+  if (from == to) {
+    return true;  // A context can always access its own memory.
+  }
+
+  auto from_device = DeviceFromContext(from);
+  if (!from_device.ok()) {
+    LOG(ERROR) << "failed to resolve 'from' peer access context to a device: "
+               << from_device.status();
+    return false;
+  }
+  auto to_device = DeviceFromContext(to);
+  if (!to_device.ok()) {
+    LOG(ERROR) << "failed to resolve 'to' peer access context to a device: "
+               << to_device.status();
+    return false;
+  }
+  return CanEnablePeerAccess(from_device.value(), to_device.value());
+}
+
+absl::Status EnablePeerAccess(Context* from, Context* to) {
+  if (from == to) {
+    return absl::OkStatus();  // A context can always access its own
+                              // memory.
+  }
+
+  ScopedActivateContext activated{from};
+  CUresult result = cuCtxEnablePeerAccess(
+      tensorflow::down_cast<CudaContext*>(to)->context(), 0 /* = flags */);
+  if (result != CUDA_SUCCESS &&
+      result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
+    return absl::InternalError(
+        absl::StrFormat("failed to enable peer access from %p to %p: %s", from,
+                        to, cuda::ToStatus(result).ToString()));
+  }
+
+  return absl::OkStatus();
+}
 }  // namespace
 
 // Given const GPU memory, returns a libcuda device pointer datatype, suitable
@@ -377,7 +448,7 @@ CudaExecutor::~CudaExecutor() {
 
 absl::Status CudaExecutor::Init() {
   TF_RETURN_IF_ERROR(GpuDriver::Init());
-  TF_RETURN_IF_ERROR(GpuDriver::GetDevice(device_ordinal(), &device_));
+  TF_ASSIGN_OR_RETURN(device_, GetDevice(device_ordinal()));
   TF_ASSIGN_OR_RETURN(Context * context,
                       CudaContext::Create(device_ordinal(), device_));
   set_context(context);
@@ -838,13 +909,12 @@ fft::FftSupport* CudaExecutor::AsFft() {
 
 bool CudaExecutor::CanEnablePeerAccessTo(StreamExecutor* other) {
   GpuExecutor* cuda_other = static_cast<GpuExecutor*>(other);
-  return GpuDriver::CanEnablePeerAccess(gpu_context(),
-                                        cuda_other->gpu_context());
+  return CanEnablePeerAccess(gpu_context(), cuda_other->gpu_context());
 }
 
 absl::Status CudaExecutor::EnablePeerAccessTo(StreamExecutor* other) {
   GpuExecutor* cuda_other = static_cast<GpuExecutor*>(other);
-  return GpuDriver::EnablePeerAccess(gpu_context(), cuda_other->gpu_context());
+  return EnablePeerAccess(gpu_context(), cuda_other->gpu_context());
 }
 
 bool CudaExecutor::DeviceMemoryUsage(int64_t* free_out,
@@ -888,8 +958,7 @@ absl::StatusOr<DeviceMemoryBase> CudaExecutor::GetSymbol(
                    reinterpret_cast<uintptr_t>(module_handle.id()), ")"));
 }
 
-absl::Status FillBlockDimLimit(GpuDeviceHandle device,
-                               BlockDim* block_dim_limit) {
+absl::Status FillBlockDimLimit(CUdevice device, BlockDim* block_dim_limit) {
   // The BlockDim name is a mismatch against these GRID_DIM_* queries because
   // we use BlockDims to express the dimensions of blocks within a grid
   // (as opposed to ThreadDim which expresses the dimensions of threads
@@ -925,13 +994,13 @@ CudaExecutor::CreateCommandBuffer(CommandBuffer::Mode mode) {
 }
 
 absl::Status CudaExecutor::TrimGraphMemory() {
-  return GpuDriver::DeviceGraphMemTrim(device_);
+  return cuda::ToStatus(cuDeviceGraphMemTrim(device_),
+                        "Failed to trim device graph memory");
 }
 
 absl::StatusOr<std::unique_ptr<DeviceDescription>>
 CudaExecutor::CreateDeviceDescription(int device_ordinal) {
-  GpuDeviceHandle device;
-  TF_RETURN_IF_ERROR(GpuDriver::GetDevice(device_ordinal, &device));
+  TF_ASSIGN_OR_RETURN(CUdevice device, GetDevice(device_ordinal));
 
   int cc_major;
   int cc_minor;

@@ -121,13 +121,6 @@ class GpuDriver {
   // previously registered.
   static bool HostUnregister(Context* context, void* location);
 
-  // Given a device ordinal, returns a device handle into the device outparam,
-  // which must not be null.
-  //
-  // N.B. these device handles do not have a corresponding destroy function in
-  // the CUDA/HIP driver API.
-  static absl::Status GetDevice(int device_ordinal, GpuDeviceHandle* device);
-
   // Launches a CUDA/ROCm kernel via cuLaunchKernel/hipModuleLaunchKernel.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1gb8f3dc3031b40da29d5f9a7139e52e15
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#execution-control
@@ -264,11 +257,6 @@ class GpuDriver {
   static absl::StatusOr<std::string> GraphDebugDotPrint(
       GpuGraphHandle graph, const char* path,
       bool return_printed_graph = false);
-
-  // Free unused memory that was cached on the specified device for use with
-  // graphs back to the OS.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g57c87f4ba6af41825627cdd4e5a8c52b
-  static absl::Status DeviceGraphMemTrim(GpuDeviceHandle device);
 
   // Creates a conditional handle.
   // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gece6f3b9e85d0edb8484d625fe567376
@@ -430,22 +418,6 @@ class GpuDriver {
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__STREAM.html#group__CUDA__STREAM_1g15e49dd91ec15991eb7c0a741beb7dad
   static absl::Status SynchronizeStream(Context* context,
                                         GpuStreamHandle stream);
-
-  // Returns whether code in the from context can access memory in the to
-  // context via cuDeviceCanAccessPeer.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__PEER__ACCESS.html#group__CUDA__PEER__ACCESS_1g496bdaae1f632ebfb695b99d2c40f19e
-  static bool CanEnablePeerAccess(Context* from, Context* to);
-
-  // Returns whether the from device can access memory in the to
-  // device via cuDeviceCanAccessPeer. Because of differences between ROCM and
-  // CUDA, this API is not supported in ROCM builds and will result in a link
-  // error if used.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__PEER__ACCESS.html#group__CUDA__PEER__ACCESS_1g496bdaae1f632ebfb695b99d2c40f19e
-  static bool CanEnablePeerAccess(GpuDeviceHandle from, GpuDeviceHandle to);
-
-  // Enables peer access per CanEnablePeerAccess, via cuCtxEnablePeerAccess.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__PEER__ACCESS.html#group__CUDA__PEER__ACCESS_1g0889ec6728e61c05ed359551d67b3f5a
-  static absl::Status EnablePeerAccess(Context* from, Context* to);
 
   // -- Pointer-specific calls.
 

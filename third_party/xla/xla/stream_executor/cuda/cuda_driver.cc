@@ -59,22 +59,6 @@ namespace gpu {
 
 namespace {
 
-// Returns the device associated with the given context.
-absl::StatusOr<CUdevice> DeviceFromContext(Context* context) {
-  ScopedActivateContext activated{context};
-  CUdevice device = -1;
-  auto status = cuda::ToStatus(cuCtxGetDevice(&device));
-  if (status.ok()) {
-    return device;
-  }
-
-  return status;
-}
-
-}  // namespace
-
-namespace {
-
 // Actually performs the work of CUDA initialization. Wrapped up in one-time
 // execution guard.
 static absl::Status InternalInit() {
@@ -99,11 +83,6 @@ absl::Status GpuDriver::Init() {
     return new absl::Status(InternalInit());
   }();
   return *init_retval;
-}
-
-absl::Status GpuDriver::GetDevice(int device_ordinal, CUdevice* device) {
-  return cuda::ToStatus(cuDeviceGet(device, device_ordinal),
-                        "Failed call to cuDeviceGet");
 }
 
 absl::Status GpuDriver::CreateGraph(CUgraph* graph) {
@@ -335,12 +314,6 @@ absl::StatusOr<std::string> GpuDriver::GraphDebugDotPrint(
 #endif  // CUDA_VERSION >= 12000
 
   return std::string(path);
-}
-
-absl::Status GpuDriver::DeviceGraphMemTrim(CUdevice device) {
-  VLOG(2) << "Trim CUDA device graph memory " << device;
-  return cuda::ToStatus(cuDeviceGraphMemTrim(device),
-                        "Failed to trim device graph memory");
 }
 
 absl::Status GpuDriver::GraphConditionalHandleCreate(
@@ -1045,56 +1018,6 @@ std::string GpuDriver::GetPCIBusID(CUdevice device) {
   }
   pci_bus_id = chars.begin();
   return pci_bus_id;
-}
-
-bool GpuDriver::CanEnablePeerAccess(Context* from, Context* to) {
-  if (from == to) {
-    return true;  // A context can always access its own memory.
-  }
-
-  auto from_device = DeviceFromContext(from);
-  if (!from_device.ok()) {
-    LOG(ERROR) << "failed to resolve 'from' peer access context to a device: "
-               << from_device.status();
-    return false;
-  }
-  auto to_device = DeviceFromContext(to);
-  if (!to_device.ok()) {
-    LOG(ERROR) << "failed to resolve 'to' peer access context to a device: "
-               << to_device.status();
-    return false;
-  }
-  return CanEnablePeerAccess(from_device.value(), to_device.value());
-}
-
-bool GpuDriver::CanEnablePeerAccess(GpuDeviceHandle from, GpuDeviceHandle to) {
-  int can_access_peer = -1;
-  auto status =
-      cuda::ToStatus(cuDeviceCanAccessPeer(&can_access_peer, from, to));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to detect peer access capability: " << status;
-    return false;
-  }
-  return can_access_peer;
-}
-
-absl::Status GpuDriver::EnablePeerAccess(Context* from, Context* to) {
-  if (from == to) {
-    return absl::OkStatus();  // A context can always access its own
-                              // memory.
-  }
-
-  ScopedActivateContext activated{from};
-  CUresult result = cuCtxEnablePeerAccess(
-      tensorflow::down_cast<CudaContext*>(to)->context(), 0 /* = flags */);
-  if (result != CUDA_SUCCESS &&
-      result != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED) {
-    return absl::InternalError(
-        absl::StrFormat("failed to enable peer access from %p to %p: %s", from,
-                        to, cuda::ToStatus(result).ToString()));
-  }
-
-  return absl::OkStatus();
 }
 
 absl::StatusOr<int> GpuDriver::GetMaxOccupiedBlocksPerCore(
