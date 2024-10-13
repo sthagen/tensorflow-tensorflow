@@ -787,40 +787,6 @@ void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   }
 }
 
-void* GpuDriver::DeviceAllocate(Context* context, uint64_t bytes) {
-  if (bytes == 0) {
-    return nullptr;
-  }
-
-  ScopedActivateContext activated{context};
-  CUdeviceptr result = 0;
-  auto status = cuda::ToStatus(cuMemAlloc(&result, bytes));
-  if (!status.ok()) {
-    // LOG(INFO) because this isn't always important to users (e.g. BFCAllocator
-    // implements a retry if the first allocation fails).
-    LOG(INFO) << "failed to allocate "
-              << tsl::strings::HumanReadableNumBytes(bytes) << " (" << bytes
-              << " bytes) from device: " << status;
-    return nullptr;
-  }
-  void* ptr = reinterpret_cast<void*>(result);
-  VLOG(2) << "allocated " << ptr << " for context " << context << " of "
-          << bytes << " bytes";
-  return ptr;
-}
-
-void GpuDriver::DeviceDeallocate(Context* context, void* location) {
-  ScopedActivateContext activation(context);
-  CUdeviceptr pointer = absl::bit_cast<CUdeviceptr>(location);
-  auto status = cuda::ToStatus(cuMemFree(pointer));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to free device memory at " << location
-               << "; result: " << status;
-  } else {
-    VLOG(2) << "deallocated " << location << " for context " << context;
-  }
-}
-
 void* GpuDriver::UnifiedMemoryAllocate(Context* context, uint64_t bytes) {
   ScopedActivateContext activation(context);
   CUdeviceptr result = 0;
@@ -944,22 +910,6 @@ int GpuDriver::GetDeviceCount() {
   return device_count;
 }
 
-absl::StatusOr<MemoryType> GpuDriver::GetPointerMemorySpace(
-    CUdeviceptr pointer) {
-  unsigned int value;
-  TF_RETURN_IF_ERROR(cuda::ToStatus(cuPointerGetAttribute(
-      &value, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, pointer)));
-  switch (value) {
-    case CU_MEMORYTYPE_DEVICE:
-      return MemoryType::kDevice;
-    case CU_MEMORYTYPE_HOST:
-      return MemoryType::kHost;
-    default:
-      return absl::InternalError(
-          absl::StrCat("unknown memory space provided by CUDA API: ", value));
-  }
-}
-
 absl::Status GpuDriver::GetPointerAddressRange(CUdeviceptr dptr,
                                                CUdeviceptr* base,
                                                size_t* size) {
@@ -971,53 +921,6 @@ absl::StatusOr<int32_t> GpuDriver::GetDriverVersion() {
   TF_RETURN_IF_ERROR(cuda::ToStatus(cuDriverGetVersion(&version),
                                     "Could not get driver version"));
   return version;
-}
-
-bool GpuDriver::GetDeviceProperties(CUdevprop* device_properties,
-                                    int device_ordinal) {
-  auto status =
-      cuda::ToStatus(cuDeviceGetProperties(device_properties, device_ordinal));
-  return status.ok();
-}
-
-bool GpuDriver::IsEccEnabled(CUdevice device, bool* result) {
-  int value = -1;
-  auto status = cuda::ToStatus(
-      cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_ECC_ENABLED, device));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to query ECC status: " << status;
-    return false;
-  }
-
-  *result = value;
-  return true;
-}
-
-bool GpuDriver::GetDeviceTotalMemory(CUdevice device, uint64_t* result) {
-  size_t value{};
-  auto status = cuda::ToStatus(cuDeviceTotalMem(&value, device));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to query total available memory: " << status;
-    return false;
-  }
-
-  *result = value;
-  return true;
-}
-
-std::string GpuDriver::GetPCIBusID(CUdevice device) {
-  std::string pci_bus_id;
-  static const int kBufferSize = 64;
-  absl::InlinedVector<char, 4> chars(kBufferSize);
-  chars[kBufferSize - 1] = '\0';
-  auto status = cuda::ToStatus(
-      cuDeviceGetPCIBusId(chars.begin(), kBufferSize - 1, device));
-  if (!status.ok()) {
-    LOG(ERROR) << "failed to query PCI bus id for device: " << status;
-    return pci_bus_id;
-  }
-  pci_bus_id = chars.begin();
-  return pci_bus_id;
 }
 
 absl::StatusOr<int> GpuDriver::GetMaxOccupiedBlocksPerCore(

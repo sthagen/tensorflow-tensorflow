@@ -128,10 +128,7 @@ class RocmExecutor : public GpuExecutor {
     return GpuDriver::HostDeallocate(gpu_context(), location);
   }
 
-  absl::StatusOr<MemoryType> GetPointerMemorySpace(const void* ptr) override {
-    return GpuDriver::GetPointerMemorySpace(
-        reinterpret_cast<GpuDevicePtr>(const_cast<void*>(ptr)));
-  }
+  absl::StatusOr<MemoryType> GetPointerMemorySpace(const void* ptr) override;
 
   Stream* FindAllocatedStream(void* gpu_stream) override {
     absl::MutexLock lock(&alive_gpu_streams_mu_);
@@ -192,7 +189,7 @@ class RocmExecutor : public GpuExecutor {
 
   // Handle for the ROCm device being operated on. Immutable
   // post-initialization.
-  GpuDeviceHandle device_;
+  hipDevice_t device_;
 
   // Reader/writer lock for mutable data structures on this object.
   absl::Mutex mu_;

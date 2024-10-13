@@ -69,18 +69,6 @@ class GpuDriver {
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#stream-management
   static void DestroyStream(Context* context, GpuStreamHandle stream);
 
-  // Allocates a GPU memory space of size bytes associated with the given
-  // context via cuMemAlloc/hipMalloc.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gb82d2a09844a58dd9e744dc31e8aa467
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  static void* DeviceAllocate(Context* context, uint64_t bytes);
-
-  // Deallocates a GPU memory space of size bytes associated with the given
-  // context via cuMemFree/hipFree.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g89b3f154e17cc89b6eea277dbdf5c93a
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  static void DeviceDeallocate(Context* context, void* location);
-
   // Allocates a unified memory space of size bytes associated with the given
   // context via cuMemAllocManaged.
   // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gb347ded34dc326af404aa02af5388a32
@@ -421,38 +409,9 @@ class GpuDriver {
 
   // -- Pointer-specific calls.
 
-  // Returns the memory space addressed by pointer.
-  static absl::StatusOr<MemoryType> GetPointerMemorySpace(GpuDevicePtr pointer);
-
   // Returns the base address and size of the device pointer dptr.
   static absl::Status GetPointerAddressRange(GpuDevicePtr dptr,
                                              GpuDevicePtr* base, size_t* size);
-
-  // -- Device-specific calls.
-
-  // Returns a grab-bag of device properties in a caller-owned device_properties
-  // structure for device_ordinal via cuDeviceGetProperties.
-  //
-  // This call is deprecated in the NVIDIA driver API; its replacement is
-  // GetDeviceAttribute
-  //
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__DEVICE__DEPRECATED.html#group__CUDA__DEVICE__DEPRECATED_1g65a5b4e25186bd257df80b98c98cffe6
-  static bool GetDeviceProperties(GpuDeviceProperty* device_properties,
-                                  int device_ordinal);
-
-  // Returns whether ECC is enabled for the given GpuDeviceHandle via
-  // cuDeviceGetattribute with CU_DEVICE_ATTRIBUTE_ECC_ENABLED.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__DEVICE.html#group__CUDA__DEVICE_1g9c3e1414f0ad901d3278a4d6645fc266
-  static bool IsEccEnabled(GpuDeviceHandle device, bool* result);
-
-  // Returns the total amount of memory available for allocation by the CUDA
-  // context, in bytes, via cuDeviceTotalMem.
-  static bool GetDeviceTotalMemory(GpuDeviceHandle device, uint64_t* result);
-
-  // Returns a PCI bus id string for the device.
-  // [domain]:[bus]:[device].[function]
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g85295e7d9745ab8f0aa80dd1e172acfc
-  static std::string GetPCIBusID(GpuDeviceHandle device);
 
   // -- Context- and device-independent calls.
 

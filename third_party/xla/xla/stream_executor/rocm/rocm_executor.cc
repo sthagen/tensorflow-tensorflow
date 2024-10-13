@@ -26,6 +26,7 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/base/casts.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/numeric/int128.h"
 #include "absl/status/status.h"
@@ -37,6 +38,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/types/span.h"
+#include "rocm/include/hip/driver_types.h"
 #include "rocm/include/hip/hip_runtime.h"
 #include "rocm/include/hip/hip_version.h"
 #include "rocm/rocm_config.h"
@@ -81,6 +83,7 @@ limitations under the License.
 #include "tsl/platform/errors.h"
 #include "tsl/platform/fingerprint.h"
 #include "tsl/platform/logging.h"
+#include "tsl/platform/numbers.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/threadpool.h"
 
@@ -394,6 +397,71 @@ absl::Status EnablePeerAccess(Context* from, Context* to) {
 
   return absl::OkStatus();
 }
+
+std::string GetPCIBusID(hipDevice_t device) {
+  std::string pci_bus_id;
+  static const int kBufferSize = 64;
+  absl::InlinedVector<char, 4> chars(kBufferSize);
+  chars[kBufferSize - 1] = '\0';
+  hipError_t res =
+      wrap::hipDeviceGetPCIBusId(chars.begin(), kBufferSize - 1, device);
+  if (res != hipSuccess) {
+    LOG(ERROR) << "failed to query PCI bus id for device: " << ToString(res);
+    return pci_bus_id;
+  }
+  pci_bus_id = chars.begin();
+  return pci_bus_id;
+}
+
+bool GetDeviceProperties(hipDeviceProp_t* device_properties,
+                         int device_ordinal) {
+  hipError_t res =
+      wrap::hipGetDeviceProperties(device_properties, device_ordinal);
+  if (res != hipSuccess) {
+    LOG(ERROR) << "failed to query device properties: " << ToString(res);
+    return false;
+  }
+
+  return true;
+}
+
+// Allocates memory on the GPU device.
+void* DeviceAllocate(Context* context, uint64_t bytes) {
+  if (bytes == 0) {
+    return nullptr;
+  }
+
+  ScopedActivateContext activated{context};
+  hipDeviceptr_t result = 0;
+  hipError_t res = wrap::hipMalloc(&result, bytes);
+  if (res != hipSuccess) {
+    // LOG(INFO) because this isn't always important to users (e.g. BFCAllocator
+    // implements a retry if the first allocation fails).
+    LOG(INFO) << "failed to allocate "
+              << tsl::strings::HumanReadableNumBytes(bytes) << " (" << bytes
+              << " bytes) from device: " << ToString(res);
+    return nullptr;
+  }
+  void* ptr = reinterpret_cast<void*>(result);
+  VLOG(2) << "allocated " << ptr << " for device " << context->device_ordinal()
+          << " of " << bytes << " bytes";
+  return ptr;
+}
+
+// Deallocates memory on the GPU device that was previously allocated via
+// DeviceAllocate.
+void DeviceDeallocate(Context* context, void* location) {
+  ScopedActivateContext activation{context};
+  hipDeviceptr_t pointer = absl::bit_cast<hipDeviceptr_t>(location);
+  hipError_t res = wrap::hipFree(pointer);
+  if (res != hipSuccess) {
+    LOG(ERROR) << "failed to free device memory at " << location
+               << "; result: " << ToString(res);
+  } else {
+    VLOG(2) << "deallocated " << location << " for device "
+            << context->device_ordinal();
+  }
+}
 }  // namespace
 
 RocmExecutor::~RocmExecutor() {
@@ -646,11 +714,11 @@ DeviceMemoryBase RocmExecutor::Allocate(uint64_t size, int64_t memory_space) {
     return DeviceMemoryBase(GpuDriver::HostAllocate(gpu_context(), size), size);
   }
   CHECK_EQ(memory_space, 0);
-  return DeviceMemoryBase(GpuDriver::DeviceAllocate(gpu_context(), size), size);
+  return DeviceMemoryBase(DeviceAllocate(gpu_context(), size), size);
 }
 
 void RocmExecutor::Deallocate(DeviceMemoryBase* mem) {
-  GpuDriver::DeviceDeallocate(gpu_context(), mem->opaque());
+  DeviceDeallocate(gpu_context(), mem->opaque());
 }
 
 bool RocmExecutor::SynchronizeAllActivity() {
@@ -853,7 +921,7 @@ RocmExecutor::CreateDeviceDescription(int device_ordinal) {
   DeviceDescription desc;
 
   {
-    std::string pci_bus_id = GpuDriver::GetPCIBusID(device);
+    std::string pci_bus_id = GetPCIBusID(device);
 
     // Lower the hex characters to match sysfs.
     pci_bus_id = absl::AsciiStrToLower(pci_bus_id);
@@ -865,7 +933,7 @@ RocmExecutor::CreateDeviceDescription(int device_ordinal) {
   }
 
   hipDeviceProp_t prop;
-  if (GpuDriver::GetDeviceProperties(&prop, device_ordinal)) {
+  if (GetDeviceProperties(&prop, device_ordinal)) {
     desc.set_threads_per_block_limit(prop.maxThreadsPerBlock);
 
     ThreadDim thread_dim_limit;
@@ -886,11 +954,8 @@ RocmExecutor::CreateDeviceDescription(int device_ordinal) {
     desc.set_l2_cache_size(prop.l2CacheSize);
   }
 
-  {
-    bool ecc_enabled = false;
-    (void)GpuDriver::IsEccEnabled(device, &ecc_enabled);
-    desc.set_ecc_enabled(ecc_enabled);
-  }
+  // No way to query ECC status from the API.
+  desc.set_ecc_enabled(false);
 
   uint64_t device_memory_size = -1;
   (void)RocmContext::GetDeviceTotalMemory(device, &device_memory_size);
@@ -949,6 +1014,29 @@ RocmExecutor::CreateDeviceDescription(int device_ordinal) {
       absl::StrFormat("%dB RAM, %d cores", device_memory_size, core_count));
 
   return std::make_unique<DeviceDescription>(std::move(desc));
+}
+
+absl::StatusOr<MemoryType> RocmExecutor::GetPointerMemorySpace(
+    const void* ptr) {
+  hipDeviceptr_t pointer =
+      reinterpret_cast<hipDeviceptr_t>(const_cast<void*>(ptr));
+  unsigned int value;
+  hipError_t result = wrap::hipPointerGetAttribute(
+      &value, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, pointer);
+  if (result == hipSuccess) {
+    switch (value) {
+      case hipMemoryTypeDevice:
+        return MemoryType::kDevice;
+      case hipMemoryTypeHost:
+        return MemoryType::kHost;
+      default:
+        return absl::InternalError(
+            absl::StrCat("unknown memory space provided by ROCM API: ", value));
+    }
+  }
+
+  return absl::InternalError(absl::StrCat(
+      "failed to query device pointer for memory space: ", ToString(result)));
 }
 
 }  // namespace gpu

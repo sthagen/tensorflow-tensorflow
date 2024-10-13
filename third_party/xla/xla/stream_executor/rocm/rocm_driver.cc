@@ -610,41 +610,6 @@ void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   }
 }
 
-void* GpuDriver::DeviceAllocate(Context* context, uint64_t bytes) {
-  if (bytes == 0) {
-    return nullptr;
-  }
-
-  ScopedActivateContext activated{context};
-  hipDeviceptr_t result = 0;
-  hipError_t res = wrap::hipMalloc(&result, bytes);
-  if (res != hipSuccess) {
-    // LOG(INFO) because this isn't always important to users (e.g. BFCAllocator
-    // implements a retry if the first allocation fails).
-    LOG(INFO) << "failed to allocate "
-              << tsl::strings::HumanReadableNumBytes(bytes) << " (" << bytes
-              << " bytes) from device: " << ToString(res);
-    return nullptr;
-  }
-  void* ptr = reinterpret_cast<void*>(result);
-  VLOG(2) << "allocated " << ptr << " for device " << context->device_ordinal()
-          << " of " << bytes << " bytes";
-  return ptr;
-}
-
-void GpuDriver::DeviceDeallocate(Context* context, void* location) {
-  ScopedActivateContext activation{context};
-  hipDeviceptr_t pointer = absl::bit_cast<hipDeviceptr_t>(location);
-  hipError_t res = wrap::hipFree(pointer);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to free device memory at " << location
-               << "; result: " << ToString(res);
-  } else {
-    VLOG(2) << "deallocated " << location << " for device "
-            << context->device_ordinal();
-  }
-}
-
 void* GpuDriver::UnifiedMemoryAllocate(Context* context, uint64_t bytes) {
   ScopedActivateContext activated{context};
   hipDeviceptr_t result = 0;
@@ -766,72 +731,11 @@ absl::Status GpuDriver::GetPointerAddressRange(hipDeviceptr_t dptr,
                       reinterpret_cast<void*>(dptr), ToString(result).c_str()));
 }
 
-absl::StatusOr<MemoryType> GpuDriver::GetPointerMemorySpace(
-    hipDeviceptr_t pointer) {
-  unsigned int value;
-  hipError_t result = wrap::hipPointerGetAttribute(
-      &value, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, pointer);
-  if (result == hipSuccess) {
-    switch (value) {
-      case hipMemoryTypeDevice:
-        return MemoryType::kDevice;
-      case hipMemoryTypeHost:
-        return MemoryType::kHost;
-      default:
-        return absl::InternalError(
-            absl::StrCat("unknown memory space provided by ROCM API: ", value));
-    }
-  }
-
-  return absl::InternalError(absl::StrCat(
-      "failed to query device pointer for memory space: ", ToString(result)));
-}
-
 absl::StatusOr<int32_t> GpuDriver::GetDriverVersion() {
   int32_t version;
   TF_RETURN_IF_ERROR(ToStatus(wrap::hipDriverGetVersion(&version),
                               "Could not get driver version"));
   return version;
-}
-
-bool GpuDriver::GetDeviceProperties(hipDeviceProp_t* device_properties,
-                                    int device_ordinal) {
-  hipError_t res =
-      wrap::hipGetDeviceProperties(device_properties, device_ordinal);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to query device properties: " << ToString(res);
-    return false;
-  }
-
-  return true;
-}
-
-bool GpuDriver::IsEccEnabled(hipDevice_t device, bool* result) {
-  int value = -1;
-  hipError_t res = hipSuccess;
-  // TODO(ROCm) implement this feature in HIP
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to query ECC status: " << ToString(res);
-    return false;
-  }
-
-  *result = value;
-  return true;
-}
-
-std::string GpuDriver::GetPCIBusID(hipDevice_t device) {
-  std::string pci_bus_id;
-  static const int kBufferSize = 64;
-  absl::InlinedVector<char, 4> chars(kBufferSize);
-  chars[kBufferSize - 1] = '\0';
-  hipError_t res =
-      wrap::hipDeviceGetPCIBusId(chars.begin(), kBufferSize - 1, device);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "failed to query PCI bus id for device: " << ToString(res);
-    return pci_bus_id;
-  }
-  pci_bus_id = chars.begin();
-  return pci_bus_id;
 }
 
 absl::StatusOr<int> GpuDriver::GetMaxOccupiedBlocksPerCore(
