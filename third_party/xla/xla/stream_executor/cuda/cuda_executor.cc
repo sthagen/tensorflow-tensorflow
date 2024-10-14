@@ -545,6 +545,15 @@ static CUdeviceptr AsCudaDevicePtr(DeviceMemoryBase* gpu_mem) {
   return AsCudaDevicePtr(*gpu_mem);
 }
 
+absl::StatusOr<DeviceMemoryBase> CudaExecutor::GetMemoryRange(
+    const DeviceMemoryBase& location) {
+  CUdeviceptr device_pointer;
+  size_t size;
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuMemGetAddressRange(&device_pointer, &size, AsCudaDevicePtr(location))));
+  return DeviceMemoryBase(reinterpret_cast<void*>(device_pointer), size);
+}
+
 CudaExecutor::~CudaExecutor() {
   CHECK(kernel_to_gpu_binary_.empty()) << "GpuExecutor has live kernels.";
   CHECK(gpu_binary_to_module_.empty()) << "GpuExecutor has loaded modules.";
@@ -582,7 +591,6 @@ void* CudaExecutor::UnifiedMemoryAllocate(uint64_t size) {
 }
 
 absl::Status CudaExecutor::Init() {
-  TF_RETURN_IF_ERROR(GpuDriver::Init());
   TF_ASSIGN_OR_RETURN(device_, GetDevice(device_ordinal()));
   TF_ASSIGN_OR_RETURN(Context * context,
                       CudaContext::Create(device_ordinal(), device_));

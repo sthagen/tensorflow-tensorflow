@@ -57,39 +57,10 @@ namespace gpu {
 // Thread safety: these functions should not be used from signal handlers.
 class GpuDriver {
  public:
-  // Wraps a call to cuInit/hipInit with logging to help indicate what has gone
-  // wrong in the case of failure. Safe to call multiple times; will be fast on
-  // all calls after the first.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#initialization
-  static absl::Status Init();
-
   // Destroys a CUDA/HIP stream associated with the given context.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__STREAM.html#group__CUDA__STREAM_1g244c8833de4596bcd31a06cdf21ee758
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#stream-management
   static void DestroyStream(Context* context, GpuStreamHandle stream);
-
-  // Launches a CUDA/ROCm kernel via cuLaunchKernel/hipModuleLaunchKernel.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1gb8f3dc3031b40da29d5f9a7139e52e15
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#execution-control
-  static absl::Status LaunchKernel(
-      Context* context, absl::string_view kernel_name,
-      GpuFunctionHandle function, unsigned int grid_dim_x,
-      unsigned int grid_dim_y, unsigned int grid_dim_z,
-      unsigned int block_dim_x, unsigned int block_dim_y,
-      unsigned int block_dim_z, unsigned int shared_mem_bytes,
-      GpuStreamHandle stream, void** kernel_params, void** extra);
-
-  // Launches a CUDA/ROCm kernel via cuLaunchKernelEx/hipModuleLaunchKernelEx.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1gb9c891eb6bb8f4089758e64c9c976db9
-  static absl::Status LaunchKernel(
-      Context* context, absl::string_view kernel_name,
-      GpuFunctionHandle function, unsigned int cluster_dim_x,
-      unsigned int cluster_dim_y, unsigned int cluster_dim_z,
-      unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,
-      unsigned int block_dim_x, unsigned int block_dim_y,
-      unsigned int block_dim_z, unsigned int shared_mem_bytes,
-      GpuStreamHandle stream, void** kernel_params, void** extra);
 
   // Creates a new GPU graph.
   // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gd885f719186010727b75c3315f865fdf
@@ -327,13 +298,6 @@ class GpuDriver {
   // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1gab95a78143bae7f21eebb978f91e7f3f
   typedef void (*StreamCallback)(void* data);
 
-  // Enqueues a callback operation into stream.
-  // See StreamCallback above and the NVIDIA documentation for additional
-  // details.
-  static absl::Status AddStreamCallback(Context* context,
-                                        GpuStreamHandle stream,
-                                        StreamCallback callback, void* data);
-
   // Blocks the calling thread until the operations enqueued onto stream have
   // been completed, via cuStreamSynchronize.
   //
@@ -344,12 +308,6 @@ class GpuDriver {
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__STREAM.html#group__CUDA__STREAM_1g15e49dd91ec15991eb7c0a741beb7dad
   static absl::Status SynchronizeStream(Context* context,
                                         GpuStreamHandle stream);
-
-  // -- Pointer-specific calls.
-
-  // Returns the base address and size of the device pointer dptr.
-  static absl::Status GetPointerAddressRange(GpuDevicePtr dptr,
-                                             GpuDevicePtr* base, size_t* size);
 
   // -- Context- and device-independent calls.
 

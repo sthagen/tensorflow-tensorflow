@@ -57,34 +57,6 @@ limitations under the License.
 namespace stream_executor {
 namespace gpu {
 
-namespace {
-
-// Actually performs the work of CUDA initialization. Wrapped up in one-time
-// execution guard.
-static absl::Status InternalInit() {
-  absl::Status status =
-      cuda::ToStatus(cuInit(0 /* = flags */), "Failed call to cuInit");
-  if (status.ok()) {
-    return status;
-  }
-
-  LOG(ERROR) << "failed call to cuInit: " << status;
-
-  Diagnostician::LogDiagnosticInformation();
-  return status;
-}
-
-}  // namespace
-
-absl::Status GpuDriver::Init() {
-  // Cached return value from calling InternalInit(), as cuInit need only be
-  // called once, but GpuDriver::Init may be called many times.
-  static absl::Status* init_retval = [] {
-    return new absl::Status(InternalInit());
-  }();
-  return *init_retval;
-}
-
 absl::Status GpuDriver::CreateGraph(CUgraph* graph) {
   VLOG(2) << "Create new CUDA graph";
   TF_RETURN_IF_ERROR(cuda::ToStatus(cuGraphCreate(graph, /*flags=*/0),
@@ -649,106 +621,6 @@ absl::Status GpuDriver::GraphAddChildNode(CUgraphNode* node, CUgraph graph,
                         "Failed to set CUDA graph child node params");
 }
 
-absl::Status GpuDriver::LaunchKernel(
-    Context* context, absl::string_view kernel_name, CUfunction function,
-    unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,
-    unsigned int block_dim_x, unsigned int block_dim_y,
-    unsigned int block_dim_z, unsigned int shared_mem_bytes, CUstream stream,
-    void** kernel_params, void** extra) {
-  ScopedActivateContext activation(context);
-  VLOG(2) << "launching kernel: " << kernel_name << "; gdx: " << grid_dim_x
-          << " gdy: " << grid_dim_y << " gdz: " << grid_dim_z
-          << " bdx: " << block_dim_x << " bdy: " << block_dim_y
-          << " bdz: " << block_dim_z
-          << "; shared_mem_bytes: " << shared_mem_bytes;
-
-  // TODO(ezhulenev): Why do we do it on every call to launch kernel? This
-  // should be moved one level up to se::Kernel level, and done just once (or
-  // updated once we get a new larger shared memory request).
-  if (shared_mem_bytes != 0) {
-    TF_RETURN_IF_ERROR(cuda::ToStatus(
-        cuFuncSetAttribute(function,
-                           CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                           shared_mem_bytes),
-        "Failed to set shared memory size"));
-  }
-
-  return cuda::ToStatus(
-      cuLaunchKernel(function, grid_dim_x, grid_dim_y, grid_dim_z, block_dim_x,
-                     block_dim_y, block_dim_z, shared_mem_bytes, stream,
-                     kernel_params, extra),
-      absl::StrCat("Failed to launch CUDA kernel: ", kernel_name,
-                   "; block dims: ", block_dim_x, "x", block_dim_y, "x",
-                   block_dim_z, "; grid dims: ", grid_dim_x, "x", grid_dim_y,
-                   "x", grid_dim_z,
-                   "; shared memory size: ", shared_mem_bytes));
-}
-
-absl::Status GpuDriver::LaunchKernel(
-    Context* context, absl::string_view kernel_name, CUfunction function,
-    unsigned int cluster_dim_x, unsigned int cluster_dim_y,
-    unsigned int cluster_dim_z, unsigned int grid_dim_x,
-    unsigned int grid_dim_y, unsigned int grid_dim_z, unsigned int block_dim_x,
-    unsigned int block_dim_y, unsigned int block_dim_z,
-    unsigned int shared_mem_bytes, GpuStreamHandle stream, void** kernel_params,
-    void** extra) {
-  ScopedActivateContext activation(context);
-  VLOG(2) << "launching kernel: " << kernel_name << "; cdx: " << cluster_dim_x
-          << " cdy: " << cluster_dim_y << " cdz: " << cluster_dim_z
-          << " gdx: " << grid_dim_x << " gdy: " << grid_dim_y
-          << " gdz: " << grid_dim_z << " bdx: " << block_dim_x
-          << " bdy: " << block_dim_y << " bdz: " << block_dim_z
-          << "; shared_mem_bytes: " << shared_mem_bytes;
-
-  // TODO(ezhulenev): Why do we do it on every call to launch kernel? This
-  // should be moved one level up to se::Kernel level, and done just once (or
-  // updated once we get a new larger shared memory request).
-  if (shared_mem_bytes != 0) {
-    TF_RETURN_IF_ERROR(cuda::ToStatus(
-        cuFuncSetAttribute(function,
-                           CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                           shared_mem_bytes),
-        "Failed to set shared memory size"));
-  }
-
-  CUlaunchConfig launch_config;
-  memset(&launch_config, 0, sizeof(launch_config));
-  launch_config.blockDimX = block_dim_x;
-  launch_config.blockDimY = block_dim_y;
-  launch_config.blockDimZ = block_dim_z;
-  launch_config.gridDimX = grid_dim_x;
-  launch_config.gridDimY = grid_dim_y;
-  launch_config.gridDimZ = grid_dim_z;
-  launch_config.hStream = stream;
-  launch_config.sharedMemBytes = shared_mem_bytes;
-
-  CUlaunchAttribute cluster_dims;
-  memset(&cluster_dims, 0, sizeof(cluster_dims));
-  cluster_dims.id = CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION;
-  cluster_dims.value.clusterDim.x = cluster_dim_x;
-  cluster_dims.value.clusterDim.y = cluster_dim_y;
-  cluster_dims.value.clusterDim.z = cluster_dim_z;
-
-  launch_config.attrs = &cluster_dims;
-  launch_config.numAttrs = 1;
-
-  return cuda::ToStatus(
-      cuLaunchKernelEx(&launch_config, function, kernel_params, extra),
-      absl::StrCat("Failed to launch CUDA kernel: ", kernel_name,
-                   "; cluster dims: ", cluster_dim_x, "x", cluster_dim_y, "x",
-                   cluster_dim_z, "; block dims: ", block_dim_x, "x",
-                   block_dim_y, "x", block_dim_z, "; grid dims: ", grid_dim_x,
-                   "x", grid_dim_y, "x", grid_dim_z,
-                   "; shared memory size: ", shared_mem_bytes));
-}
-
-absl::Status GpuDriver::AddStreamCallback(Context* context, CUstream stream,
-                                          StreamCallback callback, void* data) {
-  // Note: flags param is required to be zero according to CUDA 6.0.
-  return cuda::ToStatus(cuLaunchHostFunc(stream, callback, data));
-}
-
-
 void GpuDriver::DestroyStream(Context* context, GpuStreamHandle stream) {
   if (stream == nullptr) {
     return;
@@ -786,12 +658,6 @@ int GpuDriver::GetDeviceCount() {
   }
 
   return device_count;
-}
-
-absl::Status GpuDriver::GetPointerAddressRange(CUdeviceptr dptr,
-                                               CUdeviceptr* base,
-                                               size_t* size) {
-  return cuda::ToStatus(cuMemGetAddressRange(base, size, dptr));
 }
 
 absl::StatusOr<int32_t> GpuDriver::GetDriverVersion() {

@@ -23,7 +23,6 @@ limitations under the License.
 #include <optional>
 #include <variant>
 
-#include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "xla/stream_executor/event_based_timer.h"
@@ -70,9 +69,6 @@ class GpuStream : public StreamCommon {
     return gpu_stream_;
   }
 
-  absl::Status DoHostCallbackWithStatus(
-      absl::AnyInvocable<absl::Status() &&> callback) override;
-
   void set_name(absl::string_view name) override;
   absl::StatusOr<std::unique_ptr<EventBasedTimer>> CreateEventBasedTimer(
       bool use_delay_kernel) override;
@@ -84,9 +80,10 @@ class GpuStream : public StreamCommon {
 
  private:
   // Helper method to launch a kernel with optional cluster dimensions.
-  absl::Status Launch(const ThreadDim& thread_dims, const BlockDim& block_dims,
-                      const std::optional<ClusterDim>& cluster_dims,
-                      const Kernel& kernel, const KernelArgs& args);
+  virtual absl::Status Launch(const ThreadDim& thread_dims,
+                              const BlockDim& block_dims,
+                              const std::optional<ClusterDim>& cluster_dims,
+                              const Kernel& kernel, const KernelArgs& args) = 0;
 
   GpuExecutor* parent_;         // Executor that spawned this stream.
   GpuStreamHandle gpu_stream_;  // Wrapped CUDA stream handle.

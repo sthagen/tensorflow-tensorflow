@@ -592,7 +592,6 @@ cc_library(
         ":collective_ops_utils",
         ":constant_value",
         ":hlo_dce",
-        ":hlo_pass",
         ":tuple_points_to_analysis",
         ":value_range",
         "//xla:comparison_util",
@@ -2522,6 +2521,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

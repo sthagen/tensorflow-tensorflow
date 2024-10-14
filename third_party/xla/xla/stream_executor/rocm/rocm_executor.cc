@@ -498,6 +498,28 @@ bool RocmExecutor::UnloadModule(ModuleHandle module_handle) {
   return UnloadGpuBinary(gpu_binary);
 }
 
+absl::StatusOr<DeviceMemoryBase> RocmExecutor::GetMemoryRange(
+    const DeviceMemoryBase& location) {
+  hipDeviceptr_t device_pointer;
+  size_t size;
+  hipError_t result = wrap::hipMemGetAddressRange(
+      &device_pointer, &size, const_cast<void*>(location.opaque()));
+  if (result == hipSuccess) {
+    return DeviceMemoryBase(device_pointer, size);
+  } else if (result == hipErrorNotFound) {
+    // We differentiate between "this pointer is unknown" (return here) and
+    // "there was an internal error while performing this operation" (return
+    // below).
+    return absl::NotFoundError(absl::StrFormat("not a device pointer %p; %s",
+                                               location.opaque(),
+                                               ToString(result).c_str()));
+  }
+
+  return absl::InternalError(
+      absl::StrFormat("failed to get pointer into for device pointer %p; %s",
+                      location.opaque(), ToString(result).c_str()));
+}
+
 absl::StatusOr<std::shared_ptr<DeviceMemoryBase>>
 RocmExecutor::CreateOrShareConstant(Stream* stream,
                                     absl::Span<const uint8_t> content) {
@@ -597,8 +619,6 @@ void RocmExecutor::UnloadKernel(const Kernel* kernel) {
 }
 
 absl::Status RocmExecutor::Init() {
-  TF_RETURN_IF_ERROR(GpuDriver::Init());
-
   TF_ASSIGN_OR_RETURN(device_, GetDevice(device_ordinal()));
 
   TF_ASSIGN_OR_RETURN(rocm_context_,

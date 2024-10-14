@@ -797,10 +797,19 @@ absl::Status RunOptimizationPasses(
     pipeline.AddPass<DotDecomposer>();
     // Only merge "smallish" dots.  This threshold defaults to 32MB today, with
     // a flag to override.
+    // Do not merge dots when they are assigned different stream ids.
+    std::function<bool(const HloInstruction* dot_a,
+                       const HloInstruction* dot_b)>
+        can_merge = [&](const HloInstruction* dot_a,
+                        const HloInstruction* dot_b) -> bool {
+      return dot_a->backend_config<GpuBackendConfig>()->operation_queue_id() ==
+             dot_b->backend_config<GpuBackendConfig>()->operation_queue_id();
+    };
     pipeline.AddPass<DotMerger>(
-        /*max_size_to_merge=*/int64_t{
-            debug_options.xla_gpu_dot_merger_threshold_mb()}
-        << 20);
+        /*max_size_to_merge=*/int64_t{debug_options
+                                          .xla_gpu_dot_merger_threshold_mb()}
+            << 20,
+        can_merge);
     pipeline.AddPass<SortSimplifier>();
     pipeline.AddPass<TupleSimplifier>();
     pipeline.AddPass<WhileLoopConstantSinking>();
@@ -1583,12 +1592,6 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
-
-  pipeline.AddPass<LayoutNormalization>(&NormalizeLayoutForGpuCustomCalls);
-
-  // Layout normalization will create scatters that are not simplified and
-  // also have unsorted update_window_dims.
-  pipeline.AddPass<ScatterSimplifier>();
 
   pipeline.AddPass<HostOffloader>(
       static_cast<int64_t>(stream_executor::MemoryType::kHost));
