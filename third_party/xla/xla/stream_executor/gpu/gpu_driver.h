@@ -69,46 +69,6 @@ class GpuDriver {
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#stream-management
   static void DestroyStream(Context* context, GpuStreamHandle stream);
 
-  // Allocates a unified memory space of size bytes associated with the given
-  // context via cuMemAllocManaged.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gb347ded34dc326af404aa02af5388a32
-  // (supported on CUDA only)
-  static void* UnifiedMemoryAllocate(Context* context, uint64_t bytes);
-
-  // Deallocates a unified memory space of size bytes associated with the given
-  // context via cuMemFree.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g89b3f154e17cc89b6eea277dbdf5c93a
-  // (supported on CUDA only)
-  static void UnifiedMemoryDeallocate(Context* context, void* location);
-
-  // Allocates page-locked and CUDA-registered memory on the host via
-  // cuMemAllocHost/hipHostMalloc.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gdd8311286d2c2691605362c689bc64e0
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  static void* HostAllocate(Context* context, uint64_t bytes);
-
-  // Deallocates a location created by HostAllocate, via
-  // cuMemFreeHost/hipHostFree.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g62e0fdbe181dab6b1c90fa1a51c7b92c
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  static void HostDeallocate(Context* context, void* location);
-
-  // Registers a memory region at location of size bytes via
-  // cuMemHostRegister/hipHostRegister.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gf0a9fe11544326dabd743b7aa6b54223
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  static bool HostRegister(Context* context, void* location, uint64_t bytes);
-
-  // Unregisters a memory region that was previously registered at location via
-  // cuMemHostUnregister/hipHostUnregister.
-  //
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g63f450c8125359be87b7623b1c0b2a14
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#memory-management
-  //
-  // TODO(leary) verify an error will be returned if the location wasn't
-  // previously registered.
-  static bool HostUnregister(Context* context, void* location);
-
   // Launches a CUDA/ROCm kernel via cuLaunchKernel/hipModuleLaunchKernel.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html#group__CUDA__EXEC_1gb8f3dc3031b40da29d5f9a7139e52e15
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#execution-control
@@ -355,28 +315,6 @@ class GpuDriver {
   static absl::Status GraphExecChildNodeSetParams(GpuGraphExecHandle exec,
                                                   GpuGraphNodeHandle node,
                                                   GpuGraphHandle child);
-
-  // Performs a synchronous memset of the device memory segment via cuMemsetD8.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g6e582bf866e9e2fb014297bfaf354d7b
-  static absl::Status SynchronousMemsetUint8(Context* context,
-                                             GpuDevicePtr location,
-                                             uint8_t value, size_t size);
-
-  // Performs a synchronous memset of the device memory segment via cuMemsetD32.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g983e8d8759acd1b64326317481fbf132
-  static absl::Status SynchronousMemsetUint32(Context* context,
-                                              GpuDevicePtr location,
-                                              uint32_t value,
-                                              size_t uint32_count);
-
-  // -- Synchronous memcopies.
-  // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g4d32266788c440b0220b1a9ba5795169
-
-  static absl::Status SynchronousMemcpyD2H(Context* context, void* host_dst,
-                                           GpuDevicePtr gpu_src, uint64_t size);
-  static absl::Status SynchronousMemcpyH2D(Context* context,
-                                           GpuDevicePtr gpu_dst,
-                                           const void* host_src, uint64_t size);
 
   // The CUDA stream callback type signature.
   // The data passed to AddStreamCallback is subsequently passed to this

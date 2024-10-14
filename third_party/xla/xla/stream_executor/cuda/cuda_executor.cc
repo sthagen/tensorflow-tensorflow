@@ -70,9 +70,11 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_types.h"
 #include "xla/stream_executor/gpu/read_numa_node.h"
 #include "xla/stream_executor/gpu/scoped_activate_context.h"
+#include "xla/stream_executor/host_memory_allocation.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/kernel_spec.h"
 #include "xla/stream_executor/launch_dim.h"
+#include "xla/stream_executor/memory_allocation.h"
 #include "xla/stream_executor/module_spec.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/plugin_registry.h"
@@ -503,6 +505,29 @@ void DeviceDeallocate(Context* context, void* location) {
   }
 }
 
+// Allocates memory on the host.
+void* HostAllocate(Context* context, uint64_t bytes) {
+  ScopedActivateContext activation(context);
+  void* host_mem = nullptr;
+  // "Portable" memory is visible to all CUDA contexts. Safe for our use model.
+  auto status = cuda::ToStatus(
+      cuMemHostAlloc(&host_mem, bytes, CU_MEMHOSTALLOC_PORTABLE));
+  if (!status.ok()) {
+    LOG(ERROR) << "failed to alloc " << bytes << " bytes on host: " << status;
+  }
+  return host_mem;
+}
+
+// Deallocates memory allocated via HostAllocate.
+void HostDeallocate(Context* context, void* location) {
+  ScopedActivateContext activation(context);
+  auto status = cuda::ToStatus(cuMemFreeHost(location));
+  if (!status.ok()) {
+    LOG(ERROR) << "error deallocating host memory at " << location << ": "
+               << status;
+  }
+}
+
 }  // namespace
 
 // Given const GPU memory, returns a libcuda device pointer datatype, suitable
@@ -524,6 +549,36 @@ CudaExecutor::~CudaExecutor() {
   CHECK(kernel_to_gpu_binary_.empty()) << "GpuExecutor has live kernels.";
   CHECK(gpu_binary_to_module_.empty()) << "GpuExecutor has loaded modules.";
   set_context(nullptr);
+}
+
+void CudaExecutor::UnifiedMemoryDeallocate(void* location) {
+  ScopedActivateContext activation(gpu_context());
+  CUdeviceptr pointer = absl::bit_cast<CUdeviceptr>(location);
+  auto status = cuda::ToStatus(cuMemFree(pointer));
+  if (!status.ok()) {
+    LOG(ERROR) << "failed to free unified memory at " << location
+               << "; result: " << status;
+  } else {
+    VLOG(2) << "deallocated unified memory at " << location << " for context "
+            << gpu_context();
+  }
+}
+
+void* CudaExecutor::UnifiedMemoryAllocate(uint64_t size) {
+  ScopedActivateContext activation(gpu_context());
+  CUdeviceptr result = 0;
+  // "Portable" memory is visible to all CUDA contexts. Safe for our use model.
+  auto status =
+      cuda::ToStatus(cuMemAllocManaged(&result, size, CU_MEM_ATTACH_GLOBAL));
+  if (!status.ok()) {
+    LOG(ERROR) << "failed to alloc " << size
+               << " bytes unified memory; result: " << status;
+    return nullptr;
+  }
+  void* ptr = reinterpret_cast<void*>(result);
+  VLOG(2) << "allocated " << ptr << " for context " << gpu_context() << " of "
+          << size << " bytes in unified memory";
+  return ptr;
 }
 
 absl::Status CudaExecutor::Init() {
@@ -631,7 +686,7 @@ absl::StatusOr<std::unique_ptr<Kernel>> CudaExecutor::LoadKernel(
     VLOG(2) << "Resolve CUDA kernel " << *kernel_name
             << " from symbol pointer: " << symbol;
     TF_ASSIGN_OR_RETURN(
-        GpuFunctionHandle function,
+        CUfunction function,
         CudaRuntime::GetFuncBySymbol(spec.in_process_symbol().symbol()));
     cuda_kernel->set_gpu_function(function);
 
@@ -643,7 +698,7 @@ absl::StatusOr<std::unique_ptr<Kernel>> CudaExecutor::LoadKernel(
   // from a module, as CUDA runtime did that automatically for us.
   if (!spec.has_in_process_symbol()) {
     VLOG(2) << "getting function " << *kernel_name << " from module " << module;
-    GpuFunctionHandle function;
+    CUfunction function;
     TF_RETURN_IF_ERROR(GetModuleFunction(gpu_context(), module,
                                          kernel_name->c_str(), &function));
     cuda_kernel->set_gpu_function(function);
@@ -848,10 +903,20 @@ DeviceMemoryBase CudaExecutor::Allocate(uint64_t size, int64_t memory_space) {
     return DeviceMemoryBase(nullptr, 0);
   } else if (memory_space ==
              static_cast<int64_t>(stream_executor::MemoryType::kHost)) {
-    return DeviceMemoryBase(GpuDriver::HostAllocate(gpu_context(), size), size);
+    return DeviceMemoryBase(HostAllocate(gpu_context(), size), size);
   }
   CHECK_EQ(memory_space, 0);
   return DeviceMemoryBase(DeviceAllocate(gpu_context(), size), size);
+}
+
+absl::StatusOr<std::unique_ptr<MemoryAllocation>>
+CudaExecutor::HostMemoryAllocate(uint64_t size) {
+  auto* buffer = HostAllocate(gpu_context(), size);
+  if (buffer == nullptr && size > 0) {
+    return absl::InternalError(
+        absl::StrFormat("Failed to allocate HostMemory of size %d", size));
+  }
+  return std::make_unique<HostMemoryAllocation>(buffer, size, this);
 }
 
 void CudaExecutor::Deallocate(DeviceMemoryBase* mem) {
@@ -862,10 +927,14 @@ void CudaExecutor::Deallocate(DeviceMemoryBase* mem) {
   }
   auto memory_space = status_or_memory_space.value();
   if (memory_space == MemoryType::kHost) {
-    GpuDriver::HostDeallocate(gpu_context(), mem->opaque());
+    HostDeallocate(gpu_context(), mem->opaque());
   } else {
     DeviceDeallocate(gpu_context(), mem->opaque());
   }
+}
+
+void CudaExecutor::HostMemoryDeallocate(void* location) {
+  return HostDeallocate(gpu_context(), location);
 }
 
 bool CudaExecutor::SynchronizeAllActivity() {
@@ -876,38 +945,71 @@ bool CudaExecutor::HostMemoryRegister(void* location, uint64_t size) {
   VLOG(1) << "Called StreamExecutor::HostMemoryRegister(data=" << location
           << ")";
 
-  return GpuDriver::HostRegister(gpu_context(), location, size);
+  ScopedActivateContext activation(gpu_context());
+  // "Portable" memory is visible to all CUDA contexts. Safe for our use model.
+  auto status = cuda::ToStatus(
+      cuMemHostRegister(location, size, CU_MEMHOSTREGISTER_PORTABLE));
+  if (!status.ok()) {
+    LOG(ERROR) << "error registering host memory at " << location << ": "
+               << status;
+    return false;
+  }
+  return true;
 }
 
 bool CudaExecutor::HostMemoryUnregister(void* location) {
   VLOG(1) << "Called StreamExecutor::HostUnregister(data=" << location << ")";
 
-  return GpuDriver::HostUnregister(gpu_context(), location);
+  ScopedActivateContext activation(gpu_context());
+  auto status = cuda::ToStatus(cuMemHostUnregister(location));
+  if (!status.ok()) {
+    LOG(ERROR) << "error unregistering host memory at " << location << ": "
+               << status;
+    return false;
+  }
+  return true;
 }
 
 absl::Status CudaExecutor::SynchronousMemZero(DeviceMemoryBase* location,
                                               uint64_t size) {
-  if (reinterpret_cast<uintptr_t>(location->opaque()) % 4 == 0 &&
-      size % 4 == 0) {
-    return GpuDriver::SynchronousMemsetUint32(
-        gpu_context(), AsCudaDevicePtr(location), 0x0, size / 4);
+  ScopedActivateContext activation(gpu_context());
+  CUdeviceptr cuda_location = AsCudaDevicePtr(location);
+  if (reinterpret_cast<uintptr_t>(location->opaque()) % sizeof(uint32_t) == 0 &&
+      size % sizeof(uint32_t) == 0) {
+    return cuda::ToStatus(
+        cuMemsetD32(cuda_location, 0x0, size / sizeof(uint32_t)),
+        "Failed to memset memory");
   }
-  return GpuDriver::SynchronousMemsetUint8(
-      gpu_context(), AsCudaDevicePtr(location), 0x0, size);
+  return cuda::ToStatus(cuMemsetD8(cuda_location, 0x0, size),
+                        "Failed to memset memory");
 }
 
 absl::Status CudaExecutor::SynchronousMemcpy(DeviceMemoryBase* gpu_dst,
                                              const void* host_src,
                                              uint64_t size) {
-  return GpuDriver::SynchronousMemcpyH2D(
-      gpu_context(), AsCudaDevicePtr(gpu_dst), host_src, size);
+  ScopedActivateContext activation(gpu_context());
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuMemcpyHtoD(AsCudaDevicePtr(gpu_dst), host_src, size),
+      absl::StrFormat(
+          "failed to synchronous memcpy from host to device: GPU dst: %llx;"
+          " host src: %p; size: %u=0x%x",
+          AsCudaDevicePtr(gpu_dst), host_src, size, size)));
+  VLOG(2) << "successfully enqueued sync memcpy h2d of " << size << " bytes";
+  return absl::OkStatus();
 }
 
 absl::Status CudaExecutor::SynchronousMemcpy(void* host_dst,
                                              const DeviceMemoryBase& gpu_src,
                                              uint64_t size) {
-  return GpuDriver::SynchronousMemcpyD2H(gpu_context(), host_dst,
-                                         AsCudaDevicePtr(gpu_src), size);
+  ScopedActivateContext activation(gpu_context());
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuMemcpyDtoH(host_dst, AsCudaDevicePtr(gpu_src), size),
+      absl::StrFormat("failed to synchronous memcpy from device to host "
+                      "host dst: %p; GPU src: %llx; size: %u=0x%x",
+                      host_dst, AsCudaDevicePtr(gpu_src), size, size)));
+  VLOG(2) << "successfully sync memcpy'd d2h of " << size << " bytes to "
+          << host_dst;
+  return absl::OkStatus();
 }
 
 void CudaExecutor::DeallocateStream(Stream* stream) {
@@ -1024,7 +1126,7 @@ absl::StatusOr<DeviceMemoryBase> CudaExecutor::GetSymbol(
     auto it = gpu_binary_to_module_.find(module_handle.id());
     CHECK(it != gpu_binary_to_module_.end());
 
-    GpuModuleHandle gpu_module_handle = it->second.first;
+    CUmodule gpu_module_handle = it->second.first;
     CHECK(gpu_module_handle != nullptr);
     TF_RETURN_IF_ERROR(
         GetModuleSymbol(gpu_context(), gpu_module_handle, symbol_name.c_str(),
