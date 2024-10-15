@@ -24,6 +24,7 @@ cc_library(
         "//tensorflow/lite/experimental/lrt/c:lite_rt_common.h",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_model.h",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_op_code.h",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_options.h",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_support.h",
         "//tensorflow/lite/experimental/lrt/cc:lite_rt_support.h",
         "//tensorflow/lite/experimental/lrt/vendors/c:lite_rt_compiler_plugin.h",
@@ -36,7 +37,24 @@ cc_library(
 
 cc_library(
     name = "model",
-    srcs = ["model.cc"],
+    srcs = [
+        "model.cc",
+    ],
+    hdrs = [
+        "model.h",
+    ],
+    deps = [
+        ":api_internal",
+        "//tensorflow/compiler/mlir/lite/core:model_builder_base",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:c_api_types",
+        "//tensorflow/lite/schema:schema_fbs",
+    ],
+)
+
+cc_library(
+    name = "option",
+    srcs = ["option.cc"],
     hdrs = [
         "model.h",
     ],
@@ -56,6 +74,7 @@ cc_library(
     deps = [
         ":api_internal",
         ":model",
+        ":option",
         "//tensorflow/compiler/mlir/lite/core:model_builder_base",
         "//tensorflow/lite:allocation",
         "//tensorflow/lite:framework",
@@ -83,29 +102,19 @@ cc_test(
     ],
 )
 
-cc_library(
-    name = "algo",
-    hdrs = ["algo.h"],
-    deps = [
-        ":api_internal",
-        ":model",
-        "//tensorflow/lite/schema:schema_fbs",
-        "@com_google_absl//absl/log:check",
-        "@llvm-project//llvm:Support",
-    ],
-)
-
 cc_test(
-    name = "algo_test",
-    srcs = ["algo_test.cc"],
+    name = "option_test",
+    srcs = ["option_test.cc"],
     tags = ["no_oss"],
     deps = [
-        ":algo",
         ":api_internal",
         ":graph_tools",
-        ":model",
+        ":lite_rt_model_init",
         "//tensorflow/lite/experimental/lrt/test:common",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
+        "@flatbuffers//:runtime_cc",
+        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -119,75 +128,6 @@ cc_library(
         "//tensorflow/compiler/mlir/lite/core:model_builder_base",
         "//tensorflow/lite/c:c_api_types",
         "@llvm-project//llvm:Support",
-    ],
-)
-
-cc_library(
-    name = "plugin_manager",
-    srcs = ["plugin_manager.cc"],
-    hdrs = ["plugin_manager.h"],
-    deps = [
-        ":compiler_plugin_api",
-        ":dynamic_loading",
-        ":logging",
-        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
-        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-# copybara:uncomment_begin(no OSS for unique-test-directory)
-# cc_test(
-#     name = "plugin_manager_test",
-#     srcs = ["plugin_manager_test.cc"],
-#     data = ["//tensorflow/lite/experimental/lrt/vendors/examples:example_plugin_so"],
-#     tags = [
-#         # Sanitizer runtimes are incompatible with RTLD_DEEPBIND.
-#         "noasan",
-#         "nomsan",
-#         "nosan",
-#     ],
-#     deps = [
-#         ":plugin_manager",
-#         "@com_google_googletest//:gtest_main",
-#         "//testing/base/public:unique-test-directory",
-#         "@com_google_absl//absl/strings:string_view",
-#         "@com_google_absl//absl/types:span",
-#         "//tensorflow/lite/experimental/lrt/test:common",
-#     ],
-# )
-# copybara:uncomment_end
-
-cc_library(
-    name = "compiler_plugin_api",
-    srcs = ["compiler_plugin_api.cc"],
-    hdrs = ["compiler_plugin_api.h"],
-    deps = [
-        ":api_internal",
-        ":dynamic_loading",
-        ":logging",
-        "@com_google_absl//absl/strings:string_view",
-    ],
-)
-
-cc_test(
-    name = "compiler_plugin_api_test",
-    srcs = ["compiler_plugin_api_test.cc"],
-    data = ["//tensorflow/lite/experimental/lrt/vendors/examples:example_plugin_so"],
-    tags = [
-        # Sanitizer runtimes are incompatible with RTLD_DEEPBIND.
-        "noasan",
-        "nomsan",
-        "nosan",
-    ],
-    deps = [
-        ":compiler_plugin_api",
-        ":dynamic_loading",
-        "//tensorflow/lite/experimental/lrt/test:common",
-        "//tensorflow/lite/experimental/lrt/vendors/c:lite_rt_compiler_plugin",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -229,6 +169,7 @@ cc_library(
 cc_library(
     name = "tensor_buffer",
     srcs = [
+        "ahwb_buffer.cc",
         "dmabuf_buffer.cc",
         "fastrpc_buffer.cc",
         "ion_buffer.cc",
@@ -238,6 +179,7 @@ cc_library(
         "tensor_buffer.cc",
     ],
     hdrs = [
+        "ahwb_buffer.h",
         "dmabuf_buffer.h",
         "fastrpc_buffer.h",
         "ion_buffer.h",
@@ -266,7 +208,6 @@ cc_test(
         "//tensorflow:android": ["-landroid"],
         "//conditions:default": [],
     }),
-    tags = ["manual"],
     deps = [
         ":tensor_buffer",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",

@@ -25,10 +25,13 @@
 #include "tensorflow/lite/experimental/lrt/c/lite_rt_model.h"
 #include "tensorflow/lite/experimental/lrt/c/lite_rt_support.h"
 #include "tensorflow/lite/experimental/lrt/cc/lite_rt_support.h"
-#include "tensorflow/lite/experimental/lrt/core/algo.h"
+#include "tensorflow/lite/experimental/lrt/core/compiler_plugin/algo.h"
 #include "tensorflow/lite/experimental/lrt/core/lite_rt_model_init.h"
 #include "tensorflow/lite/experimental/lrt/core/model.h"
 #include "tensorflow/lite/experimental/lrt/vendors/c/lite_rt_compiler_plugin.h"
+
+using ::lrt::internal::GroupPartitions;
+using ::lrt::internal::OutlinePartition;
 
 // NOLINTNEXTLINE
 static llvm::cl::opt<std::string> model_path(
@@ -61,22 +64,6 @@ static llvm::cl::opt<bool> dry_run(
     std::cerr << msg << "\n";  \
     return 1;                  \
   }
-
-void DumpSubgraph(const LrtSubgraphT& subgraph, std::string_view label) {
-#ifndef NDEBUG
-  std::cerr << "===== " << label << " =====\n";
-  for (auto op : subgraph.ops) {
-    debug::DumpOp(*op);
-  }
-  for (auto tensor : subgraph.inputs) {
-    std::cerr << "SG_IN " << tensor << "\n";
-  }
-
-  for (auto tensor : subgraph.outputs) {
-    std::cerr << "SG_OUT " << tensor << "\n";
-  }
-#endif
-}
 
 bool IsSocModelSupported(LrtCompilerPlugin plugin,
                          std::string_view requested_soc_model) {
@@ -127,12 +114,10 @@ LrtStatus ApplyPlugin(LrtModel model, LrtCompilerPlugin plugin,
   LRT_RETURN_STATUS_IF_NOT_OK(
       LrtPluginPartitionModel(plugin, model, &selected_ops));
 
-  auto partitions =
-      algo::DisjointSets::GetPartitionsFromFlatList(selected_ops.ops);
+  auto partitions = GroupPartitions(selected_ops.ops);
 
   // TODO: b/366821557 - Support multiple subgraphs in plugin application.
   auto& main_subgraph = model->subgraphs.front();
-  DumpSubgraph(main_subgraph, "Main subgraph before partioning.");
 
   std::vector<LrtSubgraph> slices;
   std::vector<LrtOp> custom_ops;
@@ -142,15 +127,10 @@ LrtStatus ApplyPlugin(LrtModel model, LrtCompilerPlugin plugin,
   for (auto& partition : partitions) {
     LrtSubgraph new_subgraph = &model->subgraphs.emplace_back();
 
-    LrtOp custom_op = algo::GraphSlicer::SlicePartitionFromGraph(
-        main_subgraph, new_subgraph, partition);
+    LrtOp custom_op = OutlinePartition(main_subgraph, new_subgraph, partition);
     custom_ops.push_back(custom_op);
     slices.push_back(new_subgraph);
-
-    DumpSubgraph(*new_subgraph, "New subgraph");
   }
-
-  DumpSubgraph(main_subgraph, "Main subgraph after partioning.");
 
   if (dry_run) {
     return kLrtStatusOk;

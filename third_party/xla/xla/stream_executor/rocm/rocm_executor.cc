@@ -42,6 +42,7 @@ limitations under the License.
 #include "rocm/include/hip/hip_runtime.h"
 #include "rocm/include/hip/hip_version.h"
 #include "rocm/rocm_config.h"
+#include "xla/stream_executor/activate_context.h"
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_description.h"
@@ -164,9 +165,7 @@ absl::Status LoadHsaco(Context* context, const char* hsaco_contents,
   GetDriverExecutor()->Schedule(
       [context, hsaco_contents, module, &returned_status, &notification]() {
         ScopedActivateContext activation{context};
-        void* hsaco_data = const_cast<char*>(hsaco_contents);
-
-        hipError_t res = wrap::hipModuleLoadData(module, hsaco_data);
+        hipError_t res = wrap::hipModuleLoadData(module, hsaco_contents);
 
         if (res != hipSuccess) {
           returned_status = absl::InternalError(
@@ -481,15 +480,16 @@ void* HostAllocate(Context* context, uint64_t bytes) {
 }  // namespace
 
 RocmExecutor::~RocmExecutor() {
-  for (auto& it : disk_modules_) {
-    UnloadRocmModule(gpu_context(), it.second);
-  }
   for (auto& it : in_memory_modules_) {
     UnloadRocmModule(gpu_context(), it.second);
   }
   set_context(nullptr);
   CHECK(kernel_to_gpu_binary_.empty()) << "GpuExecutor has live kernels.";
   CHECK(gpu_binary_to_module_.empty()) << "GpuExecutor has loaded modules.";
+}
+
+std::unique_ptr<ActivateContext> RocmExecutor::Activate() {
+  return std::make_unique<ScopedActivateContext>(gpu_context());
 }
 
 bool RocmExecutor::UnloadModule(ModuleHandle module_handle) {
@@ -858,9 +858,9 @@ void RocmExecutor::DeallocateStream(Stream* stream) {
       dnn_->NotifyStreamDestroyed(stream);
     }
   }
-  GpuStream* rocm_stream = AsGpuStream(stream);
+  RocmStream* rocm_stream = static_cast<RocmStream*>(stream);
   absl::MutexLock l(&alive_gpu_streams_mu_);
-  alive_gpu_streams_.erase(rocm_stream->gpu_stream());
+  alive_gpu_streams_.erase(rocm_stream->stream_handle());
 }
 
 absl::Status RocmExecutor::BlockHostUntilDone(Stream* stream) {
@@ -995,8 +995,7 @@ absl::StatusOr<std::unique_ptr<Stream>> RocmExecutor::CreateStream(
     std::optional<std::variant<StreamPriority, int>> priority) {
   TF_ASSIGN_OR_RETURN(auto stream, RocmStream::Create(this, priority));
   absl::MutexLock l(&alive_gpu_streams_mu_);
-  auto gpu_stream = stream->gpu_stream();
-  alive_gpu_streams_[gpu_stream] = stream.get();
+  alive_gpu_streams_[stream->stream_handle()] = stream.get();
   return std::move(stream);
 }
 

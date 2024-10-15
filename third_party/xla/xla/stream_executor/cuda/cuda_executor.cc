@@ -28,7 +28,6 @@ limitations under the License.
 
 #include "absl/base/casts.h"
 #include "absl/container/inlined_vector.h"
-#include "absl/debugging/leak_check.h"
 #include "absl/log/check.h"
 #include "absl/numeric/int128.h"
 #include "absl/status/status.h"
@@ -43,6 +42,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
+#include "xla/stream_executor/activate_context.h"
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/cuda/cuda_collectives.h"
@@ -154,13 +154,8 @@ absl::Status LoadPtx(Context* context, const char* ptx_contents,
         CHECK(TF_ARRAYSIZE(options) == TF_ARRAYSIZE(option_values));
 
         absl::Status status;
-        {
-          // TODO(leary) Need to see if NVIDIA can expunge the leakiness in
-          // their module loading: see http://b/13248943
-          absl::LeakCheckDisabler disabler;
-          status = cuda::ToStatus(cuModuleLoadDataEx(
-              module, ptx_data, TF_ARRAYSIZE(options), options, option_values));
-        }
+        status = cuda::ToStatus(cuModuleLoadDataEx(
+            module, ptx_data, TF_ARRAYSIZE(options), options, option_values));
 
         // The PTX JIT mutates the values in the option values array to reflect
         // the size of the logs it output; now that we've made the call, read
@@ -554,6 +549,10 @@ absl::StatusOr<DeviceMemoryBase> CudaExecutor::GetMemoryRange(
   return DeviceMemoryBase(reinterpret_cast<void*>(device_pointer), size);
 }
 
+std::unique_ptr<ActivateContext> CudaExecutor::Activate() {
+  return std::make_unique<ScopedActivateContext>(gpu_context());
+}
+
 CudaExecutor::~CudaExecutor() {
   CHECK(kernel_to_gpu_binary_.empty()) << "GpuExecutor has live kernels.";
   CHECK(gpu_binary_to_module_.empty()) << "GpuExecutor has loaded modules.";
@@ -646,12 +645,6 @@ absl::Status CudaExecutor::LoadModuleFromPtx(const char* ptx,
   }
   gpu_binary_to_module_[ptx] = {*module, module_refcount};
   return absl::OkStatus();
-}
-
-absl::Status CudaExecutor::LoadModuleFromHsaco(const char* hsaco,
-                                               CUmodule* module) {
-  return absl::InternalError(
-      "Feature not supported on CUDA platform (LoadModuleFromHsaco)");
 }
 
 absl::StatusOr<std::unique_ptr<Kernel>> CudaExecutor::LoadKernel(
@@ -1027,9 +1020,8 @@ void CudaExecutor::DeallocateStream(Stream* stream) {
       dnn_->NotifyStreamDestroyed(stream);
     }
   }
-  GpuStream* gpu_stream = AsGpuStream(stream);
   absl::MutexLock l(&alive_gpu_streams_mu_);
-  alive_gpu_streams_.erase(gpu_stream->gpu_stream());
+  alive_gpu_streams_.erase(stream->platform_specific_handle().stream);
 }
 
 absl::Status CudaExecutor::BlockHostUntilDone(Stream* stream) {
@@ -1170,8 +1162,7 @@ absl::StatusOr<std::unique_ptr<Stream>> CudaExecutor::CreateStream(
     std::optional<std::variant<StreamPriority, int>> priority) {
   TF_ASSIGN_OR_RETURN(auto stream, CudaStream::Create(this, priority));
   absl::MutexLock l(&alive_gpu_streams_mu_);
-  auto gpu_stream = stream->gpu_stream();
-  alive_gpu_streams_[gpu_stream] = stream.get();
+  alive_gpu_streams_[stream->stream_handle()] = stream.get();
   return std::move(stream);
 }
 
