@@ -113,6 +113,10 @@ class MockStreamExecutor : public StreamExecutor {
               (const, override));
   MOCK_METHOD(absl::StatusOr<std::unique_ptr<Event>>, CreateEvent, (),
               (override));
+  MOCK_METHOD(void, UnloadKernel, (const Kernel* kernel), (override));
+  MOCK_METHOD(absl::StatusOr<std::unique_ptr<EventBasedTimer>>,
+              CreateEventBasedTimer, (Stream * stream, bool use_delay_kernel),
+              (override));
 };
 
 }  // namespace stream_executor
