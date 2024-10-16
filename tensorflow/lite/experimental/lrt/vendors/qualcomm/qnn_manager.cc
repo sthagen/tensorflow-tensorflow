@@ -254,8 +254,10 @@ LrtStatus QnnManager::GenerateContextBin(std::vector<char>& buffer) {
 
 LrtStatus SetupAll(std::optional<QnnHtpDevice_Arch_t> soc_model,
                    QnnManager& qnn, bool load_system, bool load_context) {
-  LRT_RETURN_STATUS_IF_NOT_OK(qnn.LoadLib(kLibQnnHtpSo));
-  LRT_RETURN_STATUS_IF_NOT_OK(qnn.ResolveApi());
+  {
+    LRT_RETURN_STATUS_IF_NOT_OK(qnn.LoadLib(kLibQnnHtpSo));
+    LRT_RETURN_STATUS_IF_NOT_OK(qnn.ResolveApi());
+  }
 
   if (load_system) {
     LRT_RETURN_STATUS_IF_NOT_OK(qnn.LoadSystemLib(kLibQnnSystemSo));
@@ -270,7 +272,7 @@ LrtStatus SetupAll(std::optional<QnnHtpDevice_Arch_t> soc_model,
   }
 
   if (auto status = qnn.Api()->logCreate(GetDefaultStdOutLogger(),
-                                         QNN_LOG_LEVEL_DEBUG, &qnn.LogHandle());
+                                         QNN_LOG_LEVEL_INFO, &qnn.LogHandle());
       status != QNN_SUCCESS) {
     LITE_RT_LOG(LRT_ERROR, "Failed to create QNN logger: %d", status);
     return kLrtStatusErrorRuntimeFailure;

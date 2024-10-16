@@ -89,6 +89,9 @@ cc_library(
 cc_test(
     name = "model_test",
     srcs = ["model_test.cc"],
+    data = [
+        "//tensorflow/lite/experimental/lrt/test:tflite_test_data",
+    ],
     tags = ["no_oss"],
     deps = [
         ":api_internal",
@@ -105,6 +108,9 @@ cc_test(
 cc_test(
     name = "option_test",
     srcs = ["option_test.cc"],
+    data = [
+        "//tensorflow/lite/experimental/lrt/test:tflite_test_data",
+    ],
     tags = ["no_oss"],
     deps = [
         ":api_internal",
@@ -166,6 +172,30 @@ cc_library(
 # )
 # copybara:uncomment_end
 
+cc_test(
+    name = "layout_cc_test",
+    srcs = [
+        "layout_cc_test.cc",
+    ],
+    deps = [
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "ranked_tensor_type_cc_test",
+    srcs = [
+        "ranked_tensor_type_cc_test.cc",
+    ],
+    deps = [
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "tensor_buffer",
     srcs = [
@@ -216,6 +246,54 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "tensor_buffer_cc_test",
+    srcs = [
+        "tensor_buffer_cc_test.cc",
+    ],
+    linkopts = select({
+        "//tensorflow:android": ["-landroid"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":tensor_buffer",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_tensor_buffer_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_tensor_buffer_cc_api",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tensor_buffer_requirements_test",
+    srcs = [
+        "tensor_buffer_requirements_test.cc",
+    ],
+    deps = [
+        ":tensor_buffer",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_tensor_buffer_c_api",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tensor_buffer_requirements_cc_test",
+    srcs = [
+        "tensor_buffer_requirements_cc_test.cc",
+    ],
+    deps = [
+        ":tensor_buffer",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_tensor_buffer_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_tensor_buffer_cc_api",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "dispatch",
     srcs = [
@@ -228,8 +306,8 @@ cc_library(
         ":tensor_buffer",
         ":utils",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
-        "//tensorflow/lite/experimental/lrt/c:lite_rt_dispatch_c_api",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_tensor_buffer_c_api",
+        "//tensorflow/lite/experimental/lrt/vendors/c:lite_rt_dispatch_c_api",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:node_hash_map",

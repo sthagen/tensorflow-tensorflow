@@ -20,6 +20,7 @@ package(
 cc_library(
     name = "lite_rt_cc_api",
     hdrs = [
+        "lite_rt_model.h",
         "lite_rt_support.h",
         "//tensorflow/lite/experimental/lrt/vendors/c:lite_rt_compiler_plugin.h",
     ],
@@ -28,6 +29,25 @@ cc_library(
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "lite_rt_tensor_buffer_cc_api",
+    hdrs = [
+        "lite_rt_handle.h",
+        "lite_rt_tensor_buffer.h",
+        "lite_rt_tensor_buffer_requirements.h",
+    ],
+    deps = [
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
+        "//tensorflow/lite/experimental/lrt/c:lite_rt_tensor_buffer_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:lite_rt_cc_api",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -46,6 +66,9 @@ cc_library(
 cc_test(
     name = "lite_rt_tensor_test",
     srcs = ["lite_rt_tensor_test.cc"],
+    data = [
+        "//tensorflow/lite/experimental/lrt/test:tflite_test_data",
+    ],
     deps = [
         ":lite_rt_tensor",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
@@ -67,6 +90,9 @@ cc_library(
 cc_test(
     name = "lite_rt_op_test",
     srcs = ["lite_rt_op_test.cc"],
+    data = [
+        "//tensorflow/lite/experimental/lrt/test:tflite_test_data",
+    ],
     deps = [
         ":lite_rt_op",
         "//tensorflow/lite/experimental/lrt/c:lite_rt_c_api",
@@ -76,4 +102,4 @@ cc_test(
     ],
 )
 
-exports_files(srcs = glob(["lite_rt*.h"]))
+exports_files(srcs = glob(["lite_rt_*.h"]))

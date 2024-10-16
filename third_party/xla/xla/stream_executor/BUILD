@@ -193,6 +193,7 @@ cc_library(
     name = "module_spec",
     hdrs = ["module_spec.h"],
     deps = [
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:logging",
     ],
@@ -441,6 +442,7 @@ cc_library(
         ":numeric_options",
         ":scratch_allocator",
         ":stream",
+        "//xla:util",
         "//xla/tsl/lib/strings:proto_serialization",
         "//xla/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/algorithm:container",

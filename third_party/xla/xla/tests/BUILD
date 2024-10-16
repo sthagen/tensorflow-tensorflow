@@ -1818,7 +1818,15 @@ xla_test(
         ":test_macros_header",
         ":test_utils",
         ":xla_internal_test_main",
+        "//xla:error_spec",
+        "//xla:literal",
+        "//xla:literal_util",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
     ],
 )
@@ -2134,20 +2142,25 @@ xla_test(
         ":test_macros_header",
         ":xla_internal_test_main",
         "//xla:array2d",
+        "//xla:array3d",
         "//xla:array4d",
         "//xla:error_spec",
+        "//xla:literal",
         "//xla:literal_util",
         "//xla:reference_util",
         "//xla:shape_util",
-        "//xla:status_macros",
         "//xla:test",
+        "//xla:types",
         "//xla:xla_data_proto_cc",
-        "//xla/client:global_data",
         "//xla/client:local_client",
         "//xla/hlo/builder:xla_builder",
         "//xla/hlo/builder:xla_computation",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:ml_dtypes",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -3026,11 +3039,13 @@ xla_test(
 
 xla_test(
     name = "iota_test",
+    timeout = "long",
     srcs = ["iota_test.cc"],
+    backend_tags = {
+        "cpu": ["optonly"],
+    },
     shard_count = 50,
     tags = [
-        # Require optimized builds, iota_test_cpu is very slow in fastbuild.
-        "optonly",
         "test_xla_cpu_thunks",
     ],
     deps = [
