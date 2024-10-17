@@ -15,17 +15,10 @@
 #ifndef TENSORFLOW_LITE_EXPERIMENTAL_LRT_CORE_MODEL_H_
 #define TENSORFLOW_LITE_EXPERIMENTAL_LRT_CORE_MODEL_H_
 
-#include <sstream>
-#ifndef NDEBUG
-#include <cstdio>
-#include <iostream>
-#endif
-
 #include <list>
 #include <vector>
 
-#include "tensorflow/lite/core/c/c_api_types.h"
-#include "tensorflow/lite/experimental/lrt/c/lite_rt_common.h"
+#include "absl/strings/string_view.h"
 #include "tensorflow/lite/experimental/lrt/c/lite_rt_model.h"
 #include "tensorflow/lite/experimental/lrt/c/lite_rt_op_code.h"
 #include "tensorflow/lite/experimental/lrt/cc/lite_rt_support.h"
@@ -129,6 +122,10 @@ struct LrtModelT {
   // Custom code associated with all customs ops emitted during
   // re-serialization.
   std::string custom_op_code;
+
+  // Look up metadata by key, getting a view of its buffer as a string
+  // if it exists.
+  LrtResult<FbBufferT> FindMetadata(absl::string_view key) const;
 };
 
 //
@@ -136,8 +133,23 @@ struct LrtModelT {
 //
 
 // Used for communicating selections of ops.
-struct LrtOpListT {
-  std::vector<LrtOp> ops;
+class LrtOpListT {
+ public:
+  void Push(LrtOp op) { ops_.push_back(op); }
+
+  std::vector<LrtOp> Vec() const {
+    std::vector<LrtOp> res;
+    res.reserve(ops_.size());
+    res.assign(ops_.begin(), ops_.end());
+    return res;
+  }
+
+ private:
+  // NOTE: This was originally a vector. Was encountering really odd
+  // segfaults when freeing after code on another side of a compilation boundary
+  // was doing pushes that resized. A list+copy to vector is not optimimal,
+  // revisit if bottleneck.
+  std::list<LrtOp> ops_;
 };
 
 #endif  // TENSORFLOW_LITE_EXPERIMENTAL_LRT_CORE_MODEL_H_

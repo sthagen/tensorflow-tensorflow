@@ -19,6 +19,9 @@
 #include <cstdint>
 #include <tuple>
 
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+
 #ifndef NDEBUG
 #include <iostream>
 #endif
@@ -101,7 +104,8 @@ inline LrtResult<llvm::SmallVector<TensorUseInfo>> GetTensorUses(
 inline LrtResult<TensorUseInfo> GetTensorOnlyUse(LrtTensor tensor) {
   LRT_ASSIGN_OR_RETURN_RESULT(auto uses, GetTensorUses(tensor), TensorUseInfo);
   if (uses.size() != 1) {
-    return LrtResult<TensorUseInfo>::FromStatus(kLrtStatusGraphInvariantError);
+    return LrtResult<TensorUseInfo>::FromStatus(
+        kLrtStatusErrorInvalidGraphInvariant);
   }
   return LrtResult<TensorUseInfo>::FromValue(uses[0]);
 }
@@ -123,7 +127,8 @@ inline LrtResult<llvm::ArrayRef<LrtTensor>> GetOpIns(LrtOp op) {
 inline LrtResult<LrtTensor> GetOnlyOpIn(LrtOp op) {
   LRT_ASSIGN_OR_RETURN_RESULT(auto ins, GetOpIns(op), LrtTensor);
   if (ins.size() != 1) {
-    return LrtResult<LrtTensor>::FromStatus(kLrtStatusGraphInvariantError);
+    return LrtResult<LrtTensor>::FromStatus(
+        kLrtStatusErrorInvalidGraphInvariant);
   }
   return LrtResult<LrtTensor>::FromValue(ins[0]);
 }
@@ -145,7 +150,8 @@ inline LrtResult<llvm::ArrayRef<LrtTensor>> GetOpOuts(LrtOp op) {
 inline LrtResult<LrtTensor> GetOnlyOpOut(LrtOp op) {
   LRT_ASSIGN_OR_RETURN_RESULT(auto outs, GetOpOuts(op), LrtTensor);
   if (outs.size() != 1) {
-    return LrtResult<LrtTensor>::FromStatus(kLrtStatusGraphInvariantError);
+    return LrtResult<LrtTensor>::FromStatus(
+        kLrtStatusErrorInvalidGraphInvariant);
   }
   return LrtResult<LrtTensor>::FromValue(outs[0]);
 }
@@ -203,6 +209,16 @@ inline LrtResult<LrtSubgraph> GetSubgraph(LrtModel model) {
                               LrtSubgraph);
 
   return LrtResult<LrtSubgraph>::FromValue(subgraph);
+}
+
+inline LrtResult<FbConstBufferT> GetMetadata(LrtModel model,
+                                             const absl::string_view key) {
+  const void* buf;
+  size_t size;
+  LRT_RETURN_RESULT_IF_NOT_OK(
+      LiteRtModelGetMetadata(model, key.data(), &buf, &size), FbConstBufferT);
+  auto res = absl::MakeConstSpan(reinterpret_cast<const FbCharT*>(buf), size);
+  return LrtResult<FbConstBufferT>::FromValue(res);
 }
 
 //===----------------------------------------------------------------------===//
