@@ -22,8 +22,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "tensorflow/lite/experimental/lrt/tools/apply_plugin.h"
 
-using ::lrt::tools::ApplyPlugin;
-using ::lrt::tools::ApplyPluginRun;
+using ::litert::tools::ApplyPlugin;
+using ::litert::tools::ApplyPluginRun;
 
 // NOLINTNEXTLINE
 static llvm::cl::opt<std::string> cmd(
@@ -39,8 +39,8 @@ static llvm::cl::opt<std::string> model(
 // NOLINTNEXTLINE
 static llvm::cl::opt<std::string> soc_manufacturer(
     "soc_man",
-    llvm::cl::desc(
-        "String identifier of SoC manufacturer (e.g., Pixel, Qualcomm)."),
+    llvm::cl::desc("String identifier of SoC manufacturer (e.g., GoogleTensor, "
+                   "Qualcomm)."),
     llvm::cl::init("ExampleSocManufacturer"));
 
 // TODO: Support multi target compilation.

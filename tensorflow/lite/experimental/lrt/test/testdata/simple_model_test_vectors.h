@@ -18,11 +18,12 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "tensorflow/lite/experimental/lrt/c/lite_rt_model.h"
+#include "tensorflow/lite/experimental/lrt/c/litert_model.h"
 
 constexpr const char* kModelFileName = "simple_model.tflite";
 constexpr const char* kQualcommModelFileName = "simple_model_qualcomm.bin";
-constexpr const char* kPixelModelFileName = "simple_model_pixel.bin";
+constexpr const char* kGoogleTensorModelFileName =
+    "simple_model_google_tensor.bin";
 
 constexpr const int32_t kTestInput0Dimensions[] = {2};
 constexpr const int32_t kNumTestInput0Dimensions =
@@ -45,22 +46,22 @@ constexpr const size_t kTestInput1Size =
 constexpr const size_t kTestOutputSize =
     sizeof(kTestOutputTensor) / sizeof(kTestOutputTensor[0]);
 
-constexpr const LrtRankedTensorType kInput0TensorType = {
-    /*.element_type=*/kLrtElementTypeFloat32,
+constexpr const LiteRtRankedTensorType kInput0TensorType = {
+    /*.element_type=*/kLiteRtElementTypeFloat32,
     /*.layout=*/{
         /*.rank=*/kNumTestInput0Dimensions,
         /*.dimensions=*/kTestInput0Dimensions,
     }};
 
-constexpr const LrtRankedTensorType kInput1TensorType = {
-    /*.element_type=*/kLrtElementTypeFloat32,
+constexpr const LiteRtRankedTensorType kInput1TensorType = {
+    /*.element_type=*/kLiteRtElementTypeFloat32,
     /*.layout=*/{
         /*.rank=*/kNumTestInput1Dimensions,
         /*.dimensions=*/kTestInput1Dimensions,
     }};
 
-constexpr const LrtRankedTensorType kOutputTensorType = {
-    /*.element_type=*/kLrtElementTypeFloat32,
+constexpr const LiteRtRankedTensorType kOutputTensorType = {
+    /*.element_type=*/kLiteRtElementTypeFloat32,
     /*.layout=*/{
         /*.rank=*/kNumTestOutputDimensions,
         /*.dimensions=*/kTestOutputDimensions,

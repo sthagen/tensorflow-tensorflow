@@ -631,6 +631,8 @@ cuda_library(
         "command_buffer_kernels.cc",
         "command_buffer_kernels.cu.cc",
     ],
+    hdrs = ["command_buffer_kernels.h"],
+    # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
     tags = ["cuda-only"],
     deps = [
         "//xla/stream_executor:kernel_spec",
@@ -974,9 +976,7 @@ cc_library(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:semantic_version",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/stream_executor/gpu:context",
         "//xla/stream_executor/gpu:gpu_asm_opts",
-        "//xla/stream_executor/gpu:scoped_activate_context",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/cleanup",
@@ -1016,7 +1016,9 @@ cc_library(
     ],
     deps = [
         ":cuda_collectives",
+        ":cuda_command_buffer",
         ":cuda_context",
+        ":cuda_driver",
         ":cuda_event",  # buildcleaner: keep
         ":cuda_kernel",  # buildcleaner: keep
         ":cuda_platform_id",
@@ -1213,8 +1215,6 @@ cc_library(
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_common",
-        "//xla/stream_executor/gpu:gpu_driver_header",
-        "//xla/stream_executor/gpu:gpu_stream",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
@@ -1314,5 +1314,27 @@ xla_test(
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "cuda_command_buffer",
+    srcs = ["cuda_command_buffer.cc"],
+    hdrs = ["cuda_command_buffer.h"],
+    tags = [
+        "cuda-only",
+        "gpu",
+    ],
+    deps = [
+        ":command_buffer_kernels",
+        ":cuda_status",
+        "//xla/stream_executor:typed_kernel_factory",
+        "//xla/stream_executor/gpu:gpu_command_buffer",
+        "//xla/stream_executor/gpu:gpu_executor_header",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@local_config_cuda//cuda:cuda_headers",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )

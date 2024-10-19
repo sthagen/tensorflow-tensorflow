@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYTPES
-#define XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYTPES
+#ifndef XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYPES
+#define XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYPES
 
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/BuiltinTypes.td"
@@ -33,4 +33,4 @@ def XLACPU_CallFrame : XLACPU_Type<"CallFrame", "call_frame"> {
   let summary = "XLA:CPU host kernel call frame";
 }
 
-#endif // XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYTPES
+#endif // XLA_BACKENDS_CPU_CODEGEN_IR_XLA_CPU_TYPES
