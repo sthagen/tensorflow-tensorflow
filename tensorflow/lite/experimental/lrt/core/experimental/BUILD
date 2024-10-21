@@ -20,5 +20,11 @@ package(
 cc_library(
     name = "litert_model_serialize",
     hdrs = ["litert_model_serialize.h"],
-    deps = ["//tensorflow/lite/experimental/lrt/c:litert_c_api"],
+    deps = [
+        "//tensorflow/lite/experimental/lrt/c:litert_c_api",
+        "//tensorflow/lite/experimental/lrt/cc:litert_cc_api",
+        "//tensorflow/lite/experimental/lrt/core:litert_model_init",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
+    ],
 )

@@ -34,11 +34,9 @@ cc_library(
     name = "llvm_gpu_backend",
     srcs = [
         "gpu_backend_lib.cc",
-        "utils.cc",
     ],
     hdrs = [
         "gpu_backend_lib.h",
-        "utils.h",
     ],
     data = if_cuda_is_configured(
         if_google(
@@ -49,6 +47,9 @@ cc_library(
         "GOOGLE_CUDA=1",
     ]) + if_rocm_is_configured(["TENSORFLOW_USE_ROCM=1"]),
     deps = [
+        ":load_ir_module",
+        ":nvptx_libdevice_path",
+        ":utils",
         "//xla:status_macros",
         "//xla:types",
         "//xla:util",
@@ -107,19 +108,55 @@ cc_library(
     ]),
 )
 
-xla_cc_test(
-    name = "utils_test",
-    size = "small",
-    srcs = ["utils_test.cc"],
-    data = [
-        "tests_data/saxpy.ll",
-    ],
+cc_library(
+    name = "load_ir_module",
+    srcs = ["load_ir_module.cc"],
+    hdrs = ["load_ir_module.h"],
     deps = [
-        ":llvm_gpu_backend",
-        "//xla/tests:xla_internal_test_main",
-        "@llvm-project//llvm:Core",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@llvm-project//llvm:IRReader",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:ir_headers",
+        "@local_tsl//tsl/platform:logging",
+    ],
+)
+
+cc_library(
+    name = "nvptx_libdevice_path",
+    srcs = ["nvptx_libdevice_path.cc"],
+    hdrs = ["nvptx_libdevice_path.h"],
+    deps = [
+        ":nvptx_utils",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/platform:cuda_root_path",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
-        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "nvptx_utils",
+    srcs = ["nvptx_utils.cc"],
+    hdrs = ["nvptx_utils.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:cuda_root_path",
+    ],
+)
+
+cc_library(
+    name = "utils",
+    srcs = ["utils.cc"],
+    hdrs = ["utils.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -133,6 +170,45 @@ xla_cc_test(
         "//xla/stream_executor:semantic_version",
         "//xla/tests:xla_internal_test_main",
         "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+xla_cc_test(
+    name = "load_ir_module_test",
+    size = "small",
+    srcs = ["load_ir_module_test.cc"],
+    data = [
+        "tests_data/saxpy.ll",
+    ],
+    deps = [
+        ":load_ir_module",
+        "//xla/tests:xla_internal_test_main",
+        "@llvm-project//llvm:ir_headers",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+xla_cc_test(
+    name = "nvptx_utils_test",
+    srcs = ["nvptx_utils_test.cc"],
+    deps = [
+        ":nvptx_utils",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+xla_cc_test(
+    name = "utils_test",
+    size = "small",
+    srcs = ["utils_test.cc"],
+    deps = [
+        ":utils",
+        "//xla/tests:xla_internal_test_main",
+        "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:test",
     ],
 )
