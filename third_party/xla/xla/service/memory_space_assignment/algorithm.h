@@ -37,6 +37,7 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/utils/hlo_live_range.h"
@@ -433,6 +434,10 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   void UpdateSyncDataMovementCandidatesForJointProcessedValues(
       const std::vector<const HloValue*>& joint_processed_values);
 
+  // Returns true if repack_allocation_blocks_ includes an AllocationBlock
+  // belonging to a converted synchronous memory operations.
+  bool RepackAllocationsIncludeConvertedSyncMemOp();
+
   absl::StatusOr<HeapSimulator::Result<HloValue>> Finish() override;
 
  protected:
@@ -809,6 +814,8 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
     kFailedPrecondition = 2,
     kFailedValueNotAllowedInAlternateMemory = 4,
     kFailedSatisfyingConstraints = 8,
+    kFailedNotProcessed = 16,
+    kFailedGaveUp = 32,
   };
 
   AsyncConversionResult IsAsyncConversionSliceCandidate(
@@ -902,6 +909,8 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
       absl::flat_hash_map<const HloInstruction*, std::vector<size_t>>&
           value_indices_by_sync_inst,
       int allocation_value_idx) const;
+
+  bool VerifyAllConversionsAreSuccessful();
 
   // Finds allocations for allocation values generated from colocated intervals.
   // All of the allocation values have a must-alias relationship with each
@@ -1130,7 +1139,8 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
       const Allocation& prev_allocation, AllocationSequence* allocations,
       AliasedOffset* aliased_offset,
       const std::vector<SliceDecision>& slice_decisions_sorted_by_start_time,
-      int64_t prefetch_end_time, int64_t allocation_end_time);
+      int64_t prefetch_end_time, int64_t allocation_end_time,
+      HloInstruction* sync_mem_op);
 
   // For window prefetching, adds a WindowPrefetchedAllocation to allocations.
   // Also updates asynchronous copy data structures, prefetch_interval_tree_,
@@ -1245,6 +1255,13 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   bool IsIntervalPinnedToAlternateMemory(
       const MsaBufferInterval& interval) const;
 
+  // A convenience debugging method that returns true if the prefetch context
+  // matches the described producer and consumer.
+  bool MatchesPrefetchContext(const PrefetchContext& context,
+                              absl::string_view producer_name,
+                              ShapeIndex producer_shape_index,
+                              absl::string_view consumer_name) const;
+
   AllocationSequence* allocations_;
   const Options& options_;
   const HloAliasAnalysis& alias_analysis_;
@@ -1308,7 +1325,7 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   absl::flat_hash_map<HloUse, LoopOptimizedAllocationInfo>
       loop_optimized_allocations_map_;
   // A map to look the operands of each instruction that are assigned in
-  // alternate memory.
+  // alternate memory or are window prefetched.
   absl::flat_hash_map<const HloInstruction*,
                       absl::flat_hash_set<std::pair<int, ShapeIndex>>>
       operands_in_alternate_memory_map_;
@@ -1324,6 +1341,7 @@ class MsaAlgorithm : public GlobalDecreasingSizeBestFitHeap<HloValue> {
   absl::flat_hash_map<const HloInstruction*, AsyncConversionResult>
       failed_async_conversions_;
   absl::flat_hash_set<const HloInstruction*> successful_async_conversion_set_;
+  std::vector<const HloInstruction*> not_finalized_async_conversions_;
   // Debug strings.
   std::string buffer_info_str_;
   std::string allocation_info_str_;

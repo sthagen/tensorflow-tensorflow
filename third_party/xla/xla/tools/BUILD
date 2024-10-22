@@ -12,6 +12,7 @@ load(
     "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
     "if_cuda_is_configured",
 )
+load("//xla:lit.bzl", "enforce_glob", "lit_test_suite")
 load(
     "//xla:xla.bzl",
     "xla_cc_binary",
@@ -214,12 +215,12 @@ cc_library(
     deps = [
         "//xla:xla_data_proto_cc",
         "//xla/hlo/pass:hlo_pass_pipeline",
+        "//xla/hlo/transforms:cholesky_expander",
+        "//xla/hlo/transforms:rng_bit_generator_expander",
+        "//xla/hlo/transforms:rng_expander",
         "//xla/service:batchnorm_expander",
-        "//xla/service:cholesky_expander",
         "//xla/service:hlo_proto_cc",
         "//xla/service:hlo_verifier",
-        "//xla/service:rng_bit_generator_expander",
-        "//xla/service:rng_expander",
         "//xla/service:sharding_propagation",
         "//xla/service:triangular_solve_expander",
         "//xla/service/spmd:stateful_rng_spmd_partitioner",
@@ -374,7 +375,7 @@ cc_library(
         "//xla:debug_options_flags",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
-        "//xla/service:despecializer",
+        "//xla/hlo/transforms:despecializer",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_runner_interface",
         "//xla/stream_executor:platform",
@@ -554,9 +555,9 @@ cc_library(
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
+        "//xla/hlo/transforms:hlo_dce",
         "//xla/service:call_graph",
         "//xla/service:collective_ops_utils",
-        "//xla/service:hlo_dce",
         "//xla/service:tuple_util",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
@@ -574,9 +575,9 @@ xla_cc_test(
     srcs = ["hlo_control_flow_flattening_test.cc"],
     deps = [
         ":hlo_control_flow_flattening",
+        "//xla/hlo/transforms:despecializer",
         "//xla/hlo/utils:hlo_matchers",
         "//xla/service:collective_ops_utils",
-        "//xla/service:despecializer",
         "//xla/service:hlo_verifier",
         "//xla/service/spmd:spmd_partitioner",
         "//xla/tests:hlo_test_base",
@@ -608,14 +609,32 @@ xla_cc_binary(
     deps = [
         ":hlo_module_loader",
         "//xla:debug_options_flags",
-        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
         "//xla/service:hlo_cost_analysis",
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
         "//xla/tsl/util:command_line_flags",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:platform_port",
         "@local_tsl//tsl/platform:status",
+    ],
+)
+
+lit_test_suite(
+    name = "compute_cost_test",
+    srcs = enforce_glob(
+        [
+            "compute_cost_test.hlo",
+        ],
+        include = [
+            "*.hlo",
+        ],
+    ),
+    cfg = "//xla:lit.cfg.py",
+    tools = [
+        ":compute_cost",
+        "@llvm-project//llvm:FileCheck",
     ],
 )
 
