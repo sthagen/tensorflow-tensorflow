@@ -24,6 +24,7 @@ limitations under the License.
 #include <string>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -103,11 +104,9 @@ limitations under the License.
 #include "xla/stream_executor/cuda/ptx_compiler_support.h"
 #include "xla/stream_executor/cuda/ptx_linking_method.h"
 #include "xla/stream_executor/device_description.h"
-#include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/dnn.h"
 #include "xla/stream_executor/gpu/gpu_asm_opts.h"
 #include "xla/stream_executor/gpu/gpu_driver.h"
-#include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/util/env_var.h"
@@ -187,7 +186,6 @@ class MatmulBfloat16Support : public FloatSupport {
 absl::Status NVPTXCompiler::OptimizeHloConvolutionCanonicalization(
     HloModule* hlo_module, se::GpuComputeCapability gpu_version,
     se::dnn::VersionInfo dnn_version,
-    se::DeviceMemoryAllocator* device_allocator,
     const se::SemanticVersion& toolkit_version) {
   auto cuda_compute_capability =
       std::get<se::CudaComputeCapability>(gpu_version);
@@ -614,8 +612,10 @@ NVPTXCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
     RecordLlvmPassesAndLlvmToPtxDuration(end_usecs - start_usecs);
   }
 
-  TF_ASSIGN_OR_RETURN(se::PtxLinkingMethod linking_method,
-                      ChooseLinkingMethod(module_config.debug_options()));
+  TF_ASSIGN_OR_RETURN(
+      se::PtxLinkingMethod linking_method,
+      ChooseLinkingMethod(module_config.debug_options(),
+                          std::get<se::CudaComputeCapability>(gpu_version)));
 
   if (linking_method == se::PtxLinkingMethod::kNvJitLink && relocatable) {
     VLOG(2) << "Deferring the PTX to CUBIN compilation of the relocatable "
@@ -900,7 +900,8 @@ static absl::StatusOr<stream_executor::SemanticVersion> GetAsmCompilerVersion(
 }
 
 absl::StatusOr<se::PtxLinkingMethod> NVPTXCompiler::ChooseLinkingMethod(
-    const DebugOptions& debug_options) {
+    const DebugOptions& debug_options,
+    se::CudaComputeCapability& compute_capability) {
   se::GpuAsmOpts ptxas_config = PtxOptsFromDebugOptions(debug_options);
   std::string& preferred_cuda_dir = ptxas_config.preferred_cuda_dir;
 
@@ -922,8 +923,8 @@ absl::StatusOr<se::PtxLinkingMethod> NVPTXCompiler::ChooseLinkingMethod(
 
   int ptxas_version =
       asm_compiler_version.major() * 1000 + asm_compiler_version.minor() * 10;
-  TF_ASSIGN_OR_RETURN(int driver_version,
-                      se::gpu::GpuDriver::GetDriverVersion());
+  int driver_version =
+      compute_capability.major * 1000 + compute_capability.minor * 10;
 
   if (driver_version >= ptxas_version) {
     return LinkingMethod::kDriver;
@@ -931,8 +932,8 @@ absl::StatusOr<se::PtxLinkingMethod> NVPTXCompiler::ChooseLinkingMethod(
 
   LOG_FIRST_N(WARNING, 1)
       << "The NVIDIA driver's CUDA version is "
-      << absl::StrFormat("%d.%d", driver_version / 1000,
-                         (driver_version % 1000) / 10)
+      << absl::StrFormat("%d.%d", compute_capability.major,
+                         compute_capability.minor)
       << " which is older than the PTX compiler version "
       << asm_compiler_version
       << ". Because the driver is older than the PTX compiler version, XLA is "
@@ -944,12 +945,20 @@ absl::StatusOr<se::PtxLinkingMethod> NVPTXCompiler::ChooseLinkingMethod(
 }
 
 absl::StatusOr<bool> NVPTXCompiler::CanUseLinkModules(
-    const HloModuleConfig& hlo_module_config) {
-  // TODO(phawkins): rather than comparing version numbers, it might be more
-  // robust if we simply tried to link something the first time we compile.
-  TF_ASSIGN_OR_RETURN(se::PtxLinkingMethod linking_method,
-                      ChooseLinkingMethod(hlo_module_config.debug_options()));
-  return linking_method != se::PtxLinkingMethod::kNone;
+    const HloModuleConfig& hlo_module_config,
+    se::GpuComputeCapability& gpu_compute_capability) {
+  if (std::holds_alternative<se::CudaComputeCapability>(
+          gpu_compute_capability)) {
+    // TODO(phawkins): rather than comparing version numbers, it might be more
+    // robust if we simply tried to link something the first time we compile.
+    TF_ASSIGN_OR_RETURN(se::PtxLinkingMethod linking_method,
+                        ChooseLinkingMethod(hlo_module_config.debug_options(),
+                                            std::get<se::CudaComputeCapability>(
+                                                gpu_compute_capability)));
+    return linking_method != se::PtxLinkingMethod::kNone;
+  }
+
+  return false;
 }
 
 absl::StatusOr<std::vector<uint8_t>> NVPTXCompiler::LinkModules(
@@ -962,7 +971,7 @@ absl::StatusOr<std::vector<uint8_t>> NVPTXCompiler::LinkModules(
       std::get<stream_executor::CudaComputeCapability>(compute_capability);
 
   TF_ASSIGN_OR_RETURN(se::PtxLinkingMethod linking_method,
-                      ChooseLinkingMethod(debug_options));
+                      ChooseLinkingMethod(debug_options, cc));
   VLOG(1) << "Linking " << modules.size()
           << " modules with linking method: " << linking_method;
 

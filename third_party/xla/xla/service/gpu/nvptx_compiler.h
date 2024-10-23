@@ -39,7 +39,6 @@ limitations under the License.
 #include "xla/service/hlo_module_config.h"
 #include "xla/stream_executor/cuda/ptx_linking_method.h"
 #include "xla/stream_executor/device_description.h"
-#include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/dnn.h"
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/stream_executor/stream_executor.h"
@@ -59,7 +58,6 @@ class NVPTXCompiler : public GpuCompiler {
   absl::Status OptimizeHloConvolutionCanonicalization(
       HloModule* hlo_module, se::GpuComputeCapability gpu_version,
       se::dnn::VersionInfo dnn_version,
-      se::DeviceMemoryAllocator* device_allocator,
       const se::SemanticVersion& toolkit_version) override;
 
   absl::Status OptimizeHloPostLayoutAssignment(
@@ -97,7 +95,8 @@ class NVPTXCompiler : public GpuCompiler {
       const HloModule* debug_module, const CompileOptions& options) override;
 
   absl::StatusOr<bool> CanUseLinkModules(
-      const HloModuleConfig& module_config) override;
+      const HloModuleConfig& module_config,
+      se::GpuComputeCapability& gpu_compute_capability) override;
 
  private:
   absl::StatusOr<std::vector<uint8_t>> LinkModules(
@@ -107,7 +106,8 @@ class NVPTXCompiler : public GpuCompiler {
       const DebugOptions& debug_options) override;
 
   absl::StatusOr<stream_executor::PtxLinkingMethod> ChooseLinkingMethod(
-      const DebugOptions& debug_options);
+      const DebugOptions& debug_options,
+      se::CudaComputeCapability& compute_capability);
 
   // Tries to compile the given ptx string to cubin.  Returns a vector with the
   // compiled cubin if compilation succeeded.

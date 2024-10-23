@@ -41,7 +41,6 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_module_group.h"
 #include "xla/hlo/ir/hlo_opcode.h"
-#include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/primitive_util.h"
@@ -290,7 +289,7 @@ ENTRY e {
     return str;
   }
 
-  DebugOptions GetDebugOptionsForTest() override {
+  DebugOptions GetDebugOptionsForTest() const override {
     DebugOptions options = HloTestBase::GetDebugOptionsForTest();
     options.set_xla_gpu_dump_autotune_results_to(
         xla_gpu_dump_autotune_results_to_);
@@ -786,15 +785,19 @@ class KernelCacheTest : public HloTestBase {
     CHECK(tsl::Env::Default()->LocalTempFilename(&cache_file_name_));
     HloModuleConfig config;
     config.set_debug_options(GetDebugOptionsForTest());
+    se::GpuComputeCapability cc = backend()
+                                      .default_stream_executor()
+                                      ->GetDeviceDescription()
+                                      .cuda_compute_capability();
     TF_ASSERT_OK_AND_ASSIGN(bool can_use_link_modules,
                             dynamic_cast<GpuCompiler*>(backend().compiler())
-                                ->CanUseLinkModules(config));
+                                ->CanUseLinkModules(config, cc));
     if (!can_use_link_modules) {
       GTEST_SKIP() << "Caching compiled kernels requires support of linking.";
     }
   }
 
-  DebugOptions GetDebugOptionsForTest() override {
+  DebugOptions GetDebugOptionsForTest() const override {
     DebugOptions debug_options = HloTestBase::GetDebugOptionsForTest();
     debug_options.set_xla_gpu_kernel_cache_file(cache_file_name_);
     debug_options.set_xla_gpu_enable_llvm_module_compilation_parallelism(true);
@@ -954,7 +957,7 @@ ENTRY e {
 
 class KernelCacheTestSingleThreaded : public KernelCacheTest {
  public:
-  DebugOptions GetDebugOptionsForTest() override {
+  DebugOptions GetDebugOptionsForTest() const override {
     DebugOptions debug_options = KernelCacheTest::GetDebugOptionsForTest();
     debug_options.set_xla_gpu_force_compilation_parallelism(1);
     return debug_options;
@@ -971,7 +974,7 @@ TEST_F(KernelCacheTestSingleThreaded, CacheIsGenerated) {
 
 class NoKernelCacheTest : public KernelCacheTest {
  public:
-  DebugOptions GetDebugOptionsForTest() override {
+  DebugOptions GetDebugOptionsForTest() const override {
     DebugOptions debug_options = KernelCacheTest::GetDebugOptionsForTest();
     debug_options.set_xla_gpu_enable_llvm_module_compilation_parallelism(false);
     return debug_options;
@@ -1302,16 +1305,6 @@ TEST_F(PassOrderTest, CollectivePipelinerRunsAfterCollectiveQuantizer) {
 
   VerifyPassOrder(/*first_pass_regex=*/"collective-quantizer",
                   /*last_pass_regex=*/"collective-pipeliner.*");
-}
-
-TEST_F(PassOrderTest,
-       AllGatherDynamicSliceSimplifierRunsAfterAllGatherOptimizer) {
-  DebugOptions options = GetDebugOptionsForTest();
-  SetDebugOptions(options);
-
-  VerifyPassOrder(
-      /*first_pass_regex=*/".*all-gather-optimizer.*",
-      /*last_pass_regex=*/".*all-gather-dynamic-slice-simplifier.*");
 }
 
 }  // namespace
