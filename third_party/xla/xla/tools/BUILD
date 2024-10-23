@@ -685,8 +685,8 @@ tsl_gpu_library(
         "//xla/service:xla_compile_result_proto_cc_impl",
         "//xla/service/cpu:cpu_compiler",
         "//xla/service/cpu:cpu_executable",
-        "//xla/stream_executor",
         "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:stream_executor_memory_allocator",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/status",
@@ -765,10 +765,6 @@ xla_test(
         ":data/add.hlo",
         "//xla/service:xla_aot_compile_test_gpu_target_config.prototxt",
         "//xla/service/gpu:gpu_compiler_test_autotune_db.textproto",
-    ],
-    tags = [
-        "config-cuda-only",
-        "cuda-only",
     ],
     deps = [
         ":xla_compile_lib",
