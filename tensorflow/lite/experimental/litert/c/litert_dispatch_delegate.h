@@ -20,6 +20,7 @@
 #include "tensorflow/lite/c/c_api_opaque.h"
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/experimental/litert/vendors/c/litert_dispatch.h"
 
 #ifdef __cplusplus
 #include <memory>
@@ -34,31 +35,26 @@ extern "C" {
 typedef struct LiteRtDispatchDelegateOptions LiteRtDispatchDelegateOptions;
 
 // Returns DispatchDelegateOptions populated with default values.
-LiteRtDispatchDelegateOptions* LiteRtDispatchDelegateOptionsCreateDefault();
+LiteRtDispatchDelegateOptions* LiteRtCreateDefaultDispatchDelegateOptions();
 
-TfLiteStatus LiteRtDispatchDelegateOptionsAdd(
-    LiteRtDispatchDelegateOptions* options, const char* option_name,
-    const char* option_value);
-
-// Specify a directory for loading dynamic libraries.
-TfLiteStatus LiteRtDispatchDelegateOptionsAddSharedLibraryDir(
-    LiteRtDispatchDelegateOptions* options, const char* shared_library_dir);
+TfLiteStatus LiteRtAddDispatchDelegateOption(
+    LiteRtDispatchDelegateOptions* options, LiteRtDispatchOption option);
 
 // Add NPU executable information keyed by a provided tag.
-TfLiteStatus LiteRtDispatchDelegateOptionsExecInfo(
+TfLiteStatus LiteRtAddDispatchDelegateExecInfoOption(
     LiteRtDispatchDelegateOptions* options, const char* exec_tag,
     const void* bytecode_addr, size_t bytecode_size, const char* function_name);
 
-void LiteRtDispatchDelegateOptionsDelete(
+void LiteRtDestroyDispatchDelegateOptions(
     LiteRtDispatchDelegateOptions* options);
 
 // Create a delegate that uses the Dispatch API for execution. Takes ownership
 // of the passed `options`. Must outlive the TFL interpreter.
-TfLiteOpaqueDelegate* LiteRtDispatchDelegateCreate(
+TfLiteOpaqueDelegate* LiteRtCreateDispatchDelegate(
     LiteRtDispatchDelegateOptions* options);
 
 // Do any needed cleanup and delete 'delegate'.
-void LiteRtDispatchDelegateDelete(TfLiteOpaqueDelegate* delegate);
+void LiteRtDestroyDispatchDelegate(TfLiteOpaqueDelegate* delegate);
 
 #ifdef __cplusplus
 }
@@ -71,9 +67,11 @@ using DispatchDelegateOptionsPtr =
     std::unique_ptr<LiteRtDispatchDelegateOptions,
                     void (*)(LiteRtDispatchDelegateOptions*)>;
 
-DispatchDelegateOptionsPtr DispatchDelegateOptionsCreateDefaultPtr();
+using DispatchDelegatePtr = tflite::TfLiteOpaqueDelegateUniquePtr;
 
-tflite::TfLiteOpaqueDelegateUniquePtr DispatchDelegateCreatePtr(
+DispatchDelegateOptionsPtr CreateDispatchDelegateOptionsPtr();
+
+DispatchDelegatePtr CreateDispatchDelegatePtr(
     DispatchDelegateOptionsPtr&& options);
 
 }  // namespace litert

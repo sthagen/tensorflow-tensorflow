@@ -342,8 +342,11 @@ cc_library(
     hdrs = ["all_gather_dynamic_slice_simplifier.h"],
     deps = [
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/transforms:op_expander_pass",
         "//xla/service:collective_opt_utils",
-        "//xla/service:op_expander_pass",
+        "//xla/service:hlo_module_config",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -355,7 +358,12 @@ xla_cc_test(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_matchers",
+        "//xla/service:hlo_module_config",
         "//xla/tests:hlo_test_base",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test_main",
     ],
 )
@@ -1405,6 +1413,37 @@ xla_test(
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "dot_normalizer",
+    srcs = ["dot_normalizer.cc"],
+    hdrs = ["dot_normalizer.h"],
+    deps = [
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/transforms:op_expander_pass",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:errors",
+    ],
+)
+
+xla_cc_test(
+    name = "dot_normalizer_test",
+    srcs = ["dot_normalizer_test.cc"],
+    deps = [
+        ":dot_normalizer",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
+        "//xla/tests:hlo_test_base",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
