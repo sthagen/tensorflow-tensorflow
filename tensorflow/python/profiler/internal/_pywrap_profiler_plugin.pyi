@@ -1,4 +1,4 @@
-# Copyright 2024 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,12 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-# Temporary envs file while we migrate to the new docker image.
-# Once the migration is complete, this file will be removed.
-source ci/official/envs/linux_x86_build
-TFCI_BAZEL_COMMON_ARGS="--repo_env=HERMETIC_PYTHON_VERSION=$TFCI_PYTHON_VERSION --config release_gpu_linux"
-TFCI_BAZEL_TARGET_SELECTING_CONFIG_PREFIX=linux_cuda
-TFCI_BUILD_PIP_PACKAGE_ARGS="--repo_env=WHEEL_NAME=tensorflow"
-TFCI_DOCKER_ARGS="--gpus all"
-TFCI_LIB_SUFFIX="-gpu-linux-x86_64"
-TFCI_WHL_SIZE_LIMIT=610M
+def monitor(arg0: str, arg1: int, arg2: int, arg3: bool) -> str: ...
+def trace(arg0: str, arg1: str, arg2: str, arg3: bool, arg4: int, arg5: int, arg6: dict) -> None: ...
+def xspace_to_tools_data(arg0: list, arg1: str, arg2: dict = ...) -> tuple: ...
+def xspace_to_tools_data_from_byte_string(arg0: list, arg1: list, arg2: str, arg3: dict) -> tuple: ...
