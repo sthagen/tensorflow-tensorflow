@@ -47,14 +47,26 @@ class RocmCommandBuffer : public GpuCommandBuffer {
       : GpuCommandBuffer(mode, parent, graph, is_owned_graph),
         parent_(parent) {}
 
-  absl::StatusOr<SetIfConditionKernel*> GetSetIfConditionKernel() override;
-  absl::StatusOr<SetIfElseConditionKernel*> GetSetIfElseConditionKernel()
-      override;
-  absl::StatusOr<SetCaseConditionKernel*> GetSetCaseConditionKernel() override;
-  absl::StatusOr<SetForConditionKernel*> GetSetForConditionKernel() override;
-  absl::StatusOr<SetWhileConditionKernel*> GetSetWhileConditionKernel()
-      override;
-  absl::StatusOr<NoOpKernel*> GetNoOpKernel() override;
+  absl::Status LaunchSetIfConditionKernel(
+      ExecutionScopeId execution_scope_id,
+      GraphConditionalHandle if_conditional,
+      DeviceMemory<bool> predicate) override;
+  absl::Status LaunchSetIfElseConditionKernel(
+      ExecutionScopeId execution_scope_id,
+      GraphConditionalHandle if_conditional,
+      GraphConditionalHandle else_conditional,
+      DeviceMemory<bool> predicate) override;
+  absl::Status LaunchSetCaseConditionKernel(
+      ExecutionScopeId execution_scope_id, GraphConditionalHandles conditionals,
+      DeviceMemory<int32_t> index, int32_t batch_offset,
+      bool enable_conditional_default) override;
+  absl::Status LaunchSetForConditionKernel(ExecutionScopeId execution_scope_id,
+                                           GraphConditionalHandle conditional,
+                                           DeviceMemory<int32_t> loop_counter,
+                                           int32_t iterations) override;
+  absl::Status LaunchSetWhileConditionKernel(
+      ExecutionScopeId execution_scope_id, GraphConditionalHandle conditional,
+      DeviceMemory<bool> predicate) override;
 
   std::unique_ptr<GpuCommandBuffer> CreateNestedCommandBuffer(
       hipGraph_t graph) override;
@@ -102,6 +114,14 @@ class RocmCommandBuffer : public GpuCommandBuffer {
   absl::Status SetNodeExecutionEnabled(GraphNodeHandle node_handle,
                                        CommandBuffer& root_command_buffer,
                                        bool enabled) override;
+
+  absl::Status LaunchGraph(Stream* stream) override;
+
+  absl::StatusOr<size_t> GetNodeCount() const override;
+
+  absl::Status PrepareFinalization() override;
+
+  absl::StatusOr<GraphConditionalHandle> CreateConditionalHandle() override;
 
   GpuExecutor* parent_;
 };

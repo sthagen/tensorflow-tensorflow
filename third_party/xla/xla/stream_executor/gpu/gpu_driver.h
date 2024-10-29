@@ -89,44 +89,6 @@ class GpuDriver {
                                        GpuGraphHandle graph,
                                        const GraphInstantiateFlags& flags);
 
-  // Launches an executable graph in a stream.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g6b2dceb3901e71a390d2bd8b0491e471
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status GraphLaunch(GpuGraphExecHandle exec,
-                                  GpuStreamHandle stream);
-
-  // Graph update result.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1g8edc8969ff6ae00b7cd5d7292f812c3c
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#cuda-driver-data-types
-  enum class GraphExecUpdateResult {
-    kSuccess,
-    kError,
-    kTopologyChanged,
-    kNodeTypeChanged,
-    kFunctionChanged,
-    kParametersChanged,
-    kNotSupported,
-    kUnsupportedFunctionChange,
-    kAttributesChanged
-  };
-
-  // Graph update result info.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/structCUgraphExecUpdateResultInfo__v1.html#structCUgraphExecUpdateResultInfo__v1
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  struct GraphExecUpdateResultInfo {
-    GpuGraphNodeHandle error_from_node;
-    GpuGraphNodeHandle error_node;
-    GraphExecUpdateResult result;
-  };
-
-  // Check whether an executable graph can be updated with a graph and perform
-  // the update if possible.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g96efefc56df46927da7297f122adfb9f
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status GraphExecUpdate(GpuGraphExecHandle exec,
-                                      GpuGraphHandle graph,
-                                      GraphExecUpdateResultInfo* result);
-
   // Returns a node's dependencies.
   //
   // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g048f4c0babcbba64a933fc277cd45083
@@ -144,12 +106,6 @@ class GpuDriver {
   static absl::StatusOr<std::string> GraphDebugDotPrint(
       GpuGraphHandle graph, const char* path,
       bool return_printed_graph = false);
-
-  // Creates a conditional handle.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gece6f3b9e85d0edb8484d625fe567376
-  static absl::Status GraphConditionalHandleCreate(
-      GpuGraphConditionalHandle* handle, GpuGraphHandle graph, Context* context,
-      unsigned int default_launch_value, unsigned int flags);
 
   // Conditional node parameters.
   // https://docs.nvidia.com/cuda/cuda-driver-api/structCUDA__CONDITIONAL__NODE__PARAMS.html#structCUDA__CONDITIONAL__NODE__PARAMS
@@ -180,23 +136,6 @@ class GpuDriver {
       GpuGraphNodeHandle* node, GpuGraphHandle graph,
       absl::Span<const GpuGraphNodeHandle> deps,
       const GpuGraphNodeParams& params);
-
-  // Creates a kernel execution node and adds it to a graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g50d871e3bd06c1b835e52f2966ef366b
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status GraphAddKernelNode(
-      GpuGraphNodeHandle* node, GpuGraphHandle graph,
-      absl::Span<const GpuGraphNodeHandle> deps, absl::string_view kernel_name,
-      GpuFunctionHandle function, unsigned int grid_dim_x,
-      unsigned int grid_dim_y, unsigned int grid_dim_z,
-      unsigned int block_dim_x, unsigned int block_dim_y,
-      unsigned int block_dim_z, unsigned int shared_mem_bytes,
-      void** kernel_params, void** extra);
-
-  // Counts number of nodes in the graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gfa35a8e2d2fc32f48dbd67ba27cf27e5
-  // https://docs.amd.com/projects/HIP/en/docs-5.0.0/doxygen/html/group___graph.html#gaf006701d98164ed3492755bbb19bab83
-  static absl::StatusOr<size_t> GraphGetNodeCount(GpuGraphHandle graph);
 
   // The CUDA stream callback type signature.
   // The data passed to AddStreamCallback is subsequently passed to this

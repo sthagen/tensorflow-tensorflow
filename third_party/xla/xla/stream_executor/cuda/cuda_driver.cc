@@ -96,70 +96,6 @@ absl::Status GpuDriver::GraphInstantiate(CUgraphExec* exec, CUgraph graph,
 #endif  // CUDA_VERSION >= 12000
 }
 
-absl::Status GpuDriver::GraphLaunch(CUgraphExec exec, CUstream stream) {
-  VLOG(2) << "Launching CUDA executable graph " << exec << " on a stream "
-          << stream;
-  return cuda::ToStatus(cuGraphLaunch(exec, stream),
-                        "Failed to launch CUDA graph");
-}
-
-absl::Status GpuDriver::GraphExecUpdate(CUgraphExec exec, CUgraph graph,
-                                        GraphExecUpdateResultInfo* result) {
-  VLOG(2) << "Update CUDA graph executable " << exec << " with graph " << graph;
-
-#if CUDA_VERSION >= 12000
-  CUgraphExecUpdateResultInfo cu_result;
-  memset(&cu_result, 0, sizeof(cu_result));
-  CUresult err_code = cuGraphExecUpdate(exec, graph, &cu_result);
-  auto cu_result_enum = cu_result.result;
-  if (cu_result.errorFromNode) {
-    result->error_from_node = cu_result.errorFromNode;
-  }
-  if (cu_result.errorNode) {
-    result->error_node = cu_result.errorNode;
-  }
-#else
-  CUgraphExecUpdateResult cu_result;
-  CUresult err_code = cuGraphExecUpdate(exec, graph, nullptr, &cu_result);
-  auto cu_result_enum = cu_result;
-#endif  // CUDA_VERSION >= 12000
-
-  switch (cu_result_enum) {
-    case CU_GRAPH_EXEC_UPDATE_SUCCESS:
-      result->result = GraphExecUpdateResult::kSuccess;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR:
-      result->result = GraphExecUpdateResult::kError;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_TOPOLOGY_CHANGED:
-      result->result = GraphExecUpdateResult::kTopologyChanged;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_NODE_TYPE_CHANGED:
-      result->result = GraphExecUpdateResult::kNodeTypeChanged;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_FUNCTION_CHANGED:
-      result->result = GraphExecUpdateResult::kFunctionChanged;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_PARAMETERS_CHANGED:
-      result->result = GraphExecUpdateResult::kParametersChanged;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_NOT_SUPPORTED:
-      result->result = GraphExecUpdateResult::kNotSupported;
-      break;
-#if CUDA_VERSION >= 12000
-    case CU_GRAPH_EXEC_UPDATE_ERROR_UNSUPPORTED_FUNCTION_CHANGE:
-      result->result = GraphExecUpdateResult::kUnsupportedFunctionChange;
-      break;
-    case CU_GRAPH_EXEC_UPDATE_ERROR_ATTRIBUTES_CHANGED:
-      result->result = GraphExecUpdateResult::kAttributesChanged;
-      break;
-#endif  // CUDA_VERSION >= 12000
-    default:
-      return absl::InternalError("Unknown graph update result");
-  }
-  return cuda::ToStatus(err_code, "Failed to update CUDA graph");
-}
-
 absl::StatusOr<std::vector<GpuGraphNodeHandle>>
 GpuDriver::GraphNodeGetDependencies(GpuGraphNodeHandle node) {
   VLOG(2) << "Get CUDA graph node " << node << " dependencies";
@@ -205,27 +141,6 @@ absl::StatusOr<std::string> GpuDriver::GraphDebugDotPrint(
 #endif  // CUDA_VERSION >= 12000
 
   return std::string(path);
-}
-
-absl::Status GpuDriver::GraphConditionalHandleCreate(
-    GpuGraphConditionalHandle* handle, CUgraph graph, Context* context,
-    unsigned int default_launch_value, unsigned int flags) {
-  VLOG(2) << "Create conditional handle for a graph " << graph
-          << "; context: " << context
-          << "; default_launch_value: " << default_launch_value
-          << "; flags: " << flags;
-
-#if CUDA_VERSION >= 12030
-  return cuda::ToStatus(
-      cuGraphConditionalHandleCreate(
-          handle, graph,
-          tensorflow::down_cast<CudaContext*>(context)->context(),
-          default_launch_value, flags),
-      "Failed to create conditional handle for a CUDA graph");
-#else
-  return absl::UnimplementedError(
-      "CUDA graph conditional nodes are not implemented");
-#endif  // CUDA_VERSION >= 12030
 }
 
 static std::string ConditionalTypeToString(
@@ -282,49 +197,6 @@ absl::StatusOr<GpuDriver::GpuGraphNodeResult> GpuDriver::GraphAddNode(
   return absl::UnimplementedError("unsupported node type");
 }
 
-absl::Status GpuDriver::GraphAddKernelNode(
-    CUgraphNode* node, CUgraph graph, absl::Span<const CUgraphNode> deps,
-    absl::string_view kernel_name, CUfunction function, unsigned int grid_dim_x,
-    unsigned int grid_dim_y, unsigned int grid_dim_z, unsigned int block_dim_x,
-    unsigned int block_dim_y, unsigned int block_dim_z,
-    unsigned int shared_mem_bytes, void** kernel_params, void** extra) {
-  VLOG(2) << "Add kernel node to a graph " << graph
-          << "; kernel: " << kernel_name << "; gdx: " << grid_dim_x
-          << " gdy: " << grid_dim_y << " gdz: " << grid_dim_z
-          << " bdx: " << block_dim_x << " bdy: " << block_dim_y
-          << " bdz: " << block_dim_z << "; shmem: " << shared_mem_bytes
-          << "; deps: " << deps.size();
-
-  CUDA_KERNEL_NODE_PARAMS params;
-  memset(&params, 0, sizeof(params));
-
-  params.func = function;
-  params.gridDimX = grid_dim_x;
-  params.gridDimY = grid_dim_y;
-  params.gridDimZ = grid_dim_z;
-  params.blockDimX = block_dim_x;
-  params.blockDimY = block_dim_y;
-  params.blockDimZ = block_dim_z;
-  params.sharedMemBytes = shared_mem_bytes;
-  params.kernelParams = kernel_params;
-  params.extra = extra;
-
-  // TODO(ezhulenev): Why do we do it on every call to launch kernel? This
-  // should be moved one level up to se::Kernel level, and done just once (or
-  // updated once we get a new larger shared memory request).
-  if (shared_mem_bytes != 0) {
-    TF_RETURN_IF_ERROR(cuda::ToStatus(
-        cuFuncSetAttribute(function,
-                           CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                           shared_mem_bytes),
-        "Failed to set shared memory size"));
-  }
-
-  return cuda::ToStatus(
-      cuGraphAddKernelNode(node, graph, deps.data(), deps.size(), &params),
-      "Failed to add kernel node to a CUDA graph");
-}
-
 int GpuDriver::GetDeviceCount() {
   int device_count = 0;
   auto status = cuda::ToStatus(cuDeviceGetCount(&device_count));
@@ -341,13 +213,6 @@ absl::StatusOr<int32_t> GpuDriver::GetDriverVersion() {
   TF_RETURN_IF_ERROR(cuda::ToStatus(cuDriverGetVersion(&version),
                                     "Could not get driver version"));
   return version;
-}
-
-absl::StatusOr<size_t> GpuDriver::GraphGetNodeCount(GpuGraphHandle graph) {
-  size_t num_nodes;
-  TF_RETURN_IF_ERROR(
-      cuda::ToStatus(cuGraphGetNodes(graph, /*nodes=*/nullptr, &num_nodes)));
-  return num_nodes;
 }
 
 }  // namespace gpu

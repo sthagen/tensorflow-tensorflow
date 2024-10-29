@@ -34,7 +34,6 @@ limitations under the License.
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/gpu/gpu_command_buffer.h"
-#include "xla/stream_executor/gpu/gpu_driver.h"
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
 #include "xla/stream_executor/kernel.h"
@@ -105,33 +104,34 @@ std::unique_ptr<GpuCommandBuffer> RocmCommandBuffer::CreateNestedCommandBuffer(
                             /*is_owned_graph=*/false));
 }
 
-absl::StatusOr<GpuCommandBuffer::SetIfConditionKernel*>
-RocmCommandBuffer::GetSetIfConditionKernel() {
+absl::Status RocmCommandBuffer::LaunchSetIfConditionKernel(
+    ExecutionScopeId execution_scope_id, GraphConditionalHandle if_conditional,
+    DeviceMemory<bool> predicate) {
   return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
-absl::StatusOr<GpuCommandBuffer::SetIfElseConditionKernel*>
-RocmCommandBuffer::GetSetIfElseConditionKernel() {
+absl::Status RocmCommandBuffer::LaunchSetIfElseConditionKernel(
+    ExecutionScopeId execution_scope_id, GraphConditionalHandle if_conditional,
+    GraphConditionalHandle else_conditional, DeviceMemory<bool> predicate) {
   return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
-absl::StatusOr<GpuCommandBuffer::SetCaseConditionKernel*>
-RocmCommandBuffer::GetSetCaseConditionKernel() {
+absl::Status RocmCommandBuffer::LaunchSetCaseConditionKernel(
+    ExecutionScopeId execution_scope_id, GraphConditionalHandles conditionals,
+    DeviceMemory<int32_t> index, int32_t batch_offset,
+    bool enable_conditional_default) {
   return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
-absl::StatusOr<GpuCommandBuffer::SetForConditionKernel*>
-RocmCommandBuffer::GetSetForConditionKernel() {
+absl::Status RocmCommandBuffer::LaunchSetForConditionKernel(
+    ExecutionScopeId execution_scope_id, GraphConditionalHandle conditional,
+    DeviceMemory<int32_t> loop_counter, int32_t iterations) {
   return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
-absl::StatusOr<GpuCommandBuffer::SetWhileConditionKernel*>
-RocmCommandBuffer::GetSetWhileConditionKernel() {
-  return absl::UnimplementedError("Conditionals are not supported on ROCM.");
-}
-
-absl::StatusOr<GpuCommandBuffer::NoOpKernel*>
-RocmCommandBuffer::GetNoOpKernel() {
+absl::Status RocmCommandBuffer::LaunchSetWhileConditionKernel(
+    ExecutionScopeId execution_scope_id, GraphConditionalHandle conditional,
+    DeviceMemory<bool> predicate) {
   return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
@@ -356,7 +356,7 @@ absl::StatusOr<GraphNodeHandle> RocmCommandBuffer::CreateBarrierNode(
 absl::Status RocmCommandBuffer::Trace(
     Stream* stream, absl::AnyInvocable<absl::Status()> function) {
   TF_RETURN_IF_ERROR(CheckNotFinalized());
-  TF_ASSIGN_OR_RETURN(size_t count, GpuDriver::GraphGetNodeCount(graph_));
+  TF_ASSIGN_OR_RETURN(size_t count, GetNodeCount());
   if (count != 0 || !is_owned_graph_)
     return absl::InternalError(
         "Stream can't be traced on non empty command buffer");
@@ -409,4 +409,28 @@ absl::Status RocmCommandBuffer::SetNodeExecutionEnabled(
       "Failed to set HIP graph node enabled flag");
 }
 
+absl::Status RocmCommandBuffer::LaunchGraph(Stream* stream) {
+  VLOG(3) << "Launch command buffer executable graph " << exec_
+          << " on a stream: " << stream;
+  return ToStatus(wrap::hipGraphLaunch(exec_, AsGpuStreamValue(stream)),
+                  "Failed to launch HIP graph");
+}
+absl::StatusOr<size_t> RocmCommandBuffer::GetNodeCount() const {
+  size_t numNodes;
+  TF_RETURN_IF_ERROR(
+      ToStatus(wrap::hipGraphGetNodes(graph_, /*nodes=*/nullptr, &numNodes),
+               "Failed to get HIP graph node count"));
+
+  return numNodes;
+}
+
+absl::Status RocmCommandBuffer::PrepareFinalization() {
+  return absl::OkStatus();
+}
+
+absl::StatusOr<GpuCommandBuffer::GraphConditionalHandle>
+RocmCommandBuffer::CreateConditionalHandle() {
+  return absl::UnimplementedError(
+      "Graph conditionals are not yet supported on HIP graphs.");
+}
 }  // namespace stream_executor::gpu
