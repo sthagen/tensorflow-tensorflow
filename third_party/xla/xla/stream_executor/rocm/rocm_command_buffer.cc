@@ -17,10 +17,12 @@ limitations under the License.
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/casts.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
@@ -37,6 +39,7 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_command_buffer.h"
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
+#include "xla/stream_executor/gpu/scoped_update_mode.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/rocm/rocm_driver_wrapper.h"
@@ -444,4 +447,77 @@ absl::Status RocmCommandBuffer::WriteGraphToDotFile(absl::string_view path) {
       "Failed to print gpu graph debug file");
 }
 
+absl::Status RocmCommandBuffer::InstantiateGraph() {
+  VLOG(2) << "Instantiate HIP executable graph from graph " << graph_;
+  return ToStatus(
+      wrap::hipGraphInstantiate(&exec_, graph_, nullptr, nullptr, 0),
+      "Failed to instantiate HIP graph");
+}
+
+std::unique_ptr<ScopedUpdateMode> RocmCommandBuffer::ActivateUpdateMode(
+    GpuCommandBuffer* nested_cmd_buffer) {
+  auto nested_rocm_cmd_buffer =
+      static_cast<RocmCommandBuffer*>(nested_cmd_buffer);
+  auto scoped_graph_exec = std::make_unique<ScopedRocmGraphExec>(
+      &nested_rocm_cmd_buffer->exec_,
+      &nested_rocm_cmd_buffer->is_owned_graph_exec_);
+
+  nested_rocm_cmd_buffer->exec_ = exec_;
+  nested_rocm_cmd_buffer->is_owned_graph_exec_ = false;
+
+  return std::move(scoped_graph_exec);
+}
+
+RocmCommandBuffer::~RocmCommandBuffer() {
+  if (exec_ != nullptr && is_owned_graph_exec_) {
+    VLOG(5) << "Destroy GPU command buffer executable graph " << exec_ << " "
+            << "(remaining alive executable graphs: " << NotifyExecDestroyed()
+            << ")";
+    if (auto status = ToStatus(hipGraphExecDestroy(exec_),
+                               "Failed to destroy HIP executable graph");
+        !status.ok()) {
+      LOG(ERROR) << status.message();
+    }
+  }
+  if (graph_ != nullptr && is_owned_graph_) {
+    if (auto status =
+            ToStatus(hipGraphDestroy(graph_), "Failed to destroy HIP graph");
+        !status.ok()) {
+      LOG(ERROR) << status.message();
+    }
+  }
+}
+absl::Status RocmCommandBuffer::CheckCanBeUpdated() {
+  if (exec_ == nullptr) {
+    return absl::InternalError(
+        "Command buffer has to have a graph executable to be updated.");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::vector<GraphNodeHandle>>
+RocmCommandBuffer::GetNodeDependencies(const GraphNodeHandle node) {
+  VLOG(2) << "Get HIP graph node " << node << " dependencies";
+
+  std::vector<hipGraphNode_t> dependencies;
+
+  size_t num_dependencies = 0;
+  TF_RETURN_IF_ERROR(
+      ToStatus(hipGraphNodeGetDependencies(ToHipGraphHandle(node), nullptr,
+                                           &num_dependencies),
+               "Failed to get HIP graph node depedencies size"));
+
+  dependencies.resize(num_dependencies, nullptr);
+  TF_RETURN_IF_ERROR(ToStatus(
+      hipGraphNodeGetDependencies(ToHipGraphHandle(node), dependencies.data(),
+                                  &num_dependencies),
+      "Failed to get HIP graph node depedencies"));
+
+  std::vector<GraphNodeHandle> result;
+  result.reserve(dependencies.size());
+  absl::c_transform(
+      dependencies, std::back_inserter(result),
+      static_cast<GraphNodeHandle (*)(hipGraphNode_t)>(&FromHipGraphHandle));
+  return result;
+}
 }  // namespace stream_executor::gpu

@@ -19,18 +19,20 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/span.h"
 #include "rocm/include/hip/hip_runtime.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/gpu/gpu_command_buffer.h"
 #include "xla/stream_executor/gpu/gpu_executor.h"
+#include "xla/stream_executor/gpu/scoped_gpu_graph_exec.h"
+#include "xla/stream_executor/gpu/scoped_update_mode.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/launch_dim.h"
 
@@ -43,11 +45,15 @@ class RocmCommandBuffer : public GpuCommandBuffer {
   static absl::StatusOr<std::unique_ptr<RocmCommandBuffer>> Create(
       Mode mode, GpuExecutor* parent);
 
+  ~RocmCommandBuffer() override;
+
  private:
   RocmCommandBuffer(Mode mode, GpuExecutor* parent, hipGraph_t graph,
                     bool is_owned_graph)
-      : GpuCommandBuffer(mode, parent, graph, is_owned_graph),
-        parent_(parent) {}
+      : GpuCommandBuffer(mode, parent),
+        parent_(parent),
+        graph_(graph),
+        is_owned_graph_(is_owned_graph) {}
 
   absl::Status LaunchSetIfConditionKernel(
       ExecutionScopeId execution_scope_id,
@@ -128,7 +134,28 @@ class RocmCommandBuffer : public GpuCommandBuffer {
 
   absl::Status WriteGraphToDotFile(absl::string_view path) override;
 
+  absl::Status InstantiateGraph() override;
+
+  using ScopedRocmGraphExec = ScopedGraphExec<hipGraphExec_t>;
+  std::unique_ptr<ScopedUpdateMode> ActivateUpdateMode(
+      GpuCommandBuffer* nested_cmd_buffer) override;
+
+  absl::Status CheckCanBeUpdated() override;
+
+  absl::StatusOr<std::vector<GraphNodeHandle>> GetNodeDependencies(
+      GraphNodeHandle node) override;
+
   GpuExecutor* parent_;
+
+  static_assert(std::is_pointer_v<hipGraph_t>, "hipGraph_t must be a pointer");
+  static_assert(std::is_pointer_v<hipGraphExec_t>,
+                "hipGraphExec_t must be a pointer");
+
+  hipGraph_t graph_ = nullptr;  // owned if `is_owned_graph_`
+  bool is_owned_graph_ = true;  // ownership of `graph_`
+
+  hipGraphExec_t exec_ = nullptr;    // owned if `is_owned_graph_exec_`
+  bool is_owned_graph_exec_ = true;  // ownership of `is_owned_graph_exec_`
 };
 
 }  // namespace stream_executor::gpu

@@ -54,55 +54,6 @@ limitations under the License.
 
 namespace stream_executor::gpu {
 
-absl::Status GpuDriver::CreateGraph(hipGraph_t* graph) {
-  VLOG(2) << "Create new HIP graph";
-  TF_RETURN_IF_ERROR(ToStatus(wrap::hipGraphCreate(graph, /*flags=*/0),
-                              "Failed to create HIP graph"));
-  VLOG(2) << "Created HIP graph " << *graph;
-  return absl::OkStatus();
-}
-
-absl::Status GpuDriver::DestroyGraph(hipGraph_t graph) {
-  VLOG(2) << "Destroy HIP graph " << graph;
-  return ToStatus(wrap::hipGraphDestroy(graph), "Failed to destroy HIP graph");
-}
-
-absl::Status GpuDriver::GraphInstantiate(hipGraphExec_t* exec, hipGraph_t graph,
-                                         const GraphInstantiateFlags& flags) {
-  VLOG(2) << "Instantiate HIP executable graph from graph " << graph << " ("
-          << "auto_free_on_launch=" << flags.auto_free_on_launch << ", "
-          << "device_launch=" << flags.device_launch << ", "
-          << "use_node_priority=" << flags.use_node_prirotiy << ", "
-          << "upload=" << flags.upload << ")";
-  return ToStatus(wrap::hipGraphInstantiate(exec, graph, nullptr, nullptr, 0),
-                  "Failed to instantiate HIP graph");
-}
-
-absl::StatusOr<std::vector<GpuGraphNodeHandle>>
-GpuDriver::GraphNodeGetDependencies(GpuGraphNodeHandle node) {
-  VLOG(2) << "Get HIP graph node " << node << " dependencies";
-
-  std::vector<hipGraphNode_t> dependencies;
-
-  size_t num_dependencies = 0;
-  TF_RETURN_IF_ERROR(
-      ToStatus(hipGraphNodeGetDependencies(node, nullptr, &num_dependencies),
-               "Failed to get HIP graph node depedencies size"));
-
-  dependencies.resize(num_dependencies, nullptr);
-  TF_RETURN_IF_ERROR(ToStatus(
-      hipGraphNodeGetDependencies(node, dependencies.data(), &num_dependencies),
-      "Failed to get HIP graph node depedencies"));
-
-  return dependencies;
-}
-
-absl::Status GpuDriver::DestroyGraphExec(hipGraphExec_t exec) {
-  VLOG(2) << "Destroying HIP executable graph" << exec;
-  return ToStatus(wrap::hipGraphExecDestroy(exec),
-                  "Failed to destroy HIP graph");
-}
-
 int GpuDriver::GetDeviceCount() {
   int device_count = 0;
   hipError_t res = wrap::hipGetDeviceCount(&device_count);

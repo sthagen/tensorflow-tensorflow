@@ -19,10 +19,13 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/casts.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
@@ -43,6 +46,7 @@ limitations under the License.
 #include "xla/stream_executor/gpu/gpu_command_buffer.h"
 #include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
+#include "xla/stream_executor/gpu/scoped_update_mode.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/semantic_version.h"
@@ -113,6 +117,19 @@ std::string ConditionalTypeToString(GpuCommandBuffer::ConditionType type) {
     case GpuCommandBuffer::ConditionType::kWhile:
       return "WHILE";
   }
+}
+
+absl::Status GraphInstantiate(CUgraphExec* exec, CUgraph graph) {
+  VLOG(2) << "Instantiate CUDA executable graph from graph " << graph;
+
+#if CUDA_VERSION >= 12000
+  uint64_t cu_flags = 0;
+  return cuda::ToStatus(cuGraphInstantiate(exec, graph, cu_flags),
+                        "Failed to instantiate CUDA graph");
+#else
+  return cuda::ToStatus(cuGraphInstantiate(exec, graph, nullptr, nullptr, 0),
+                        "Failed to instantiate CUDA graph");
+#endif  // CUDA_VERSION >= 12000
 }
 
 }  // namespace
@@ -649,6 +666,94 @@ absl::Status CudaCommandBuffer::WriteGraphToDotFile(absl::string_view path) {
 
   return absl::UnimplementedError(
       "CUDA graph debug dot print is not supported.");
+}
+
+absl::Status CudaCommandBuffer::InstantiateGraph() {
+  // If we get a "resource exhausted error" we retry instantiating Gpu graph
+  // one more time after releasing unused device memory allocated for graphs.
+  auto instantiated = GraphInstantiate(&exec_, graph_);
+  if (instantiated.code() == absl::StatusCode::kResourceExhausted) {
+    LOG(WARNING) << "Retry CUDA graph instantiation after OOM error";
+
+    TF_RETURN_IF_ERROR(parent_->TrimGraphMemory());
+    TF_RETURN_IF_ERROR(GraphInstantiate(&exec_, graph_));
+  } else {
+    TF_RETURN_IF_ERROR(instantiated);
+  }
+
+  return absl::OkStatus();
+}
+
+std::unique_ptr<ScopedUpdateMode> CudaCommandBuffer::ActivateUpdateMode(
+    GpuCommandBuffer* nested_cmd_buffer) {
+  auto nested_cuda_cmd_buffer =
+      static_cast<CudaCommandBuffer*>(nested_cmd_buffer);
+
+  auto scoped_graph_exec = std::make_unique<ScopedCudaGraphExec>(
+      &nested_cuda_cmd_buffer->exec_,
+      &nested_cuda_cmd_buffer->is_owned_graph_exec_);
+
+  // We need to store the graph exec handle in the nested command buffer.
+  // The scoped_graph_exec will restore the old state once we are done.
+  nested_cuda_cmd_buffer->exec_ = exec_;
+  nested_cuda_cmd_buffer->is_owned_graph_exec_ = false;
+
+  return std::move(scoped_graph_exec);
+}
+
+CudaCommandBuffer::~CudaCommandBuffer() {
+  if (exec_ != nullptr && is_owned_graph_exec_) {
+    VLOG(5) << "Destroy GPU command buffer executable graph " << exec_ << " "
+            << "(remaining alive executable graphs: " << NotifyExecDestroyed()
+            << ")";
+    if (auto status = cuda::ToStatus(cuGraphExecDestroy(exec_),
+                                     "Failed to destroy CUDA executable graph");
+        !status.ok()) {
+      LOG(ERROR) << status.message();
+    }
+  }
+  if (graph_ != nullptr && is_owned_graph_) {
+    if (auto status = cuda::ToStatus(cuGraphDestroy(graph_),
+                                     "Failed to destroy CUDA graph");
+        !status.ok()) {
+      LOG(ERROR) << status.message();
+    }
+  }
+}
+
+absl::Status CudaCommandBuffer::CheckCanBeUpdated() {
+  if (exec_ == nullptr) {
+    return absl::InternalError(
+        "Command buffer has to have a graph executable to be updated.");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::vector<GraphNodeHandle>>
+CudaCommandBuffer::GetNodeDependencies(GraphNodeHandle node) {
+  VLOG(2) << "Get CUDA graph node " << node << " dependencies";
+
+  std::vector<CUgraphNode> dependencies;
+
+  size_t num_dependencies = 0;
+  TF_RETURN_IF_ERROR(
+      cuda::ToStatus(cuGraphNodeGetDependencies(ToCudaGraphHandle(node),
+                                                nullptr, &num_dependencies),
+                     "Failed to get CUDA graph node depedencies size"));
+
+  dependencies.resize(num_dependencies, nullptr);
+  TF_RETURN_IF_ERROR(cuda::ToStatus(
+      cuGraphNodeGetDependencies(ToCudaGraphHandle(node), dependencies.data(),
+                                 &num_dependencies),
+      "Failed to get CUDA graph node depedencies"));
+
+  std::vector<GraphNodeHandle> result;
+  result.reserve(dependencies.size());
+  absl::c_transform(
+      dependencies, std::back_inserter(result),
+      static_cast<GraphNodeHandle (*)(CUgraphNode)>(&FromCudaGraphHandle));
+
+  return result;
 }
 
 }  // namespace stream_executor::gpu

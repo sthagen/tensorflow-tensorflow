@@ -168,6 +168,23 @@ gpu_only_cc_library(
     ),
 )
 
+cc_library(
+    name = "scoped_update_mode",
+    hdrs = [
+        "scoped_update_mode.h",
+    ],
+)
+
+cc_library(
+    name = "scoped_gpu_graph_exec",
+    hdrs = [
+        "scoped_gpu_graph_exec.h",
+    ],
+    deps = [
+        ":scoped_update_mode",
+    ],
+)
+
 gpu_only_cc_library(
     name = "gpu_command_buffer",
     srcs = ["gpu_command_buffer.cc"],
@@ -175,9 +192,9 @@ gpu_only_cc_library(
         "gpu_command_buffer.h",
     ],
     deps = [
-        ":gpu_driver_header",
         ":gpu_executor_header",
         ":gpu_types_header",
+        ":scoped_update_mode",
         "//xla/stream_executor:bit_pattern",
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:device_memory",
@@ -712,9 +729,7 @@ xla_test(
     backends = ["gpu"],
     deps = [
         ":gpu_command_buffer",
-        ":gpu_driver_header",
         ":gpu_test_kernels",
-        ":gpu_types_header",
         "//xla/service:platform_util",
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:device_memory",
@@ -736,8 +751,10 @@ xla_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_benchmark",

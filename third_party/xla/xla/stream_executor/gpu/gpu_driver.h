@@ -57,49 +57,6 @@ namespace gpu {
 // Thread safety: these functions should not be used from signal handlers.
 class GpuDriver {
  public:
-  // Creates a new GPU graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gd885f719186010727b75c3315f865fdf
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status CreateGraph(GpuGraphHandle* graph);
-
-  // Destroys GPU graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g718cfd9681f078693d4be2426fd689c8
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status DestroyGraph(GpuGraphHandle graph);
-
-  // Graph instantiation flags.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1g070bf5517d3a7915667c256eefce4956
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#cuda-driver-data-types
-  struct GraphInstantiateFlags {
-    // Automatically free memory allocated in a graph before relaunching.
-    bool auto_free_on_launch = false;
-    // Automatically upload the graph after instantiation.
-    bool upload = false;
-    // Instantiate the graph to be launchable from the device.
-    bool device_launch = false;
-    // Run the graph using the per-node priority attributes rather than the
-    // priority of the stream it is launched into.
-    bool use_node_prirotiy = false;
-  };
-
-  // Creates an executable graph from a graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1gb53b435e178cccfa37ac87285d2c3fa1
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status GraphInstantiate(GpuGraphExecHandle* exec,
-                                       GpuGraphHandle graph,
-                                       const GraphInstantiateFlags& flags);
-
-  // Returns a node's dependencies.
-  //
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g048f4c0babcbba64a933fc277cd45083
-  static absl::StatusOr<std::vector<GpuGraphNodeHandle>>
-  GraphNodeGetDependencies(GpuGraphNodeHandle node);
-
-  // Destroys an executable graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1ga32ad4944cc5d408158207c978bc43a7
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::Status DestroyGraphExec(GpuGraphExecHandle exec);
-
   // The CUDA stream callback type signature.
   // The data passed to AddStreamCallback is subsequently passed to this
   // callback when it fires.

@@ -1,4 +1,4 @@
-/* Copyright 2020 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,25 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/cpu/runtime_pow.h"
+#ifndef XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
+#define XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
 
-#include <cstdint>
+namespace stream_executor::gpu {
 
-#include "absl/base/attributes.h"
+// RAII wrapper for `GpuCommandBuffer::ActivateUpdateMode` that enables updates
+// of nested command buffers.
+class ScopedUpdateMode {
+ public:
+  virtual ~ScopedUpdateMode() = 0;
+};
 
-template <typename T>
-static T Powi(T a, int32_t b) {
-  const bool recip = b < 0;
-  T r = 1;
-  while (true) {
-    if (b & 1) r *= a;
-    b /= 2;
-    if (b == 0) break;
-    a *= a;
-  }
-  return recip ? 1 / r : r;
-}
+inline ScopedUpdateMode::~ScopedUpdateMode() = default;
 
-float ABSL_ATTRIBUTE_WEAK __powisf2(float a, int32_t b) { return Powi(a, b); }
+}  // namespace stream_executor::gpu
 
-double ABSL_ATTRIBUTE_WEAK __powidf2(double a, int32_t b) { return Powi(a, b); }
+#endif  // XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
