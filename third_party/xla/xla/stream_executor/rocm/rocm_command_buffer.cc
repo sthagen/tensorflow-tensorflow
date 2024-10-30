@@ -27,6 +27,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "rocm/include/hip/driver_types.h"
 #include "rocm/include/hip/hip_runtime.h"
@@ -97,11 +98,11 @@ absl::StatusOr<std::unique_ptr<RocmCommandBuffer>> RocmCommandBuffer::Create(
                             /*is_owned_graph=*/true));
 }
 
-std::unique_ptr<GpuCommandBuffer> RocmCommandBuffer::CreateNestedCommandBuffer(
-    hipGraph_t graph) {
-  return std::unique_ptr<RocmCommandBuffer>(
-      new RocmCommandBuffer(Mode::kNested, parent_, graph,
-                            /*is_owned_graph=*/false));
+absl::StatusOr<GpuCommandBuffer::ConditionalNodeResult>
+RocmCommandBuffer::CreateConditionalNode(const Dependencies& dependencies,
+                                         GraphConditionalHandle conditional,
+                                         ConditionType type) {
+  return absl::UnimplementedError("Conditionals are not supported on ROCM.");
 }
 
 absl::Status RocmCommandBuffer::LaunchSetIfConditionKernel(
@@ -433,4 +434,14 @@ RocmCommandBuffer::CreateConditionalHandle() {
   return absl::UnimplementedError(
       "Graph conditionals are not yet supported on HIP graphs.");
 }
+
+absl::Status RocmCommandBuffer::WriteGraphToDotFile(absl::string_view path) {
+  VLOG(2) << "Print HIP graph " << graph_ << " debug dot file to " << path;
+
+  int flags = hipGraphDebugDotFlagsVerbose;
+  return ToStatus(
+      wrap::hipGraphDebugDotPrint(graph_, std::string{path}.c_str(), flags),
+      "Failed to print gpu graph debug file");
+}
+
 }  // namespace stream_executor::gpu

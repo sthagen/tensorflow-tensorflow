@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/service/layout_assignment.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -2593,47 +2594,45 @@ absl::StatusOr<bool> LayoutAssignment::Run(
   VLOG(2) << "Running layout assignment on module " << module->name();
   TF_RETURN_IF_ERROR(Init(module));
   call_graph_ = CallGraph::Build(module);
-  // Add copy to the operand of Send instructions, since we cannot call
-  // SetOperandLayout on Send instructions as it aliases its input to the
-  // output.
-  //
-  // TODO(b/68493863): Remove this once we can call SetOperandLayout() on the
-  // operand buffers that aliases with the output.
-  for (HloComputation* computation : module->computations(execution_threads)) {
-    for (HloInstruction* instruction :
-         computation->MakeInstructionPostOrder()) {
-      if (instruction->opcode() == HloOpcode::kSend) {
-        TF_RETURN_IF_ERROR(AddCopyForOperand(instruction, 0));
-      }
-    }
-  }
 
-  // If there is both a layout constraint on operands of a custom call, and
-  // aliasing constraint between output and operand, then it is simpler and
-  // safer to copy the operand before we assign layouts. Copying the operand
-  // during layout assignment is complicated because we may not update buffer
-  // aliasing information correctly at that stage. If we don't copy before
-  // layout assignment, and the backend imposes additional restraints on the
-  // operand (eg: if operand is a dot), then attempting to make a copy during
-  // layout assignment may still lead to wrong result due to incomplete
-  // propagation of buffer aliasing information depending on ordering of
-  // constraints. We expect that unnecessary copies may be optimized out by
-  // later passes.
+  std::vector<std::pair<HloInstruction*, int64_t>> operands_to_copy;
   for (HloComputation* computation : module->computations(execution_threads)) {
-    for (HloInstruction* instruction :
-         computation->MakeInstructionPostOrder()) {
-      if (IsLayoutConstrainedCustomCall(instruction)) {
+    for (HloInstruction* instruction : computation->instructions()) {
+      // Add copy to the operand of Send instructions, since we cannot call
+      // SetOperandLayout on Send instructions as it aliases its input to the
+      // output.
+      //
+      // TODO(b/68493863): Remove this once we can call SetOperandLayout() on
+      // the operand buffers that aliases with the output.
+      if (instruction->opcode() == HloOpcode::kSend) {
+        operands_to_copy.emplace_back(instruction, 0);
+      } else if (IsLayoutConstrainedCustomCall(instruction)) {
+        // If there is both a layout constraint on operands of a custom call,
+        // and aliasing constraint between output and operand, then it is
+        // simpler and safer to copy the operand before we assign layouts.
+        // Copying the operand during layout assignment is complicated because
+        // we may not update buffer aliasing information correctly at that
+        // stage. If we don't copy before layout assignment, and the backend
+        // imposes additional restraints on the operand (eg: if operand is a
+        // dot), then attempting to make a copy during layout assignment may
+        // still lead to wrong result due to incomplete propagation of buffer
+        // aliasing information depending on ordering of constraints. We expect
+        // that unnecessary copies may be optimized out by later passes.
         absl::flat_hash_set<int64_t> processed;
         for (const std::pair<ShapeIndex, std::pair<int64_t, ShapeIndex>>&
                  output_operand_pair : instruction->output_operand_aliasing()) {
           int operand_no = output_operand_pair.second.first;
           if (!processed.contains(operand_no)) {
-            TF_RETURN_IF_ERROR(AddCopyForOperand(instruction, operand_no));
+            operands_to_copy.emplace_back(instruction, operand_no);
             processed.insert(operand_no);
           }
         }
       }
     }
+    for (const auto [instruction, operand_no] : operands_to_copy) {
+      TF_RETURN_IF_ERROR(AddCopyForOperand(instruction, operand_no));
+    }
+    operands_to_copy.clear();
   }
 
   // Clone Conditional computations with multiple callsites.
@@ -2797,7 +2796,9 @@ absl::StatusOr<bool> LayoutAssignment::Run(
   TF_RETURN_IF_ERROR(PropagateComputationLayouts(module->entry_computation(),
                                                  entry_computation_layout_));
 
+#ifndef NDEBUG
   TF_RETURN_IF_ERROR(CheckLayouts(module, execution_threads));
+#endif  // NDEBUG
 
   // All layouts are reset then reassigned by this pass.
   return true;
@@ -2958,27 +2959,26 @@ absl::Status LayoutAssignment::Init(HloModule* module) {
   current_priority_ = LayoutConstraint::kBeginningPriority;
   // Clear all the copies which have been added, and all the related
   // instructions (like GTE and tuples).
-  int64_t removed_copies = 0;
-  for (HloComputation* computation : module->computations()) {
-    for (HloInstruction* instruction :
-         computation->MakeInstructionPostOrder()) {
-      if (instruction->opcode() == HloOpcode::kCopy &&
-          added_copies_.contains(instruction)) {
-        VLOG(5) << "Removing added copy: " << instruction->ToString();
-        TF_RETURN_IF_ERROR(
-            instruction->ReplaceAllUsesWith(instruction->mutable_operand(0)));
-        TF_RETURN_IF_ERROR(computation->RemoveInstruction(instruction));
-        ++removed_copies;
-      }
+  if (!added_copies_.empty()) {
+    std::vector<HloInstruction*> copies_to_remove(added_copies_.begin(),
+                                                  added_copies_.end());
+    // Ensure determinism.
+    std::sort(copies_to_remove.begin(), copies_to_remove.end(),
+              [](const HloInstruction* a, const HloInstruction* b) {
+                return a->unique_id() < b->unique_id();
+              });
+    for (HloInstruction* instruction : copies_to_remove) {
+      VLOG(5) << "Removing added copy: " << instruction->ToString();
+      HloComputation* computation = instruction->parent();
+      TF_RETURN_IF_ERROR(
+          instruction->ReplaceAllUsesWith(instruction->mutable_operand(0)));
+      TF_RETURN_IF_ERROR(computation->RemoveInstruction(instruction));
     }
-  }
-  added_copies_.clear();
-  if (removed_copies > 0) {
+    added_copies_.clear();
     TupleSimplifier tuple_simplifier;
     HloDCE dce;
     TF_RETURN_IF_ERROR(tuple_simplifier.Run(module).status());
     TF_RETURN_IF_ERROR(dce.Run(module).status());
-    call_graph_ = CallGraph::Build(module);
   }
   return absl::OkStatus();
 }

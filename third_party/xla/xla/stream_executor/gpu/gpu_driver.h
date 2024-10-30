@@ -100,43 +100,6 @@ class GpuDriver {
   // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
   static absl::Status DestroyGraphExec(GpuGraphExecHandle exec);
 
-  // Write a DOT file describing graph structure.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g0fb0c4d319477a0a98da005fcb0dacc4
-  // https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Driver_API_functions_supported_by_HIP.html#graph-management
-  static absl::StatusOr<std::string> GraphDebugDotPrint(
-      GpuGraphHandle graph, const char* path,
-      bool return_printed_graph = false);
-
-  // Conditional node parameters.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/structCUDA__CONDITIONAL__NODE__PARAMS.html#structCUDA__CONDITIONAL__NODE__PARAMS
-  struct GpuGraphConditionalNodeParams {
-    // Conditional node type.
-    // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1g04ade961d0263336423eb216fbe514da
-    enum class Type { kIf, kWhile };
-
-    // A struct for returning output arguments back to the caller.
-    struct Result {
-      GpuGraphHandle graph;
-    };
-
-    Type type;
-    GpuGraphConditionalHandle handle;
-    Context* context;
-  };
-
-  // Graph node parameters
-  // https://docs.nvidia.com/cuda/cuda-driver-api/structCUgraphNodeParams.html#structCUgraphNodeParams
-  using GpuGraphNodeParams = std::variant<GpuGraphConditionalNodeParams>;
-  using GpuGraphNodeResult =
-      std::variant<GpuGraphConditionalNodeParams::Result>;
-
-  // Adds a node of arbitrary type to a graph.
-  // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html#group__CUDA__GRAPH_1g4210c258cbba352040a26d1b4e658f9d
-  static absl::StatusOr<GpuGraphNodeResult> GraphAddNode(
-      GpuGraphNodeHandle* node, GpuGraphHandle graph,
-      absl::Span<const GpuGraphNodeHandle> deps,
-      const GpuGraphNodeParams& params);
-
   // The CUDA stream callback type signature.
   // The data passed to AddStreamCallback is subsequently passed to this
   // callback when it fires.

@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/functional/any_invocable.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "xla/stream_executor/bit_pattern.h"
 #include "xla/stream_executor/command_buffer.h"
@@ -71,8 +72,9 @@ class CudaCommandBuffer final : public GpuCommandBuffer {
       DeviceMemory<bool> predicate) override;
   absl::StatusOr<NoOpKernel*> GetNoOpKernel();
 
-  std::unique_ptr<GpuCommandBuffer> CreateNestedCommandBuffer(
-      CUgraph graph) override;
+  absl::StatusOr<ConditionalNodeResult> CreateConditionalNode(
+      const Dependencies& dependencies, GraphConditionalHandle conditional,
+      ConditionType type) override;
 
   absl::StatusOr<GraphNodeHandle> CreateMemsetNode(
       const Dependencies& dependencies, DeviceMemoryBase destination,
@@ -125,6 +127,8 @@ class CudaCommandBuffer final : public GpuCommandBuffer {
   absl::Status PrepareFinalization() override;
 
   absl::StatusOr<GraphConditionalHandle> CreateConditionalHandle() override;
+
+  absl::Status WriteGraphToDotFile(absl::string_view path) override;
 
   // A signature of a device kernels updating conditional handle(s).
   using SetIfConditionKernel =
