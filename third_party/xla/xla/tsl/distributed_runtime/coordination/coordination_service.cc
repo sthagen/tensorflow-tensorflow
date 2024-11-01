@@ -22,7 +22,6 @@ limitations under the License.
 #include <functional>
 #include <map>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -182,13 +181,24 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
   // recoverable.
   // Note: SetTaskError() must be called before propagating its error.
   void PropagateError(const absl::Status& error,
-                      std::optional<CoordinatedTask> source_task = std::nullopt,
+                      const std::vector<CoordinatedTask>& source_tasks,
                       bool is_reported_by_task = false)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
+  void PropagateError(const absl::Status& error,
+                      const std::vector<std::string_view>& source_task_names,
+                      bool is_reported_by_task = false)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
+  // Checks if all tasks are from recoverable jobs.
+  bool AllTasksAreRecoverable(const std::vector<CoordinatedTask>& tasks)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
   void SetTaskError(std::string_view task_name, const absl::Status& error)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
+  // Used for cluster-wide errors (e.g. register or shutdown barrier fails).
+  void SetAllTasksError(const absl::Status& error)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
   absl::Status DisconnectTask(const CoordinatedTask& task)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
+  void DisconnectAllTasks() ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
 
   struct BarrierState {
     bool passed = false;
@@ -241,10 +251,10 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
   // Sends responses to error polling requests when an error is encountered.
   void SendErrorPollingResponse(const absl::Status& error)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
-  // Responds to error polling or stops the service when an error is
+  // Responds to error polling or fails all tasks when an error is
   // encountered. Should only be called when there is no service to client
-  // connection. Returns true if the service stops, otherwise returns false.
-  bool SendErrorPollingResponseOrStopService(const absl::Status& error)
+  // connection.
+  void SendErrorPollingResponseOrFailAllTasks(const absl::Status& error)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
   // Returns whether the clients are polling for error from the service. If the
   // clients are not polling for error from the service, the service should stop
@@ -304,7 +314,9 @@ class CoordinationServiceStandaloneImpl : public CoordinationServiceInterface {
     void Disconnect(uint64_t grace_period_duration_us);
     absl::Status RecordHeartbeat(uint64_t task_incarnation);
     int64_t TimeSinceLastHeartbeatMs();
-    void SetError(const absl::Status& status);
+    // Sets the error and returns true if the task state is not ERROR.
+    // Otherwise, don't overwrite the error and return false.
+    bool SetError(const absl::Status& status);
     DeviceInfo GetDeviceInfo() { return devices_; }
     void CollectDeviceInfo(const DeviceInfo& devices) { devices_ = devices; }
     // Checks if task has called WaitForAllTasks() previously, which gathers the
@@ -432,11 +444,12 @@ void CoordinationServiceStandaloneImpl::TaskState::Disconnect(
   status_ = absl::OkStatus();
 }
 
-void CoordinationServiceStandaloneImpl::TaskState::SetError(
+bool CoordinationServiceStandaloneImpl::TaskState::SetError(
     const absl::Status& status) {
-  if (state_ == CoordinatedTaskState::TASKSTATE_ERROR) return;
+  if (state_ == CoordinatedTaskState::TASKSTATE_ERROR) return false;
   state_ = CoordinatedTaskState::TASKSTATE_ERROR;
   status_ = status;
+  return true;
 }
 
 absl::Status CoordinationServiceStandaloneImpl::TaskState::RecordHeartbeat(
@@ -444,7 +457,7 @@ absl::Status CoordinationServiceStandaloneImpl::TaskState::RecordHeartbeat(
   if (!status_.ok()) return status_;
   if (task_incarnation != task_incarnation_) {
     return MakeCoordinationError(absl::AbortedError(absl::StrCat(
-        task_name_, "Heartbeat: Incarnation ID mismatch: expecting ",
+        task_name_, " Heartbeat: Incarnation ID mismatch: expecting ",
         task_incarnation_, " but got ", task_incarnation,
         ". The task has restarted and likely crashed earlier - check for any "
         "earlier errors or any scheduler events (e.g. preemption, eviction) to "
@@ -541,12 +554,6 @@ void CoordinationServiceStandaloneImpl::CheckHeartbeatTimeout() {
                        "preemption, eviction) to debug further.")));
 
       SetTaskError(task_name, status);
-      if (ServiceHasStopped()) {
-        // Setting the task to error may cause service to stop (e.g. task is
-        // waiting for shutdown barrier). In this case, all the state is invalid
-        // and we should exit immediately.
-        return;
-      }
     }
   }
   // Propagate heartbeat timeout errors to other connected tasks.
@@ -559,7 +566,7 @@ void CoordinationServiceStandaloneImpl::CheckHeartbeatTimeout() {
                          "\nThe tasks have crashed. Check the task logs for an "
                          "earlier error, or scheduler events (e.g. preemption, "
                          "eviction) to debug further.")));
-    PropagateError(heartbeat_timeout_error);
+    PropagateError(heartbeat_timeout_error, stale_task_names);
   }
 }
 
@@ -751,7 +758,8 @@ void CoordinationServiceStandaloneImpl::RegisterTaskAsync(
     return;
   }
 
-  auto* task_cluster_state = cluster_state_[task_name].get();
+  const std::unique_ptr<TaskState>& task_cluster_state =
+      cluster_state_[task_name];
   const auto task_state = task_cluster_state->GetState();
   const auto task_status = task_cluster_state->GetStatus();
 
@@ -804,19 +812,20 @@ void CoordinationServiceStandaloneImpl::RegisterTaskAsync(
                        "incarnation. It has likely restarted.");
     }
   } else {
-    // This task is connected or already in error, which implies it has
-    // registered previously.
+    // This task is already in error, which implies it has registered
+    // previously.
     error_message =
         absl::StrCat(task_name,
                      " unexpectedly tried to connect while it is already in "
                      "error. ResetTask() should be called before a "
-                     "subsequent connect attempt.");
+                     "subsequent connect attempt. Existing error: ",
+                     task_status.ToString());
   }
   LOG(ERROR) << error_message;
   absl::Status error =
       MakeCoordinationError(absl::AbortedError(error_message), task);
   SetTaskError(task_name, error);
-  PropagateError(error, task);
+  PropagateError(error, {task});
   done(error);
 }
 
@@ -929,7 +938,7 @@ absl::Status CoordinationServiceStandaloneImpl::ReportTaskError(
         "The task is not connected or already has an error."));
   }
   SetTaskError(task_name, error);
-  PropagateError(error, task, /*is_reported_by_task=*/true);
+  PropagateError(error, {task}, /*is_reported_by_task=*/true);
   return absl::OkStatus();
 }
 
@@ -976,9 +985,13 @@ absl::Status CoordinationServiceStandaloneImpl::RecordHeartbeat(
         absl::StrCat("Unexpected heartbeat request from task: ", task_name,
                      ". This usually implies a configuration error.")));
   }
-  if (!cluster_state_[task_name]->GetStatus().ok()) {
-    return cluster_state_[task_name]->GetStatus();
-  } else if (cluster_state_[task_name]->IsDisconnectedBeyondGracePeriod()) {
+  const std::unique_ptr<TaskState>& task_state = cluster_state_[task_name];
+  if (!task_state->GetStatus().ok()) {
+    return MakeCoordinationError(absl::AbortedError(absl::StrCat(
+        "Unexpected heartbeat request from an already-in-error task: ",
+        task_name,
+        " with existing error: ", task_state->GetStatus().ToString())));
+  } else if (task_state->IsDisconnectedBeyondGracePeriod()) {
     // We accept heartbeats for a short grace period to account for the lag
     // time between the service recording the state change and the agent
     // stopping heartbeats.
@@ -990,26 +1003,53 @@ absl::Status CoordinationServiceStandaloneImpl::RecordHeartbeat(
   }
   VLOG(10) << "Record heartbeat from task: " << task_name
            << "at incarnation: " << incarnation << "at " << absl::Now();
-  s = cluster_state_[task_name]->RecordHeartbeat(incarnation);
+  s = task_state->RecordHeartbeat(incarnation);
 
   // Set and propagate any heartbeat errors.
   if (!s.ok()) {
     SetTaskError(task_name, s);
-    PropagateError(s, task);
+    PropagateError(s, {task});
   }
 
   return s;
 }
 
+bool CoordinationServiceStandaloneImpl::AllTasksAreRecoverable(
+    const std::vector<CoordinatedTask>& tasks) {
+  for (const auto& task : tasks) {
+    if (!isRecoverableJob(task.job_name())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void CoordinationServiceStandaloneImpl::PropagateError(
-    const absl::Status& error, std::optional<CoordinatedTask> source_task,
+    const absl::Status& error,
+    const std::vector<std::string_view>& source_task_names,
+    bool is_reported_by_task) {
+  std::vector<CoordinatedTask> source_tasks;
+  source_tasks.reserve(source_task_names.size());
+  for (const auto& task : source_task_names) {
+    source_tasks.push_back(GetTaskFromName(task));
+  }
+  return PropagateError(error, source_tasks, is_reported_by_task);
+}
+
+void CoordinationServiceStandaloneImpl::PropagateError(
+    const absl::Status& error, const std::vector<CoordinatedTask>& source_tasks,
     bool is_reported_by_task) {
   VLOG(3) << "PropagateError(): " << error;
   assert(!error.ok());
+  assert(!source_tasks.empty());
+  if (AllTasksAreRecoverable(source_tasks)) {
+    VLOG(3) << "All tasks are recoverable, skip propagating error.";
+    return;
+  }
   // If there is no service-to-client connection, use error polling or stop
   // the service.
   if (client_cache_ == nullptr) {
-    SendErrorPollingResponseOrStopService(error);
+    SendErrorPollingResponseOrFailAllTasks(error);
     return;
   }
 
@@ -1020,11 +1060,10 @@ void CoordinationServiceStandaloneImpl::PropagateError(
   payload->set_is_reported_error(is_reported_by_task);
   CallOptions call_opts;
   call_opts.SetTimeout(kServiceToClientTimeoutMs);
-  if (source_task.has_value()) {
-    // If the error task is recoverable, do not propagate the error to other
-    // connected tasks.
-    if (isRecoverableJob(source_task->job_name())) return;
-    *payload->mutable_source_task() = *source_task;
+  // TODO(b/369222279): This logic will be removed shortly, so we don't bother
+  // adding the full list of source tasks.
+  if (!source_tasks.empty()) {
+    *payload->mutable_source_task() = source_tasks[0];
   }
 
   std::vector<std::shared_ptr<absl::Notification>> notifications;
@@ -1189,18 +1228,27 @@ absl::Status CoordinationServiceStandaloneImpl::DeleteKeyValue(
   return absl::OkStatus();
 }
 
+void CoordinationServiceStandaloneImpl::SetAllTasksError(
+    const absl::Status& error) {
+  for (const auto& task_state : cluster_state_) {
+    SetTaskError(task_state.first, error);
+  }
+}
+
 void CoordinationServiceStandaloneImpl::SetTaskError(
     std::string_view task_name, const absl::Status& error) {
-  cluster_state_[task_name]->SetError(error);
-  LOG(ERROR) << task_name
-             << " has been set to ERROR in coordination service: " << error;
-  for (const auto& barrier_id :
-       cluster_state_[task_name]->GetOngoingBarriers()) {
-    absl::Status barrier_error =
-        MakeCoordinationError(absl::InternalError(absl::StrCat(
-            "Barrier failed beacuse a task is in error. Barrier Id: ",
-            barrier_id, ", Task: ", task_name, " Error: ", error.ToString())));
-    PassBarrier(barrier_id, barrier_error, &barriers_[barrier_id]);
+  const std::unique_ptr<TaskState>& task_state = cluster_state_[task_name];
+  if (task_state->SetError(error)) {
+    LOG(ERROR) << task_name
+               << " has been set to ERROR in coordination service: " << error;
+    for (const auto& barrier_id : task_state->GetOngoingBarriers()) {
+      absl::Status barrier_error =
+          MakeCoordinationError(absl::InternalError(absl::StrCat(
+              "Barrier failed beacuse a task is in error. Barrier Id: ",
+              barrier_id, ", Task: ", task_name,
+              " Error: ", error.ToString())));
+      PassBarrier(barrier_id, barrier_error, &barriers_[barrier_id]);
+    }
   }
 }
 
@@ -1506,7 +1554,6 @@ void CoordinationServiceStandaloneImpl::PassBarrier(std::string_view barrier_id,
     const CoordinatedTask& task = task_at_barrier.first;
     cluster_state_[GetTaskName(task)]->ExitBarrier(barrier_id);
   }
-  barrier->tasks_at_barrier.clear();
   ongoing_barriers_.erase(barrier_id);
   // Propagate results to participating tasks.
   for (const auto& callback : barrier->done_callbacks) {
@@ -1514,7 +1561,11 @@ void CoordinationServiceStandaloneImpl::PassBarrier(std::string_view barrier_id,
   }
   barrier->done_callbacks.clear();
   if (barrier_id == kClusterRegisterBarrierId && !result.ok()) {
-    // Stop service if register failed.
+    // Set all tasks to error.
+    absl::Status register_error =
+        MakeCoordinationError(absl::InternalError(absl::StrCat(
+            "Cluster registration failed with error: ", result.ToString())));
+    SetAllTasksError(register_error);
     LOG(ERROR)
         << "Stopping coordination service as cluster registration failed. This "
            "may be due to 1) some tasks crashed earlier before connecting, 2) "
@@ -1522,16 +1573,19 @@ void CoordinationServiceStandaloneImpl::PassBarrier(std::string_view barrier_id,
            "setting a longer initialization timeout if such delays are "
            "expected, the timeout is currently set to: "
         << cluster_register_timeout_ << ".\n\nOriginal error: " << result;
-    Stop();
     return;
   }
   // Special hook for shutdown barrier to disconnect tasks at the barrier and
   // propagate errors to those that have not.
   if (barrier_id == shutdown_barrier_id_) {
     CompleteShutdownAfterBarrier(result, barrier);
-    // Note: this may stop the service. Be careful about referencing barrier
-    // state after this point.
   }
+  if (ServiceHasStopped()) {
+    return;
+  }
+  // This has to be after shutdown hook, which checks the tasks that reached the
+  // barrier.
+  barrier->tasks_at_barrier.clear();
 }
 
 void CoordinationServiceStandaloneImpl::SendErrorPollingResponse(
@@ -1609,10 +1663,20 @@ void CoordinationServiceStandaloneImpl::AggregateClusterDevices() {
   }
 }
 
+void CoordinationServiceStandaloneImpl::DisconnectAllTasks() {
+  for (const auto& [task_name, _] : cluster_state_) {
+    auto s = DisconnectTask(GetTaskFromName(task_name));
+    if (!s.ok()) {
+      LOG(ERROR) << "Failed to disconnect task " << task_name << ": " << s;
+    }
+  }
+}
+
 void CoordinationServiceStandaloneImpl::CompleteShutdownAfterBarrier(
     const absl::Status& result, BarrierState* barrier) {
   if (result.ok()) {
     LOG(INFO) << "Shutdown barrier in coordination service has passed.";
+    DisconnectAllTasks();
   } else {
     LOG(ERROR) << "Shutdown barrier in coordination service has failed:\n"
                << result
@@ -1623,26 +1687,25 @@ void CoordinationServiceStandaloneImpl::CompleteShutdownAfterBarrier(
                   "the logs (both the program and scheduler events) for an "
                   "earlier error to identify the root cause.";
     absl::Status shutdown_error = MakeCoordinationError(absl::InternalError(
-        absl::StrCat("Shutdown barrier has failed, but this task is not at the "
-                     "barrier yet.\nBarrier result: '",
+        absl::StrCat("Shutdown barrier has failed.\nBarrier result: '",
                      barrier->result.ToString())));
-    // Propagate error to all tasks before disconnecting them.
-    PropagateError(shutdown_error);
-  }
-  // It is possible that PropagateError() stops the service. In this case, the
-  // task state is forcibly erased and disconnecting the task is not
-  // necessary.
-  if (ServiceHasStopped()) {
-    return;
-  }
-  for (const auto& [task, at_barrier] : barrier->tasks_at_barrier) {
-    if (at_barrier) {
-      // Disconnect tasks that reached the barrier.
-      absl::Status disconnect_status = DisconnectTask(task);
-      if (!disconnect_status.ok()) {
-        LOG(ERROR) << disconnect_status;
+    // Propagate error to all tasks.
+    // 1. Identify all straggling tasks.
+    std::vector<CoordinatedTask> straggling_tasks;
+    for (const auto& [task, at_barrier] : barrier->tasks_at_barrier) {
+      if (!at_barrier) {
+        straggling_tasks.push_back(task);
       }
     }
+    // 2. Propagate error to everybody.
+    PropagateError(shutdown_error, straggling_tasks);
+    // 3. Set all tasks to error, to prevent unexpected connections from
+    // restarted tasks.
+    // This is done after (2) so that all tasks get the shutdown error.
+    // (already-errored tasks don't receive new notifications)
+    // For restarted tasks that hit this error, they should retry until there is
+    // a new service instance.
+    SetAllTasksError(shutdown_error);
   }
 }
 }  // namespace
@@ -1659,9 +1722,9 @@ bool CoordinationServiceStandaloneImpl::isRecoverableJob(
   return recoverable_jobs_.find(task_name) != recoverable_jobs_.end();
 }
 
-bool CoordinationServiceStandaloneImpl::SendErrorPollingResponseOrStopService(
+void CoordinationServiceStandaloneImpl::SendErrorPollingResponseOrFailAllTasks(
     const absl::Status& error) {
-  CHECK(!error.ok()) << "SendErrorPollingResponseOrStopService called with OK "
+  CHECK(!error.ok()) << "SendErrorPollingResponseOrFailAllTasks called with OK "
                         "status. Should always return an error.";
   // Should be called only when there is no service-to-client connection.
   assert(client_cache_ == nullptr);
@@ -1670,14 +1733,15 @@ bool CoordinationServiceStandaloneImpl::SendErrorPollingResponseOrStopService(
         << "Use error polling to propagate the following error to all tasks: "
         << error;
     SendErrorPollingResponse(error);
-    return false;
+  } else {
+    absl::Status unheard_error =
+        MakeCoordinationError(absl::InternalError(absl::StrCat(
+            "All tasks were set to error because coordination service "
+            "encountered an error, but was unable to inform clients. Error: ",
+            error.ToString())));
+    LOG(ERROR) << unheard_error;
+    SetAllTasksError(unheard_error);
   }
-
-  LOG(ERROR) << "Stopping coordination service as there is no "
-                "service-to-client connection, but we encountered an error: "
-             << error;
-  Stop();
-  return true;
 }
 
 bool CoordinationServiceStandaloneImpl::IsClientPollingForError() const {
