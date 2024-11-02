@@ -11,6 +11,7 @@ load(
 )
 load("//xla:xla.bzl", "xla_cc_test")
 load("//xla/tests:build_defs.bzl", "xla_test")
+load("//xla/tsl:tsl.bzl", "if_oss")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -115,7 +116,7 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_h100",
-    ],
+    ] + if_oss(["gpu_b100"]),
     tags = [
         "cuda-only",
         "no_mac",
@@ -145,6 +146,7 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tests:filecheck",
         "//xla/tests:hlo_test_base",
@@ -302,8 +304,8 @@ xla_test(
         "//xla/hlo/ir:hlo",
         "//xla/service:platform_util",
         "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream",
         "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:statusor",
@@ -331,6 +333,7 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor:stream",
         "//xla/tests:hlo_test_base",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/protobuf:dnn_proto_cc",
@@ -437,6 +440,7 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:dnn",
         "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream",
         "//xla/tests:hlo_test_base",
         "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/strings:string_view",
@@ -497,10 +501,12 @@ xla_test(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass_pipeline",
+        "//xla/stream_executor:stream",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
     ],
 )

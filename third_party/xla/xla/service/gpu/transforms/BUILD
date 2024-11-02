@@ -468,7 +468,7 @@ xla_cc_test(
     deps = [
         ":collective_send_recv_combiner",
         "//xla/hlo/ir:hlo",
-        "//xla/tests:filecheck",
+        "//xla/hlo/testlib:filecheck",
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
@@ -507,6 +507,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -715,7 +716,7 @@ cc_library(
     hdrs = ["convert_async_collectives_to_sync.h"],
     deps = [
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/transforms:convert_async_collectives_to_sync",
+        "//xla/hlo/transforms/collectives:convert_async_collectives_to_sync",
         "//xla/service/gpu:backend_configs_cc",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
@@ -1459,7 +1460,7 @@ xla_test(
         "gpu_p100",
         "gpu_v100",
         "gpu_amd_any",
-    ],
+    ] + if_oss(["gpu_b100"]),
     deps = if_gpu_is_configured(
         [
             ":dot_operand_converter",
@@ -1985,6 +1986,7 @@ xla_test(
         "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -3103,7 +3105,7 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_h100",
-    ],
+    ] + if_oss(["gpu_b100"]),
     deps = [
         ":triton_fusion_numerics_verifier",
         "//xla:shape_util",
@@ -3114,6 +3116,7 @@ xla_test(
         "//xla/service/gpu/autotuning:autotuner_compile_util",
         "//xla/service/gpu/autotuning:autotuner_util",
         "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream",
         "//xla/tests:hlo_test_base",
         "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/status",

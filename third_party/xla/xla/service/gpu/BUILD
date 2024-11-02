@@ -36,6 +36,7 @@ load("//xla/tests:build_defs.bzl", "xla_test")
 load(
     "//xla/tsl:tsl.bzl",
     "if_google",
+    "if_oss",
     "internal_visibility",
     "tsl_copts",
     "tsl_gpu_library",
@@ -374,6 +375,7 @@ cc_library(
         "//xla/service/gpu/runtime:nccl_collective_broadcast_thunk",
         "//xla/service/gpu/runtime:nccl_collective_permute_thunk",
         "//xla/service/gpu/runtime:nccl_collective_thunk",
+        "//xla/service/gpu/runtime:nccl_group_thunk",
         "//xla/service/gpu/runtime:nccl_p2p_thunk_common",
         "//xla/service/gpu/runtime:nccl_recv_thunk",
         "//xla/service/gpu/runtime:nccl_send_thunk",
@@ -1439,6 +1441,7 @@ cc_library(
         ":gpu_hlo_schedule",
         ":gpu_latency_hiding_scheduler",
         ":gpu_p2p_pipeliner",
+        ":gpu_reduce_scatter_combiner",
         ":gpu_spmd_pipeline",
         ":hlo_fusion_stats",
         ":ir_emission_utils",
@@ -1479,20 +1482,20 @@ cc_library(
         "//xla/hlo/ir:hlo_module_group",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/pass:hlo_pass_pipeline",
+        "//xla/hlo/transforms/collectives:all_gather_broadcast_reorder",
+        "//xla/hlo/transforms/collectives:all_gather_combiner",
+        "//xla/hlo/transforms/collectives:all_reduce_combiner",
+        "//xla/hlo/transforms/collectives:all_reduce_contiguous",
+        "//xla/hlo/transforms/collectives:async_collective_creator",
+        "//xla/hlo/transforms/collectives:collective_quantizer",
+        "//xla/hlo/transforms/collectives:collectives_schedule_linearizer",
+        "//xla/hlo/transforms/collectives:convert_async_collectives_to_sync",
         "//xla/hlo/transforms:algebraic_simplifier",
-        "//xla/hlo/transforms:all_gather_broadcast_reorder",
-        "//xla/hlo/transforms:all_gather_combiner",
-        "//xla/hlo/transforms:all_reduce_combiner",
-        "//xla/hlo/transforms:all_reduce_contiguous",
         "//xla/hlo/transforms:all_reduce_folder",
-        "//xla/hlo/transforms:async_collective_creator",
         "//xla/hlo/transforms:bitcast_dtypes_expander",
         "//xla/hlo/transforms:broadcast_canonicalizer",
-        "//xla/hlo/transforms:collective_quantizer",
-        "//xla/hlo/transforms:collectives_schedule_linearizer",
         "//xla/hlo/transforms:comparison_expander",
         "//xla/hlo/transforms:conditional_canonicalizer",
-        "//xla/hlo/transforms:convert_async_collectives_to_sync",
         "//xla/hlo/transforms:convert_memory_placement_to_internal_annotations",
         "//xla/hlo/transforms:convert_mover",
         "//xla/hlo/transforms:convolution_4d_expander",
@@ -1916,7 +1919,7 @@ xla_test(
     backends = [
         "gpu_v100",
         "gpu_a100",
-    ],
+    ] + if_oss(["gpu_b100"]),
     tags = [
         "cuda-only",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
@@ -2636,7 +2639,7 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_h100",
-    ],
+    ] + if_oss(["gpu_b100"]),
     deps = [
         ":variant_visitor",
         "//xla:error_spec",
@@ -2879,7 +2882,7 @@ xla_test(
         "gpu_a100",
         "gpu_h100",
         "gpu_amd_any",
-    ],
+    ] + if_oss(["gpu_b100"]),
     tags = [
         "no_mac",
     ],
@@ -2994,7 +2997,7 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_amd_any",
-    ],
+    ] + if_oss(["gpu_b100"]),
     deps = [
         "//xla:literal",
         "//xla:xla_proto_cc",
@@ -3181,7 +3184,7 @@ cc_library(
         ":gpu_hlo_schedule",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
-        "//xla/hlo/transforms:all_gather_combiner",
+        "//xla/hlo/transforms/collectives:all_gather_combiner",
         "//xla/service:hlo_domain_map",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -3211,7 +3214,7 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "reduce_scatter_combiner",
+    name = "gpu_reduce_scatter_combiner",
     srcs = ["reduce_scatter_combiner.cc"],
     hdrs = ["reduce_scatter_combiner.h"],
     deps = [
@@ -3234,7 +3237,7 @@ xla_cc_test(
     name = "reduce_scatter_combiner_test",
     srcs = ["reduce_scatter_combiner_test.cc"],
     deps = [
-        ":reduce_scatter_combiner",
+        ":gpu_reduce_scatter_combiner",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:filecheck",
         "//xla/service:collective_utils",
