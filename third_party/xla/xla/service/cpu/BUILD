@@ -412,31 +412,6 @@ cc_library(
     ]),
 )
 
-xla_test(
-    name = "cpu_compiler_test",
-    srcs = ["cpu_compiler_test.cc"],
-    backends = [
-        "cpu",
-    ],
-    deps = [
-        "//xla:shape_util",
-        "//xla/pjrt:pjrt_client",
-        "//xla/service:hlo_runner_interface",
-        "//xla/service:hlo_runner_pjrt",
-        "//xla/service:platform_util",
-        "//xla/tests:hlo_test_base",
-        "//xla/tests:new_hlo_test_base",
-        "//xla/tests:pjrt_client_registry",
-        "//xla/tests:pjrt_cpu_client_registry",
-        "//xla/tests:xla_internal_test_main",
-        "//xla/tsl/lib/core:status_test_util",
-        "//xla/tsl/lib/monitoring:collected_metrics",
-        "//xla/tsl/lib/monitoring:collection_registry",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
-    ],
-)
-
 cc_library(
     # The old target name will still be used so that dependencies won't break.
     # In the future, dependencies should be cleaned up and relinked to the above
@@ -467,6 +442,32 @@ cc_library(
         "@llvm-project//llvm:Target",
     ],
     alwayslink = True,  # Contains compiler registration
+)
+
+xla_test(
+    name = "cpu_compiler_test",
+    srcs = ["cpu_compiler_test.cc"],
+    backends = [
+        "cpu",
+    ],
+    tags = [
+        "test_hlo_pjrt_runner",
+    ],
+    deps = [
+        "//xla:shape_util",
+        "//xla/pjrt:pjrt_client",
+        "//xla/service:hlo_runner",
+        "//xla/service:hlo_runner_interface",
+        "//xla/service:hlo_runner_pjrt",
+        "//xla/service:platform_util",
+        "//xla/tests:new_hlo_test_base",
+        "//xla/tests:pjrt_client_registry",
+        "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/lib/monitoring:collected_metrics",
+        "//xla/tsl/lib/monitoring:collection_registry",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
+    ],
 )
 
 tf_proto_library(
