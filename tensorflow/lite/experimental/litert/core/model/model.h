@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_H_
-#define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_H_
+#ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_H_
+#define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_H_
 
 #include <cstdint>
 #include <list>
@@ -23,8 +23,8 @@
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_support.h"
-#include "tensorflow/lite/experimental/litert/core/util/buffer_ref.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
 //
@@ -162,4 +162,4 @@ class LiteRtOpListT {
   std::list<LiteRtOp> ops_;
 };
 
-#endif  // TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_H_
+#endif  // TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_H_

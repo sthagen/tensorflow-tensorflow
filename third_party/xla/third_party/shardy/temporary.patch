@@ -1,324 +1,97 @@
-diff --git a/third_party/llvm/generated.patch b/third_party/llvm/generated.patch
-index 38cc391..d311765 100644
---- a/third_party/llvm/generated.patch
-+++ b/third_party/llvm/generated.patch
-@@ -12,289 +12,6 @@ diff -ruN --strip-trailing-cr a/llvm/lib/Transforms/Vectorize/SLPVectorizer.cpp
-                          getWidenedType(Slice.front()->getType(), VF),
-                          InterleaveFactor,
-                          cast<LoadInst>(Slice.front())->getAlign(),
--diff -ruN --strip-trailing-cr a/llvm/test/CodeGen/NVPTX/load-store.ll b/llvm/test/CodeGen/NVPTX/load-store.ll
----- a/llvm/test/CodeGen/NVPTX/load-store.ll
--+++ b/llvm/test/CodeGen/NVPTX/load-store.ll
--@@ -167,25 +167,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [generic_4xi8_param_0];
-- ; CHECK-NEXT:    ld.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load <4 x i8>, ptr %a
--@@ -511,25 +511,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [generic_volatile_4xi8_param_0];
-- ; CHECK-NEXT:    ld.volatile.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.volatile.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load volatile <4 x i8>, ptr %a
--@@ -1416,25 +1416,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [global_4xi8_param_0];
-- ; CHECK-NEXT:    ld.global.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.global.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load <4 x i8>, ptr addrspace(1) %a
--@@ -1741,25 +1741,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [global_volatile_4xi8_param_0];
-- ; CHECK-NEXT:    ld.volatile.global.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.volatile.global.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load volatile <4 x i8>, ptr addrspace(1) %a
--@@ -2788,25 +2788,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [shared_4xi8_param_0];
-- ; CHECK-NEXT:    ld.shared.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.shared.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load <4 x i8>, ptr addrspace(3) %a
--@@ -3113,25 +3113,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [shared_volatile_4xi8_param_0];
-- ; CHECK-NEXT:    ld.volatile.shared.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.volatile.shared.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load volatile <4 x i8>, ptr addrspace(3) %a
--@@ -4018,25 +4018,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [local_4xi8_param_0];
-- ; CHECK-NEXT:    ld.local.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.local.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load <4 x i8>, ptr addrspace(5) %a
--@@ -4343,25 +4343,25 @@
-- ; CHECK-NEXT:  // %bb.0:
-- ; CHECK-NEXT:    ld.param.u64 %rd1, [local_volatile_4xi8_param_0];
-- ; CHECK-NEXT:    ld.local.u32 %r1, [%rd1];
---; CHECK-NEXT:    bfe.u32 %r2, %r1, 0, 8;
--+; CHECK-NEXT:    bfe.u32 %r2, %r1, 24, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs1, %r2;
-- ; CHECK-NEXT:    add.s16 %rs2, %rs1, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r3, %rs2;
---; CHECK-NEXT:    bfe.u32 %r4, %r1, 8, 8;
--+; CHECK-NEXT:    bfe.u32 %r4, %r1, 16, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs3, %r4;
-- ; CHECK-NEXT:    add.s16 %rs4, %rs3, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r5, %rs4;
---; CHECK-NEXT:    bfi.b32 %r6, %r5, %r3, 8, 8;
---; CHECK-NEXT:    bfe.u32 %r7, %r1, 16, 8;
--+; CHECK-NEXT:    prmt.b32 %r6, %r5, %r3, 13120;
--+; CHECK-NEXT:    bfe.u32 %r7, %r1, 8, 8;
-- ; CHECK-NEXT:    cvt.u16.u32 %rs5, %r7;
-- ; CHECK-NEXT:    add.s16 %rs6, %rs5, 1;
-- ; CHECK-NEXT:    cvt.u32.u16 %r8, %rs6;
---; CHECK-NEXT:    bfi.b32 %r9, %r8, %r6, 16, 8;
---; CHECK-NEXT:    bfe.u32 %r10, %r1, 24, 8;
---; CHECK-NEXT:    cvt.u16.u32 %rs7, %r10;
--+; CHECK-NEXT:    bfe.u32 %r9, %r1, 0, 8;
--+; CHECK-NEXT:    cvt.u16.u32 %rs7, %r9;
-- ; CHECK-NEXT:    add.s16 %rs8, %rs7, 1;
---; CHECK-NEXT:    cvt.u32.u16 %r11, %rs8;
---; CHECK-NEXT:    bfi.b32 %r12, %r11, %r9, 24, 8;
--+; CHECK-NEXT:    cvt.u32.u16 %r10, %rs8;
--+; CHECK-NEXT:    prmt.b32 %r11, %r10, %r8, 13120;
--+; CHECK-NEXT:    prmt.b32 %r12, %r11, %r6, 21520;
-- ; CHECK-NEXT:    st.local.u32 [%rd1], %r12;
-- ; CHECK-NEXT:    ret;
--   %a.load = load volatile <4 x i8>, ptr addrspace(5) %a
- diff -ruN --strip-trailing-cr a/llvm/test/Transforms/SLPVectorizer/RISCV/interleave-greater-than-slice.ll b/llvm/test/Transforms/SLPVectorizer/RISCV/interleave-greater-than-slice.ll
- --- a/llvm/test/Transforms/SLPVectorizer/RISCV/interleave-greater-than-slice.ll
- +++ b/llvm/test/Transforms/SLPVectorizer/RISCV/interleave-greater-than-slice.ll
-@@ -886,3 +603,14 @@ diff -ruN --strip-trailing-cr a/utils/bazel/llvm-project-overlay/libc/test/UnitT
-      ],
-  )
-  
-+diff -ruN --strip-trailing-cr a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
-+--- a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
-++++ b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
-+@@ -23,6 +23,7 @@
-+ exports_files([
-+     "LICENSE.TXT",
-+     "cmake/modules/llvm-driver-template.cpp.in",
-++    "include/llvm/BinaryFormat/Dwarf.def",
-+     "include/llvm/CodeGen/SDNodeProperties.td",
-+     "include/llvm/CodeGen/ValueTypes.td",
-+     "include/llvm/Frontend/Directive/DirectiveBase.td",
+diff --git a/docs/_toc.yaml b/docs/_toc.yaml
+deleted file mode 100644
+index 2757147..0000000
+--- a/docs/_toc.yaml
++++ /dev/null
+@@ -1,18 +0,0 @@
+-toc:
+-- heading: Shardy documentation
+-- title: Getting started
+-  section:
+-  - title: Introduction
+-    path: /shardy
+-- title: Reference documentation
+-  section:
+-  - title: SDY dialect
+-    path: /shardy/sdy_dialect
+-  - title: SDY export passes
+-    path: /shardy/sdy_export_passes
+-  - title: SDY import passes
+-    path: /shardy/sdy_import_passes
+-  - title: SDY op interfaces
+-    path: /shardy/sdy_op_interfaces
+-  - title: SDY propagation passes
+-    path: /shardy/sdy_propagation_passes
+diff --git a/docs/sdy_export_passes.md b/docs/sdy_export_passes.md
+index abfc31b..ce5d931 100755
+--- a/docs/sdy_export_passes.md
++++ b/docs/sdy_export_passes.md
+@@ -8,13 +8,13 @@ sharded operands and produce a sharded result without requiring any reshard
+ communications (note that the operation might still require communication
+ such as all-reduce or halo-swaps).
+ 
+-After propagation, some operations may still have incompatible shardings.
++After propagation, some opeartions may still have incompatible shardings.
+ 
+ Please note, when an axis (or sub-axis) is used to shard non-corresponding
+ dimensions (e.g. non-contracting dimensions in matmul) across multiple
+ tensors, or when an axis shards a dimension in one tensor but not the
+ corresponding dimension in the other tensor, it is said that the operation
+-has a sharding conflict. Hence, after this pass, the operations become
++has a sharding conflict. Hence, after this pass, the opeartions become
+ conflict-free.
+ 
+ This pass injects reshard operations explicitly so that, for each operation,
+@@ -47,7 +47,7 @@ In the example above, there is a conflict since `lhs` and `rhs` tensors
+ are both sharded on axis "x" on their non-contracting dimensions. Here,
+ `rhs` tensor is resharded, before the dot operation, explicitly to be
+ sharded only on its first dimension and on axis "x". This way, the dot
+-operation becomes compatible.
++opearation becomes compatible.
+ ### `-sdy-remove-sharding-groups`
+ 
+ _Removes ShardingGroupOps after propagation._
+diff --git a/shardy/dialect/sdy/transforms/export/passes.td b/shardy/dialect/sdy/transforms/export/passes.td
+index 8c741b4..3c00db3 100644
+--- a/shardy/dialect/sdy/transforms/export/passes.td
++++ b/shardy/dialect/sdy/transforms/export/passes.td
+@@ -52,13 +52,13 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
+     communications (note that the operation might still require communication
+     such as all-reduce or halo-swaps).
+ 
+-    After propagation, some operations may still have incompatible shardings.
++    After propagation, some opeartions may still have incompatible shardings.
+ 
+     Please note, when an axis (or sub-axis) is used to shard non-corresponding
+     dimensions (e.g. non-contracting dimensions in matmul) across multiple
+     tensors, or when an axis shards a dimension in one tensor but not the
+     corresponding dimension in the other tensor, it is said that the operation
+-    has a sharding conflict. Hence, after this pass, the operations become
++    has a sharding conflict. Hence, after this pass, the opeartions become
+     conflict-free.
+ 
+     This pass injects reshard operations explicitly so that, for each operation,
+@@ -91,7 +91,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
+     are both sharded on axis "x" on their non-contracting dimensions. Here,
+     `rhs` tensor is resharded, before the dot operation, explicitly to be
+     sharded only on its first dimension and on axis "x". This way, the dot
+-    operation becomes compatible.
++    opearation becomes compatible.
+   }];
+   let dependentDialects = ["mlir::sdy::SdyDialect"];
+ }
 diff --git a/third_party/llvm/workspace.bzl b/third_party/llvm/workspace.bzl
-index 364146d..8e9b100 100644
+index d0f05d2..cf8280b 100644
 --- a/third_party/llvm/workspace.bzl
 +++ b/third_party/llvm/workspace.bzl
 @@ -4,8 +4,8 @@ load("//third_party:repo.bzl", "tf_http_archive")
  
  def repo(name):
      """Imports LLVM."""
--    LLVM_COMMIT = "17d8ed717fced72ed313ee7553309345630b0097"
--    LLVM_SHA256 = "4151ee12583e7d7697ea581dd29a7c57f43060abdff4421062d530e1151c6131"
-+    LLVM_COMMIT = "bb9ff32867d633787b5dd2572bc6e2fe5dade107"
-+    LLVM_SHA256 = "a1a3d041d035054266a691c1779f0c463a4362df83d246151508bf013bf54daa"
+-    LLVM_COMMIT = "c6f3b7bcd0596d30f8dabecdfb9e44f9a07b6e4c"
+-    LLVM_SHA256 = "13a1b39cfe51421fb1fd15828b76766d7680d854fc1039254b37f3f824ab47b7"
++    LLVM_COMMIT = "246b57cb2086b22ad8b41051c77e86ef478053a1"
++    LLVM_SHA256 = "2d46c080deb2cb6dbb9420a334be231040487bbfe87b5ed0b90bb69cac423500"
  
      tf_http_archive(
          name = name,
