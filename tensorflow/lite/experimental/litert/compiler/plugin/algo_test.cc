@@ -21,7 +21,6 @@
 #include <gtest/gtest.h>
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
-#include "tensorflow/lite/experimental/litert/cc/litert_support.h"
 #include "tensorflow/lite/experimental/litert/core/graph_tools.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
 #include "tensorflow/lite/experimental/litert/test/common.h"
@@ -34,7 +33,6 @@ using ::litert::internal::OutlinePartition;
 // NOLINTBEGIN
 bool HasValidGeneralTopology(LiteRtSubgraph subgraph) {
   if (!litert::internal::ValidateTopology(subgraph->ops)) {
-    _LITERT_D_MSG("Failed validate op tolopology");
     return false;
   }
 
@@ -46,13 +44,11 @@ bool HasValidGeneralTopology(LiteRtSubgraph subgraph) {
   }
 
   if (implied_subgraph_outs.size() != subgraph->outputs.size()) {
-    _LITERT_D_MSG("Outs not same size");
     return false;
   }
 
   for (auto tensor : subgraph->outputs) {
     if (implied_subgraph_outs.find(tensor) == implied_subgraph_outs.end()) {
-      _LITERT_D_MSG("Mismatched subgraph outs");
       return false;
     }
   }
@@ -66,13 +62,11 @@ bool HasValidGeneralTopology(LiteRtSubgraph subgraph) {
   }
 
   if (implied_subgraph_ins.size() != subgraph->inputs.size()) {
-    _LITERT_D_MSG("Ins not same size");
     return false;
   }
 
   for (auto tensor : subgraph->inputs) {
     if (implied_subgraph_ins.find(tensor) == implied_subgraph_ins.end()) {
-      _LITERT_D_MSG("Mismatched subgraph ins");
       return false;
     }
   }
@@ -193,8 +187,8 @@ TEST(TestSliceSubgraphSimpleMultiOp, OnePartition) {
   ASSERT_EQ(hal_cal_op, edited_subgraph_ops[1]);
 
   {
-    ASSERT_RESULT_OK_ASSIGN(auto hal_cal_op_ins,
-                            litert::internal::GetOpIns(hal_cal_op));
+    LITERT_ASSERT_RESULT_OK_ASSIGN(auto hal_cal_op_ins,
+                                   litert::internal::GetOpIns(hal_cal_op));
 
     ASSERT_EQ(hal_cal_op_ins.size(), 1);
 
@@ -214,8 +208,8 @@ TEST(TestSliceSubgraphSimpleMultiOp, OnePartition) {
   }
 
   {
-    ASSERT_RESULT_OK_ASSIGN(auto hal_cal_op_out,
-                            litert::internal::GetOnlyOpOut(hal_cal_op));
+    LITERT_ASSERT_RESULT_OK_ASSIGN(auto hal_cal_op_out,
+                                   litert::internal::GetOnlyOpOut(hal_cal_op));
 
     ASSERT_TRUE(litert::internal::MatchTensorHasUses(
         hal_cal_op_out,

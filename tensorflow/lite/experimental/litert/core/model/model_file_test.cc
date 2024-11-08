@@ -27,8 +27,8 @@
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
-#include "tensorflow/lite/experimental/litert/cc/litert_support.h"
 #include "tensorflow/lite/experimental/litert/core/graph_tools.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
 #include "tensorflow/lite/experimental/litert/core/model/model_load.h"
@@ -48,15 +48,13 @@ Model LoadModelThroughRoundTrip(std::string_view path) {
   OwningBufferRef buf;
   auto [data, size, offset] = buf.GetWeak();
 
-  LITERT_CHECK_STATUS_OK_MSG(
-      LiteRtSerializeModel(model.Release(), &data, &size, &offset),
-      "Failed to serialize model");
+  LITERT_CHECK_STATUS_OK(
+      LiteRtSerializeModel(model.Release(), &data, &size, &offset));
 
   // Reload model.
   LiteRtModel result = nullptr;
-  LITERT_CHECK_STATUS_OK_MSG(
-      LiteRtLoadModelFromMemory(buf.Data(), buf.Size(), &result),
-      "Failed to re load model");
+  LITERT_CHECK_STATUS_OK(
+      LiteRtLoadModelFromMemory(buf.Data(), buf.Size(), &result));
 
   return Model::CreateFromOwnedHandle(result);
 }
@@ -80,8 +78,8 @@ class TopologyTest : public ::testing::TestWithParam<LiteRtModel> {
 
 TEST(LiteRtModelTest, TestLoadTestDataBadFilepath) {
   LiteRtModel model = nullptr;
-  ASSERT_STATUS_HAS_CODE(LiteRtLoadModelFromFile("bad_path", &model),
-                         kLiteRtStatusErrorFileIO);
+  LITERT_ASSERT_STATUS_HAS_CODE(LiteRtLoadModelFromFile("bad_path", &model),
+                                kLiteRtStatusErrorFileIO);
 }
 
 TEST(LiteRtModelTest, TestLoadTestDataBadFileData) {
@@ -100,7 +98,7 @@ TEST(LiteRtModelTest, TestLoadTestDataBadFileData) {
   bad_file.close();
 
   LiteRtModel model = nullptr;
-  ASSERT_STATUS_HAS_CODE(
+  LITERT_ASSERT_STATUS_HAS_CODE(
       LiteRtLoadModelFromFile(test_file_path.c_str(), &model),
       kLiteRtStatusErrorInvalidFlatbuffer);
   // NOLINTEND
@@ -112,14 +110,15 @@ TEST(TestSerializeModel, TestMetadata) {
   constexpr static std::string_view kMetadataName = "an_soc_manufacturer";
   constexpr static std::string_view kMetadataData = "My_Meta_Data";
 
-  ASSERT_STATUS_OK(model.Get()->PushMetadata(
+  LITERT_ASSERT_STATUS_OK(model.Get()->PushMetadata(
       kMetadataName, OwningBufferRef<uint8_t>(kMetadataData)));
 
-  ASSERT_RESULT_OK_ASSIGN(auto serialized, SerializeModel(std::move(model)));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto serialized,
+                                 SerializeModel(std::move(model)));
   EXPECT_TRUE(VerifyFlatbuffer(serialized.Span()));
-  ASSERT_RESULT_OK_MOVE(auto re_loaded, LoadModelFromMemory(serialized));
-  ASSERT_RESULT_OK_ASSIGN(auto metadata,
-                          re_loaded.Get()->FindMetadata(kMetadataName));
+  LITERT_ASSERT_RESULT_OK_MOVE(auto re_loaded, LoadModelFromMemory(serialized));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto metadata,
+                                 re_loaded.Get()->FindMetadata(kMetadataName));
   EXPECT_EQ(metadata.StrView(), kMetadataData);
 }
 
@@ -133,14 +132,17 @@ TEST_P(AddSimpleTest, TestBuildModelAddSimple) {
   //  return(output)
   //
 
-  ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph, GetSubgraph(model.Get()));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs, GetSubgraphInputs(subgraph));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs, GetSubgraphOutputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph,
+                                 GetSubgraph(model.Get()));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs,
+                                 GetSubgraphInputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs,
+                                 GetSubgraphOutputs(subgraph));
 
   ASSERT_EQ(subgraph_inputs.size(), 1);
   ASSERT_EQ(subgraph_outputs.size(), 1);
 
-  ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
   ASSERT_TRUE(ValidateTopology(ops));
 
   ASSERT_EQ(ops.size(), 1);
@@ -150,12 +152,12 @@ TEST_P(AddSimpleTest, TestBuildModelAddSimple) {
   ASSERT_TRUE(MatchOpType(op, {float_2by2_type, float_2by2_type},
                           {float_2by2_type}, kLiteRtOpCodeTflAdd));
 
-  ASSERT_RESULT_OK_ASSIGN(auto op_inputs, GetOpIns(op));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto op_inputs, GetOpIns(op));
   ASSERT_EQ(op_inputs.size(), 2);
   ASSERT_EQ(op_inputs[0], subgraph_inputs[0]);
   ASSERT_EQ(op_inputs[0], op_inputs[1]);
 
-  ASSERT_RESULT_OK_ASSIGN(auto op_out, GetOnlyOpOut(op));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto op_out, GetOnlyOpOut(op));
   ASSERT_EQ(op_out, subgraph_outputs[0]);
 
   ASSERT_TRUE(MatchNoWeights(subgraph_outputs[0]));
@@ -177,14 +179,17 @@ TEST_P(AddCstTest, TestBuildModelAddCst) {
   //  return(output)
   //
 
-  ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph, GetSubgraph(model.Get()));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs, GetSubgraphInputs(subgraph));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs, GetSubgraphOutputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph,
+                                 GetSubgraph(model.Get()));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs,
+                                 GetSubgraphInputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs,
+                                 GetSubgraphOutputs(subgraph));
 
   ASSERT_EQ(subgraph_inputs.size(), 1);
   ASSERT_EQ(subgraph_outputs.size(), 1);
 
-  ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
   ASSERT_TRUE(ValidateTopology(ops));
 
   ASSERT_EQ(ops.size(), 1);
@@ -194,13 +199,13 @@ TEST_P(AddCstTest, TestBuildModelAddCst) {
   ASSERT_TRUE(MatchOpType(op, {float_2by2_type, float_2by2_type},
                           {float_2by2_type}, kLiteRtOpCodeTflAdd));
 
-  ASSERT_RESULT_OK_ASSIGN(auto op_inputs, GetOpIns(op));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto op_inputs, GetOpIns(op));
   ASSERT_EQ(op_inputs.size(), 2);
   ASSERT_EQ(op_inputs[0], subgraph_inputs[0]);
   ASSERT_TRUE(MatchWeights(op_inputs[1],
                            absl::Span<const float>({1.0, 2.0, 3.0, 4.0})));
 
-  ASSERT_RESULT_OK_ASSIGN(auto op_out, GetOnlyOpOut(op));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto op_out, GetOnlyOpOut(op));
   ASSERT_EQ(op_out, subgraph_outputs[0]);
 
   ASSERT_TRUE(MatchNoWeights(subgraph_outputs[0]));
@@ -223,19 +228,22 @@ TEST_P(SimpleMultiOpTest, TestBuildModelSimpleMultiAdd) {
   //   3 = tfl.add 2, 2
   //   return 3
 
-  ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph, GetSubgraph(model.Get()));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs, GetSubgraphInputs(subgraph));
-  ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs, GetSubgraphOutputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(LiteRtSubgraph subgraph,
+                                 GetSubgraph(model.Get()));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_inputs,
+                                 GetSubgraphInputs(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto subgraph_outputs,
+                                 GetSubgraphOutputs(subgraph));
 
   ASSERT_EQ(subgraph_inputs.size(), 1);
   ASSERT_EQ(subgraph_outputs.size(), 1);
 
-  ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
+  LITERT_ASSERT_RESULT_OK_ASSIGN(auto ops, GetSubgraphOps(subgraph));
   ASSERT_TRUE(ValidateTopology(ops));
 
   ASSERT_EQ(ops.size(), 4);
   for (auto op : ops) {
-    ASSERT_RESULT_OK_ASSIGN(auto inputs, GetOpIns(op));
+    LITERT_ASSERT_RESULT_OK_ASSIGN(auto inputs, GetOpIns(op));
     ASSERT_EQ(inputs.size(), 2);
     ASSERT_EQ(inputs[0], inputs[1]);
   }
