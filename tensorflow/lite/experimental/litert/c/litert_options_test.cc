@@ -17,9 +17,7 @@
 
 #include <gmock/gmock.h>  // IWYU pragma: keep
 #include <gtest/gtest.h>
-#include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_options.h"
-#include "tensorflow/lite/experimental/litert/core/graph_tools.h"
 #include "tensorflow/lite/experimental/litert/test/common.h"
 
 namespace {
@@ -29,7 +27,7 @@ TEST(GetOpOptionTest, TestGetAddOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -44,7 +42,7 @@ TEST(GetOpOptionTest, TestGetBatchMatmulOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   bool adj_x;
   LITERT_ASSERT_STATUS_OK(LiteRtGetBatchMatmulAdjXOption(op, &adj_x));
@@ -67,7 +65,7 @@ TEST(GetOpOptionTest, TestGetConcatenationOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -85,7 +83,7 @@ TEST(GetOpOptionTest, TestGetDivOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -100,7 +98,7 @@ TEST(GetOpOptionTest, TestGetFullyConnectedOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -134,7 +132,7 @@ TEST(GetOpOptionTest, TestGetMulOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -148,7 +146,7 @@ TEST(GetOpOptionTest, TestGetSoftmaxOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   float beta;
   LITERT_ASSERT_STATUS_OK(LiteRtGetSoftmaxBetaOption(op, &beta));
@@ -162,7 +160,7 @@ TEST(GetOpOptionTest, TestGetStridedSliceOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   int32_t begin_mask;
   LITERT_ASSERT_STATUS_OK(
@@ -199,7 +197,7 @@ TEST(GetOpOptionTest, TestGetSubOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   uint32_t fused_activation;
   LITERT_ASSERT_STATUS_OK(
@@ -213,7 +211,7 @@ TEST(GetOpOptionTest, TestGetReshapeOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   int32_t* new_shape = nullptr;
   int32_t new_shape_size;
@@ -228,7 +226,7 @@ TEST(GetOpOptionTest, TestGetSumOptions) {
   EXPECT_TRUE(subgraph.ok());
 
   auto ops = subgraph->Ops();
-  auto op = ops[0];
+  auto op = ops.front().Get();
 
   bool keepdims;
   LITERT_ASSERT_STATUS_OK(LiteRtGetSumKeepDimsOption(op, &keepdims));
