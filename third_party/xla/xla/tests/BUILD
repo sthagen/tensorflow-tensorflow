@@ -593,37 +593,6 @@ xla_test(
 )
 
 xla_test(
-    name = "xla_hlo_profile_test",
-    srcs = ["xla_hlo_profile_test.cc"],
-    backends = [
-        # Hlo profiles are only supported on CPU/GPU.
-        "cpu",
-        "gpu",
-    ],
-    tags = ["not_run:arm"],
-    deps = [
-        ":client_library_test_base",
-        ":test_macros_header",
-        ":test_utils",
-        "//xla:array2d",
-        "//xla:shape_util",
-        "//xla:util",
-        "//xla/client:local_client",
-        "//xla/hlo/builder:xla_builder",
-        "//xla/hlo/builder:xla_computation",
-        "//xla/service:platform_util",
-        "//xla/service:stream_pool",
-        "//xla/tsl/lib/core:status_test_util",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:regexp",
-        "@local_tsl//tsl/platform:test",
-    ],
-)
-
-xla_test(
     name = "axpy_simple_test",
     srcs = ["axpy_simple_test.cc"],
     tags = ["test_xla_cpu_thunks"],
@@ -3423,5 +3392,30 @@ xla_test(
         "//xla:literal_util",
         "//xla/hlo/builder:xla_builder",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+xla_test(
+    name = "two_plus_two_simple_test",
+    srcs = ["two_plus_two_simple_test.cc"],
+    deps = [
+        "//xla:error_spec",
+        "//xla:literal",
+        "//xla:literal_util",
+        "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
+        "//xla/client:global_data",
+        "//xla/client:local_client",
+        "//xla/hlo/builder:xla_builder",
+        "//xla/service",
+        "//xla/tests:client_library_test_base",
+        "//xla/tests:literal_test_util",
+        "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/lib/core:status_test_util",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:path",
     ],
 )

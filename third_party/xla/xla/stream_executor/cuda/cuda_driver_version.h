@@ -13,18 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/stream_executor/cuda/ptx_compiler_support.h"
+#ifndef XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
+#define XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
 
-namespace stream_executor {
-bool IsLibNvPtxCompilerSupported() {
-  // Libnvptxcompiler as a precompiled library is not compatible with MSan, so
-  // we disable its support so that we at least can run some larger tests under
-  // MSAN. This is not ideal because it means these tests will take different
-  // code paths but the alternative would be not running them at all.
-#ifdef MEMORY_SANITIZER
-  return false;
-#else
-  return LIBNVPTXCOMPILER_SUPPORT;
-#endif
-}
-}  // namespace stream_executor
+#include <cstdint>
+
+#include "absl/status/statusor.h"
+
+namespace stream_executor::gpu {
+
+// Returns the version of the CUDA driver.
+absl::StatusOr<int32_t> CudaDriverVersion();
+
+}  // namespace stream_executor::gpu
+
+#endif  // XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
