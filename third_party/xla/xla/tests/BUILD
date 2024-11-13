@@ -2470,13 +2470,16 @@ xla_test(
     ],
     deps = [
         ":hlo_test_base",
+        ":literal_test_util",
         ":xla_internal_test_main",
         "//xla:literal",
+        "//xla:literal_util",
         "//xla/hlo/testlib:verified_hlo_module",
         "//xla/service:hlo_module_config",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -3398,4 +3401,27 @@ bzl_library(
         "//xla/stream_executor:build_defs_bzl",
         "@local_tsl//tsl/platform:build_config_root_bzl",
     ] + tests_build_defs_bzl_deps(),
+)
+
+xla_test(
+    name = "atan2_test",
+    srcs = ["atan2_test.cc"],
+    deps = [
+        ":client_library_test_base",
+        "//xla:error_spec",
+        "//xla/hlo/builder:xla_builder",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+xla_test(
+    name = "remainder_test",
+    srcs = ["remainder_test.cc"],
+    deps = [
+        ":client_library_test_base",
+        "//xla:error_spec",
+        "//xla:literal_util",
+        "//xla/hlo/builder:xla_builder",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
