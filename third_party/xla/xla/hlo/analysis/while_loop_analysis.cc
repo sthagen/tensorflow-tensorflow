@@ -18,20 +18,26 @@ limitations under the License.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <ostream>
+#include <utility>
+#include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/base/casts.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/types/span.h"
 #include "xla/comparison_util.h"
+#include "xla/hlo/analysis/hlo_reachability.h"
 #include "xla/hlo/evaluator/hlo_evaluator.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_opcode.h"
-#include "xla/hlo/ir/hlo_reachability.h"
 #include "xla/hlo/utils/hlo_query.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
@@ -39,6 +45,7 @@ limitations under the License.
 #include "xla/service/pattern_matcher.h"
 #include "xla/shape_util.h"
 #include "xla/tools/hlo_extractor.h"
+#include "tsl/platform/status.h"
 
 namespace xla {
 
@@ -108,6 +115,29 @@ static optional<int64_t> GetGTEOperandIndex(const HloInstruction* instr,
   return tuple_idx;
 }
 
+// This function returns true if the operation is a simple scalar operation.
+// While loop analysis can execute such an operation at compile time without
+// incurring huge overheads.
+static bool IsScalarOp(const HloInstruction* op) {
+  if (IsCollective(op)) return false;
+  switch (op->opcode()) {
+    case HloOpcode::kSend:
+    case HloOpcode::kSendDone:
+    case HloOpcode::kRecv:
+    case HloOpcode::kRecvDone:
+    case HloOpcode::kCustomCall:
+      return false;
+    default:
+      break;
+  }
+  for (const HloComputation* computation : op->called_computations()) {
+    for (const HloInstruction* instruction : computation->instructions()) {
+      if (!IsScalarOp(instruction)) return false;
+    }
+  }
+  return ShapeUtil::IsScalar(op->shape());
+}
+
 // If `out` is a function of a single value in the tuple `in` and has no other
 // dependence, i.e. if `out=f(gte(in))`, then this function will return the
 // unique get-tuple-element index for the dependence.
@@ -116,8 +146,10 @@ static optional<int64_t> GetGTEOperandIndex(const HloInstruction* instr,
 //   in = (s32[], s32[], s32[]) tuple(a,b,c)
 //   gte.1 = get-tuple-element(in), index=1
 //   out = fusion(gte.1), ...
-std::optional<int64_t> GetUniqueGTEDependenceIndex(const HloInstruction* out,
-                                                   const HloInstruction* in) {
+// Also checks whether all ops on the path from `in` to `out` are ops with a
+// scalar shape.
+static std::optional<int64_t> GetUniqueGTEDependenceIndex(
+    const HloInstruction* out, const HloInstruction* in) {
   // Fast path : pattern matching.
   std::optional<int64_t> tuple_idx = GetGTEOperandIndex(out, in);
   if (tuple_idx != std::nullopt) {
@@ -180,6 +212,13 @@ std::optional<int64_t> GetUniqueGTEDependenceIndex(const HloInstruction* out,
                      [candidate_index](const HloInstruction* inst) -> bool {
                        return inst->tuple_index() != candidate_index;
                      })) {
+    return std::nullopt;
+  }
+
+  if (absl::c_any_of(
+          entry->instructions(), [](const HloInstruction* inst) -> bool {
+            return inst->opcode() != HloOpcode::kParameter && !IsScalarOp(inst);
+          })) {
     return std::nullopt;
   }
 
@@ -438,30 +477,6 @@ optional<int64_t> CheckedSubtract(int64_t a, int64_t b) {
   return result;
 }
 
-// This function returns true if the operation is a simple scalar operation.
-// While loop analysis can execute such an operation at compile time without
-// incurring huge overheads.
-bool IsScalarOp(const HloInstruction* op) {
-  if (IsCollective(op)) return false;
-  switch (op->opcode()) {
-    case HloOpcode::kSend:
-    case HloOpcode::kSendDone:
-    case HloOpcode::kRecv:
-    case HloOpcode::kRecvDone:
-    case HloOpcode::kCustomCall:
-      return false;
-    default:
-      break;
-  }
-  for (const HloComputation* computation : op->called_computations()) {
-    for (const HloInstruction* instruction : computation->instructions()) {
-      if (!IsScalarOp(instruction)) return false;
-    }
-  }
-  return ShapeUtil::IsEffectiveScalar(op->shape()) ||
-         op->opcode() == HloOpcode::kParameter;
-}
-
 optional<int64_t> MatchTrivialLoopTripCount(const HloInstruction* while_op,
                                             int64_t indvar_tuple_idx,
                                             const Literal& indvar_init) {
@@ -485,8 +500,6 @@ optional<int64_t> MatchTrivialLoopTripCount(const HloInstruction* while_op,
       while_body_indvar !=
           hlo_query::GetUniqueGteInstruction(
               while_body->parameter_instruction(0), indvar_tuple_idx)) {
-    // We do not need a guard for scalar operations here, because we are pattern
-    // matching with add operation later, which is a scalar operation.
     return std::nullopt;
   }
   HloInstruction* trip_count_increase_step_instr = nullptr;
@@ -537,9 +550,6 @@ optional<int64_t> MatchTrivialLoopTripCount(const HloInstruction* while_op,
       while_cond_indvar !=
           hlo_query::GetUniqueGteInstruction(
               while_cond->parameter_instruction(0), indvar_tuple_idx)) {
-    // We do not need a guard for scalar operations here because we are pattern
-    // matching the condition operation with compare later, which is a scalar
-    // operation.
     return std::nullopt;
   }
   HloInstruction* while_cond_bound = nullptr;
@@ -658,8 +668,7 @@ optional<int64_t> ComputeWhileLoopTripCount(const HloInstruction* while_op,
   if (while_body_indvar == nullptr ||
       while_body_indvar !=
           hlo_query::GetUniqueGteInstruction(
-              while_body->parameter_instruction(0), *indvar_tuple_idx) ||
-      !IsScalarOp(while_body_indvar_update)) {
+              while_body->parameter_instruction(0), *indvar_tuple_idx)) {
     return std::nullopt;
   }
 
@@ -669,8 +678,7 @@ optional<int64_t> ComputeWhileLoopTripCount(const HloInstruction* while_op,
   if (while_cond_indvar == nullptr ||
       while_cond_indvar !=
           hlo_query::GetUniqueGteInstruction(
-              while_cond->parameter_instruction(0), *indvar_tuple_idx) ||
-      !IsScalarOp(while_cond_root)) {
+              while_cond->parameter_instruction(0), *indvar_tuple_idx)) {
     return std::nullopt;
   }
 

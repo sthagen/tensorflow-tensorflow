@@ -27,6 +27,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "tensorflow/compiler/mlir/lite/allocation.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
@@ -39,6 +40,7 @@
 #include "tensorflow/lite/experimental/litert/core/model/model_serialize.h"
 #include "tensorflow/lite/kernels/register.h"
 #include "tensorflow/lite/model_builder.h"
+#include "tensorflow/lite/stderr_reporter.h"
 #include "tsl/platform/platform.h"
 
 namespace litert {
@@ -99,7 +101,7 @@ bool ValidateTopology(const std::vector<Op>& ops) {
   for (const auto& op : ops) {
     const auto inputs = op.Inputs();
     for (int i = 0; i < inputs.size(); ++i) {
-      if (!MatchUse(inputs.at(i), UseInfo(op.Code(), i))) {
+      if (!MatchUse(inputs.at(i), UseInfo{op.Code(), i})) {
         return false;
       }
     }
@@ -140,7 +142,7 @@ Expected<OwningBufferRef<uint8_t>> GetModelBufWithByteCode(
     auto exec_info =
         MakeExecInfo(op->custom_options.StrView(), kByteCodeMetadataKey);
     if (!exec_info) {
-      return exec_info.Unex();
+      return exec_info.Error();
     }
     op->custom_options = std::move(*exec_info);
   }
@@ -171,7 +173,18 @@ Expected<TflRuntime::Ptr> TflRuntime::CreateFromTflFile(
     absl::string_view filename) {
   auto runtime = std::make_unique<TflRuntime>();
 
-  runtime->fb_model_ = tflite::FlatBufferModel::BuildFromFile(filename.data());
+  {
+    auto alloc = tflite::GetAllocationFromFile(filename.data(),
+                                               tflite::DefaultErrorReporter());
+    if (alloc == nullptr) {
+      return Unexpected(kLiteRtStatusErrorFileIO);
+    }
+    runtime->alloc_ = std::move(alloc);
+  }
+
+  runtime->fb_model_ = tflite::FlatBufferModel::BuildFromBuffer(
+      reinterpret_cast<const char*>(runtime->alloc_->base()),
+      runtime->alloc_->bytes());
   if (runtime->fb_model_ == nullptr) {
     return Unexpected(kLiteRtStatusErrorFileIO);
   }
@@ -193,13 +206,18 @@ Expected<TflRuntime::Ptr> TflRuntime::CreateFromTflFileWithByteCode(
     auto model_with_byte_code =
         GetModelBufWithByteCode(tfl_filename, npu_filename);
     if (!model_with_byte_code) {
-      return model_with_byte_code.Unex();
+      return model_with_byte_code.Error();
     }
     runtime->model_buf_ = std::move(*model_with_byte_code);
   }
 
+  runtime->alloc_ = std::make_unique<tflite::MemoryAllocation>(
+      runtime->model_buf_.Data(), runtime->model_buf_.Size(),
+      tflite::DefaultErrorReporter());
+
   runtime->fb_model_ = tflite::FlatBufferModel::BuildFromBuffer(
-      runtime->model_buf_.StrData(), runtime->model_buf_.Size());
+      reinterpret_cast<const char*>(runtime->alloc_->base()),
+      runtime->alloc_->bytes());
   if (runtime->fb_model_ == nullptr) {
     return Unexpected(kLiteRtStatusErrorFileIO);
   }
