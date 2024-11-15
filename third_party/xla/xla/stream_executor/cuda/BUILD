@@ -61,7 +61,10 @@ config_setting(
 
 bool_flag(
     name = "enable_libnvjitlink_support",
-    build_setting_default = True,
+    build_setting_default = if_google(
+        True,
+        oss_value = False,
+    ),
 )
 
 config_setting(
@@ -1343,9 +1346,9 @@ cc_library(
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:semantic_version",
         "//xla/stream_executor:stream",
+        "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:typed_kernel_factory",
         "//xla/stream_executor/gpu:gpu_command_buffer",
-        "//xla/stream_executor/gpu:gpu_executor_header",
         "//xla/stream_executor/gpu:gpu_stream",
         "//xla/stream_executor/gpu:scoped_gpu_graph_exec",
         "//xla/stream_executor/gpu:scoped_update_mode",
