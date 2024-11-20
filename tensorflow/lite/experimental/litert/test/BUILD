@@ -32,11 +32,16 @@ done
 )
 
 genrule(
-    name = "tflite_test_data",
+    name = "mlir_test_data",
     srcs = glob(["testdata/*.mlir"]),
     outs = [s.removesuffix(".mlir") + ".tflite" for s in glob(["testdata/*.mlir"])],
     cmd = CMD,
     tools = [CONVERTER],
+)
+
+filegroup(
+    name = "tflite_test_data",
+    srcs = glob(["testdata/*.tflite"]),
 )
 
 cc_library(
@@ -56,15 +61,12 @@ cc_library(
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/core:cc_api_stable",
         "//tensorflow/lite/experimental/litert/c:litert_common",
-        "//tensorflow/lite/experimental/litert/c:litert_op_code",
         "//tensorflow/lite/experimental/litert/cc:litert_buffer_ref",
         "//tensorflow/lite/experimental/litert/cc:litert_expected",
         "//tensorflow/lite/experimental/litert/cc:litert_model",
         "//tensorflow/lite/experimental/litert/cc:litert_model_predicates",
-        "//tensorflow/lite/experimental/litert/core:byte_code_util",
-        "//tensorflow/lite/experimental/litert/core/model",
+        "//tensorflow/lite/experimental/litert/core/model:model_buffer",
         "//tensorflow/lite/experimental/litert/core/model:model_load",
-        "//tensorflow/lite/experimental/litert/core/model:model_serialize",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_absl//absl/log:absl_check",
@@ -104,4 +106,10 @@ cc_library(
     deps = [
         "//tensorflow/lite/experimental/litert/c:litert_model",
     ],
+)
+
+cc_library(
+    name = "test_models",
+    hdrs = ["test_models.h"],
+    deps = ["@com_google_absl//absl/strings:string_view"],
 )

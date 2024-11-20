@@ -39,6 +39,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/transforms/simplifiers/sub_byte_normalization.h"
 #include "xla/layout_util.h"
+#include "xla/primitive_util.h"
 #include "xla/service/gpu/gpu_fusible.h"
 #include "xla/service/hlo_creation_utils.h"
 #include "xla/shape.h"
@@ -141,6 +142,11 @@ class HorizontalLoopFusionImpl {
   std::string prefix_;
 };  // HorizontalLoopFusionImpl
 
+bool IsConcatenationInputFusion(const HloInstruction& instr) {
+  return instr.IsInputFusion() &&
+         instr.fused_expression_root()->opcode() == HloOpcode::kConcatenate;
+}
+
 bool IsFusibleCandidate(const HloInstruction& instr) {
   // For now, we do not support fusing instruction with control flow.
   if (!instr.control_successors().empty() ||
@@ -158,8 +164,7 @@ bool IsFusibleCandidate(const HloInstruction& instr) {
     return true;
   }
 
-  // Exclude fusions other than kLoop.
-  if (!instr.IsLoopFusion()) {
+  if (!(instr.IsLoopFusion() || IsConcatenationInputFusion(instr))) {
     return false;
   }
 
@@ -196,7 +201,8 @@ bool IsProfitableFusionCandidate(const HloInstruction& instr,
   // GPU thread can only process 1 element. From experience, we enable larger
   // tensor size threshold for kLoop fusion.
   const int64_t kShapeThreshold =
-      sliced_input_fusion ? 128 * 2048 : 8192 * 8192;
+      (sliced_input_fusion || IsConcatenationInputFusion(instr)) ? 128 * 2048
+                                                                 : 8192 * 8192;
   const int64_t kInstrCountThreshold = sliced_input_fusion ? 30 : 128;
   const HloInstruction* root = (instr.opcode() == HloOpcode::kFusion)
                                    ? instr.fused_expression_root()
@@ -253,8 +259,6 @@ void HorizontalLoopFusionImpl::FusionCandidates::Initialize(
   std::vector<HloInstruction*> ordered_fusible_candidates;
   for (HloInstruction* opnd : consumer->operands()) {
     HloInstruction* predecessor = opnd->LatestNonGteAncestor();
-    // We support kLoop fusion and element-wise HLOs now. We may extend the
-    // support list if needs arise.
     if (IsFusibleCandidate(*predecessor)) {
       if (fusible_candidates.insert(predecessor).second) {
         // Add unseen fusion to ordered list.
@@ -711,14 +715,11 @@ absl::StatusOr<bool> HorizontalLoopFusion::Run(
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   VLOG(2) << "Run horizontal fusion.";
 
-  bool any_changed = false;
-  for (HloComputation* computation :
-       GetFusibleComputations(*module, execution_threads)) {
-    TF_ASSIGN_OR_RETURN(bool changed, RunOnComputation(computation));
-    any_changed |= changed;
-  }
+  // Run on the entry computation is actually enough.
+  TF_ASSIGN_OR_RETURN(bool changed,
+                      RunOnComputation(module->entry_computation()));
 
-  if (any_changed) {
+  if (changed) {
     // Correctly set element_size_in_bits for any sub-byte added slice and
     // concatenate instructions
     TF_ASSIGN_OR_RETURN(
@@ -727,7 +728,7 @@ absl::StatusOr<bool> HorizontalLoopFusion::Run(
             module));
   }
 
-  return any_changed;
+  return changed;
 }
 
 }  // namespace gpu

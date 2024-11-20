@@ -15,19 +15,6 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
-
-def AnalyzeVariablesPass : Pass<"tfl-analyze-variables-pass", "mlir::ModuleOp"> {
-  let summary = "Analyze variables in the graph";
-  let description = [{
-      Pass which analyzes the variables in the graph and add an attribute whether
-      variables should be legalized to TFLite native ones.
-      This pass needs to run post TF->TFL legalization and before variable
-      legalization.
-  }];
-  let constructor = "CreateAnalyzeVariablesPass()";
-  let dependentDialects = ["TFL::TensorFlowLiteDialect"];
-}
-
 def DefaultQuantParamsPass : Pass<"tfl-default-quant", "mlir::func::FuncOp"> {
   let summary = "Apply quantization with default quantization parameter";
   let constructor = "CreateDefaultQuantParamsPass()";
@@ -149,12 +136,6 @@ def ModifyIONodesPass : Pass<"tfl-modify-io-nodes", "mlir::func::FuncOp"> {
       ListOption<"io_node_types_", "test-io-types", "std::string",
                  "comma separated type strings. Allowed values: 'int8', 'uint8', 'float32']">,
   ];
-}
-
-def OptimizeBatchMatmulPass : Pass<"tfl-optimize-batch-matmul", "mlir::func::FuncOp"> {
-  let summary = "Optimize FC with BatchMatmul within the TensorFlow Lite dialect";
-  let constructor = "CreateOptimizeBatchMatmulPass()";
-  let dependentDialects = ["TFL::TensorFlowLiteDialect"];
 }
 
 def OptimizeFunctionalOpsPass : Pass<"tfl-optimize-functional-ops", "mlir::ModuleOp"> {
@@ -408,21 +389,9 @@ def UnfoldLargeSplatConstantPass : Pass<"unfold-large-splat-constant", "mlir::Mo
   let dependentDialects = ["TFL::TensorFlowLiteDialect"];
 }
 
-def WhileOutlinePass : Pass<"tfl-while-loop-outline", "mlir::ModuleOp"> {
-  let summary = "Hoist while op regions into functions";
-  let constructor = "CreateWhileOutlinePass()";
-  let dependentDialects = ["TF::TensorFlowDialect"];
-}
-
 def IfOutlinePass : Pass<"tfl-if-outline", "mlir::ModuleOp"> {
   let summary = "Hoist if op regions into functions";
   let constructor = "CreateIfOutlinePass()";
-  let dependentDialects = ["TFL::TensorFlowLiteDialect"];
-}
-
-def LegalizeTensorListPass : Pass<"tfl-legalize-tensorlist", "mlir::ModuleOp"> {
-  let summary = "Legalize TensorFlow tensorlist ops to TensorFlow Lite custom.";
-  let constructor = "CreateLegalizeTensorListPass()";
   let dependentDialects = ["TFL::TensorFlowLiteDialect"];
 }
 
