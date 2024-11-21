@@ -54,7 +54,7 @@ CreateIfrtMergeReshardsPass();
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 CreateIfrtOutlineAtomProgramToModulePass();
 
-std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
+std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
 CreateIfrtVerifyDonationPass();
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
@@ -137,6 +137,10 @@ CreateIfrtAtomProgramsFromVhloPass(
         atom_programs);
 
 void populateIfrtToVifrtPatterns(mlir::RewritePatternSet* patterns,
+                                 mlir::TypeConverter* converter,
+                                 mlir::MLIRContext* context);
+
+void populateVifrtToIfrtPatterns(mlir::RewritePatternSet* patterns,
                                  mlir::TypeConverter* converter,
                                  mlir::MLIRContext* context);
 

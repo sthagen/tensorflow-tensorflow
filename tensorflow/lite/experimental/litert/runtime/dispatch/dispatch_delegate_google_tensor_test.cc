@@ -146,7 +146,7 @@ TEST(DispatchDelegate, GoogleTensorHwBuffer) {
               kLiteRtTensorBufferTypeAhwb);
     auto input_buffer =
         buffer_context.CreateBufferForTensor(interpreter.input_tensor(i));
-    ASSERT_TRUE(input_buffer.HasValue());
+    ASSERT_TRUE(input_buffer);
     ASSERT_TRUE(input_buffer->IsOwned());
     ASSERT_EQ(*input_buffer->BufferType(), kLiteRtTensorBufferTypeAhwb);
     auto duplicate_buffer = (*input_buffer).Duplicate();
@@ -161,7 +161,7 @@ TEST(DispatchDelegate, GoogleTensorHwBuffer) {
   for (int i = 0; i < interpreter.outputs().size(); ++i) {
     auto output_buffer_requirements =
         buffer_context.GetBufferRequirement(interpreter.output_tensor(i));
-    ASSERT_TRUE(output_buffer_requirements.HasValue());
+    ASSERT_TRUE(output_buffer_requirements);
     ASSERT_EQ((*output_buffer_requirements)->SupportedTypes().Value()[0],
               kLiteRtTensorBufferTypeAhwb);
     auto output_buffer =

@@ -158,6 +158,7 @@ class Tensor : public internal::NonOwnedHandle<LiteRtTensor> {
   }
 
   LiteRtUnrankedTensorType UnrankedTensorType() const {
+    internal::AssertEq([&]() { return TypeId(); }, kLiteRtUnrankedTensorType);
     LiteRtUnrankedTensorType unranked_tensor_type;
     internal::AssertOk(LiteRtGetUnrankedTensorType, Get(),
                        &unranked_tensor_type);
@@ -165,9 +166,27 @@ class Tensor : public internal::NonOwnedHandle<LiteRtTensor> {
   }
 
   class RankedTensorType RankedTensorType() const {
+    internal::AssertEq([&]() { return TypeId(); }, kLiteRtRankedTensorType);
     LiteRtRankedTensorType ranked_tensor_type;
     internal::AssertOk(LiteRtGetRankedTensorType, Get(), &ranked_tensor_type);
     return litert::RankedTensorType(ranked_tensor_type);
+  }
+
+  LiteRtQuantizationTypeId QTypeId() const {
+    LiteRtQuantizationTypeId q_type_id;
+    internal::AssertOk(LiteRtGetQuantizationTypeId, Get(), &q_type_id);
+    return q_type_id;
+  }
+
+  bool HasQuantization() const { return QTypeId() != kLiteRtQuantizationNone; }
+
+  LiteRtQuantizationPerTensor PerTensorQuantization() const {
+    internal::AssertEq([&]() { return QTypeId(); },
+                       kLiteRtQuantizationPerTensor);
+    LiteRtQuantizationPerTensor per_tensor_quantization;
+    internal::AssertOk(LiteRtGetPerTensorQuantization, Get(),
+                       &per_tensor_quantization);
+    return per_tensor_quantization;
   }
 
   bool HasWeights() const {

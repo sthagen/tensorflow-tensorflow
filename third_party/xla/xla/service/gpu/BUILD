@@ -17,10 +17,6 @@ load(
     "@local_tsl//tsl/platform:build_config_root.bzl",
     "if_static",
 )
-load(
-    "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
-    "if_cuda_is_configured",
-)
 load("//xla:xla.bzl", "xla_cc_test", "xla_internal")
 load(
     "//xla/service/gpu:build_defs.bzl",
@@ -42,6 +38,10 @@ load(
     "tsl_gpu_library",
 )
 load("//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
+load(
+    "//xla/tsl/platform/default:cuda_build_defs.bzl",
+    "if_cuda_is_configured",
+)
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -543,7 +543,6 @@ cc_library(
     ],
 )
 
-# TODO(b/244780257): Remove this config.
 bool_flag(
     name = "enable_xlir",
     build_setting_default = if_google(True, False),
@@ -1869,7 +1868,6 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/cuda:cuda_asm_compiler",
         "//xla/stream_executor/cuda:cuda_diagnostics",
-        "//xla/stream_executor/cuda:cuda_driver_version",
         "//xla/stream_executor/cuda:cuda_platform_id",
         "//xla/stream_executor/cuda:nvjitlink",
         "//xla/stream_executor/cuda:nvjitlink_known_issues",

@@ -661,8 +661,6 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair(PrimitiveType::F8E5M2, PrimitiveType::F8E5M2)));
 
 TEST_P(FloatNormalizationTest, Fp8Normalization) {
-  // TODO(b/344573710) Make this test not require a GPU when AutotuneCacheKey is
-  // more stable.
   const PrimitiveType lhs_type = GetParam().first;
   const PrimitiveType rhs_type = GetParam().second;
   const std::string lhs_name =
@@ -894,9 +892,12 @@ class KernelCacheTest : public HloTestBase {
     CHECK(tsl::Env::Default()->LocalTempFilename(&cache_file_name_));
     HloModuleConfig config;
     config.set_debug_options(GetDebugOptionsForTest());
-    TF_ASSERT_OK_AND_ASSIGN(bool can_use_link_modules,
-                            dynamic_cast<GpuCompiler*>(backend().compiler())
-                                ->CanUseLinkModules(config));
+    TF_ASSERT_OK_AND_ASSIGN(
+        bool can_use_link_modules,
+        dynamic_cast<GpuCompiler*>(backend().compiler())
+            ->CanUseLinkModules(
+                config,
+                backend().default_stream_executor()->GetDeviceDescription()));
     if (!can_use_link_modules) {
       GTEST_SKIP() << "Caching compiled kernels requires support of linking.";
     }

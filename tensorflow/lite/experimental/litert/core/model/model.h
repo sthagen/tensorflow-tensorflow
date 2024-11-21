@@ -16,6 +16,7 @@
 #define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_H_
 
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <vector>
 
@@ -25,7 +26,6 @@
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
-#include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
 //
@@ -41,7 +41,13 @@ typedef union {
   LiteRtRankedTensorType ranked_tensor_type;
 } LiteRtTypeDetail;
 
+typedef union {
+  LiteRtQuantizationPerTensor per_tensor;
+} LiteRtQuantizationTypeDetail;
+
 struct LiteRtTensorT {
+  using Ref = std::reference_wrapper<LiteRtTensorT>;
+
   // Empty if subgraph output. This is a reference.
   std::vector<LiteRtOp> users;
 
@@ -63,6 +69,12 @@ struct LiteRtTensorT {
   // Union tensor type.
   LiteRtTypeDetail type_detail;
 
+  // Id for union quantization type.
+  LiteRtQuantizationTypeId q_type_id = kLiteRtQuantizationNone;
+
+  // Union quantization type.
+  LiteRtQuantizationTypeDetail q_type_detail;
+
   // Authored name of tensor, may be empty.
   std::string name;
 };
@@ -83,6 +95,20 @@ struct LiteRtOpT {
   litert::OwningBufferRef<uint8_t> custom_options;
 
   tflite::BuiltinOptionsUnion option;
+
+  // Add a new input to this op and updating given tensors users.
+  void AddInput(LiteRtTensorT& input_tensor) {
+    input_tensor.users.push_back(this);
+    input_tensor.user_arg_inds.push_back(inputs.size());
+    inputs.push_back(&input_tensor);
+  }
+
+  // Add a new output to this op and update given tensors defining op.
+  void AddOutput(LiteRtTensorT& output_tensor) {
+    output_tensor.defining_op_out_ind = outputs.size();
+    output_tensor.defining_op = this;
+    outputs.push_back(&output_tensor);
+  }
 };
 
 //
@@ -107,6 +133,12 @@ struct LiteRtSubgraphT {
 
   // These are references and a subset of `tensors`.
   std::vector<LiteRtTensor> outputs;
+
+  LiteRtTensorT& EmplaceTensor() {
+    auto& tensor = tensors_storage.emplace_back();
+    tensors.push_back(&tensor);
+    return tensor;
+  }
 };
 
 //

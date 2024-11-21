@@ -9,10 +9,6 @@ load(
     "cc_library",
 )
 load(
-    "@local_tsl//tsl/platform/default:cuda_build_defs.bzl",
-    "if_cuda_newer_than",
-)
-load(
     "//xla:xla.bzl",
     "xla_cc_test",
 )
@@ -31,6 +27,10 @@ load(
     "if_nccl",
     "internal_visibility",
     "tsl_copts",
+)
+load(
+    "//xla/tsl/platform/default:cuda_build_defs.bzl",
+    "if_cuda_newer_than",
 )
 
 package(
@@ -779,7 +779,6 @@ xla_cc_test(
     srcs = ["ptx_compiler_test.cc"],
     tags = [
         "cuda-only",
-        # TODO(b/343996893): Figure out whether msan reports a false positive or not.
         "nomsan",
     ],
     deps = [
