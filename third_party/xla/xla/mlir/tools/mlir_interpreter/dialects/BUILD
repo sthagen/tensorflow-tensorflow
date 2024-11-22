@@ -16,26 +16,20 @@ package_group(
 
 cc_library(
     name = "dialects",
-    srcs = [
-        "affine.cc",
-        "arith.cc",
-        "bufferization.cc",
-        "builtin.cc",
-        "complex.cc",
-        "func.cc",
-        "linalg.cc",
-        "math.cc",
-        "memref.cc",
-        "mhlo.cc",
-        "mhlo_binary_cwise.cc",
-        "mhlo_unary_cwise.cc",
-        "scf.cc",
-        "tensor.cc",
-        "vector.cc",
-    ],
+    srcs = glob(
+        [
+            "*.cc",
+        ],
+        exclude = [
+            "util.cc",
+            "symbol_finder_linux.cc",
+            "symbol_finder_windows.cc",
+            "symbol_finder_test.cc",
+        ],
+    ),
     deps = [
         ":dialect_utils",
-        ":find_symbol",
+        ":symbol_finder",
         "//xla/mlir/tools/mlir_interpreter/framework",
         "//xla/mlir_hlo",
         "@com_google_absl//absl/status:statusor",
@@ -105,7 +99,7 @@ cc_library(
 )
 
 cc_library(
-    name = "find_symbol",
+    name = "symbol_finder",
     hdrs = ["symbol_finder.h"],
     deps = [
         "@com_google_absl//absl/status:statusor",
@@ -113,4 +107,16 @@ cc_library(
         [":symbol_finder_windows"],
         [":symbol_finder_linux"],
     ),
+)
+
+cc_test(
+    name = "symbol_finder_test",
+    srcs = ["symbol_finder_test.cc"],
+    deps = [
+        ":symbol_finder",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:test",
+    ],
 )

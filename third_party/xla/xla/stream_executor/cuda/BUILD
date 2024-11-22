@@ -17,7 +17,6 @@ load(
     "stream_executor_friends",
     "tf_additional_cuda_platform_deps",
     "tf_additional_cudnn_plugin_copts",
-    "tf_additional_gpu_compilation_copts",
 )
 load("//xla/tests:build_defs.bzl", "xla_test")
 load(
@@ -25,6 +24,7 @@ load(
     "if_cuda_tools",
     "if_google",
     "if_nccl",
+    "if_windows",
     "internal_visibility",
     "tsl_copts",
 )
@@ -32,6 +32,7 @@ load(
     "//xla/tsl/platform/default:cuda_build_defs.bzl",
     "if_cuda_newer_than",
 )
+load(":build_defs.bzl", "stage_in_bin_subdirectory")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -905,21 +906,6 @@ cc_library(
     name = "cuda_asm_compiler",
     srcs = ["cuda_asm_compiler.cc"],
     hdrs = ["cuda_asm_compiler.h"],
-    copts = tf_additional_gpu_compilation_copts(),
-    # copybara:uncomment_begin
-    # data = [
-    # "@local_config_cuda//cuda:runtime_fatbinary",
-    # "@local_config_cuda//cuda:runtime_nvlink",
-    # "@local_config_cuda//cuda:runtime_ptxas",
-    # ],
-    # copybara:uncomment_end
-    # copybara:comment_begin
-    data = if_cuda_tools([
-        "@cuda_nvcc//:fatbinary",
-        "@cuda_nvcc//:nvlink",
-        "@cuda_nvcc//:ptxas",
-    ]),
-    # copybara:comment_end
     tags = [
         "cuda-only",
         "gpu",
@@ -932,38 +918,19 @@ cc_library(
         "//tensorflow/core/kernels:__subpackages__",
     ]),
     deps = [
+        ":cubin_or_ptx_image",
         ":cuda_executor",  # buildcleaner: keep
-        ":cuda_status",
         ":ptx_compiler",
-        ":ptx_compiler_helpers",
         ":ptx_compiler_support",
-        "//xla:status_macros",
-        "//xla:util",
+        ":subprocess_compilation",
         "//xla/stream_executor:device_description",
-        "//xla/stream_executor:semantic_version",
         "//xla/stream_executor/gpu:gpu_asm_opts",
-        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/cleanup",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/types:span",
-        "@local_config_cuda//cuda:cuda_headers",
-        "@local_tsl//tsl/platform:cuda_root_path",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
-        "@local_tsl//tsl/platform:regexp",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:subprocess",
     ],
 )
 
@@ -1105,7 +1072,7 @@ cc_library(
         select({
             # copybara:uncomment_begin(different config setting in OSS)
             # "//tools/cc_target_os:gce": [],
-            # copybara:uncomment_end_and_comment_begin
+            # copybara:uncomment_end
             "//conditions:default": [
                 ":cuda_platform",
             ],
@@ -1328,5 +1295,203 @@ cc_library(
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "cubin_or_ptx_image",
+    hdrs = ["cubin_or_ptx_image.h"],
+)
+
+cc_library(
+    name = "subprocess_compilation",
+    srcs = ["subprocess_compilation.cc"],
+    hdrs = ["subprocess_compilation.h"],
+    # copybara:uncomment_begin
+    # data = [
+    # "@local_config_cuda//cuda:runtime_fatbinary",
+    # "@local_config_cuda//cuda:runtime_nvlink",
+    # "@local_config_cuda//cuda:runtime_ptxas",
+    # ],
+    # copybara:uncomment_end
+    # copybara:comment_begin
+    data = if_cuda_tools([
+        "@cuda_nvcc//:fatbinary",
+        "@cuda_nvcc//:nvlink",
+        "@cuda_nvcc//:ptxas",
+    ]),
+    # copybara:comment_end
+    local_defines = if_windows(["PLATFORM_WINDOWS"]),
+    deps = [
+        ":cubin_or_ptx_image",
+        ":ptx_compiler_helpers",
+        "//xla:status_macros",
+        "//xla:util",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor/gpu:gpu_asm_opts",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:cuda_root_path",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:regexp",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:subprocess",
+    ],
+)
+
+cc_binary(
+    name = "dummy_cuda_binary",
+    testonly = True,
+    srcs = ["dummy_cuda_binary.cc"],
+    deps = [
+        "//xla/tsl/lib/core:status_test_util",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+stage_in_bin_subdirectory(
+    name = "ptxas",
+    testonly = True,
+    data = [":dummy_cuda_binary"],
+)
+
+stage_in_bin_subdirectory(
+    name = "nvlink",
+    testonly = True,
+    data = [":dummy_cuda_binary"],
+)
+
+stage_in_bin_subdirectory(
+    name = "fatbinary",
+    testonly = True,
+    data = [":dummy_cuda_binary"],
+)
+
+xla_cc_test(
+    name = "subprocess_compilation_test",
+    srcs = ["subprocess_compilation_test.cc"],
+    data = [
+        ":fatbinary",
+        ":nvlink",
+        ":ptxas",
+    ],
+    deps = [
+        ":subprocess_compilation",
+        "//xla/stream_executor:semantic_version",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "driver_compilation",
+    srcs = ["driver_compilation.cc"],
+    hdrs = ["driver_compilation.h"],
+    tags = [
+        "cuda-only",
+        "gpu",
+    ],
+    deps = [
+        ":cuda_status",
+        "//xla/stream_executor:activate_context",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor:stream_executor_h",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+        "@local_config_cuda//cuda:cuda_headers",
+        "@local_tsl//tsl/platform:errors",
+    ],
+)
+
+cc_library(
+    name = "compilation_options",
+    hdrs = ["compilation_options.h"],
+    deps = ["@com_google_absl//absl/strings:str_format"],
+)
+
+cc_test(
+    name = "compilation_options_test",
+    srcs = ["compilation_options_test.cc"],
+    deps = [
+        ":compilation_options",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "compilation_provider",
+    hdrs = ["compilation_provider.h"],
+    deps = [
+        ":compilation_options",
+        "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "subprocess_compilation_provider",
+    srcs = ["subprocess_compilation_provider.cc"],
+    hdrs = ["subprocess_compilation_provider.h"],
+    deps = [
+        ":compilation_options",
+        ":compilation_provider",
+        ":subprocess_compilation",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor/gpu:gpu_asm_opts",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:path",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "compilation_provider_test",
+    srcs = ["compilation_provider_test.cc"],
+    deps = [
+        ":compilation_options",
+        ":compilation_provider",
+        ":subprocess_compilation",
+        ":subprocess_compilation_provider",
+        "//xla/stream_executor:device_description",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:test",
     ],
 )
