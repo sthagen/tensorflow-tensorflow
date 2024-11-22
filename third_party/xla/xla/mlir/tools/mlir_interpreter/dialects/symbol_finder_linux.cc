@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
-#define XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
+#include <dlfcn.h>
 
-#include <cstdint>
+#include <string>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/mlir/tools/mlir_interpreter/dialects/symbol_finder.h"
 
-namespace stream_executor::gpu {
-
-// Returns the version of the CUDA driver.
-absl::StatusOr<int32_t> CudaDriverVersion();
-
-}  // namespace stream_executor::gpu
-
-#endif  // XLA_STREAM_EXECUTOR_CUDA_CUDA_DRIVER_VERSION_H_
+namespace mlir {
+namespace interpreter {
+absl::StatusOr<void*> FindSymbolInProcess(const std::string& symbol_name) {
+  void* sym = dlsym(RTLD_DEFAULT, symbol_name.c_str());
+  if (sym == nullptr) {
+    return absl::NotFoundError("Callee not found");
+  }
+  return sym;
+}
+}  // namespace interpreter
+}  // namespace mlir

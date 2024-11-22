@@ -409,7 +409,6 @@ gpu_only_cc_library(
         "//tensorflow/core/kernels:__subpackages__",
     ]),
     deps = [
-        ":gpu_asm_opts",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:device_memory_allocator",
         "//xla/stream_executor:device_memory_handle",
@@ -441,7 +440,6 @@ xla_test(
     srcs = ["redzone_allocator_test.cc"],
     backends = ["gpu"],
     deps = [
-        ":gpu_asm_opts",
         ":gpu_init",
         ":redzone_allocator",
         "//xla/stream_executor:device_memory",
@@ -493,7 +491,6 @@ xla_test(
     tags = ["cuda-only"],
     deps = [
         ":gpu_cudamallocasync_allocator",
-        ":gpu_stream",
         "//xla/service:platform_util",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",

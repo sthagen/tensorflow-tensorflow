@@ -1,4 +1,4 @@
-/* Copyright 2015 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,25 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <stdint.h>
-#include <stdlib.h>
+#include <windows.h>
 
-#include <cstdint>
+#include <string>
 
 #include "absl/status/statusor.h"
-#include "third_party/gpus/cuda/include/cuda.h"
-#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
-#include "third_party/gpus/cuda/include/driver_types.h"
-#include "xla/stream_executor/cuda/cuda_status.h"
-#include "tsl/platform/errors.h"
+#include "xla/mlir/tools/mlir_interpreter/dialects/symbol_finder.h"
 
-namespace stream_executor::gpu {
+namespace mlir {
+namespace interpreter {
 
-absl::StatusOr<int32_t> CudaDriverVersion() {
-  int32_t version;
-  TF_RETURN_IF_ERROR(cuda::ToStatus(cuDriverGetVersion(&version),
-                                    "Could not get driver version"));
-  return version;
+absl::StatusOr<void*> FindSymbolInProcess(const std::string& symbol_name) {
+  HMODULE handle = GetModuleHandle(NULL);
+  if (handle) {
+    void* sym = GetProcAddress(handle, symbol_name.c_str());
+    if (!sym) {
+      return absl::NotFoundError("Callee not found");
+    }
+    return sym;
+  } else {
+    return absl::InternalError("Failed to get module handle");
+  }
 }
-
-}  // namespace stream_executor::gpu
+}  // namespace interpreter
+}  // namespace mlir
