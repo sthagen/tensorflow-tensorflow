@@ -65,11 +65,12 @@ cc_library(
         "//tensorflow/lite/experimental/litert/cc:litert_expected",
         "//tensorflow/lite/experimental/litert/cc:litert_model",
         "//tensorflow/lite/experimental/litert/cc:litert_model_predicates",
+        "//tensorflow/lite/experimental/litert/core:filesystem",
         "//tensorflow/lite/experimental/litert/core/model:model_buffer",
         "//tensorflow/lite/experimental/litert/core/model:model_load",
+        "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/schema:schema_fbs",
-        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform",
     ],
@@ -110,5 +111,8 @@ cc_library(
 cc_library(
     name = "test_models",
     hdrs = ["test_models.h"],
-    deps = ["@com_google_absl//absl/strings:string_view"],
+    deps = [
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+    ],
 )
