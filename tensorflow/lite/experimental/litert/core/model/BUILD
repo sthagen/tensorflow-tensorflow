@@ -59,8 +59,8 @@ cc_library(
     srcs = ["model_load.cc"],
     hdrs = ["model_load.h"],
     deps = [
+        ":flatbuffer_to_litert",
         ":model",
-        ":model_util",
         "//tensorflow/compiler/mlir/lite/core:model_builder_base",
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "//tensorflow/lite/experimental/litert/c:litert_logging",
@@ -108,8 +108,8 @@ cc_library(
     srcs = ["model_serialize.cc"],
     hdrs = ["model_serialize.h"],
     deps = [
+        ":litert_to_flatbuffer",
         ":model",
-        ":model_util",
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "//tensorflow/lite/experimental/litert/c:litert_op_code",
         "//tensorflow/lite/experimental/litert/cc:litert_buffer_ref",
@@ -120,14 +120,15 @@ cc_library(
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/strings:string_view",
         "@flatbuffers//:runtime_cc",
     ],
 )
 
 cc_library(
-    name = "model_util",
-    srcs = ["model_util.cc"],
-    hdrs = ["model_util.h"],
+    name = "flatbuffer_to_litert",
+    srcs = ["flatbuffer_to_litert.cc"],
+    hdrs = ["flatbuffer_to_litert.h"],
     deps = [
         ":model",
         "//tensorflow/lite/experimental/litert/c:litert_common",
@@ -137,6 +138,22 @@ cc_library(
         "//tensorflow/lite/experimental/litert/cc:litert_expected",
         "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
         "//tensorflow/lite/schema:schema_fbs",
+    ],
+)
+
+cc_library(
+    name = "litert_to_flatbuffer",
+    srcs = ["litert_to_flatbuffer.cc"],
+    hdrs = ["litert_to_flatbuffer.h"],
+    deps = [
+        ":model",
+        "//tensorflow/lite/experimental/litert/c:litert_common",
+        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/c:litert_op_code",
+        "//tensorflow/lite/experimental/litert/cc:litert_expected",
+        "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -169,10 +186,13 @@ cc_library(
     srcs = ["model_file_test_util.cc"],
     hdrs = ["model_file_test_util.h"],
     deps = [
+        ":flatbuffer_to_litert",
         ":model",
-        ":model_util",
+        "//tensorflow/lite/experimental/litert/c:litert_logging",
+        "//tensorflow/lite/experimental/litert/cc:litert_detail",
         "//tensorflow/lite/experimental/litert/cc:litert_model",
         "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

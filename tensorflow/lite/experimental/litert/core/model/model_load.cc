@@ -30,8 +30,8 @@
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
+#include "tensorflow/lite/experimental/litert/core/model/flatbuffer_to_litert.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
-#include "tensorflow/lite/experimental/litert/core/model/model_util.h"
 #include "tensorflow/lite/experimental/litert/core/util/flatbuffer_tools.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
@@ -56,13 +56,13 @@ LiteRtStatus ConvertTensor(const TflTensor& tfl_tensor, GetBuffer get_buffer,
     target.weights.fb_buffer = std::move(*buffer);
   }
 
-  auto tensor_type = MapTensorType(tfl_tensor);
+  TflTensorType tfl_tensor_type(tfl_tensor.type, TflShapeInfo(tfl_tensor));
+  auto tensor_type = MapTensorType(tfl_tensor_type);
   if (!tensor_type) {
     return tensor_type.Error().Status();
   }
 
-  target.type_id = tensor_type->first;
-  target.type_detail = tensor_type->second;
+  target.SetType(*tensor_type);
 
   auto quantization = MapQuantization(tfl_tensor.quantization.get());
   if (!quantization) {

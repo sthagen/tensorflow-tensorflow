@@ -14,9 +14,13 @@
 
 #include "tensorflow/lite/experimental/litert/core/model/model_file_test_util.h"
 
+#include "absl/types/span.h"
+#include "tensorflow/lite/experimental/litert/c/litert_logging.h"
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_detail.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
-#include "tensorflow/lite/experimental/litert/core/model/model_util.h"
+#include "tensorflow/lite/experimental/litert/core/model/flatbuffer_to_litert.h"
+#include "tensorflow/lite/experimental/litert/core/model/model.h"
 #include "tensorflow/lite/experimental/litert/core/util/flatbuffer_tools.h"
 
 namespace litert::internal {
@@ -33,7 +37,7 @@ template <>
 bool EqualsFbQuantizationDetail<LiteRtQuantizationPerTensor>(
     LiteRtQuantizationPerTensor litert_quantization,
     const TflQuantization* tfl_quantization) {
-  auto tfl_q_params = GetPerTensorQparams(tfl_quantization);
+  auto tfl_q_params = AsPerTensorQparams(tfl_quantization);
   if (!tfl_q_params) return false;
   return litert_quantization.zero_point == tfl_q_params->first &&
          litert_quantization.scale == tfl_q_params->second;
@@ -41,34 +45,52 @@ bool EqualsFbQuantizationDetail<LiteRtQuantizationPerTensor>(
 
 template <class LiteRtTenzorType>
 bool EqualsFbTensorTypeDetail(LiteRtTenzorType litert_tensor_type,
-                              const TflTensor& tfl_tensor) {
+                              const TflTensorType& tfl_tensor) {
+  LITERT_LOG(LITERT_ERROR, "LiteRtTensorType not supported");
   return false;
 }
 
 template <>
-bool EqualsFbTensorTypeDetail<RankedTensorType>(
-    RankedTensorType litert_tensor_type, const TflTensor& tfl_tensor) {
-  auto tfl_type_info = GetStaticTensorTypeInfo(tfl_tensor);
-  if (!tfl_type_info) {
+bool EqualsFbTensorTypeDetail<LiteRtRankedTensorType>(
+    LiteRtRankedTensorType litert_tensor_type,
+    const TflTensorType& tfl_tensor_type) {
+  auto tfl_shape = AsDynamicShape(tfl_tensor_type.second);
+  if (!tfl_shape) {
+    LITERT_LOG(LITERT_ERROR, "Not ranked shape");
     return false;
   }
-  const bool element_type_eq =
-      MapElementType(tfl_type_info->first) ==
-      static_cast<LiteRtElementType>(litert_tensor_type.ElementType());
+
+  if (MapElementType(tfl_tensor_type.first) !=
+      static_cast<LiteRtElementType>(litert_tensor_type.element_type)) {
+    LITERT_LOG(LITERT_ERROR, "Element type not equal");
+    return false;
+  }
+
+  auto same_or_both_dyn = [](auto l, auto r) {
+    const auto same_static = l >= 0 && l == r;
+    const auto both_dyn = l < 0 && r < 0;
+    return same_static || both_dyn;
+  };
+
+  auto& layout = litert_tensor_type.layout;
   const bool shape_eq =
-      tfl_type_info->second == litert_tensor_type.Layout().Dimensions();
-  return element_type_eq && shape_eq;
+      AllZip(*tfl_shape, absl::MakeConstSpan(layout.dimensions, layout.rank),
+             same_or_both_dyn);
+  if (!shape_eq) {
+    LITERT_LOG(LITERT_ERROR, "Shapes are not equal");
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace
 
-// Compare q-params within litert tensor to flatbuffer q-params for having the
-// same type and values.
-bool EqualsFbQuantization(const Tensor& litert_tensor,
+bool EqualsFbQuantization(const Quantization& litert_quantization,
                           const TflQuantization* tfl_quantization) {
-  switch (litert_tensor.QTypeId()) {
+  switch (litert_quantization.first) {
     case kLiteRtQuantizationPerTensor:
-      return EqualsFbQuantizationDetail(litert_tensor.PerTensorQuantization(),
+      return EqualsFbQuantizationDetail(litert_quantization.second.per_tensor,
                                         tfl_quantization);
     case kLiteRtQuantizationNone:
       return !IsQuantized(tfl_quantization);
@@ -80,13 +102,14 @@ bool EqualsFbQuantization(const Tensor& litert_tensor,
 
 // Compare tensor type within litert tensor to the type within flatbuffer
 // tensor.
-bool EqualsFbTensorType(const Tensor& litert_tensor,
-                        const TflTensor& tfl_tensor) {
-  switch (litert_tensor.TypeId()) {
+bool EqualsFbTensorType(const TensorType& litert_tensor_type,
+                        const TflTensorType& tfl_tensor_type) {
+  switch (litert_tensor_type.first) {
     case kLiteRtRankedTensorType:
-      return EqualsFbTensorTypeDetail(litert_tensor.RankedTensorType(),
-                                      tfl_tensor);
+      return EqualsFbTensorTypeDetail(
+          litert_tensor_type.second.ranked_tensor_type, tfl_tensor_type);
     default:
+      LITERT_LOG(LITERT_ERROR, "Tensor kind not supported");
       // Not implemented yet.
       return false;
   }
@@ -102,18 +125,25 @@ bool EqualsFbOp(const Op& litert_op, const TflOp& tfl_op,
 
   auto check_tensors = [&](auto& litert_tensors, auto& tfl_tensors) {
     if (litert_tensors.size() != tfl_tensors.size()) {
+      LITERT_LOG(LITERT_ERROR, "Tensors not same size");
       return false;
     }
 
     for (auto i = 0; i < litert_tensors.size(); ++i) {
       const auto& fb_tensor = get_tfl_tensor(tfl_tensors.at(i)).get();
-      const auto& litert_tensor = litert_tensors.at(i);
+      const auto& litert_tensor = *litert_tensors.at(i).Get();
 
-      const auto type_eq = EqualsFbTensorType(litert_tensor, fb_tensor);
-      const auto quant_eq =
-          EqualsFbQuantization(litert_tensor, fb_tensor.quantization.get());
+      if (!EqualsFbTensorType(
+              {litert_tensor.type_id, litert_tensor.type_detail},
+              {fb_tensor.type, TflShapeInfo(fb_tensor)})) {
+        LITERT_LOG(LITERT_ERROR, "Tensor %d not same type", i);
+        return false;
+      }
 
-      if (!type_eq || !quant_eq) {
+      if (!EqualsFbQuantization(
+              {litert_tensor.q_type_id, litert_tensor.q_type_detail},
+              fb_tensor.quantization.get())) {
+        LITERT_LOG(LITERT_ERROR, "Tensor %d not same quantization", i);
         return false;
       }
     }

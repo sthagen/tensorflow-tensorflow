@@ -1,3 +1,4 @@
+
 // Copyright 2024 Google LLC.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_UTIL_H_
-#define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_UTIL_H_
+#ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_LITERT_TO_FLATBUFFER_H_
+#define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_LITERT_TO_FLATBUFFER_H_
 
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
@@ -23,23 +24,11 @@
 
 namespace litert::internal {
 
-LiteRtStatus IsOpSupported(const TflOp& op);
+Expected<TflTensorType> MapTensorType(const TensorType& litert_tensor_type);
 
-LiteRtStatus IsBufferSupported(const TflBuffer& buffer);
-
-// Checks if the misc non-type non quantization parts of this tensor are
-// supported in the litet model api.
-LiteRtStatus IsTensorSupported(const TflTensor& tensor);
-
-LiteRtStatus SetDefaultOptions(tflite::BuiltinOptionsUnion& opts,
-                               LiteRtOpCode code);
-
-LiteRtElementType MapElementType(tflite::TensorType type);
-
-Expected<TensorType> MapTensorType(const TflTensor& tensor);
-
-Expected<Quantization> MapQuantization(const TflQuantization* tfl_quantization);
+Expected<TflQuantizationPtr> MapQuantization(
+    const Quantization& litert_quantization);
 
 }  // namespace litert::internal
 
-#endif  // TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_MODEL_UTIL_H_
+#endif  // TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_MODEL_LITERT_TO_FLATBUFFER_H_
