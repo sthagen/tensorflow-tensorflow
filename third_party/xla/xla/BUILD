@@ -268,16 +268,6 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "status",
-    hdrs = ["status.h"],
-    deprecation = "Use @com_google_absl//absl/status instead.",
-    visibility = ["//visibility:public"],
-    deps = [
-        "@com_google_absl//absl/status",
-    ],
-)
-
-cc_library(
     name = "fp_util",
     hdrs = ["fp_util.h"],
     visibility = ["//visibility:public"],
@@ -1158,8 +1148,8 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     visibility = internal_visibility([":friends"]),
     deps = [
+        "//xla/backends/cpu:alignment",
         "@com_google_absl//absl/base:dynamic_annotations",
-        "@eigen_archive//:eigen3",
     ],
 )
 

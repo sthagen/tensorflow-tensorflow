@@ -4328,11 +4328,13 @@ cc_library(
         ":computation_layout",
         ":computation_placer",
         ":hlo_proto_cc",
+        ":sharding_config",
         "//xla:debug_options_flags",
         "//xla:shape_layout",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo_sharding",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
@@ -6348,6 +6350,28 @@ xla_cc_test(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "sharding_config",
+    srcs = ["sharding_config.cc"],
+    hdrs = ["sharding_config.h"],
+    deps = [
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo_sharding",
+    ],
+)
+
+xla_cc_test(
+    name = "sharding_config_test",
+    srcs = ["sharding_config_test.cc"],
+    deps = [
+        ":sharding_config",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo_sharding",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

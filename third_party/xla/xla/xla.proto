@@ -1237,7 +1237,7 @@ message ExecutionOptions {
 // Serialization of HloModuleConfig. See the C++ class definition for
 // descriptions of each field.
 // There are no guarantees of backwards or forwards compatibility.
-// Next id: 38.
+// Next id: 39.
 message HloModuleConfigProto {
   enum FusionConfigCollection {
     OFF = 0;       // Do not collect configuration.
@@ -1298,6 +1298,7 @@ message HloModuleConfigProto {
   bytes fdo_profile = 31;
   int64 device_memory_size = 32;
   bool use_shardy_partitioner = 34;
+  ShardingConfigProto sharding_config = 38;
 }
 
 message HloModuleProtoWithConfig {
@@ -1320,4 +1321,16 @@ message ScheduleProto {
   int64 computation_id = 2;
   HloModuleProto hlo_module = 3;
   int64 cycles_per_microsecond = 4;
+}
+
+// Message that captures sharding configuration of an HLO op.
+message NodeShardingConfigProto {
+  xla.OpSharding sharding = 1;                 // For non-tuples.
+  repeated NodeShardingConfigProto nodes = 2;  // For tuples.
+}
+
+// Message that captures sharding configuration of an HLO module.
+message ShardingConfigProto {
+  // Configuration for each HLO instruction.
+  repeated NodeShardingConfigProto nodes = 1;
 }

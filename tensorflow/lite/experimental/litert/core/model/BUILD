@@ -136,8 +136,21 @@ cc_library(
         "//tensorflow/lite/experimental/litert/c:litert_model",
         "//tensorflow/lite/experimental/litert/c:litert_op_code",
         "//tensorflow/lite/experimental/litert/cc:litert_expected",
+        "//tensorflow/lite/experimental/litert/cc:litert_layout",
         "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
         "//tensorflow/lite/schema:schema_fbs",
+    ],
+)
+
+cc_test(
+    name = "flatbuffer_to_litert_test",
+    srcs = ["flatbuffer_to_litert_test.cc"],
+    deps = [
+        ":flatbuffer_to_litert",
+        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -154,6 +167,19 @@ cc_library(
         "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "litert_to_flatbuffer_test",
+    srcs = ["litert_to_flatbuffer_test.cc"],
+    deps = [
+        ":litert_to_flatbuffer",
+        ":model",
+        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/cc:litert_layout",
+        "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
