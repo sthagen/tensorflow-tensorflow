@@ -1,11 +1,11 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 load("@local_config_rocm//rocm:build_defs.bzl", "if_rocm")
-load("@local_tsl//tsl/platform:build_config_root.bzl", "tf_gpu_tests_tags")
-load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 load("//xla:xla.bzl", "xla_cc_binary")
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "if_cuda_or_rocm", "if_google")
+load("//xla/tsl/platform:build_config_root.bzl", "tf_gpu_tests_tags")
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -42,6 +42,7 @@ cc_library(
         "//xla/pjrt/distributed:client",
         "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/pjrt/distributed:service",
+        "//xla/pjrt/plugin/xla_gpu:xla_gpu_client_options",
         "//xla/service:cpu_plugin",
         "//xla/tsl/util:command_line_flags",
         "@com_google_absl//absl/log:check",
@@ -201,6 +202,7 @@ xla_test(
         "//xla:xla_proto_cc",
         "//xla/hlo/testlib:filecheck",
         "//xla/pjrt:pjrt_client",
+        "//xla/pjrt/plugin/xla_gpu:xla_gpu_client_options",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/util:command_line_flags",
         "@com_google_absl//absl/log:check",

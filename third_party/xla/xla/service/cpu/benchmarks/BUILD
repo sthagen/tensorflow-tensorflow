@@ -1,5 +1,5 @@
-load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 load("//xla:xla.bzl", "xla_cc_test")
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -28,6 +28,7 @@ cc_library(
         "//xla/pjrt:pjrt_executable",
         "//xla/pjrt/cpu:cpu_client",
         "//xla/service:hlo_module_config",
+        "//xla/tests:test_utils",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
