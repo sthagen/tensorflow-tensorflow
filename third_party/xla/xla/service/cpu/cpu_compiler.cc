@@ -76,6 +76,9 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "xla/backends/cpu/codegen/cpu_features.h"
+#include "xla/backends/cpu/codegen/ir_compiler.h"
+#include "xla/backends/cpu/codegen/jit_compiler.h"
 #include "xla/backends/cpu/codegen/target_machine_features.h"
 #include "xla/backends/cpu/runtime/thunk.h"
 #include "xla/cpu_function_runtime.h"
@@ -146,7 +149,6 @@ limitations under the License.
 #include "xla/service/conditional_to_select.h"
 #include "xla/service/copy_insertion.h"
 #include "xla/service/cpu/buffer_info_util.h"
-#include "xla/service/cpu/compiler_functor.h"
 #include "xla/service/cpu/conv_canonicalization.h"
 #include "xla/service/cpu/cpu_executable.h"
 #include "xla/service/cpu/cpu_instruction_fusion.h"
@@ -1008,10 +1010,12 @@ absl::StatusOr<std::unique_ptr<HloModule>> CpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* /*stream_exec*/,
     const CompileOptions& options) {
   auto& config = module->config();
-  std::unique_ptr<llvm::TargetMachine> jit_target_machine =
-      SimpleOrcJIT::InferTargetMachineForJIT(
+
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<llvm::TargetMachine> jit_target_machine,
+      JitCompiler::InferTargetMachine(
           CompilerTargetOptions(config), CodeGenOptLevel(config),
-          config.debug_options().xla_cpu_max_isa());
+          CpuFeatureFromString(config.debug_options().xla_cpu_max_isa())));
 
   TF_RETURN_IF_ERROR(RunHloPasses(module.get(), /*is_aot_compile=*/false,
                                   jit_target_machine.get(),
@@ -1938,7 +1942,7 @@ CpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
                                           obj_file.getData().size()));
       };
 
-      CompilerFunctor::Options ir_compiler_options = {
+      IrCompiler::Options ir_compiler_options = {
           /*optimization_level=*/static_cast<int>(opt_level),
           /*optimize_for_size=*/
           options::OptimizeForSizeRequested(module->config()),
@@ -1950,18 +1954,18 @@ CpuCompiler::CompileAheadOfTime(std::unique_ptr<HloModuleGroup> module_group,
           /*dfsan_enabled=*/aot_options.sanitize_dataflow(),
           /*dfsan_abilists_enabled=*/aot_options.sanitize_abilists_dataflow()};
 
-      CompilerFunctor::CompilationHooks ir_compiler_hooks = {
+      IrCompiler::CompilationHooks ir_compiler_hooks = {
           pre_optimization_ir_hook,
           post_optimization_ir_hook,
           post_codegen_hook,
       };
 
-      CompilerFunctor compiler_functor([&] { return target_machine; },
-                                       std::move(ir_compiler_options),
-                                       std::move(ir_compiler_hooks));
+      IrCompiler ir_compiler([&] { return target_machine; },
+                             std::move(ir_compiler_options),
+                             std::move(ir_compiler_hooks));
 
       std::unique_ptr<llvm::MemoryBuffer> object_file =
-          cantFail(compiler_functor(*llvm_module));
+          cantFail(ir_compiler(*llvm_module));
       ObjectFileData object_file_data(object_file->getBufferStart(),
                                       object_file->getBufferEnd());
 

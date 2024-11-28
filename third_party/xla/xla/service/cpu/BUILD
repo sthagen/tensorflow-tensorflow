@@ -215,7 +215,6 @@ cc_library(
     copts = tsl_copts(),
     deps = [
         ":buffer_info_util",
-        ":compiler_functor",
         ":conv_canonicalization",
         ":cpu_executable",
         ":cpu_float_support",
@@ -244,6 +243,9 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/cpu/codegen:cpu_features",
+        "//xla/backends/cpu/codegen:ir_compiler",
+        "//xla/backends/cpu/codegen:jit_compiler",
         "//xla/backends/cpu/codegen:target_machine_features",
         "//xla/backends/cpu/runtime:thunk",
         "//xla/hlo/analysis:hlo_ordering",
@@ -492,22 +494,20 @@ cc_library(
 )
 
 cc_library(
-    name = "simple_orc_jit",
+    name = "runtime_symbol_generator",
     srcs = [
-        "simple_orc_jit.cc",
+        "runtime_symbol_generator.cc",
         "windows_compatibility.cc",
         "windows_compatibility.h",
     ],
-    hdrs = ["simple_orc_jit.h"],
-    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]) + tsl_copts(),
+    hdrs = ["runtime_symbol_generator.h"],
+    copts = tsl_copts(),
     deps = [
-        ":compiler_functor",
         ":cpu_runtime",
         ":onednn_convolution",
         ":onednn_layer_norm",
         ":onednn_matmul",
         ":onednn_softmax",
-        ":orc_jit_memory_mapper",
         ":runtime_conv2d",
         ":runtime_conv2d_acl",
         ":runtime_conv2d_mkl",
@@ -526,9 +526,32 @@ cc_library(
         ":runtime_single_threaded_fft",
         ":runtime_single_threaded_matmul",
         ":runtime_topk",
+        "//xla/service:custom_call_target_registry",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/strings:string_view",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:OrcJIT",
+        "@llvm-project//llvm:OrcShared",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:mlir_c_runner_utils",
+        "@local_tsl//tsl/platform:logging",
+    ],
+)
+
+cc_library(
+    name = "simple_orc_jit",
+    srcs = ["simple_orc_jit.cc"],
+    hdrs = ["simple_orc_jit.h"],
+    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]) + tsl_copts(),
+    deps = [
+        ":orc_jit_memory_mapper",
+        ":runtime_symbol_generator",
         "//xla:types",
         "//xla:util",
         "//xla/backends/cpu/codegen:contiguous_section_memory_manager",
+        "//xla/backends/cpu/codegen:cpu_features",
+        "//xla/backends/cpu/codegen:ir_compiler",
+        "//xla/backends/cpu/codegen:jit_compiler",
         "//xla/service:custom_call_target_registry",
         "//xla/service:llvm_compiler",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -547,7 +570,6 @@ cc_library(
         "@llvm-project//llvm:TargetParser",
         "@llvm-project//mlir:mlir_c_runner_utils",
         "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:platform_port",
     ] + xla_internal(["service/cpu:named_orc_jit_memory_mapper"]),
 )
 
@@ -1000,35 +1022,6 @@ xla_cc_binary(
         "@com_google_absl//absl/strings:str_format",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:platform_port",
-    ],
-)
-
-cc_library(
-    name = "compiler_functor",
-    srcs = ["compiler_functor.cc"],
-    hdrs = ["compiler_functor.h"],
-    deps = [
-        ":cpu_runtime",
-        "//xla:types",
-        "//xla:util",
-        "//xla/backends/cpu/codegen:polynomial_approximations",
-        "//xla/service:llvm_compiler",
-        "//xla/service/llvm_ir:llvm_util",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
-        "@llvm-project//llvm:Analysis",
-        "@llvm-project//llvm:Core",
-        "@llvm-project//llvm:Instrumentation",
-        "@llvm-project//llvm:MC",
-        "@llvm-project//llvm:Object",
-        "@llvm-project//llvm:OrcJIT",
-        "@llvm-project//llvm:Passes",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//llvm:Target",
-        "@llvm-project//llvm:TargetParser",
-        "@local_tsl//tsl/platform:logging",
     ],
 )
 
