@@ -17,20 +17,25 @@ limitations under the License.
 #define XLA_BACKENDS_CPU_CODEGEN_JIT_COMPILER_H_
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/TaskDispatch.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Target/TargetMachine.h"
@@ -51,6 +56,17 @@ namespace xla::cpu {
 class JitCompiler {
  public:
   using Symbol = FunctionLibrary::Symbol;
+
+  // Task and a TaskRunner are used to run compilation tasks in parallel.
+  using Task = std::function<void()>;  // NOLINT (must be copyable)
+  using TaskRunner = absl::AnyInvocable<void(Task)>;
+
+  // A callback that returns a definition generator that will be added to all
+  // dynamic libraries created by the jit compiler. Definition generator enables
+  // linking host runtime symbols into the jit-compiled function library.
+  using DefinitionGenerator =
+      std::function<std::unique_ptr<llvm::orc::DefinitionGenerator>(
+          llvm::TargetMachine*)>;
 
   JitCompiler(JitCompiler&&) = default;
   JitCompiler& operator=(JitCompiler&&) = default;
@@ -84,6 +100,10 @@ class JitCompiler {
     // multiple dynamic libraries we enable parallel compilation.
     size_t num_dylibs = 1;
 
+    // Optional definition generator to inject host runtime symbols into the
+    // jit-compiled function library.
+    DefinitionGenerator definition_generator;
+
     // Maximum CPU instruction set for wich the compiler should generate code.
     // If instruction set is empty, compiler will generate code for all ISA
     // extensions detected on the current machine.
@@ -93,17 +113,26 @@ class JitCompiler {
   // Creates a new instance of the JitCompiler.
   static absl::StatusOr<JitCompiler> Create(llvm::TargetOptions target_options,
                                             llvm::CodeGenOptLevel opt_level,
-                                            Options options);
+                                            Options options,
+                                            TaskRunner task_runner);
 
   // Adds a LLVM module to the dynamic library at `dylib_index`.
   absl::Status AddModule(llvm::orc::ThreadSafeModule module,
                          size_t dylib_index = 0);
 
-  // Compiles all added LLVM modules into the FunctionLibrary by resolving all
-  // symbols in `symbols`. After this method returns, the FunctionLibrary will
-  // contain compiled functions that can be invoked via function calls. Returned
-  // FunctionLibrary track type ids of the resolved symbols, but the compiler
-  // doesn't verify that LLVM IR function signature matches the type id.
+  // Adds an object file to the dynamic library at `dylib_index`.
+  absl::Status AddObjFile(std::unique_ptr<llvm::MemoryBuffer> obj_file,
+                          size_t dylib_index = 0);
+
+  // Compiles all added LLVM modules and object files into the FunctionLibrary
+  // by resolving all symbols in `symbols`.
+  //
+  // After this method returns, the FunctionLibrary will contain compiled
+  // functions that can be invoked via function calls. Returned FunctionLibrary
+  // tracks type ids of the resolved symbols, but the compiler doesn't verify
+  // that LLVM IR function signature matches the type id, and it's up to the
+  // user to make sure that function types actually match, otherwise it will
+  // lead to run-time crashes.
   //
   // TODO(ezhulenev): Add an option to pass symbol (function) types at compile
   // time together with names and type-check LLVM function signature against the
@@ -113,11 +142,31 @@ class JitCompiler {
   absl::StatusOr<std::unique_ptr<FunctionLibrary>> Compile(
       absl::Span<const Symbol> symbols) &&;
 
+  llvm::TargetMachine* target_machine() { return target_machine_.get(); }
+
  private:
   JitCompiler(IrCompiler::TargetMachineBuilder target_machine_builder,
               std::shared_ptr<llvm::TargetMachine> target_machine,
               std::unique_ptr<llvm::orc::ExecutionSession> execution_session,
-              std::unique_ptr<IrCompiler> ir_compiler, size_t num_dylibs);
+              std::unique_ptr<IrCompiler> ir_compiler, size_t num_dylibs,
+              DefinitionGenerator definition_generator);
+
+  // LLVM ORC task dispatcher that uses `TaskRunner` to run compilation tasks.
+  class TaskDispatcher : public llvm::orc::TaskDispatcher {
+   public:
+    explicit TaskDispatcher(TaskRunner task_runner);
+    ~TaskDispatcher() final;
+
+    void dispatch(std::unique_ptr<llvm::orc::Task> T) final;
+    void shutdown() final;
+
+   private:
+    TaskRunner task_runner_;
+
+    absl::Mutex mu_;
+    absl::CondVar cv_;
+    size_t num_dispatched_tasks_ ABSL_GUARDED_BY(mu_) = 0;
+  };
 
   // Function library constructed from the set of jit-compiled symbols.
   class CompiledFunctionLibrary : public FunctionLibrary {
@@ -129,6 +178,7 @@ class JitCompiler {
 
     CompiledFunctionLibrary(
         std::unique_ptr<llvm::orc::ExecutionSession> execution_session,
+        std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer,
         absl::flat_hash_map<std::string, ResolvedSymbol> symbols_map);
 
     ~CompiledFunctionLibrary() final;
@@ -138,6 +188,7 @@ class JitCompiler {
 
    private:
     std::unique_ptr<llvm::orc::ExecutionSession> execution_session_;
+    std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer_;
     absl::flat_hash_map<std::string, ResolvedSymbol> symbols_map_;
   };
 
@@ -147,9 +198,10 @@ class JitCompiler {
   std::shared_ptr<llvm::TargetMachine> target_machine_;
 
   std::unique_ptr<llvm::orc::ExecutionSession> execution_session_;
-  std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_linking_layer_;
+  std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer_;
   std::unique_ptr<llvm::orc::IRCompileLayer> compile_layer_;
 
+  // Non-owning pointers to dynamic libraries created for the execution session.
   std::vector<llvm::orc::JITDylib*> dylibs_;
 
   // Non owning pointer to JIT event listeners for gdb and perf.
