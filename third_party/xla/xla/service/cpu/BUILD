@@ -11,7 +11,6 @@ load(
     "//xla:xla.bzl",
     "xla_cc_binary",
     "xla_cc_test",
-    "xla_internal",
 )
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility", "tf_openmp_copts", "tsl_copts")
@@ -230,7 +229,7 @@ cc_library(
         ":onednn_contraction_rewriter",
         ":onednn_ops_rewriter",
         ":parallel_task_assignment",
-        ":simple_orc_jit",
+        ":runtime_symbol_generator",
         ":thunk_emitter",
         ":xla_framework",
         "//xla:cpu_function_runtime",
@@ -247,6 +246,7 @@ cc_library(
         "//xla/backends/cpu/codegen:ir_compiler",
         "//xla/backends/cpu/codegen:jit_compiler",
         "//xla/backends/cpu/codegen:target_machine_features",
+        "//xla/backends/cpu/runtime:function_library",
         "//xla/backends/cpu/runtime:thunk",
         "//xla/hlo/analysis:hlo_ordering",
         "//xla/hlo/analysis:indexed_array_analysis",
@@ -501,7 +501,7 @@ cc_library(
         "windows_compatibility.h",
     ],
     hdrs = ["runtime_symbol_generator.h"],
-    copts = tsl_copts(),
+    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]) + tsl_copts(),
     deps = [
         ":cpu_runtime",
         ":onednn_convolution",
@@ -536,41 +536,6 @@ cc_library(
         "@llvm-project//mlir:mlir_c_runner_utils",
         "@local_tsl//tsl/platform:logging",
     ],
-)
-
-cc_library(
-    name = "simple_orc_jit",
-    srcs = ["simple_orc_jit.cc"],
-    hdrs = ["simple_orc_jit.h"],
-    copts = if_enable_acl(["-DXLA_CPU_USE_ACL=1"]) + tsl_copts(),
-    deps = [
-        ":orc_jit_memory_mapper",
-        ":runtime_symbol_generator",
-        "//xla:types",
-        "//xla:util",
-        "//xla/backends/cpu/codegen:contiguous_section_memory_manager",
-        "//xla/backends/cpu/codegen:cpu_features",
-        "//xla/backends/cpu/codegen:ir_compiler",
-        "//xla/backends/cpu/codegen:jit_compiler",
-        "//xla/service:custom_call_target_registry",
-        "//xla/service:llvm_compiler",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
-        "@llvm-project//llvm:Core",
-        "@llvm-project//llvm:ExecutionEngine",
-        "@llvm-project//llvm:MC",  # fixdeps: keep
-        "@llvm-project//llvm:OrcJIT",
-        "@llvm-project//llvm:OrcShared",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//llvm:Target",  # fixdeps: keep
-        "@llvm-project//llvm:TargetParser",
-        "@llvm-project//mlir:mlir_c_runner_utils",
-        "@local_tsl//tsl/platform:logging",
-    ] + xla_internal(["service/cpu:named_orc_jit_memory_mapper"]),
 )
 
 cc_library(
@@ -615,7 +580,6 @@ cc_library(
     hdrs = ["cpu_executable.h"],
     deps = [
         ":cpu_runtime",
-        ":simple_orc_jit",
         "//xla:executable_run_options",
         "//xla:literal",
         "//xla:shape_tree",
@@ -624,6 +588,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/backends/cpu/runtime:buffer_allocations",
+        "//xla/backends/cpu/runtime:function_library",
         "//xla/backends/cpu/runtime:thread_pool_task_runner",
         "//xla/backends/cpu/runtime:thunk",
         "//xla/backends/cpu/runtime:thunk_executor",
@@ -632,6 +597,7 @@ cc_library(
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_status_internal",
         "//xla/service:executable",
+        "//xla/service:hlo_execution_profile",
         "//xla/service:hlo_profile_printer_data_cc",
         "//xla/service:hlo_value",
         "//xla/service:maybe_owning_device_memory",
@@ -653,6 +619,7 @@ cc_library(
         "@llvm-project//llvm:OrcShared",
         "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -1696,6 +1663,7 @@ xla_cc_test(
     size = "small",
     srcs = ["vectorized_reduce_with_no_vector_registers_test.cc"],
     tags = ["not_run:arm"],
+    target_compatible_with = ["@platforms//cpu:x86_64"],
     deps = [
         ":cpu_compiler",
         ":cpu_transfer_manager",

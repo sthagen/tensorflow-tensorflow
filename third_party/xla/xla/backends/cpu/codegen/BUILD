@@ -1,4 +1,4 @@
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.bzl", "xla_cc_test", "xla_internal")
 load(
     "//xla/tsl/platform:build_config_root.bzl",
     "if_llvm_aarch64_available",
@@ -52,18 +52,6 @@ cc_library(
 )
 
 cc_library(
-    name = "function_library",
-    srcs = ["function_library.cc"],
-    hdrs = ["function_library.h"],
-    deps = [
-        "//xla:util",
-        "//xla/tsl/lib/gtl:int_type",
-        "@com_google_absl//absl/status:statusor",
-        "@local_tsl//tsl/platform:statusor",
-    ],
-)
-
-cc_library(
     name = "ir_compiler",
     srcs = ["ir_compiler.cc"],
     hdrs = ["ir_compiler.h"],
@@ -96,9 +84,9 @@ cc_library(
     deps = [
         ":contiguous_section_memory_manager",
         ":cpu_features",
-        ":function_library",
         ":ir_compiler",
         "//xla:util",
+        "//xla/backends/cpu/runtime:function_library",
         "//xla/service/cpu:orc_jit_memory_mapper",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -131,16 +119,16 @@ cc_library(
         "@llvm-project//llvm:SystemZCodeGen",  # fixdeps: keep
     ]) + if_llvm_x86_available([
         "@llvm-project//llvm:X86CodeGen",  # fixdeps: keep
-    ]),
+    ]) + xla_internal(["service/cpu:named_orc_jit_memory_mapper"]),
 )
 
 xla_cc_test(
     name = "jit_compiler_test",
     srcs = ["jit_compiler_test.cc"],
     deps = [
-        ":function_library",
         ":jit_compiler",
         "//xla:util",
+        "//xla/backends/cpu/runtime:function_library",
         "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
