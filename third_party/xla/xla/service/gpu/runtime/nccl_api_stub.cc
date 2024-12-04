@@ -22,10 +22,11 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "xla/core/collectives/clique_id.h"
 #include "xla/core/collectives/communicator.h"
+#include "xla/core/collectives/rank_id.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/gpu/runtime/nccl_api.h"
-#include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/stream.h"
@@ -85,33 +86,26 @@ static absl::Status UnimplementedError() {
 
 class NcclApiStub final : public NcclApi {
  public:
-  absl::StatusOr<NcclCliqueId> GetUniqueId() final {
-    return UnimplementedError();
-  }
-
   absl::StatusOr<std::vector<std::unique_ptr<Communicator>>> CommInitRanks(
-      int32_t, const NcclCliqueId&, absl::Span<const DeviceRank>,
+      int32_t, const CliqueId&, absl::Span<const DeviceRank>,
       const Config&) final {
     return UnimplementedError();
   }
 
   absl::StatusOr<std::vector<std::unique_ptr<Communicator>>> CommSplit(
-      absl::Span<const Communicator* const>, int32_t, absl::Span<const int32_t>,
+      absl::Span<const Communicator* const>, int32_t, absl::Span<const RankId>,
       std::optional<Config>) final {
     return UnimplementedError();
   }
 
-  absl::Status CommAbort(Communicator*) final { return UnimplementedError(); }
-
-  absl::Status CommFinalize(Communicator*) final {
+  absl::StatusOr<CliqueId> CreateUniqueCliqueId() const final {
     return UnimplementedError();
   }
 
-  absl::StatusOr<int32_t> CommCount(Communicator*) final {
-    return UnimplementedError();
-  }
+  bool IsGlobalConfig() const final { return false; }
 
-  absl::Status CommGetAsyncError(Communicator*) final {
+  absl::StatusOr<const CliqueIdCallback*> GetCliqueIdCallback(
+      const CliqueIdCallback*, bool) final {
     return UnimplementedError();
   }
 

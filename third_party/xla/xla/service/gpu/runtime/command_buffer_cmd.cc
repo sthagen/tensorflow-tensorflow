@@ -41,6 +41,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "llvm/ADT/STLExtras.h"
+#include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/core/collectives/communicator.h"
 #include "xla/debug_options_flags.h"
 #include "xla/executable_run_options.h"
@@ -49,6 +50,8 @@ limitations under the License.
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/computation_placer.h"
+#include "xla/service/custom_call_status.h"
+#include "xla/service/custom_call_status_internal.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
@@ -60,11 +63,9 @@ limitations under the License.
 #include "xla/service/gpu/runtime/nccl_all_reduce_thunk.h"
 #include "xla/service/gpu/runtime/nccl_all_to_all_thunk.h"
 #include "xla/service/gpu/runtime/nccl_api.h"
-#include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/service/gpu/runtime/nccl_collective_broadcast_thunk.h"
 #include "xla/service/gpu/runtime/nccl_collective_thunk.h"
 #include "xla/service/gpu/runtime/thunk.h"
-#include "xla/service/gpu/runtime/while_thunk.h"
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
@@ -86,13 +87,6 @@ limitations under the License.
 #include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/profiler/lib/scoped_annotation.h"
-
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-#include "xla/service/custom_call_status.h"
-#include "xla/service/custom_call_status_internal.h"
-#include "xla/stream_executor/gpu/gpu_stream.h"
-#include "xla/stream_executor/gpu/gpu_types.h"
-#endif
 
 namespace xla::gpu {
 
@@ -1445,11 +1439,9 @@ absl::Status CustomCallCmd::RecordLegacyCustomCall(
       se::TraceCommandBufferFactory::Create(
           execute_params.stream->parent(),
           execute_params.command_buffer_trace_stream, [&](se::Stream* stream) {
-            se::gpu::GpuStreamHandle gpu_stream =
-                se::gpu::AsGpuStreamValue(stream);
             XlaCustomCallStatus custom_call_status;
-            call_target_(gpu_stream, buffers.data(), opaque_.data(),
-                         opaque_.size(), &custom_call_status);
+            call_target_(stream, buffers.data(), opaque_.data(), opaque_.size(),
+                         &custom_call_status);
             auto message = CustomCallStatusGetMessage(&custom_call_status);
             if (message) {
               return absl::InternalError(
@@ -1614,10 +1606,10 @@ absl::Status CollectiveCmd::Prepare(
     const Thunk::PrepareParams& params,
     Thunk::ResourceRequests& resource_requests) {
   TF_ASSIGN_OR_RETURN(
-      NcclCliqueKey clique_key,
-      GetNcclCliqueKey(*params.collective_params, config().replica_groups,
-                       config().group_mode, nccl_stream_id(),
-                       GetAsyncStreamKind()));
+      GpuCliqueKey clique_key,
+      GetGpuCliqueKey(nccl_api_, *params.collective_params,
+                      config().replica_groups, config().group_mode,
+                      nccl_stream_id(), GetAsyncStreamKind()));
   TF_ASSIGN_OR_RETURN(
       size_t num_local_participants,
       GetNumLocalParticipants(*params.collective_params,
@@ -1681,11 +1673,12 @@ absl::Status AllReduceCmd::Record(const Thunk::ExecuteParams& execute_params,
   }
 
   TF_ASSIGN_OR_RETURN(
-      NcclCommHandleWrapper comm_handle,
-      GetNcclComm(*execute_params.collective_params,
+      CommunicatorHandle comm_handle,
+      GetNcclComm(nccl_api(), *execute_params.collective_params,
                   *execute_params.collective_cliques, config().replica_groups,
                   config().group_mode, nccl_stream_id(), GetAsyncStreamKind()));
-  Communicator* comm = comm_handle.comm_handle;
+  Communicator* comm = comm_handle.comm;
+
   // Use custom allocator for persistent execution plans.
   NcclApi::ScopedPersistentPlanAllocator scoped_allocator(
       comm, tsl::MakeRef<NcclApi::PersistentPlanAllocator>(
@@ -1752,11 +1745,11 @@ absl::Status ReduceScatterCmd::Record(
   }
 
   TF_ASSIGN_OR_RETURN(
-      NcclCommHandleWrapper comm_handle,
-      GetNcclComm(*execute_params.collective_params,
+      CommunicatorHandle comm_handle,
+      GetNcclComm(nccl_api(), *execute_params.collective_params,
                   *execute_params.collective_cliques, config().replica_groups,
                   config().group_mode, nccl_stream_id(), GetAsyncStreamKind()));
-  Communicator* comm = comm_handle.comm_handle;
+  Communicator* comm = comm_handle.comm;
   // Use custom allocator for persistent execution plans.
   NcclApi::ScopedPersistentPlanAllocator scoped_allocator(
       comm, tsl::MakeRef<NcclApi::PersistentPlanAllocator>(
@@ -1822,11 +1815,11 @@ absl::Status AllToAllCmd::Record(const Thunk::ExecuteParams& execute_params,
   }
 
   TF_ASSIGN_OR_RETURN(
-      NcclCommHandleWrapper comm_handle,
-      GetNcclComm(*execute_params.collective_params,
+      CommunicatorHandle comm_handle,
+      GetNcclComm(nccl_api(), *execute_params.collective_params,
                   *execute_params.collective_cliques, config().replica_groups,
                   config().group_mode, nccl_stream_id(), GetAsyncStreamKind()));
-  Communicator* comm = comm_handle.comm_handle;
+  Communicator* comm = comm_handle.comm;
   // Use custom allocator for persistent execution plans.
   NcclApi::ScopedPersistentPlanAllocator scoped_allocator(
       comm, tsl::MakeRef<NcclApi::PersistentPlanAllocator>(
@@ -1890,11 +1883,11 @@ absl::Status AllGatherCmd::Record(const Thunk::ExecuteParams& execute_params,
   }
 
   TF_ASSIGN_OR_RETURN(
-      NcclCommHandleWrapper comm_handle,
-      GetNcclComm(*execute_params.collective_params,
+      CommunicatorHandle comm_handle,
+      GetNcclComm(nccl_api(), *execute_params.collective_params,
                   *execute_params.collective_cliques, config().replica_groups,
                   config().group_mode, nccl_stream_id(), GetAsyncStreamKind()));
-  Communicator* comm = comm_handle.comm_handle;
+  Communicator* comm = comm_handle.comm;
   // Use custom allocator for persistent execution plans.
   NcclApi::ScopedPersistentPlanAllocator scoped_allocator(
       comm, tsl::MakeRef<NcclApi::PersistentPlanAllocator>(
@@ -1959,11 +1952,11 @@ absl::Status CollectiveBroadcastCmd::Record(
   }
 
   TF_ASSIGN_OR_RETURN(
-      NcclCommHandleWrapper comm_handle,
-      GetNcclComm(*execute_params.collective_params,
+      CommunicatorHandle comm_handle,
+      GetNcclComm(nccl_api(), *execute_params.collective_params,
                   *execute_params.collective_cliques, config().replica_groups,
                   config().group_mode, nccl_stream_id(), GetAsyncStreamKind()));
-  Communicator* comm = comm_handle.comm_handle;
+  Communicator* comm = comm_handle.comm;
   // Use custom allocator for persistent execution plans.
   NcclApi::ScopedPersistentPlanAllocator scoped_allocator(
       comm, tsl::MakeRef<NcclApi::PersistentPlanAllocator>(

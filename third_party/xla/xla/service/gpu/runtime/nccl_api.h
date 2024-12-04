@@ -25,9 +25,11 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "xla/backends/gpu/collectives/gpu_collectives.h"
+#include "xla/core/collectives/clique_id.h"
 #include "xla/core/collectives/communicator.h"
+#include "xla/core/collectives/rank_id.h"
 #include "xla/service/collective_ops_utils.h"
-#include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/shape_util.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/device_memory_allocator.h"
@@ -46,7 +48,7 @@ namespace xla::gpu {
 // NCCL library so that no other parts of XLA should include nccl.h header
 // directly (or indirectly).
 
-class NcclApi {
+class NcclApi : public GpuCollectives {
  public:
   virtual ~NcclApi() = default;
 
@@ -118,11 +120,11 @@ class NcclApi {
   };
 
   struct DeviceRank {
-    DeviceRank(se::StreamExecutor* device, int32_t rank)
+    DeviceRank(se::StreamExecutor* device, RankId rank)
         : device(device), rank(rank) {}
 
     se::StreamExecutor* device;
-    int32_t rank;
+    RankId rank;
   };
 
   // Returns a slice of device memory `buff` containing `count` values of data
@@ -134,11 +136,6 @@ class NcclApi {
     return buff.GetByteSlice(offset * multiplier, count * multiplier);
   }
 
-  // Creates a new unique clique id.
-  //
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclgetuniqueid
-  virtual absl::StatusOr<NcclCliqueId> GetUniqueId() = 0;
-
   // Creates new communicators for given devices.
   //
   // This API doesn't have a corresponding API in NCCL and implemented as
@@ -146,7 +143,7 @@ class NcclApi {
   //
   // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcomminitrank
   virtual absl::StatusOr<std::vector<std::unique_ptr<Communicator>>>
-  CommInitRanks(int32_t nranks, const NcclCliqueId& clique_id,
+  CommInitRanks(int32_t nranks, const CliqueId& clique_id,
                 absl::Span<const DeviceRank> ranks, const Config& config) = 0;
 
   // Creates new communicators by splitting `comms`.
@@ -157,28 +154,7 @@ class NcclApi {
   // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommsplit
   virtual absl::StatusOr<std::vector<std::unique_ptr<Communicator>>> CommSplit(
       absl::Span<const Communicator* const> comms, int32_t color,
-      absl::Span<const int32_t> keys, std::optional<Config> config) = 0;
-
-  // Abort any uncompleted operations and destroys the communicator. Frees
-  // resources that are allocated to a communicator object comm.
-  //
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommabort
-  virtual absl::Status CommAbort(Communicator* comm) = 0;
-
-  // Finalize a communicator object comm.
-  //
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommdestroy
-  virtual absl::Status CommFinalize(Communicator* comm) = 0;
-
-  // Returns the number of ranks in the NCCL communicator comm.
-  //
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommcount
-  virtual absl::StatusOr<int32_t> CommCount(Communicator* comm) = 0;
-
-  // Queries the progress and potential errors of asynchronous operations
-  //
-  // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#ncclcommgetasyncerror
-  virtual absl::Status CommGetAsyncError(Communicator* comm) = 0;
+      absl::Span<const RankId> keys, std::optional<Config> config) = 0;
 
   // Starts a group call.
   //

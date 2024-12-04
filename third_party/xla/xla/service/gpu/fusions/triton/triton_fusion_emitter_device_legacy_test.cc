@@ -161,24 +161,6 @@ ENTRY e {
   EXPECT_TRUE(Run(kHloText, /*run_hlo_passes=*/false));
 }
 
-TEST_F(TritonGemmTest, RejectDotInt4HLO) {
-  constexpr std::string_view kHloText = R"(
-    HloModule t
-
-    ENTRY main {
-      lhs = s4[16,32,64]{2,1,0} parameter(0)
-      rhs = s4[16,64,16]{2,1,0} parameter(1)
-      ROOT dot = s4[16,32,16]{2,1,0} dot(lhs, rhs),
-          lhs_contracting_dims={2},
-          rhs_contracting_dims={1},
-          lhs_batch_dims={0},
-          rhs_batch_dims={0}
-    }
-  )";
-  EXPECT_THAT(GetOptimizedModule(kHloText).status(),
-              StatusIs(tsl::error::INVALID_ARGUMENT));
-}
-
 TEST_F(TritonGemmTest, Int4NegatePlusConvertHLO) {
   constexpr std::string_view kHloText = R"(
     HloModule t
@@ -4494,22 +4476,18 @@ HloModule m
 ENTRY e {
   parameter_0 = bf16[32,4,36]{2,1,0} parameter(0)
   parameter_1 = bf16[40,4,36]{2,1,0} parameter(1)
-  ROOT dot.16450 = bf16[4,32,40]{2,1,0} dot(parameter_0, parameter_1),
-      lhs_batch_dims={1}, lhs_contracting_dims={2},
-      rhs_batch_dims={1}, rhs_contracting_dims={2}
+  ROOT dot.16450 = bf16[4,32,40]{2,1,0} dot(parameter_0, parameter_1), lhs_batch_dims={1}, lhs_contracting_dims={2}, rhs_batch_dims={1}, rhs_contracting_dims={2}
 })";
 
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           GetOptimizedModule(kHloText));
 
-  // The contracting dims were already minor, so the layout is unchanged
-  // (non-major batch dims are fine).
   EXPECT_THAT(module->entry_computation()
                   ->root_instruction()
                   ->fused_instructions_computation()
                   ->root_instruction(),
-              GmockMatch(m::Dot(m::Op().WithShape(BF16, {32, 4, 36}, {2, 1, 0}),
-                                m::Op().WithShape(BF16, {40, 4, 36}, {2, 1, 0}))
+              GmockMatch(m::Dot(m::Op().WithShape(BF16, {32, 4, 36}, {2, 0, 1}),
+                                m::Op().WithShape(BF16, {40, 4, 36}, {2, 0, 1}))
                              .WithShape(BF16, {4, 32, 40}, {2, 1, 0})));
 }
 
@@ -4523,22 +4501,18 @@ HloModule m
 ENTRY e {
   parameter_1 = bf16[16,16,48]{2,1,0} parameter(1)
   parameter_2 = bf16[16,48,32]{2,1,0} parameter(0)
-  ROOT dot.16125 = bf16[16,16,32]{2,1,0} dot(parameter_1, parameter_2),
-      lhs_batch_dims={1}, lhs_contracting_dims={2},
-      rhs_batch_dims={0}, rhs_contracting_dims={1}
+  ROOT dot.16125 = bf16[16,16,32]{2,1,0} dot(parameter_1, parameter_2), lhs_batch_dims={1}, lhs_contracting_dims={2}, rhs_batch_dims={0}, rhs_contracting_dims={1}
 })";
 
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           GetOptimizedModule(kHloText));
 
-  // lhs has minor contracting dims, so the layout is changed.
-  // rhs changes layout to have minor contracting dims.
   EXPECT_THAT(
       module->entry_computation()
           ->root_instruction()
           ->fused_instructions_computation()
           ->root_instruction(),
-      GmockMatch(m::Dot(m::Op().WithShape(BF16, {16, 16, 48}, {2, 1, 0}),
+      GmockMatch(m::Dot(m::Op().WithShape(BF16, {16, 16, 48}, {2, 0, 1}),
                         m::Op().WithShape(BF16, {16, 48, 32}, {1, 2, 0}))
                      .WithShape(BF16, {16, 16, 32}, {2, 1, 0})));
 }

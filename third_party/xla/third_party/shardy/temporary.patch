@@ -1,15 +1,33 @@
+diff --git a/third_party/llvm/generated.patch b/third_party/llvm/generated.patch
+index 509398d..bb2be30 100644
+--- a/third_party/llvm/generated.patch
++++ b/third_party/llvm/generated.patch
+@@ -1 +1,13 @@
+ Auto generated patch. Do not edit or delete it, even if empty.
++diff -ruN --strip-trailing-cr a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++--- a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+++++ b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++@@ -2937,6 +2937,8 @@
++     ]),
++     hdrs = glob([
++         "include/llvm/ExecutionEngine/Orc/Shared/*.h",
+++    ] + [
+++        "include/llvm/ExecutionEngine/Orc/SymbolStringPool.h",
++     ]),
++     copts = llvm_copts,
++     deps = [
 diff --git a/third_party/llvm/workspace.bzl b/third_party/llvm/workspace.bzl
-index 0c3d81f..6d5c0d5 100644
+index adc9951..47d284d 100644
 --- a/third_party/llvm/workspace.bzl
 +++ b/third_party/llvm/workspace.bzl
 @@ -4,8 +4,8 @@ load("//third_party:repo.bzl", "tf_http_archive")
  
  def repo(name):
      """Imports LLVM."""
--    LLVM_COMMIT = "21d27b3aabf3d06f7e8b1002b34bb467f6ab66d8"
--    LLVM_SHA256 = "7806aecab74a955250601fc95110836a8de67c4dbb268e432fd41876df49765d"
-+    LLVM_COMMIT = "1b03747ed85cd4a6573b728674e88f4bd3fa844d"
-+    LLVM_SHA256 = "58d57df317c6485b543e2a02ab9d2c1c6148b8f9bc0860741dd558b70de1a787"
+-    LLVM_COMMIT = "109e4a147faa80aa0ef4da92da203dd6732ee415"
+-    LLVM_SHA256 = "108a121809bbf74eb8515df3c45a3f9f70b49d3aa11f9e263e6abe47c1cee4e4"
++    LLVM_COMMIT = "9c9d4b9e73c19842c4fde581cec0295abed8c977"
++    LLVM_SHA256 = "0c0fb301ce5da9ea3042fd35856924ed3f89c73aa0fc062b38d96d6a0d0bfc4d"
  
      tf_http_archive(
          name = name,
