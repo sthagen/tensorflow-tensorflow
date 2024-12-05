@@ -38,8 +38,12 @@
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/concatenation_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/cos_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/div_op_legalization.h"
+#include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/embedding_lookup_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/fully_connected_op_legalization.h"
+#include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/greater_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/legalization.h"
+#include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/less_op_legalization.h"
+#include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/logical_and_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/mul_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/reshape_op_legalization.h"
 #include "tensorflow/lite/experimental/litert/vendors/qualcomm/compiler/legalizations/rsqrt_op_legalization.h"
@@ -77,6 +81,10 @@ LiteRtStatus RegisterAllLegalizations(
   legalizations.push_back(CosOpLegalization::Create());
   legalizations.push_back(SelectOpLegalization::Create());
   legalizations.push_back(FullyConnectedOpLegalization::Create());
+  legalizations.push_back(EmbeddingLookupOpLegalization::Create());
+  legalizations.push_back(LogicalAndOpLegalization::Create());
+  legalizations.push_back(LessOpLegalization::Create());
+  legalizations.push_back(GreaterOpLegalization::Create());
   LITERT_LOG(LITERT_INFO, "Scheduling %lu legalizations", legalizations.size());
   return kLiteRtStatusOk;
 }
@@ -106,6 +114,9 @@ LiteRtStatus MapGraph(QnnManager& qnn, Qnn_ContextHandle_t context_handle,
         graph_mapper.PushToScope(subgraph_input.Get(), qnn_subgraph_input));
   }
 
+  for (const auto& subgraph_output : graph_mapper.Graph().Outputs()) {
+    graph_mapper.RegisterOutput(subgraph_output.Get());
+  }
   //
   // Topologically traverse graph, legalizing and updating tensors in scope
   //

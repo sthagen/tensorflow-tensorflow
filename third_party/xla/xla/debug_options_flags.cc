@@ -180,6 +180,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_collective_permute_decomposer_threshold(
       std::numeric_limits<int64_t>::max());
+  opts.set_xla_gpu_enable_experimental_pipeline_parallelism_opt(false);
 
   opts.set_xla_cpu_enable_mlir_tiling_and_fusion(true);
   opts.set_xla_cpu_enable_custom_matmul_tiling(false);
@@ -1317,6 +1318,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_gpu_dump_llvmir),
                 debug_options->xla_gpu_dump_llvmir(), "Dump LLVM IR."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_dump_hlo_unoptimized_snapshots",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_dump_hlo_unoptimized_snapshots),
+      debug_options->xla_gpu_dump_hlo_unoptimized_snapshots(),
+      "Every time an HLO module is run, dumps an HloUnoptimizedSnapshot to the "
+      "directory specified by --xla_dump_to."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_cudnn_frontend",
       bool_setter_for(&DebugOptions::set_xla_gpu_enable_cudnn_frontend),
       debug_options->xla_gpu_enable_cudnn_frontend(),
@@ -1607,6 +1615,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
           &DebugOptions::set_xla_gpu_collective_permute_decomposer_threshold),
       debug_options->xla_gpu_collective_permute_decomposer_threshold(),
       "Collective permute decomposer threshold."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_experimental_pipeline_parallelism_opt",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_enable_experimental_pipeline_parallelism_opt),
+      debug_options->xla_gpu_enable_experimental_pipeline_parallelism_opt(),
+      "Experimental optimizations for SPMD-based pipeline parallelism on "
+      "GPU."));
   flag_list->push_back(tsl::Flag(
       "xla_partitioning_algorithm", setter_for_xla_partitioning_algorithm,
       DebugOptions::PartitioningAlgorithm_Name(

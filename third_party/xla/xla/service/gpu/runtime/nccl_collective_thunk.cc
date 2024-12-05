@@ -35,7 +35,6 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
-#include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/core/collectives/communicator.h"
 #include "xla/core/collectives/rank_id.h"
 #include "xla/debug_options_flags.h"
@@ -47,10 +46,10 @@ limitations under the License.
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/gpu/runtime/nccl_api.h"
-#include "xla/service/gpu/runtime/nccl_clique.h"
 #include "xla/service/gpu/runtime/thunk.h"
 #include "xla/service/rendezvous.h"
 #include "xla/shape.h"
+#include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/event.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
@@ -310,7 +309,7 @@ absl::Status RegisterBufferOnce(NcclApi* nccl_api, se::StreamExecutor* executor,
     absl::flat_hash_set<std::tuple<int, Communicator*, void*>> records
         ABSL_GUARDED_BY(mu);
     // Buffers could be deregistered with ncclCommDeregister.
-    std::vector<NcclApi::NcclRegisteredBufferHandle> handles
+    std::vector<std::unique_ptr<Communicator::RegisteredBufferHandle>> handles
         ABSL_GUARDED_BY(mu);
   };
   static auto& all_registered = *new RegisteredBuffers;
@@ -326,9 +325,8 @@ absl::Status RegisterBufferOnce(NcclApi* nccl_api, se::StreamExecutor* executor,
           {executor->device_ordinal(), comm, base_buffer.opaque()})) {
     // ncclCommRegister will internally get and use the base address/size of the
     // address we provide.
-    TF_ASSIGN_OR_RETURN(NcclApi::NcclRegisteredBufferHandle handle,
-                        nccl_api->RegisterBuffer(comm, buffer));
-    all_registered.handles.push_back(handle);
+    TF_ASSIGN_OR_RETURN(auto handle, comm->RegisterBuffer(buffer));
+    all_registered.handles.push_back(std::move(handle));
     all_registered.records.insert(
         {executor->device_ordinal(), comm, base_buffer.opaque()});
   }

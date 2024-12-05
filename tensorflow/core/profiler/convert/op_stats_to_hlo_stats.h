@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_PTX_COMPILE_OPTIONS_FROM_DEBUG_OPTIONS_H_
-#define XLA_SERVICE_GPU_PTX_COMPILE_OPTIONS_FROM_DEBUG_OPTIONS_H_
+#ifndef TENSORFLOW_CORE_PROFILER_CONVERT_OP_STATS_TO_HLO_STATS_H_
+#define TENSORFLOW_CORE_PROFILER_CONVERT_OP_STATS_TO_HLO_STATS_H_
 
-#include "xla/stream_executor/cuda/compilation_options.h"
-#include "xla/xla.pb.h"
+#include "tensorflow/core/profiler/protobuf/hlo_stats.pb.h"
+#include "tensorflow/core/profiler/protobuf/op_stats.pb.h"
 
-namespace xla::gpu {
+namespace tensorflow {
+namespace profiler {
+tensorflow::profiler::hlo_stats::HloStatsDatabase ConvertOpStatsToHloStats(
+    const tensorflow::profiler::OpStats& op_stats);
 
-// Infers the compilation options from the given debug options.
-stream_executor::cuda::CompilationOptions PtxCompileOptionsFromDebugOptions(
-    const DebugOptions& debug_options, bool is_autotuning_compilation);
+}  // namespace profiler
+}  // namespace tensorflow
 
-}  // namespace xla::gpu
-
-#endif  // XLA_SERVICE_GPU_PTX_COMPILE_OPTIONS_FROM_DEBUG_OPTIONS_H_
+#endif  // TENSORFLOW_CORE_PROFILER_CONVERT_OP_STATS_TO_HLO_STATS_H_

@@ -189,6 +189,7 @@ limitations under the License.
 #include "xla/service/gpu/transforms/async_wrapper.h"
 #include "xla/service/gpu/transforms/collective_permute_cycle_decomposer.h"
 #include "xla/service/gpu/transforms/collective_permute_valid_iteration_annotator.h"
+#include "xla/service/gpu/transforms/collective_select_folder.h"
 #include "xla/service/gpu/transforms/command_buffer_scheduling.h"
 #include "xla/service/gpu/transforms/conv_rewriter.h"
 #include "xla/service/gpu/transforms/convert_async_collectives_to_sync.h"
@@ -950,6 +951,12 @@ absl::Status RunCollectiveOptimizationPasses(
           .debug_options()
           .xla_gpu_collective_permute_decomposer_threshold());
 
+  if (hlo_module->config()
+          .debug_options()
+          .xla_gpu_enable_experimental_pipeline_parallelism_opt()) {
+    collectives_pipeline.AddPass<CollectiveSelectFolder>();
+  }
+
   collectives_pipeline.AddPass<CollectivePermuteDecomposer>(
       hlo_module->config()
           .debug_options()
@@ -959,7 +966,11 @@ absl::Status RunCollectiveOptimizationPasses(
           .debug_options()
           .xla_gpu_enable_pipelined_collectives() ||
       hlo_module->config().debug_options().xla_gpu_enable_pipelined_p2p()) {
-    AddP2PPipeliner(collectives_pipeline);
+    AddP2PPipeliner(
+        collectives_pipeline,
+        hlo_module->config()
+            .debug_options()
+            .xla_gpu_enable_experimental_pipeline_parallelism_opt());
   }
 
   // Run algebraic simplifier to reshape(broadcast) into a broadcast when
@@ -2629,10 +2640,13 @@ absl::Status GpuCompiler::RunPostSchedulingPipelines(
     HloPassPipeline& pipeline =
         main_pipeline.AddPass<HloPassPipeline>("async-to-sync-converter");
 
-    if (module->config()
-            .debug_options()
-            .xla_gpu_enable_pipelined_collectives() ||
-        module->config().debug_options().xla_gpu_enable_pipelined_p2p()) {
+    if (!module->config()
+             .debug_options()
+             .xla_gpu_enable_experimental_pipeline_parallelism_opt() &&
+        (module->config()
+             .debug_options()
+             .xla_gpu_enable_pipelined_collectives() ||
+         module->config().debug_options().xla_gpu_enable_pipelined_p2p())) {
       pipeline.AddPass<PipelinedP2PRewriter>();
     }
     pipeline.AddPass<GpuConvertAsyncCollectivesToSync>(is_nop);

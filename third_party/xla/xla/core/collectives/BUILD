@@ -34,8 +34,11 @@ cc_library(
     hdrs = ["collectives.h"],
     deps = [
         ":clique_id",
+        ":clique_key",
         ":communicator",
+        ":rank_id",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -43,6 +46,9 @@ cc_library(
     name = "communicator",
     hdrs = ["communicator.h"],
     deps = [
+        "//xla:xla_data_proto_cc",
+        "//xla/service:collective_ops_utils",
+        "//xla/stream_executor:device_memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],
