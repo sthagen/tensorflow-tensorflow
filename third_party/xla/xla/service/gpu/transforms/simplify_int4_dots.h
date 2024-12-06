@@ -13,19 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_RUNTIME_NCCL_API_H_
-#define XLA_SERVICE_GPU_RUNTIME_NCCL_API_H_
+#ifndef XLA_SERVICE_GPU_TRANSFORMS_SIMPLIFY_INT4_DOTS_H_
+#define XLA_SERVICE_GPU_TRANSFORMS_SIMPLIFY_INT4_DOTS_H_
 
-#include "xla/backends/gpu/collectives/gpu_collectives.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
+#include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
 
 namespace xla::gpu {
 
-//===----------------------------------------------------------------------===//
-// NcclApi
-//===----------------------------------------------------------------------===//
+class SimplifyInt4Dots : public HloModulePass {
+ public:
+  SimplifyInt4Dots() = default;
+  absl::string_view name() const override { return "simplify-int4-dots"; }
 
-using NcclApi = GpuCollectives;
+  absl::StatusOr<bool> Run(
+      HloModule* module,
+      const absl::flat_hash_set<absl::string_view>& execution_threads) override;
+};
 
 }  // namespace xla::gpu
 
-#endif  // XLA_SERVICE_GPU_RUNTIME_NCCL_API_H_
+#endif  // XLA_SERVICE_GPU_TRANSFORMS_SIMPLIFY_INT4_DOTS_H_
