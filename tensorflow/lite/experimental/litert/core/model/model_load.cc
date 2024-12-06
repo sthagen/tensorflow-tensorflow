@@ -24,12 +24,10 @@
 #include "absl/strings/string_view.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_logging.h"
-#include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
-#include "tensorflow/lite/experimental/litert/cc/litert_model.h"
 #include "tensorflow/lite/experimental/litert/core/model/flatbuffer_to_litert.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
 #include "tensorflow/lite/experimental/litert/core/util/flatbuffer_tools.h"
@@ -201,6 +199,7 @@ LiteRtStatus ModelUnpacker::Unpack(LiteRtModel model) {
     model->signatures.reserve(1);
     auto signature = std::make_unique<LiteRtSignatureT>();
     signature->key = LITERT_DEFAULT_SIGNATURE_KEY;
+    signature->subgraph_index = 0;
     signature->input_names.reserve(subgraph.inputs.size());
     for (auto& input : subgraph.inputs) {
       signature->input_names.push_back(input->name);
@@ -215,6 +214,7 @@ LiteRtStatus ModelUnpacker::Unpack(LiteRtModel model) {
     for (auto& signature_def : unpacker.Fb().signature_defs) {
       auto signature = std::make_unique<LiteRtSignatureT>();
       signature->key = signature_def->signature_key;
+      signature->subgraph_index = signature_def->subgraph_index;
       signature->input_names.reserve(signature_def->inputs.size());
       for (auto& input : signature_def->inputs) {
         signature->input_names.push_back(input->name);
@@ -230,69 +230,43 @@ LiteRtStatus ModelUnpacker::Unpack(LiteRtModel model) {
   return kLiteRtStatusOk;
 }
 
-LiteRtStatus LoadModelFromFlatbuffer(std::unique_ptr<TflModel> flatbuffer,
-                                     LiteRtModel* model) {
+Expected<std::unique_ptr<LiteRtModelT>> LoadModelFromFlatbuffer(
+    std::unique_ptr<TflModel> flatbuffer) {
   auto litert_model = std::make_unique<LiteRtModelT>();
   litert_model->flatbuffer_model = std::move(flatbuffer);
   litert_model->subgraphs.reserve(100);
 
-  LITERT_RETURN_STATUS_IF_NOT_OK(ModelUnpacker::Unpack(litert_model.get()));
+  if (auto status = ModelUnpacker::Unpack(litert_model.get());
+      status != kLiteRtStatusOk) {
+    return Unexpected(status);
+  }
 
   litert_model->flatbuffer_model->subgraphs.clear();
 
-  *model = litert_model.release();
-
-  return kLiteRtStatusOk;
+  return litert_model;
 }
 
 }  // namespace
 
-Expected<Model> LoadModelFromMemory(BufferRef<uint8_t> serialized) {
-  auto flatbuffer = FlatbufferWrapper::CreateFromBuffer(serialized);
+Expected<std::unique_ptr<LiteRtModelT>> LoadModelFromBuffer(
+    BufferRef<uint8_t> buffer) {
+  auto flatbuffer = FlatbufferWrapper::CreateFromBuffer(buffer);
   if (!flatbuffer) {
     return flatbuffer.Error();
   }
-
-  LiteRtModel model;
-  LITERT_EXPECT_OK(LoadModelFromFlatbuffer(
-      std::make_unique<TflModel>(std::move((*flatbuffer)->UnpackedModel())),
-      &model));
-
-  return Model::CreateFromOwnedHandle(model);
+  return LoadModelFromFlatbuffer(
+      std::make_unique<TflModel>(std::move((*flatbuffer)->UnpackedModel())));
 }
 
-Expected<Model> LoadModelFromFile(absl::string_view path) {
-  auto flatbuffer = FlatbufferWrapper::CreateFromTflFile(path);
+Expected<std::unique_ptr<LiteRtModelT>> LoadModelFromFile(
+    absl::string_view filename) {
+  auto flatbuffer = FlatbufferWrapper::CreateFromTflFile(filename);
   if (!flatbuffer) {
     return flatbuffer.Error();
   }
 
-  LiteRtModel model;
-  LITERT_EXPECT_OK(LoadModelFromFlatbuffer(
-      std::make_unique<TflModel>(std::move((*flatbuffer)->UnpackedModel())),
-      &model));
-
-  return Model::CreateFromOwnedHandle(model);
+  return LoadModelFromFlatbuffer(
+      std::make_unique<TflModel>(std::move((*flatbuffer)->UnpackedModel())));
 }
 
 }  // namespace litert::internal
-
-LiteRtStatus LiteRtLoadModelFromMemory(const uint8_t* buf, size_t buf_size,
-                                       LiteRtModel* model) {
-  auto new_model = litert::internal::LoadModelFromMemory(
-      litert::BufferRef<uint8_t>(buf, buf_size));
-  if (!new_model) {
-    return new_model.Error().Status();
-  }
-  *model = new_model->Release();
-  return kLiteRtStatusOk;
-}
-
-LiteRtStatus LiteRtLoadModelFromFile(const char* path, LiteRtModel* model) {
-  auto new_model = litert::internal::LoadModelFromFile(path);
-  if (!new_model) {
-    return new_model.Error().Status();
-  }
-  *model = new_model->Release();
-  return kLiteRtStatusOk;
-}

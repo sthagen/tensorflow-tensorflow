@@ -75,7 +75,6 @@ PACKAGE_STATIC_DEPS = [
     "@icu//:__subpackages__",
     "@libjpeg_turbo//:__subpackages__",
     "@llvm-project//:__subpackages__",
-    "@nsync//:__subpackages__",
     "@png//:__subpackages__",
     "@sobol_data//:__subpackages__",
     "@stablehlo//:__subpackages__",
@@ -1253,6 +1252,7 @@ cc_import(
         "//tensorflow:macos": ":libtensorflow_framework.dylib",
         "//conditions:default": ":libtensorflow_framework.so.%s" % VERSION_MAJOR,
     }),
+    visibility = ["//visibility:public"],
 )
 
 # -------------------------------------------

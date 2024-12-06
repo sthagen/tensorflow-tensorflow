@@ -29,6 +29,7 @@
 #include "absl/types/span.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_detail.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_element_type.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
@@ -318,6 +319,12 @@ class Signature : public internal::NonOwnedHandle<LiteRtSignature> {
     return key;
   }
 
+  int SubgraphIndex() const {
+    LiteRtParamIndex subgraph_index;
+    internal::AssertOk(LiteRtGetSignatureSubgraphIndex, Get(), &subgraph_index);
+    return subgraph_index;
+  }
+
   std::vector<absl::string_view> InputNames() const {
     LiteRtParamIndex num_inputs;
     internal::AssertOk(LiteRtGetNumSignatureInputs, Get(), &num_inputs);
@@ -358,6 +365,25 @@ class Model : public internal::Handle<LiteRtModel, LiteRtModelDestroy> {
     return Model(model, /*owned=*/false);
   }
 
+  static Expected<Model> LoadFromFile(const std::string& filename) {
+    LiteRtModel model;
+    if (auto status = LiteRtLoadModelFromFile(filename.c_str(), &model);
+        status != kLiteRtStatusOk) {
+      return Unexpected(status, "Failed to load model from file");
+    }
+    return CreateFromOwnedHandle(model);
+  }
+
+  static Expected<Model> LoadFromBuffer(BufferRef<uint8_t> buffer) {
+    LiteRtModel model;
+    if (auto status =
+            LiteRtLoadModelFromBuffer(buffer.Data(), buffer.Size(), &model);
+        status != kLiteRtStatusOk) {
+      return Unexpected(status, "Failed to load model from buffer");
+    }
+    return CreateFromOwnedHandle(model);
+  }
+
   Expected<absl::Span<const uint8_t>> Metadata(
       const std::string& metadata_key) const {
     const void* buffer;
@@ -391,6 +417,14 @@ class Model : public internal::Handle<LiteRtModel, LiteRtModelDestroy> {
     return litert::Subgraph(subgraph);
   }
 
+  Expected<class Subgraph> Subgraph(absl::string_view signature_key) {
+    auto signature = FindSignature(signature_key);
+    if (!signature) {
+      return Unexpected(kLiteRtStatusErrorNotFound, "Signature not found");
+    }
+    return Subgraph(signature->SubgraphIndex());
+  }
+
   // Returns the list of signatures defined in the model.
   Expected<std::vector<class Signature>> GetSignatures() const {
     LiteRtParamIndex num_signatures;
@@ -404,6 +438,14 @@ class Model : public internal::Handle<LiteRtModel, LiteRtModelDestroy> {
       signatures.push_back(std::move(signature));
     }
     return std::move(signatures);
+  }
+
+  // Returns the signature at the given index.
+  Expected<class Signature> GetSignature(size_t signature_index) const {
+    LiteRtSignature lite_rt_signature;
+    internal::AssertOk(LiteRtGetModelSignature, Get(), signature_index,
+                       &lite_rt_signature);
+    return Signature(lite_rt_signature);
   }
 
   Expected<class Signature> FindSignature(

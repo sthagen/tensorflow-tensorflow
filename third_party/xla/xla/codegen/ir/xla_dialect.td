@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,23 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_TSL_PLATFORM_DEFAULT_MUTEX_DATA_H_
-#define XLA_TSL_PLATFORM_DEFAULT_MUTEX_DATA_H_
+#ifndef XLA_CODEGEN_IR_XLA_DIALECT
+#define XLA_CODEGEN_IR_XLA_DIALECT
 
-namespace tsl {
-namespace internal {
+include "mlir/IR/DialectBase.td"
 
-// The internal state of a mutex.
-struct MuData {
-  void* space[2];
-};
+def XlaDialect : Dialect {
+  let name = "xla";
+  let description = [{
+    This dialect contains ops required for lowering HLO to LLVM.
+  }];
+  let cppNamespace = "::xla";
+  let useDefaultAttributePrinterParser = 1;
+}
 
-// The internal state of a condition_variable.
-struct CVData {
-  void* space[2];
-};
-
-}  // namespace internal
-}  // namespace tsl
-
-#endif  // XLA_TSL_PLATFORM_DEFAULT_MUTEX_DATA_H_
+#endif // XLA_CODEGEN_IR_XLA_DIALECT

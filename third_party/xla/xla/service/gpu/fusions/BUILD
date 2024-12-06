@@ -1,7 +1,6 @@
 load("@local_config_rocm//rocm:build_defs.bzl", "if_rocm_is_configured")
 load("//xla:xla.bzl", "xla_cc_test")
 load("//xla/tests:build_defs.bzl", "xla_test")
-load("//xla/tsl:tsl.bzl", "if_oss")
 load("//xla/tsl/platform/default:cuda_build_defs.bzl", "if_cuda_is_configured")
 
 package(
@@ -270,6 +269,7 @@ cc_library(
     deps = [
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
+        "//xla/codegen/ir:xla",
         "//xla/hlo/analysis:indexing_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/service:scatter_simplifier",
@@ -418,7 +418,8 @@ xla_test(
     srcs = if_cuda_is_configured(["cudnn_test.cc"]),
     backends = [
         "gpu_h100",
-    ] + if_oss(["gpu_b100"]),
+        "gpu_b100",
+    ],
     deps = [
         "//xla:comparison_util",
         "//xla:debug_options_flags",

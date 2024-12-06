@@ -40,6 +40,7 @@ cc_library(
     srcs = ["litert_model.cc"],
     hdrs = ["litert_model.h"],
     deps = [
+        ":litert_buffer_ref",
         ":litert_detail",
         ":litert_element_type",
         ":litert_expected",
@@ -253,7 +254,7 @@ cc_library(
     name = "litert_layout",
     hdrs = ["litert_layout.h"],
     deps = [
-        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/c:litert_layout",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -282,6 +283,52 @@ cc_test(
     srcs = ["litert_layout_test.cc"],
     deps = [
         ":litert_layout",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "litert_compiled_model",
+    srcs = ["litert_compiled_model.cc"],
+    hdrs = ["litert_compiled_model.h"],
+    deps = [
+        ":litert_detail",
+        ":litert_expected",
+        ":litert_handle",
+        ":litert_model",
+        ":litert_tensor_buffer",
+        "//tensorflow/lite:framework",
+        "//tensorflow/lite/c:c_api_opaque",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/core:cc_api_stable",
+        "//tensorflow/lite/experimental/litert/c:litert_common",
+        "//tensorflow/lite/experimental/litert/c:litert_compiled_model",
+        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer",
+        "//tensorflow/lite/experimental/litert/runtime:tfl_utils",
+        "//tensorflow/lite/kernels:builtin_ops",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_test(
+    name = "litert_compiled_model_test",
+    srcs = ["litert_compiled_model_test.cc"],
+    data = [
+        "//tensorflow/lite/experimental/litert/test:testdata/simple_model.tflite",
+    ],
+    deps = [
+        ":litert_compiled_model",
+        ":litert_model",
+        "//tensorflow/lite:framework",
+        "//tensorflow/lite/c:c_api_opaque",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/experimental/litert/test:common",
+        "//tensorflow/lite/kernels:builtin_ops",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )

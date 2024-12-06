@@ -544,8 +544,7 @@ absl::Status FunctionalHloRunner::LoadAndCompile(
     const PreprocessingOptions& preproc_options,
     const RawCompileOptions& raw_compile_options, std::string_view hlo_file,
     InputFormat input_format, int task_id, int num_nodes,
-    std::shared_ptr<xla::KeyValueStoreInterface> kv_store,
-    bool use_gpu_count_workaround) {
+    std::shared_ptr<xla::KeyValueStoreInterface> kv_store) {
   TF_ASSIGN_OR_RETURN(
       CompileOptions compile_options,
       FunctionalHloRunner::CreateCompileOptions(client, raw_compile_options,
@@ -555,8 +554,7 @@ absl::Status FunctionalHloRunner::LoadAndCompile(
   int num_partitions =
       compile_options.executable_build_options.num_partitions();
   int needed_devices = num_replicas * num_partitions;
-  if (client.addressable_device_count() < needed_devices &&
-      use_gpu_count_workaround) {
+  if (client.addressable_device_count() < needed_devices) {
     LOG(INFO) << "Applying a workaround to allow compiling multi-device HLOs "
                  "on machines with fewer devices.";
     DeviceAssignment assignment(num_replicas, num_partitions);
@@ -581,8 +579,7 @@ FunctionalHloRunner::ReadModuleFromHloTextFile(absl::string_view hlo_file) {
   std::string hlo_string;
   TF_RETURN_IF_ERROR(tsl::ReadFileToString(tsl::Env::Default(),
                                            std::string(hlo_file), &hlo_string));
-  return ParseAndReturnUnverifiedModule(
-      hlo_string, {}, HloParserOptions().set_fill_missing_layouts(false));
+  return ParseAndReturnUnverifiedModule(hlo_string, {}, HloParserOptions());
 }
 
 absl::StatusOr<std::unique_ptr<HloModule>>
@@ -732,7 +729,8 @@ absl::Status FunctionalHloRunner::PrepareHloModuleForCompilation(
   }
 
   if (preproc_options.flatten_while_loop() ||
-      preproc_options.remove_infeed_outfeed) {
+      preproc_options.remove_infeed_outfeed ||
+      preproc_options.flatten_conditional) {
     // The pipeline will check for the presence of
     // debug_options().xla_disable_hlo_passes().
     HloPassPipeline pipeline("control-flow-flattening-pipeline");
@@ -747,7 +745,13 @@ absl::Status FunctionalHloRunner::PrepareHloModuleForCompilation(
             while_execution_count,
             /*remove_infeed_outfeed=*/preproc_options.remove_infeed_outfeed,
             /*flatten_while_loop=*/preproc_options.flatten_while_loop(),
-            /*remove_comm=*/false, /*remove_host_transfer=*/true});
+            /*remove_comm=*/false,
+            /*remove_host_transfer=*/true,
+            /*remove_id=*/false,
+            /*flatten_conditional=*/
+            preproc_options.flatten_conditional,
+            /*conditional_value=*/
+            preproc_options.conditional_value});
     TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   }
   return absl::OkStatus();

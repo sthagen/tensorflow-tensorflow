@@ -221,12 +221,11 @@ LiteRtStatus ModelRepacker::Repack(LiteRtModelT& model) {
 
 }  // namespace
 
-Expected<OwningBufferRef<uint8_t>> SerializeModel(Model&& model) {
-  LITERT_EXPECT_OK(ModelRepacker::Repack(*model.Get()));
+Expected<OwningBufferRef<uint8_t>> SerializeModel(LiteRtModelT&& model) {
+  LITERT_EXPECT_OK(ModelRepacker::Repack(model));
 
   flatbuffers::FlatBufferBuilder b;
-  auto model_offset =
-      tflite::Model::Pack(b, model.Get()->flatbuffer_model.get());
+  auto model_offset = tflite::Model::Pack(b, model.flatbuffer_model.get());
   tflite::FinishModelBuffer(b, model_offset);
 
   OwningBufferRef<uint8_t> buffer;
@@ -240,12 +239,20 @@ Expected<OwningBufferRef<uint8_t>> SerializeModel(Model&& model) {
   return std::move(buffer);
 }
 
+Expected<OwningBufferRef<uint8_t>> SerializeModel(Model&& model) {
+  LiteRtModelT* m = model.Get();
+  return SerializeModel(std::move(*m));
+}
+
 }  // namespace litert::internal
 
 LiteRtStatus LiteRtSerializeModel(LiteRtModel model, uint8_t** buf,
-                                  size_t* size, size_t* offset) {
+                                  size_t* size, size_t* offset,
+                                  bool destroy_model) {
   auto serialized =
-      SerializeModel(::litert::Model::CreateFromOwnedHandle(model));
+      (destroy_model)
+          ? SerializeModel(::litert::Model::CreateFromOwnedHandle(model))
+          : SerializeModel(::litert::Model::CreateFromNonOwnedHandle(model));
   if (!serialized) {
     return serialized.Error().Status();
   }

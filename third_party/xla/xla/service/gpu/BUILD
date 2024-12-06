@@ -23,7 +23,6 @@ load("//xla/tests:build_defs.bzl", "xla_test")
 load(
     "//xla/tsl:tsl.bzl",
     "if_google",
-    "if_oss",
     "internal_visibility",
     "tsl_copts",
     "tsl_gpu_library",
@@ -556,9 +555,6 @@ cc_library(
     hdrs = [
         "gpu_executable.h",
     ],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     deps = [
         ":backend_configs_cc",
         ":buffer_allocations",
@@ -615,6 +611,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/types:variant",
         "@local_tsl//tsl/platform:env",
+        "@local_tsl//tsl/platform:env_time",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:random",
@@ -952,9 +949,6 @@ cc_library(
     name = "matmul_utils",
     srcs = ["matmul_utils.cc"],
     hdrs = ["matmul_utils.h"],
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
     deps = [
         ":backend_configs_cc",
         ":matmul_indexing_utils",
@@ -967,6 +961,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:algorithm_util",
         "//xla/stream_executor:blas",
+        "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:numeric_options",
         "//xla/stream_executor:stream",
@@ -1895,7 +1890,8 @@ xla_test(
     backends = [
         "gpu_v100",
         "gpu_a100",
-    ] + if_oss(["gpu_b100"]),
+        "gpu_b100",
+    ],
     tags = [
         "cuda-only",
         "nomsan",  # Pulls in precompiled NVIDIA libraries which cause false positives in msan.
@@ -2632,7 +2628,8 @@ xla_test(
     backends = [
         "gpu_a100",
         "gpu_h100",
-    ] + if_oss(["gpu_b100"]),
+        "gpu_b100",
+    ],
     deps = [
         ":variant_visitor",
         "//xla:error_spec",
@@ -2874,8 +2871,9 @@ xla_test(
         "gpu_v100",
         "gpu_a100",
         "gpu_h100",
+        "gpu_b100",
         "gpu_amd_any",
-    ] + if_oss(["gpu_b100"]),
+    ],
     tags = [
         "no_mac",
     ],
@@ -2956,8 +2954,9 @@ xla_test(
     srcs = ["determinism_test.cc"],
     backends = [
         "gpu_a100",
+        "gpu_b100",
         "gpu_amd_any",
-    ] + if_oss(["gpu_b100"]),
+    ],
     deps = [
         "//xla:literal",
         "//xla:xla_proto_cc",
