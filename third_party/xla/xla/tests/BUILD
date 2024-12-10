@@ -156,6 +156,21 @@ cc_library(
 )
 
 cc_library(
+    name = "pjrt_interpreter_client_registry",
+    testonly = True,
+    srcs = [
+        "pjrt_interpreter_client_registry.cc",
+    ],
+    deps = [
+        ":pjrt_client_registry",
+        "//xla/pjrt:interpreter_device",
+        "//xla/pjrt:pjrt_client",
+        "@com_google_absl//absl/status:statusor",
+        "@local_tsl//tsl/platform:status",
+    ],
+)
+
+cc_library(
     name = "hlo_test_base",
     testonly = True,
     srcs = ["hlo_test_base.cc"],
@@ -263,6 +278,30 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "hlo_pjrt_test_base",
+    testonly = True,
+    srcs = ["hlo_pjrt_test_base.cc"],
+    hdrs = ["hlo_pjrt_test_base.h"],
+    deps = [
+        ":hlo_runner_agnostic_test_base",
+        ":pjrt_client_registry",
+        "//xla:util",
+        "//xla:xla_data_proto_cc",
+        "//xla/pjrt:pjrt_client",
+        "//xla/service:hlo_runner",
+        "//xla/service:hlo_runner_interface",
+        "//xla/service:hlo_runner_pjrt",
+        "//xla/service:interpreter_plugin",  # reference backend
+        "//xla/service:platform_util",
+        "//xla/stream_executor:platform",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -1243,6 +1282,7 @@ xla_test(
     ],
     deps = CONVOLUTION_TEST_DEPS + [
         "//xla:error_spec",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
     ],
@@ -1311,6 +1351,7 @@ xla_test(
     ],
     deps = CONVOLUTION_TEST_DEPS + [
         "//xla:error_spec",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
     ],
@@ -1344,6 +1385,7 @@ xla_test(
     shard_count = 25,
     deps = CONVOLUTION_TEST_DEPS + [
         "//xla:error_spec",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
     ],
@@ -1378,6 +1420,7 @@ xla_test(
     ],
     deps = CONVOLUTION_TEST_DEPS + [
         "//xla:error_spec",
+        "//xla/stream_executor:device_description",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
     ],

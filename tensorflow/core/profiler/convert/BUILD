@@ -113,6 +113,26 @@ cc_library(
 )
 
 cc_library(
+    name = "op_stats_to_roofline_model",
+    srcs = ["op_stats_to_roofline_model.cc"],
+    hdrs = ["op_stats_to_roofline_model.h"],
+    deps = [
+        ":op_metrics_db_combiner",
+        ":op_metrics_to_record",
+        "//tensorflow/core/profiler/protobuf:hardware_types_proto_cc",
+        "//tensorflow/core/profiler/protobuf:op_metrics_proto_cc",
+        "//tensorflow/core/profiler/protobuf:op_stats_proto_cc",
+        "//tensorflow/core/profiler/protobuf:roofline_model_proto_cc",
+        "//tensorflow/core/profiler/protobuf:steps_db_proto_cc",
+        "//tensorflow/core/profiler/utils:diagnostics",
+        "@com_google_absl//absl/log:check",
+        "@local_tsl//tsl/platform:protobuf",
+        "@local_xla//xla/tsl/profiler/convert:xla_op_utils",
+        "@local_xla//xla/tsl/profiler/utils:math_utils",
+    ],
+)
+
+cc_library(
     name = "op_stats_to_op_profile",
     srcs = ["op_stats_to_op_profile.cc"],
     hdrs = ["op_stats_to_op_profile.h"],
@@ -656,6 +676,7 @@ cc_library(
     hdrs = ["xplane_to_tools_data.h"],
     copts = tf_profiler_copts(),
     deps = [
+        ":compute_inference_latency",
         ":hlo_to_tools_data",
         ":multi_xplanes_to_op_stats",
         ":multi_xspace_to_inference_stats",
@@ -664,6 +685,7 @@ cc_library(
         ":op_stats_to_op_profile",
         ":op_stats_to_overview_page",
         ":op_stats_to_pod_viewer",
+        ":op_stats_to_roofline_model",
         ":op_stats_to_tf_stats",
         ":preprocess_single_host_xplane",
         ":process_megascale_dcn",
@@ -1226,15 +1248,20 @@ cc_library(
         ":inference_stats_sampler",
         ":preprocess_single_host_xplane",
         ":repository",
+        ":xplane_to_step_events",
         "//tensorflow/core/profiler/protobuf:inference_stats_proto_cc",
         "//tensorflow/core/profiler/protobuf:xplane_proto_cc",
         "//tensorflow/core/profiler/utils:event_span",
+        "//tensorflow/core/profiler/utils:xplane_schema",
+        "//tensorflow/core/profiler/utils:xplane_visitor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:statusor",
         "@local_xla//xla/tsl/profiler/utils:device_utils",
         "@local_xla//xla/tsl/profiler/utils:group_events",
+        "@local_xla//xla/tsl/profiler/utils:tf_xplane_visitor",
         "@local_xla//xla/tsl/profiler/utils:tpu_xplane_utils",
+        "@local_xla//xla/tsl/profiler/utils:xplane_utils",
     ],
 )
 
