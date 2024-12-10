@@ -209,7 +209,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_exhaustive_tiling_search(false);
 
   opts.set_xla_gpu_experimental_enable_triton_heroless_priority_fusion(false);
-  opts.set_xla_gpu_experimental_enable_triton_softmax_priority_fusion(true);
 
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_gb(0);
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_ratio(1.1);
@@ -228,6 +227,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       DebugOptions::WHILE_LOOP_UNROLLING_AUTO_UNROLL);
   opts.set_xla_gpu_ensure_minor_dot_contraction_dims(false);
   opts.set_xla_gpu_filter_kernels_spilling_registers_on_autotuning(true);
+  opts.set_xla_gpu_fail_ptx_compilation_on_register_spilling(false);
   opts.set_xla_gpu_llvm_verification_level(0);
   opts.set_xla_gpu_target_config_filename("");
   opts.set_xla_gpu_enable_cub_radix_sort(true);
@@ -1676,14 +1676,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "will try to make Triton fusions first and foremost where it is "
       "possible."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_experimental_enable_triton_softmax_priority_fusion",
-      bool_setter_for(
-          &DebugOptions::
-              set_xla_gpu_experimental_enable_triton_softmax_priority_fusion),
-      debug_options
-          ->xla_gpu_experimental_enable_triton_softmax_priority_fusion(),
-      "Enable fusion into Triton Softmax in PriorityFusion pass."));
-  flag_list->push_back(tsl::Flag(
       "xla_gpu_dump_autotune_results_to",
       string_setter_for(&DebugOptions::set_xla_gpu_dump_autotune_results_to),
       debug_options->xla_gpu_dump_autotune_results_to(),
@@ -1819,6 +1811,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
               set_xla_gpu_filter_kernels_spilling_registers_on_autotuning),
       debug_options->xla_gpu_filter_kernels_spilling_registers_on_autotuning(),
       "Filter out kernels that spill registers during autotuning"));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_fail_ptx_compilation_on_register_spilling",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_fail_ptx_compilation_on_register_spilling),
+      debug_options->xla_gpu_fail_ptx_compilation_on_register_spilling(),
+      "Fails the PTX compilation if a kernel spills registers."));
   flag_list->push_back(tsl::Flag(
       "xla_debug_buffer_assignment_show_max",
       int64_setter_for(&DebugOptions::set_xla_debug_buffer_assignment_show_max),
