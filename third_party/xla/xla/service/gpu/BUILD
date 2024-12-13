@@ -2113,7 +2113,6 @@ cc_library(
         "//xla/hlo/utils:hlo_query",
         "//xla/service:buffer_value",
         "//xla/service:collective_ops_utils",
-        "//xla/service:collective_utils",
         "//xla/service:latency_hiding_scheduler",
         "//xla/service:p2p_schedule_preparation",
         "//xla/service:profile_guided_latency_estimator",
@@ -3211,7 +3210,7 @@ cc_library(
     srcs = ["ptx_compile_options_from_debug_options.cc"],
     hdrs = ["ptx_compile_options_from_debug_options.h"],
     deps = [
-        "//xla:xla_proto_cc_impl",
+        "//xla:xla_proto_cc",
         "//xla/stream_executor/cuda:compilation_options",
     ],
 )

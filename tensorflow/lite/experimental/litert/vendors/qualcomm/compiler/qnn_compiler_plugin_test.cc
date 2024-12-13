@@ -72,7 +72,13 @@ const auto kSupportedOps =
                     kRMSNormModel,
                     kSDPAModel,
                     kAttentionModel,
-                    kTransformerBlockModel
+                    kTransformerBlockModel,
+                    kQSimpleMul16x16Model,
+                    kQMulAdd16x16Model,
+                    kQQueryEinsum16x8Model,
+                    kQKeyEinsum16x8Model,
+                    kQVauleEinsum16x8Model,
+                    kQAttnVecEinsum16x8Model
                     );
 // clang-format on
 
@@ -97,8 +103,8 @@ TEST(TestQnnPlugin, PartitionMulOps) {
   auto model = testing::LoadTestFileModel("one_mul.tflite");
 
   LiteRtOpListT selected_op_list;
-  LITERT_ASSERT_STATUS_OK(LiteRtCompilerPluginPartitionModel(
-      plugin.get(), model.Get(), &selected_op_list));
+  LITERT_ASSERT_STATUS_OK(LiteRtCompilerPluginPartition(
+      plugin.get(), model.Subgraph(0)->Get(), &selected_op_list));
   const auto selected_ops = selected_op_list.Vec();
 
   ASSERT_EQ(selected_ops.size(), 1);
