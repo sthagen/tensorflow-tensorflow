@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
 #include <cstdint>
 #include <filesystem>  // NOLINT
 #include <fstream>
@@ -33,6 +34,7 @@
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model_predicates.h"
+#include "tensorflow/lite/experimental/litert/core/byte_code_util.h"
 #include "tensorflow/lite/experimental/litert/core/model/graph_validation.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
 #include "tensorflow/lite/experimental/litert/core/model/model_file_test_util.h"
@@ -48,6 +50,7 @@ namespace {
 
 using ::litert::testing::GetTestFilePath;
 using ::testing::Each;
+using ::testing::ElementsAreArray;
 using ::testing::FloatEq;
 using ::testing::Values;
 
@@ -61,6 +64,8 @@ static constexpr absl::string_view kSimpleMultiOp = "simple_multi_op.tflite";
 static constexpr absl::string_view kOneMul = "one_mul.tflite";
 static constexpr absl::string_view kSimpleMultiSubgraph =
     "multi_subgraph.tflite";
+static constexpr absl::string_view kCstMultiSubgraph =
+    "cst_multi_subgraph.tflite";
 
 // Load a model, then serialize and re-load. Used to test serialization.
 Expected<Model> LoadModelThroughRoundTrip(absl::string_view filename) {
@@ -186,7 +191,107 @@ TEST(ModelLoadTest, WithSignature) {
 }
 
 TEST(ModelSerializeTest, WithSignature) {
-  // TODO
+  auto model = litert::testing::LoadTestFileModel(kAddSimple);
+  auto& litert_model = *model.Get();
+
+  static constexpr char kInput[] = "foo";
+  static constexpr char kOutput[] = "bar";
+  static constexpr char kKey[] = "newKey";
+
+  LiteRtSignatureT signature(litert_model.MainSubgraph(), {kInput}, {kOutput},
+                             kKey);
+  litert_model.EmplaceSignature(std::move(signature));
+
+  auto serialized = SerializeModel(std::move(*model.Get()));
+  EXPECT_TRUE(VerifyFlatbuffer(serialized->Span()));
+
+  auto re_loaded = LoadModelFromBuffer(*serialized);
+  auto re_loaded_signature = re_loaded->get()->FindSignature(kKey);
+  ASSERT_TRUE(re_loaded_signature);
+  const auto& sig = re_loaded_signature->get();
+
+  const auto& inputs = sig.InputNames();
+  const auto& outputs = sig.OutputNames();
+  EXPECT_THAT(inputs, ElementsAreArray({kInput}));
+  EXPECT_THAT(outputs, ElementsAreArray({kOutput}));
+  EXPECT_EQ(&sig.GetSubgraph(), re_loaded->get()->MainSubgraph());
+}
+
+TEST(ModelSerializeTest, WithMetadataByteCode) {
+  auto model = litert::testing::LoadTestFileModel(kAddSimple);
+  auto& litert_model = *model.Get();
+
+  static constexpr absl::string_view kManufacturer = "Dodge";
+  static constexpr absl::string_view kModel = "Dart";
+  static constexpr absl::string_view kByteCode = "SOME_BYTE_CODE";
+  static constexpr auto kSerialization = Serialization::kMetadata;
+
+  // TODO(@lukeboyer) consider wrapping the tag & push metadata for npu
+  // in a helper function somewhere.
+  {
+    auto build_stamp = MakeBuildStamp(kManufacturer, kModel, kSerialization);
+    litert_model.PushMetadata(kLiteRtBuildStampKey, *build_stamp);
+    litert_model.PushMetadata(kByteCodeMetadataKey, kByteCode);
+  }
+
+  auto serialized = SerializeModel(std::move(*model.Get()));
+  EXPECT_TRUE(VerifyFlatbuffer(serialized->Span()));
+  auto re_loaded = LoadModelFromBuffer(*serialized);
+  ASSERT_TRUE(re_loaded);
+  auto& re_loaded_model = **re_loaded;
+
+  auto build_stamp =
+      ParseBuildStamp(*re_loaded_model.FindMetadata(kLiteRtBuildStampKey));
+  ASSERT_TRUE(build_stamp);
+
+  EXPECT_EQ(std::get<0>(*build_stamp), kManufacturer);
+  EXPECT_EQ(std::get<1>(*build_stamp), kModel);
+  EXPECT_EQ(std::get<2>(*build_stamp), kSerialization);
+
+  auto byte_code = re_loaded_model.FindMetadata(kByteCodeMetadataKey);
+  ASSERT_TRUE(byte_code);
+  EXPECT_EQ(byte_code->StrView(), kByteCode);
+}
+
+TEST(ModelSerializeTest, WithAppendByteCode) {
+  auto model = litert::testing::LoadTestFileModel(kAddSimple);
+  auto& litert_model = *model.Get();
+
+  static constexpr absl::string_view kManufacturer = "Honda";
+  static constexpr absl::string_view kModel = "Civic";
+  static constexpr absl::string_view kByteCode = "SOME_BYTE_CODE";
+  static constexpr auto kSerialization = Serialization::kAppend;
+
+  {
+    auto build_stamp = MakeBuildStamp(kManufacturer, kModel, kSerialization);
+    litert_model.PushMetadata(kLiteRtBuildStampKey, *build_stamp);
+    litert_model.PushMetadata(kByteCodeMetadataKey, kByteCode);
+  }
+
+  auto serialized = SerializeModel(std::move(*model.Get()));
+  EXPECT_TRUE(VerifyFlatbuffer(serialized->Span()));
+  auto re_loaded = LoadModelFromBuffer(*serialized);
+  ASSERT_TRUE(re_loaded);
+  auto& re_loaded_model = **re_loaded;
+
+  auto build_stamp =
+      ParseBuildStamp(*re_loaded_model.FindMetadata(kLiteRtBuildStampKey));
+  ASSERT_TRUE(build_stamp);
+
+  EXPECT_EQ(std::get<0>(*build_stamp), kManufacturer);
+  EXPECT_EQ(std::get<1>(*build_stamp), kModel);
+  EXPECT_EQ(std::get<2>(*build_stamp), kSerialization);
+
+  auto byte_code_metadata = re_loaded_model.FindMetadata(kByteCodeMetadataKey);
+  ASSERT_TRUE(byte_code_metadata);
+  auto byte_code_offset = ParseByteCodePlaceholder(*byte_code_metadata);
+  ASSERT_TRUE(byte_code_offset);
+
+  const auto offset = std::get<0>(*byte_code_offset);
+  const auto size = std::get<1>(*byte_code_offset);
+
+  ASSERT_EQ(offset + size, serialized->Size());
+  EXPECT_EQ(serialized->StrView().substr(offset, size), kByteCode);
 }
 
 // Tests that explicitly check litert graph structure.
@@ -405,6 +510,42 @@ INSTANTIATE_TEST_SUITE_P(ModelLoadTests, SimpleMultiSubgraphTest,
 
 INSTANTIATE_TEST_SUITE_P(ModelSerializeTests, SimpleMultiSubgraphTest,
                          Values(MakeRoundTripFactory(kSimpleMultiSubgraph)));
+
+// Test when flatbuffer export has optimized multiple tensors to share the
+// same buffer.
+using MultiSubgraphDupeConstTest = TestWithModelFactory;
+
+TEST_P(MultiSubgraphDupeConstTest, CheckGraph) {
+  static constexpr std::array kWeights = {1.0, 2.0, 3.0, 4.0};
+
+  auto model_wrap = LoadModel();
+  ASSERT_TRUE(model_wrap);
+  auto& model = *model_wrap->Get();
+
+  ASSERT_EQ(model.NumSubgraphs(), 2);
+
+  {
+    ASSERT_EQ(model.Subgraph(0).Ops().size(), 1);
+    ASSERT_EQ(model.Subgraph(0).Tensors().size(), 3);
+    auto& cst = model.Subgraph(0).Op(0).Input(1);
+    Tensor t(&cst);
+    EXPECT_THAT(*t.WeightsData<float>(), ElementsAreArray(kWeights));
+  }
+
+  {
+    ASSERT_EQ(model.Subgraph(1).Ops().size(), 1);
+    ASSERT_EQ(model.Subgraph(1).Tensors().size(), 3);
+    auto& cst = model.Subgraph(1).Op(0).Input(1);
+    Tensor t(&cst);
+    EXPECT_THAT(*t.WeightsData<float>(), ElementsAreArray(kWeights));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(ModelLoadTests, MultiSubgraphDupeConstTest,
+                         Values(MakeLoadFactory(kCstMultiSubgraph)));
+
+INSTANTIATE_TEST_SUITE_P(ModelSerializeTests, MultiSubgraphDupeConstTest,
+                         Values(MakeRoundTripFactory(kCstMultiSubgraph)));
 
 // Tests that programatically check litert against tflite models.
 //===---------------------------------------------------------------------------

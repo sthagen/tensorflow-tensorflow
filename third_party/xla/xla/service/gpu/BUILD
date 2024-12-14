@@ -1711,6 +1711,7 @@ xla_test(
     backends = ["gpu"],
     tags = ["no_oss"],  # TODO(b/277355322): Make autosharding work in OSS
     deps = [
+        "//xla:xla_data_proto_cc",
         "//xla/hlo/experimental/auto_sharding:auto_sharding_option",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_module_config",
@@ -2006,6 +2007,7 @@ cc_library(
         ":gpu_compiler",
         ":target_constants",
         "//xla:util",
+        "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
@@ -2311,6 +2313,7 @@ cc_library(
     name = "stream_executor_util",
     srcs = ["stream_executor_util.cc"],
     hdrs = ["stream_executor_util.h"],
+    compatible_with = get_compatible_with_portable(),
     copts = tsl_copts(),
     deps = [
         ":cublas_cudnn",
@@ -2939,6 +2942,7 @@ xla_test(
 cc_library(
     name = "gpu_symbol_repository",
     hdrs = ["gpu_symbol_repository.h"],
+    compatible_with = get_compatible_with_portable(),
     deps = [
         "//xla:autotune_results_proto_cc",
         "//xla:xla_proto_cc",
