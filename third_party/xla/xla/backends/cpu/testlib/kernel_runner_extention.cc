@@ -17,10 +17,8 @@ limitations under the License.
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
@@ -37,8 +35,7 @@ limitations under the License.
 #include "xla/codegen/kernel_emitter.h"
 #include "xla/codegen/kernel_spec.h"
 #include "xla/codegen/testlib/kernel_runner.h"
-#include "xla/hlo/ir/hlo_opcode.h"
-#include "xla/shape.h"
+#include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/stream_executor/launch_dim.h"
 
 namespace xla::cpu {
@@ -60,11 +57,10 @@ void ImportBaseClasses(const nb::module_& kernel_runner_module) {
   absl::string_view xla_module =
       backends_module.substr(0, backends_module.find_last_of('.'));
 
-  nb::module_::import_(
-      absl::StrCat(xla_module, ".codegen.testlib.kernel_runner").c_str());
+  nb::module_::import_(absl::StrCat(xla_module, ".codegen.testlib").c_str());
 }
 
-NB_MODULE(kernel_runner_extention, kernel_runner_module) {
+NB_MODULE(_extention, kernel_runner_module) {
   // We depend on the base classes so must import them before python tries to
   // register the derived versions.
   ImportBaseClasses(kernel_runner_module);
@@ -88,13 +84,7 @@ NB_MODULE(kernel_runner_extention, kernel_runner_module) {
 
   nb::class_<ElementalKernelEmitter, KernelEmitter>(kernel_runner_module,
                                                     "ElementalKernelEmitter")
-      .def("__init__",
-           [](ElementalKernelEmitter* self, absl::string_view kernel_name,
-              HloOpcode opcode, std::vector<Shape> input_shapes,
-              const Shape& output_shape) {
-             new (self) ElementalKernelEmitter(
-                 kernel_name, opcode, std::move(input_shapes), output_shape);
-           });
+      .def(nb::init<std::unique_ptr<HloInstruction>>());
 
   nb::class_<KernelRunner, xla::KernelRunner>(kernel_runner_module,
                                               "KernelRunner")
