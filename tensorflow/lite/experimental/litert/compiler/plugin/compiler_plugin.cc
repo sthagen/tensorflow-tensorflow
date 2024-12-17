@@ -138,9 +138,9 @@ LiteRtStatus ResolvePluginApi(void* lib_handle,
   return kLiteRtStatusOk;
 }
 
-Expected<SmallVec<std::string>> GetSocModels(
+Expected<std::vector<std::string>> GetSocModels(
     const LiteRtCompilerPluginApi& api, LiteRtCompilerPlugin plugin_handle) {
-  SmallVec<std::string> soc_models;
+  std::vector<std::string> soc_models;
 
   LiteRtParamIndex num_models;
   LITERT_EXPECT_OK(
@@ -156,17 +156,6 @@ Expected<SmallVec<std::string>> GetSocModels(
   }
 
   return soc_models;
-}
-
-std::string ResolveSocModel(const CompilerPlugin& plugin,
-                            absl::string_view soc_model = "") {
-  const auto& default_model = plugin.SocModels().front();
-  if (soc_model.empty()) {
-    LITERT_LOG(LITERT_INFO, "Using default soc_model: %s",
-               default_model.c_str());
-    return default_model;
-  }
-  return std::string(soc_model);
 }
 
 }  // namespace
@@ -213,7 +202,7 @@ Expected<CompilerPlugin> CompilerPlugin::LoadPlugin(
   return plugin;
 }
 
-Expected<SmallVec<CompilerPlugin>> CompilerPlugin::LoadPlugins(
+Expected<std::vector<CompilerPlugin>> CompilerPlugin::LoadPlugins(
     absl::Span<const absl::string_view> lib_search_paths) {
   std::vector<std::string> plugin_lib_paths;
   for (auto search_path : lib_search_paths) {
@@ -223,7 +212,7 @@ Expected<SmallVec<CompilerPlugin>> CompilerPlugin::LoadPlugins(
     }
   }
 
-  SmallVec<CompilerPlugin> loaded_plugins;
+  std::vector<CompilerPlugin> loaded_plugins;
   loaded_plugins.reserve(lib_search_paths.size());
 
   for (const auto& lib_path : plugin_lib_paths) {
@@ -318,10 +307,14 @@ Expected<std::vector<LiteRtOp>> CompilerPlugin::Partition(
 Expected<CompiledResult> CompilerPlugin::Compile(
     absl::Span<LiteRtSubgraph> partitions, absl::string_view soc_model) {
   CompiledResult result = MakeResult();
-  const auto soc_model_str = ResolveSocModel(*this, soc_model);
+  // If the user has passed an soc_model, then we use it; otherwise we let the
+  // backend pick the appropriate one by passing nullptr as soc_model. This is
+  // important for on-device compilation, where the backend must determine the
+  // SoC model based on the user device.
+  const char* soc_model_str = !soc_model.empty() ? soc_model.data() : nullptr;
   LITERT_EXPECT_OK(plugin_api_.compiler_plugin_compile(
-      plugin_handle_, soc_model_str.c_str(), partitions.data(),
-      partitions.size(), &result.compiled_result_handle_));
+      plugin_handle_, soc_model_str, partitions.data(), partitions.size(),
+      &result.compiled_result_handle_));
   return result;
 }
 
@@ -381,9 +374,8 @@ LiteRtStatus Apply(CompilerPlugin& compiler_plugin, LiteRtModelT& model,
   auto& subgraphs = partitions->second;
 
   // Pass sliced subgraphs to plugin for compilation.
-  const auto soc_model_str = ResolveSocModel(compiler_plugin, soc_model);
   auto compiled_result =
-      compiler_plugin.Compile(subgraphs.Elements(), soc_model_str);
+      compiler_plugin.Compile(subgraphs.Elements(), soc_model);
   if (!compiled_result) {
     LITERT_LOG(LITERT_ERROR, "Failed to compile");
     return compiled_result.Error().Status();
@@ -417,7 +409,7 @@ LiteRtStatus Apply(CompilerPlugin& compiler_plugin, LiteRtModelT& model,
 
   // Tag the model with make/model from the plugin.
   auto build_stamp = MakeBuildStamp(compiler_plugin.SocManufacturer(),
-                                    soc_model_str, serialization);
+                                    soc_model, serialization);
   if (!build_stamp) {
     LITERT_LOG(LITERT_ERROR, "Failed to stamp model");
     return build_stamp.Error().Status();
