@@ -111,6 +111,7 @@ limitations under the License.
 #include "xla/hlo/transforms/expanders/rng_bit_generator_expander.h"
 #include "xla/hlo/transforms/expanders/rng_expander.h"
 #include "xla/hlo/transforms/expanders/stochastic_convert_decomposer.h"
+#include "xla/hlo/transforms/literal_canonicalizer.h"
 #include "xla/hlo/transforms/operand_upcaster.h"
 #include "xla/hlo/transforms/simplifiers/algebraic_simplifier.h"
 #include "xla/hlo/transforms/simplifiers/batch_dot_simplification.h"
@@ -135,6 +136,7 @@ limitations under the License.
 #include "xla/hlo/transforms/while_loop_trip_count_annotator.h"
 #include "xla/hlo/translate/hlo_to_mhlo/hlo_to_mlir_hlo.h"
 #include "xla/literal.h"
+#include "xla/literal_pool.h"
 #include "xla/map_util.h"
 #include "xla/mlir_hlo/transforms/passes.h"
 #include "xla/primitive_util.h"
@@ -751,6 +753,12 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
     pipeline.AddPass<SubByteNormalization>(
         SubByteNormalization::SET_ELEMENT_SIZE);
   }
+
+  // Finally canonicalize all literals larger than 1024 bytes in the module to
+  // reuse the same literal across multiple HLO modules.
+  pipeline.AddPass<LiteralCanonicalizer>(LiteralPool::Default(),
+                                         /*min_size_bytes=*/1024);
+
   return pipeline.Run(module).status();
 }
 
@@ -1322,6 +1330,23 @@ inline void VlogMaxIsa(absl::string_view max_cpu_isa) {
   }
 }
 
+// We keep HloProto in the CpuExecutable, but we don't need to keep literals
+// payload in it as we use it only for debugging and memory analysis.
+static void StripPayloadFromLiteralProto(HloProto& proto) {
+  auto* module = proto.mutable_hlo_module();
+  for (auto& computation : *module->mutable_computations()) {
+    for (auto& instruction : *computation.mutable_instructions()) {
+      // We only keep literal shape to correctly estimate memory usage of the
+      // HLO module, but we don't need the actual literal data.
+      if (instruction.has_literal()) {
+        LiteralProto literal;
+        *literal.mutable_shape() = instruction.literal().shape();
+        *instruction.mutable_literal() = std::move(literal);
+      }
+    }
+  }
+}
+
 absl::StatusOr<std::unique_ptr<CpuExecutable>>
 CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
   TraceMe trace([&] {
@@ -1444,6 +1469,7 @@ CpuCompiler::CompileLegacyCpuExecutable(std::unique_ptr<HloModule> module) {
     *hlo_proto->mutable_hlo_module() = cpu_executable->module().ToProto();
     *hlo_proto->mutable_buffer_assignment() =
         cpu_executable->buffer_assignment().ToProto();
+    StripPayloadFromLiteralProto(*hlo_proto);
     cpu_executable->set_hlo_proto(std::move(hlo_proto));
     return cpu_executable;
   };
