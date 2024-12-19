@@ -374,6 +374,7 @@ gentbl_cc_library(
 cc_library(
     name = "xla_triton_passes",
     srcs = [
+        "xla_triton_int4_passes.cc",
         "xla_triton_prevent_mmav3_loop_unrolling_pass.cc",
         "xla_triton_sparse_passes.cc",
     ],
@@ -383,9 +384,12 @@ cc_library(
     deps = [
         ":xla_triton",
         ":xla_triton_passes_inc_gen",
+        "//xla/service/llvm_ir:llvm_util",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:GPUDialect",
         "@llvm-project//mlir:GPUToNVVMTransforms",
         "@llvm-project//mlir:IR",
@@ -393,6 +397,7 @@ cc_library(
         "@llvm-project//mlir:NVVMDialect",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
         "@triton//:TritonAnalysis",
@@ -567,17 +572,55 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status_matchers",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:path",
-        "@local_tsl//tsl/platform:status_matchers",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
+    ],
+)
+
+xla_test(
+    name = "triton_fusion_emitter_int4_device_test",
+    srcs = if_gpu_is_configured(["triton_fusion_emitter_int4_device_test.cc"]),
+    # TODO(b/372714955): Fix the memory leak!
+    backend_args = if_google(
+        {
+            "gpu_h100": ["--heap_check="],
+            "gpu_a100": ["--heap_check="],
+        },
+        {},
+    ),
+    backends = [
+        "gpu_a100",
+        "gpu_h100",
+        "gpu_b100",
+        "gpu_amd_any",
+    ],
+    shard_count = 20,
+    tags = [
+        "no_mac",
+    ],
+    deps = [
+        "//xla:autotuning_proto_cc",
+        "//xla:error_spec",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:filecheck",
+        "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu/tests:gpu_codegen_test",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@local_tsl//tsl/platform:path",
     ],
 )
 

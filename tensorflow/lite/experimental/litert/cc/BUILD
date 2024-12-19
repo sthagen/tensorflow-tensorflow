@@ -14,7 +14,11 @@
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = ["//tensorflow/lite/experimental/litert:__subpackages__"],
+    default_visibility = [
+        # copybara:uncomment "//third_party/mediapipe/calculators/tensor:__subpackages__",
+        # copybara:uncomment "//third_party/odml/infra:__subpackages__",
+        "//tensorflow/lite/experimental/litert:__subpackages__",
+    ],
 )
 
 cc_library(
@@ -36,6 +40,7 @@ cc_library(
         ":litert_expected",
         "//tensorflow/lite/experimental/litert/c:litert_any",
         "//tensorflow/lite/experimental/litert/c:litert_common",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
