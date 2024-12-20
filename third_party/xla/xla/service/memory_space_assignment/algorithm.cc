@@ -286,11 +286,11 @@ std::vector<MsaBufferInterval> FindCrossProgramPrefetchCandidates(
     interval.need_allocation = true;
     interval.colocations = {++buffer.values().begin(), buffer.values().end()};
     if (IsCrossProgramPrefetchCandidate(*value, alias_analysis, options)) {
-      candidates.emplace_back(interval);
+      candidates.push_back(interval);
     } else if (MemorySpaceAssignmentUtils::
                    DoesCrossProgramPrefetchBufferMatchAnyFilter(
                        options.msa_sort_order_overrides, interval)) {
-      candidates.emplace_back(interval);
+      candidates.push_back(interval);
     }
   }
 
@@ -3298,15 +3298,10 @@ void MsaAlgorithm::AllocateCrossProgramPrefetchBuffer(
   }
 
   int64_t end_of_program_prefetch_end_time = instruction_schedule.size();
-  int64_t end_of_program_prefetch_latest_start_time =
-      options_.prefetch_interval_picker->LatestPrefetchStartTime(
-          buffer->defining_position().shape(), last_use_time,
-          end_of_program_prefetch_end_time, nullptr);
   int64_t end_of_program_inclusive_prefetch_start_time =
       options_.prefetch_interval_picker->PreferredPrefetchStartTime(
           buffer->defining_position().shape(), last_use_time,
-          end_of_program_prefetch_latest_start_time,
-          end_of_program_prefetch_end_time);
+          end_of_program_prefetch_end_time, end_of_program_prefetch_end_time);
   VLOG(2) << "last use time = " << last_use_time
           << ", end-of-program inclusive prefetch start time = "
           << end_of_program_inclusive_prefetch_start_time;
