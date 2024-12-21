@@ -22,10 +22,13 @@
 #include <utility>
 #include <vector>
 
+#include "tensorflow/lite/experimental/litert/cc/litert_event.h"
+
 #if defined(__ANDROID__)
 #include <android/hardware_buffer.h>
 #endif
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/compiler/mlir/lite/allocation.h"
 #include "tensorflow/lite/c/common.h"
@@ -52,6 +55,7 @@
 #include "tensorflow/lite/model_builder.h"
 #include "tensorflow/lite/stderr_reporter.h"
 
+using litert::Error;
 using litert::Expected;
 using litert::OwningBufferRef;
 using litert::TensorBuffer;
@@ -291,7 +295,8 @@ Expected<void> LiteRtCompiledModelT::RegisterBuffer(
       auto lock_and_addr = TensorBufferScopedLock::Create(buffer);
       if (!lock_and_addr) {
         return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-                          "Failed to lock input tensor buffer");
+                          absl::StrCat("Failed to lock input tensor buffer: ",
+                                       lock_and_addr.Error().Message()));
       }
       scoped_locks.push_back(std::move(lock_and_addr->first));
       TfLiteCustomAllocation custom_allocation{lock_and_addr->second,
@@ -333,6 +338,32 @@ Expected<void> LiteRtCompiledModelT::Run(
                       "Output buffer size mismatch");
   }
 
+  // In general output buffer events are assigned by the runtime and not the
+  // caller; here we check for any violation of that condition.
+  for (auto litert_output_buffer : output_buffers) {
+    if (litert_output_buffer->HasEvent()) {
+      return Error(kLiteRtStatusErrorInvalidArgument,
+                   "Output buffers cannot have events attached");
+    }
+  }
+
+  // TODO: If input buffers have events, we wait on them before we launch the
+  // inference. This is inefficient when using HW acceleration, since in that
+  // case it would be best to make the HW accelerator wait for those events as
+  // opposed to blocking the CPU here.
+  for (auto input_buffer : input_buffers) {
+    if (input_buffer->HasEvent()) {
+      auto litert_event = input_buffer->GetEvent();
+      if (!litert_event) {
+        return litert_event.Error();
+      }
+      litert::Event event(*litert_event, /*owned=*/false);
+      if (auto status = event.Wait(/*timeout_in_ms=*/-1); !status) {
+        return status.Error();
+      }
+    }
+  }
+
   std::vector<TensorBufferScopedLock> scoped_locks;
   scoped_locks.reserve(num_inputs + num_outputs);
   for (int i = 0; i < num_inputs; ++i) {
@@ -343,7 +374,8 @@ Expected<void> LiteRtCompiledModelT::Run(
                        /*is_input=*/true, scoped_locks);
     if (!res) {
       return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-                        "Failed to register input tensor buffer");
+                        absl::StrCat("Failed to register input tensor buffer: ",
+                                     res.Error().Message()));
     }
   }
 
@@ -354,8 +386,10 @@ Expected<void> LiteRtCompiledModelT::Run(
         RegisterBuffer(runner, output_tensor, output_name, output_buffers[i],
                        /*is_input=*/false, scoped_locks);
     if (!res) {
-      return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-                        "Failed to register output tensor buffer");
+      return Unexpected(
+          kLiteRtStatusErrorRuntimeFailure,
+          absl::StrCat("Failed to register output tensor buffer: ",
+                       res.Error().Message()));
     }
   }
 

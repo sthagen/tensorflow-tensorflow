@@ -52,6 +52,8 @@ class ParallelLoopRunner {
   static tsl::AsyncValueRef<tsl::Chain> TakeDoneEvent(
       ParallelLoopRunner&& runner);
 
+  using Task1D = std::function<void(size_t offset)>;
+
   using Task1DTile1D = std::function<void(size_t offset, size_t extent)>;
 
   using Task2DTile1D =
@@ -60,6 +62,12 @@ class ParallelLoopRunner {
   using Task3DTile2D =
       std::function<void(size_t offset_i, size_t offset_j, size_t offset_k,
                          size_t extent_j, size_t extent_k)>;
+
+  // This function implements a parallel version of a following loop:
+  //
+  //   for (size_t i = 0; i < range; i++)
+  //     task(i);
+  void Parallelize(size_t range, Task1D task);
 
   // This function implements a parallel version of a following loop:
   //
@@ -96,8 +104,6 @@ class ParallelLoopRunner {
   size_t num_threads() const;
 
  private:
-  using ParallelTask = std::function<void(size_t task_index)>;
-
   // When parallelizing loops, we split the loop iteration space of `num_tasks`
   // size into `num_parallel_tasks` parallel tasks, each of which processes
   // `parallel_task_size` original tasks sequentially on a single thread. We do
@@ -120,9 +126,10 @@ class ParallelLoopRunner {
   // Schedules tasks in the [start_index, end_index) range into the Eigen thread
   // pool using recursive work splitting. Executes the `start_index` task in the
   // caller thread.
+  template <typename ParallelTask>
   void Parallelize(tsl::CountDownAsyncValueRef<tsl::Chain> count_down,
                    size_t start_index, size_t end_index,
-                   ParallelTask parallel_task);
+                   ParallelTask&& parallel_task);
 
   // Schedules `task` as the AndThen callback of the `done_event_`. Updates
   // `done_event_` to the new completion event.
