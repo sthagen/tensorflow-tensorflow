@@ -31,6 +31,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/attributes.h"
 #include "absl/base/call_once.h"
 #include "absl/base/dynamic_annotations.h"
 #include "absl/base/optimization.h"
@@ -51,10 +52,10 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/logging.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/logging.h"
-#include "tsl/platform/statusor.h"
 #include "tsl/profiler/lib/traceme.h"
 
 namespace xla::cpu {
@@ -148,125 +149,156 @@ template <size_t n>
 struct Value {
   Value(const Ref<n>& ref);  // NOLINT
 
-  const void* compared_value(size_t i) const { return value[i].data(); }
+  const void* compared_value(size_t i) const { return values[i].data(); }
 
   // Use properly aligned byte array to store primitive values.
   using ValueStorage = std::array<std::byte, kMaxElementSize>;
-  alignas(alignof(std::max_align_t)) std::array<ValueStorage, n> value;
-  std::array<uint8_t, n> value_sizes;
+
+  alignas(alignof(std::max_align_t)) std::array<ValueStorage, n> values;
+  std::array<uint8_t, n> primitive_sizes;
 };
 
 struct DValue {
   DValue(const DRef& ref);  // NOLINT
 
-  const void* compared_value(size_t i) const { return value[i].data(); }
+  const void* compared_value(size_t i) const { return values[i].data(); }
 
   // Use properly aligned byte array to store primitive values.
   using ValueStorage = std::array<std::byte, kMaxElementSize>;
-  std::vector<ValueStorage> value;
-  std::vector<uint8_t> value_sizes;
+
   size_t n;
+  std::vector<ValueStorage> values;      // size == n
+  std::vector<uint8_t> primitive_sizes;  // size == n
 };
 
 // Reference to values stored in the input buffers.
 template <size_t n>
 struct Ref {
-  Ref(std::array<std::byte*, n> ptr, std::array<uint8_t, n> ptr_sizes)
-      : ptr(ptr), ptr_sizes(ptr_sizes) {}
+  Ref(std::array<std::byte*, n> ptrs, std::array<uint8_t, n> primitive_sizes)
+      : ptrs(ptrs), primitive_sizes(primitive_sizes) {}
 
   Ref& operator=(const Value<n>& value);
   Ref& operator=(const Ref<n>& other);
 
-  const void* compared_value(size_t i) const { return ptr[i]; }
+  const void* compared_value(size_t i) const { return ptrs[i]; }
 
-  std::array<std::byte*, n> ptr;
-  std::array<uint8_t, n> ptr_sizes;
+  std::array<std::byte*, n> ptrs;
+  std::array<uint8_t, n> primitive_sizes;
 };
 
 struct DRef {
-  DRef(std::vector<std::byte*> ptr, std::vector<uint8_t> ptr_sizes)
-      : ptr(ptr), ptr_sizes(ptr_sizes), n(ptr.size()) {}
+  DRef(std::vector<std::byte*> ptrs, std::vector<uint8_t> primitive_sizes)
+      : n(ptrs.size()),
+        ptrs(std::move(ptrs)),
+        primitive_sizes(std::move(primitive_sizes)) {}
 
   DRef& operator=(const DValue& value);
   DRef& operator=(const DRef& other);
 
-  const void* compared_value(size_t i) const { return ptr[i]; }
+  const void* compared_value(size_t i) const { return ptrs[i]; }
 
-  std::vector<std::byte*> ptr;
-  std::vector<uint8_t> ptr_sizes;
-  const size_t n;
+  size_t n;
+  std::vector<std::byte*> ptrs;          // size == n
+  std::vector<uint8_t> primitive_sizes;  // size == n
 };
 
-template <size_t n>
-Value<n>::Value(const Ref<n>& ref) : value_sizes(ref.ptr_sizes) {
-  for (size_t i = 0; i < n; ++i) {
-    std::memcpy(value[i].data(), ref.ptr[i], ref.ptr_sizes[i]);
+// We know that we can only copy up to 16 bytes for the largest element type
+// and can specialize `std::memcpy` to allow LLVM to inline it with statically
+// known sizes.
+static ABSL_ATTRIBUTE_ALWAYS_INLINE void Memcpy(void* __restrict dest,
+                                                const void* __restrict src,
+                                                size_t n) {
+  switch (n) {
+    case 1:
+      std::memcpy(dest, src, 1);
+      break;
+    case 2:
+      std::memcpy(dest, src, 2);
+      break;
+    case 4:
+      std::memcpy(dest, src, 4);
+      break;
+    case 8:
+      std::memcpy(dest, src, 8);
+      break;
+    case 16:
+      std::memcpy(dest, src, 16);
+      break;
+    default:
+      LOG(FATAL) << "Unsupported memcpy size: " << n;
   }
 }
 
-DValue::DValue(const DRef& ref)
-    : value_sizes(ref.ptr_sizes), n(ref.ptr.size()) {
-  value.reserve(n);
+template <size_t n>
+ABSL_ATTRIBUTE_ALWAYS_INLINE Value<n>::Value(const Ref<n>& ref)
+    : primitive_sizes(ref.primitive_sizes) {
   for (size_t i = 0; i < n; ++i) {
-    value.emplace_back();
-    std::memcpy(value[i].data(), ref.ptr[i], ref.ptr_sizes[i]);
+    Memcpy(values[i].data(), ref.ptrs[i], ref.primitive_sizes[i]);
+  }
+}
+
+ABSL_ATTRIBUTE_ALWAYS_INLINE DValue::DValue(const DRef& ref)
+    : n(ref.ptrs.size()), values(n), primitive_sizes(ref.primitive_sizes) {
+  for (size_t i = 0; i < n; ++i) {
+    Memcpy(values[i].data(), ref.ptrs[i], ref.primitive_sizes[i]);
   }
 }
 
 template <size_t n>
-Ref<n>& Ref<n>::operator=(const Value<n>& value) {
-  DCHECK(ptr_sizes == value.value_sizes);
+ABSL_ATTRIBUTE_ALWAYS_INLINE Ref<n>& Ref<n>::operator=(const Value<n>& value) {
   for (size_t i = 0; i < n; ++i) {
-    std::memcpy(ptr[i], value.value[i].data(), value.value_sizes[i]);
+    DCHECK_EQ(primitive_sizes[i], value.primitive_sizes[i]);
+    Memcpy(ptrs[i], value.values[i].data(), value.primitive_sizes[i]);
   }
   return *this;
 }
 
-DRef& DRef::operator=(const DValue& value) {
-  DCHECK(ptr_sizes == value.value_sizes);
-  for (size_t i = 0; i < n; ++i) {
-    std::memcpy(ptr[i], value.value[i].data(), value.value_sizes[i]);
-  }
-  return *this;
-}
-
 template <size_t n>
-Ref<n>& Ref<n>::operator=(const Ref<n>& other) {
-  DCHECK(ptr_sizes == other.ptr_sizes);
+ABSL_ATTRIBUTE_ALWAYS_INLINE Ref<n>& Ref<n>::operator=(const Ref<n>& other) {
   for (size_t i = 0; i < n; ++i) {
-    std::memcpy(ptr[i], other.ptr[i], other.ptr_sizes[i]);
+    DCHECK_EQ(primitive_sizes[i], other.primitive_sizes[i]);
+    Memcpy(ptrs[i], other.ptrs[i], other.primitive_sizes[i]);
   }
   return *this;
 }
 
-DRef& DRef::operator=(const DRef& other) {
-  DCHECK(ptr_sizes == other.ptr_sizes);
-  const size_t n = other.ptr.size();
+ABSL_ATTRIBUTE_ALWAYS_INLINE DRef& DRef::operator=(const DValue& value) {
   for (size_t i = 0; i < n; ++i) {
-    std::memcpy(ptr[i], other.ptr[i], other.ptr_sizes[i]);
+    DCHECK_EQ(primitive_sizes[i], value.primitive_sizes[i]);
+    Memcpy(ptrs[i], value.values[i].data(), value.primitive_sizes[i]);
+  }
+  return *this;
+}
+
+ABSL_ATTRIBUTE_ALWAYS_INLINE DRef& DRef::operator=(const DRef& other) {
+  for (size_t i = 0, n = other.ptrs.size(); i < n; ++i) {
+    DCHECK_EQ(primitive_sizes[i], other.primitive_sizes[i]);
+    Memcpy(ptrs[i], other.ptrs[i], other.primitive_sizes[i]);
   }
   return *this;
 }
 
 // Swap function required by `std::sort` and `std::stable_sort` implementations.
 template <size_t n>
-void swap(const Ref<n>& lhs, const Ref<n>& rhs) {
+ABSL_ATTRIBUTE_ALWAYS_INLINE void swap(const Ref<n>& lhs, const Ref<n>& rhs) {
   for (size_t i = 0; i < n; ++i) {
     std::array<std::byte, kMaxElementSize> tmp;
-    std::memcpy(tmp.data(), lhs.ptr[i], lhs.ptr_sizes[i]);
-    std::memcpy(lhs.ptr[i], rhs.ptr[i], rhs.ptr_sizes[i]);
-    std::memcpy(rhs.ptr[i], tmp.data(), lhs.ptr_sizes[i]);
+    DCHECK_EQ(lhs.primitive_sizes[i], rhs.primitive_sizes[i]);
+    size_t primitive_size = lhs.primitive_sizes[i];
+    Memcpy(tmp.data(), lhs.ptrs[i], primitive_size);
+    Memcpy(lhs.ptrs[i], rhs.ptrs[i], primitive_size);
+    Memcpy(rhs.ptrs[i], tmp.data(), primitive_size);
   }
 }
 
-void swap(const DRef& lhs, const DRef& rhs) {
-  DCHECK(lhs.ptr_sizes == rhs.ptr_sizes);
-  const size_t n = lhs.ptr.size();
-  for (size_t i = 0; i < n; ++i) {
+ABSL_ATTRIBUTE_ALWAYS_INLINE void swap(const DRef& lhs, const DRef& rhs) {
+  for (size_t i = 0, n = lhs.ptrs.size(); i < n; ++i) {
     std::array<std::byte, kMaxElementSize> tmp;
-    std::memcpy(tmp.data(), lhs.ptr[i], lhs.ptr_sizes[i]);
-    std::memcpy(lhs.ptr[i], rhs.ptr[i], rhs.ptr_sizes[i]);
-    std::memcpy(rhs.ptr[i], tmp.data(), lhs.ptr_sizes[i]);
+    DCHECK_EQ(lhs.primitive_sizes[i], rhs.primitive_sizes[i]);
+    size_t primitive_size = lhs.primitive_sizes[i];
+    Memcpy(tmp.data(), lhs.ptrs[i], primitive_size);
+    Memcpy(lhs.ptrs[i], rhs.ptrs[i], primitive_size);
+    Memcpy(rhs.ptrs[i], tmp.data(), primitive_size);
   }
 }
 
@@ -277,31 +309,31 @@ struct Ptr {
 
   Ptr() = default;
 
-  Ptr(std::array<std::byte*, n> ptr, std::array<uint8_t, n> ptr_sizes)
-      : ptr(ptr), ptr_sizes(ptr_sizes) {}
+  Ptr(std::array<std::byte*, n> ptrs, std::array<uint8_t, n> primitive_sizes)
+      : ptrs(ptrs), primitive_sizes(primitive_sizes) {}
 
-  Ref<n> operator*() const { return Ref<n>{ptr, ptr_sizes}; }
+  Ref<n> operator*() const { return Ref<n>{ptrs, primitive_sizes}; }
 
   Ptr& operator+=(difference_type diff) {
-    for (size_t i = 0; i < n; ++i) ptr[i] += diff * ptr_sizes[i];
+    for (size_t i = 0; i < n; ++i) ptrs[i] += diff * primitive_sizes[i];
     return *this;
   }
 
   Ptr& operator-=(difference_type diff) {
-    for (size_t i = 0; i < n; ++i) ptr[i] -= diff * ptr_sizes[i];
+    for (size_t i = 0; i < n; ++i) ptrs[i] -= diff * primitive_sizes[i];
     return *this;
   }
 
   Ptr operator+(difference_type diff) const {
-    std::array<std::byte*, n> upd;
-    for (size_t i = 0; i < n; ++i) upd[i] = ptr[i] + diff * ptr_sizes[i];
-    return Ptr{upd, ptr_sizes};
+    Ptr upd(ptrs, primitive_sizes);
+    upd += diff;
+    return upd;
   }
 
   Ptr operator-(difference_type diff) const {
-    std::array<std::byte*, n> upd;
-    for (size_t i = 0; i < n; ++i) upd[i] = ptr[i] - diff * ptr_sizes[i];
-    return Ptr{upd, ptr_sizes};
+    Ptr upd(ptrs, primitive_sizes);
+    upd -= diff;
+    return upd;
   }
 
   // In all comparison operators defined below we use only the ptr at index 0,
@@ -309,19 +341,19 @@ struct Ptr {
   // implementation detail of sort iterator.
 
   difference_type operator-(const Ptr& rhs) const {
-    DCHECK(ptr_sizes == rhs.ptr_sizes);
-    return (ptr[0] - rhs.ptr[0]) / ptr_sizes[0];
+    DCHECK_EQ(primitive_sizes[0], rhs.primitive_sizes[0]);
+    return (ptrs[0] - rhs.ptrs[0]) / primitive_sizes[0];
   }
 
-  bool operator==(const Ptr& rhs) const { return ptr[0] == rhs.ptr[0]; }
-  bool operator!=(const Ptr& rhs) const { return ptr[0] != rhs.ptr[0]; }
-  bool operator>(const Ptr& rhs) const { return ptr[0] > rhs.ptr[0]; }
-  bool operator<(const Ptr& rhs) const { return ptr[0] < rhs.ptr[0]; }
-  bool operator>=(const Ptr& rhs) const { return ptr[0] >= rhs.ptr[0]; }
-  bool operator<=(const Ptr& rhs) const { return ptr[0] <= rhs.ptr[0]; }
+  bool operator==(const Ptr& rhs) const { return ptrs[0] == rhs.ptrs[0]; }
+  bool operator!=(const Ptr& rhs) const { return ptrs[0] != rhs.ptrs[0]; }
+  bool operator>(const Ptr& rhs) const { return ptrs[0] > rhs.ptrs[0]; }
+  bool operator<(const Ptr& rhs) const { return ptrs[0] < rhs.ptrs[0]; }
+  bool operator>=(const Ptr& rhs) const { return ptrs[0] >= rhs.ptrs[0]; }
+  bool operator<=(const Ptr& rhs) const { return ptrs[0] <= rhs.ptrs[0]; }
 
-  std::array<std::byte*, n> ptr;     // pointers into the input buffers
-  std::array<uint8_t, n> ptr_sizes;  // pointers sizes in bytes
+  std::array<std::byte*, n> ptrs;          // pointers into the input buffers
+  std::array<uint8_t, n> primitive_sizes;  // each input's primitive size
 };
 
 struct DPtr {
@@ -329,31 +361,33 @@ struct DPtr {
 
   DPtr() = default;
 
-  DPtr(std::vector<std::byte*> ptr, std::vector<uint8_t> ptr_sizes)
-      : ptr(ptr), ptr_sizes(ptr_sizes), n(ptr.size()) {}
+  DPtr(std::vector<std::byte*> ptrs, std::vector<uint8_t> primitive_sizes)
+      : n(ptrs.size()),
+        ptrs(std::move(ptrs)),
+        primitive_sizes(std::move(primitive_sizes)) {}
 
-  DRef operator*() const { return DRef{ptr, ptr_sizes}; }
+  DRef operator*() const { return DRef{ptrs, primitive_sizes}; }
 
   DPtr& operator+=(difference_type diff) {
-    for (size_t i = 0; i < n; ++i) ptr[i] += diff * ptr_sizes[i];
+    for (size_t i = 0; i < n; ++i) ptrs[i] += diff * primitive_sizes[i];
     return *this;
   }
 
   DPtr& operator-=(difference_type diff) {
-    for (size_t i = 0; i < n; ++i) ptr[i] -= diff * ptr_sizes[i];
+    for (size_t i = 0; i < n; ++i) ptrs[i] -= diff * primitive_sizes[i];
     return *this;
   }
 
   DPtr operator+(difference_type diff) const {
-    std::vector<std::byte*> upd(n);
-    for (size_t i = 0; i < n; ++i) upd[i] = ptr[i] + diff * ptr_sizes[i];
-    return DPtr{upd, ptr_sizes};
+    DPtr upd{ptrs, primitive_sizes};
+    upd += diff;
+    return upd;
   }
 
   DPtr operator-(difference_type diff) const {
-    std::vector<std::byte*> upd(n);
-    for (size_t i = 0; i < n; ++i) upd[i] = ptr[i] - diff * ptr_sizes[i];
-    return DPtr{upd, ptr_sizes};
+    DPtr upd{ptrs, primitive_sizes};
+    upd -= diff;
+    return upd;
   }
 
   // In all comparison operators defined below we use only the ptr at index 0,
@@ -361,20 +395,20 @@ struct DPtr {
   // implementation detail of sort iterator.
 
   difference_type operator-(const DPtr& rhs) const {
-    DCHECK(ptr_sizes == rhs.ptr_sizes);
-    return (ptr[0] - rhs.ptr[0]) / ptr_sizes[0];
+    DCHECK_EQ(primitive_sizes[0], rhs.primitive_sizes[0]);
+    return (ptrs[0] - rhs.ptrs[0]) / primitive_sizes[0];
   }
 
-  bool operator==(const DPtr& rhs) const { return ptr[0] == rhs.ptr[0]; }
-  bool operator!=(const DPtr& rhs) const { return ptr[0] != rhs.ptr[0]; }
-  bool operator>(const DPtr& rhs) const { return ptr[0] > rhs.ptr[0]; }
-  bool operator<(const DPtr& rhs) const { return ptr[0] < rhs.ptr[0]; }
-  bool operator>=(const DPtr& rhs) const { return ptr[0] >= rhs.ptr[0]; }
-  bool operator<=(const DPtr& rhs) const { return ptr[0] <= rhs.ptr[0]; }
+  bool operator==(const DPtr& rhs) const { return ptrs[0] == rhs.ptrs[0]; }
+  bool operator!=(const DPtr& rhs) const { return ptrs[0] != rhs.ptrs[0]; }
+  bool operator>(const DPtr& rhs) const { return ptrs[0] > rhs.ptrs[0]; }
+  bool operator<(const DPtr& rhs) const { return ptrs[0] < rhs.ptrs[0]; }
+  bool operator>=(const DPtr& rhs) const { return ptrs[0] >= rhs.ptrs[0]; }
+  bool operator<=(const DPtr& rhs) const { return ptrs[0] <= rhs.ptrs[0]; }
 
-  std::vector<std::byte*> ptr;     // pointers into the input buffers
-  std::vector<uint8_t> ptr_sizes;  // pointers sizes in bytes
   size_t n;
+  std::vector<std::byte*> ptrs;          // pointers into the input buffers
+  std::vector<uint8_t> primitive_sizes;  // each input's primitive size
 };
 
 // We rely on `std::sort` and `std::stable_sort` to sort the raw data. We sort
@@ -393,7 +427,7 @@ class SortIterator {
 
   SortIterator() = default;
   SortIterator(pointer ptr, difference_type stride)
-      : ptr_(ptr), stride_(stride) {}
+      : ptr_(std::move(ptr)), stride_(stride) {}
 
   SortIterator(const SortIterator& other) = default;
   SortIterator& operator=(const SortIterator& other) = default;
@@ -539,12 +573,12 @@ static void SortInplace(const SortDims& sort_dims, int64_t offset,
                         absl::Span<const Shape> shapes, bool is_stable,
                         SortThunk::LessThan* less_than) {
   std::array<std::byte*, n> ptr;
-  std::array<uint8_t, n> ptr_sizes;
+  std::array<uint8_t, n> primitive_sizes;
 
   for (size_t i = 0; i < n; ++i) {
     std::byte* base = reinterpret_cast<std::byte*>(data[i].opaque());
-    ptr_sizes[i] = primitive_util::ByteWidth(shapes[i].element_type());
-    ptr[i] = base + offset * ptr_sizes[i];
+    primitive_sizes[i] = primitive_util::ByteWidth(shapes[i].element_type());
+    ptr[i] = base + offset * primitive_sizes[i];
   }
 
   auto compare = [&](const auto& a, const auto& b) {
@@ -557,7 +591,7 @@ static void SortInplace(const SortDims& sort_dims, int64_t offset,
   };
 
   SortIterator<Value<n>, Ref<n>, Ptr<n>> begin(
-      Ptr<n>(ptr, ptr_sizes),
+      Ptr<n>(ptr, primitive_sizes),
       /*stride=*/sort_dims.inner_dim_size);
   if (is_stable) {
     std::stable_sort(begin, begin + sort_dims.sort_dim_size, compare);
@@ -571,12 +605,12 @@ static void DSortInplace(const SortDims& sort_dims, int64_t offset,
                          absl::Span<const Shape> shapes, bool is_stable,
                          SortThunk::LessThan* less_than, size_t n) {
   std::vector<std::byte*> ptr(n);
-  std::vector<uint8_t> ptr_sizes(n);
+  std::vector<uint8_t> primitive_sizes(n);
 
   for (size_t i = 0; i < n; ++i) {
     std::byte* base = reinterpret_cast<std::byte*>(data[i].opaque());
-    ptr_sizes[i] = primitive_util::ByteWidth(shapes[i].element_type());
-    ptr[i] = base + offset * ptr_sizes[i];
+    primitive_sizes[i] = primitive_util::ByteWidth(shapes[i].element_type());
+    ptr[i] = base + offset * primitive_sizes[i];
   }
 
   auto compare = [&](const auto& a, const auto& b) {
@@ -588,7 +622,7 @@ static void DSortInplace(const SortDims& sort_dims, int64_t offset,
     return (*less_than)(data.data());
   };
 
-  SortIterator<DValue, DRef, DPtr> begin(DPtr(ptr, ptr_sizes),
+  SortIterator<DValue, DRef, DPtr> begin(DPtr(ptr, primitive_sizes),
                                          /*stride=*/sort_dims.inner_dim_size);
   if (is_stable) {
     std::stable_sort(begin, begin + sort_dims.sort_dim_size, compare);
@@ -638,10 +672,8 @@ static absl::Status SortInplace(
           type);
     };
 
-    // use "sort" for statically known number of sorted inputs (expected to be
+    // Use "sort" for statically known number of sorted inputs (expected to be
     // faster) and "dsort" for dynamically known number of sorted inputs.
-    // for 100 elements stable sort is 1.5 times faster than stable dsort.
-    // for 100 elements unstable sort is 2.47 times faster than unstable dsort.
     switch (data.size()) {
       case 1:
         DCHECK_EQ(shapes.size(), 1);
@@ -695,33 +727,6 @@ static absl::Status SortInplace(
         break;
       case 16:
         sort(std::integral_constant<size_t, 16>{});
-        break;
-      case 17:
-        sort(std::integral_constant<size_t, 17>{});
-        break;
-      case 18:
-        sort(std::integral_constant<size_t, 18>{});
-        break;
-      case 19:
-        sort(std::integral_constant<size_t, 19>{});
-        break;
-      case 20:
-        sort(std::integral_constant<size_t, 20>{});
-        break;
-      case 21:
-        sort(std::integral_constant<size_t, 21>{});
-        break;
-      case 22:
-        sort(std::integral_constant<size_t, 22>{});
-        break;
-      case 23:
-        sort(std::integral_constant<size_t, 23>{});
-        break;
-      case 24:
-        sort(std::integral_constant<size_t, 24>{});
-        break;
-      case 25:
-        sort(std::integral_constant<size_t, 25>{});
         break;
       default:
         dsort(data.size());
