@@ -232,3 +232,52 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
     ],
 )
+
+cc_library(
+    name = "llvm_ir_kernel_spec",
+    srcs = ["llvm_ir_kernel_spec.cc"],
+    hdrs = ["llvm_ir_kernel_spec.h"],
+    deps = [
+        "//xla/codegen:kernel_spec",
+        "//xla/codegen:llvm_ir_kernel_source",
+        "//xla/service:buffer_assignment",
+        "//xla/stream_executor:launch_dim",
+    ],
+)
+
+cc_library(
+    name = "elemental_kernel_emitter",
+    srcs = ["elemental_kernel_emitter.cc"],
+    hdrs = ["elemental_kernel_emitter.h"],
+    deps = [
+        ":kernel_api_ir_builder",
+        ":llvm_ir_kernel_spec",
+        ":target_machine_features",
+        "//xla:shape_util",
+        "//xla:util",
+        "//xla/codegen:kernel_emitter",
+        "//xla/codegen:kernel_spec",
+        "//xla/codegen:llvm_ir_kernel_source",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:buffer_assignment",
+        "//xla/service:elemental_ir_emitter",
+        "//xla/service/cpu:backend_config_proto_cc",
+        "//xla/service/cpu:elemental_ir_emitter",
+        "//xla/service/cpu:ir_emitter",
+        "//xla/service/cpu:parallel_loop_emitter",
+        "//xla/service/cpu:shape_partition",
+        "//xla/service/llvm_ir:ir_array",
+        "//xla/service/llvm_ir:llvm_util",
+        "//xla/service/llvm_ir:loop_emitter",
+        "//xla/stream_executor:launch_dim",
+        "//xla/tsl/platform:errors",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:JITLink",
+        "@llvm-project//llvm:ir_headers",
+        "@local_tsl//tsl/platform:statusor",
+    ],
+)
