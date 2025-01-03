@@ -139,35 +139,48 @@ namespace {
 // The size of the largest element we support (std::complex<double>).
 static constexpr size_t kMaxElementSize = 16;
 
+// Type erased storage suitable for storing any primitive type.
+using ValueStorage = std::array<std::byte, kMaxElementSize>;
+
 // Pointers to the input arrays together with their primitive sizes.
 template <size_t n>
 class Inputs {
  public:
-  Inputs(std::array<std::byte*, n> ptrs, std::array<size_t, n> primitive_sizes)
-      : ptrs_(ptrs), primitive_sizes_(primitive_sizes) {}
+  Inputs(std::array<std::byte*, n> ptrs,
+         std::array<size_t, n> primitive_sizes) {
+    for (size_t i = 0; i < n; ++i) {
+      ptrs_and_primitive_sizes_[i] = {ptrs[i], primitive_sizes[i]};
+    }
+  }
 
   // Accessing arrays with `operator[]` has zero overheads, so we don't need to
   // use pointers to data in contrast to `DInputs` below.
 
-  std::byte* ptr(size_t i, size_t offset) {
+  std::byte* ptr(size_t i, size_t offset) const {
     DCHECK_LT(i, n) << "Input index out of bounds";
-    return ptrs_[i] + offset * primitive_size(i);
+    auto& [ptr, primitive_size] = ptrs_and_primitive_sizes_[i];
+    return ptr + offset * primitive_size;
   }
 
-  size_t primitive_size(size_t i) { return primitive_sizes_[i]; }
+  size_t primitive_size(size_t i) const {
+    return ptrs_and_primitive_sizes_[i].second;
+  }
 
  private:
-  std::array<std::byte*, n> ptrs_;         // pointers into the input buffers
-  std::array<size_t, n> primitive_sizes_;  // each input's primitive size
+  // Pointers into the input buffers and each input's primitive size. Keep
+  // pointers and primitives sizes next to each other to avoid cache misses
+  // on a hot path.
+  std::array<std::pair<std::byte*, size_t>, n> ptrs_and_primitive_sizes_;
 };
 
 class DInputs {
  public:
   DInputs(std::vector<std::byte*> ptrs, std::vector<size_t> primitive_sizes)
-      : n_(ptrs.size()),
-        ptrs_(std::move(ptrs)),
-        primitive_sizes_(std::move(primitive_sizes)) {
-    DCHECK_EQ(ptrs_.size(), primitive_sizes_.size());
+      : n_(ptrs.size()), ptrs_and_primitive_sizes_(ptrs.size()) {
+    DCHECK_EQ(ptrs.size(), primitive_sizes.size());
+    for (size_t i = 0; i < ptrs.size(); ++i) {
+      ptrs_and_primitive_sizes_[i] = {ptrs[i], primitive_sizes[i]};
+    }
   }
 
   size_t n() const { return n_; }
@@ -177,17 +190,23 @@ class DInputs {
   // every call. We know that we are not going to access out of bounds, so we
   // use a pointer to data instead.
 
-  std::byte* ptr(size_t i, size_t offset) {
+  std::byte* ptr(size_t i, size_t offset) const {
     DCHECK_LT(i, n_) << "Input index out of bounds";
-    return ptrs_.data()[i] + offset * primitive_size(i);
+    auto& [ptr, primitive_size] = ptrs_and_primitive_sizes_.data()[i];
+    return ptr + offset * primitive_size;
   }
 
-  size_t primitive_size(size_t i) { return primitive_sizes_.data()[i]; }
+  size_t primitive_size(size_t i) const {
+    return ptrs_and_primitive_sizes_.data()[i].second;
+  }
 
  private:
-  size_t n_;                             // number of sorted inputs
-  std::vector<std::byte*> ptrs_;         // pointers into the input buffers
-  std::vector<size_t> primitive_sizes_;  // each input's primitive size
+  size_t n_;  // number of sorted inputs
+
+  // Pointers into the input buffers and each input's primitive size. Keep
+  // pointers and primitives sizes next to each other to avoid cache misses
+  // on a hot path.
+  std::vector<std::pair<std::byte*, size_t>> ptrs_and_primitive_sizes_;
 };
 
 // Forward declare reference type defined below.
@@ -200,24 +219,15 @@ template <size_t n>
 struct Value {
   Value(const Ref<n>& ref);  // NOLINT
 
-  const void* compared_value(size_t i) const { return values[i].data(); }
+  void FillComparedValues(const void** __restrict compared_values) const;
 
-  // Use properly aligned byte array to store primitive values.
-  using ValueStorage = std::array<std::byte, kMaxElementSize>;
-
-  alignas(alignof(std::max_align_t)) std::array<ValueStorage, n> values;
+  std::array<ValueStorage, n> values;
 };
 
 struct DValue {
   DValue(const DRef& ref);  // NOLINT
 
-  const void* compared_value(size_t i) const {
-    DCHECK_LT(i, values.size()) << "Input index out of bounds";
-    return values.data()[i].data();
-  }
-
-  // Use properly aligned byte array to store primitive values.
-  using ValueStorage = std::array<std::byte, kMaxElementSize>;
+  void FillComparedValues(const void** __restrict compared_values) const;
 
   std::vector<ValueStorage> values;
 };
@@ -225,34 +235,34 @@ struct DValue {
 // Reference to values stored in the input buffers.
 template <size_t n>
 struct Ref {
-  Ref(Inputs<n>* inputs, size_t offset) : inputs(inputs), offset(offset) {}
+  Ref(const Inputs<n>* inputs, size_t offset)
+      : inputs(inputs), offset(offset) {}
 
   Ref& operator=(const Value<n>& value);
   Ref& operator=(const Ref<n>& other);
 
+  void FillComparedValues(const void** __restrict compared_values) const;
+
   std::byte* ptr(size_t i) const { return inputs->ptr(i, offset); }
   size_t primitive_size(size_t i) const { return inputs->primitive_size(i); }
 
-  const void* compared_value(size_t i) const { return ptr(i); }
-
-  Inputs<n>* inputs;
+  const Inputs<n>* inputs;
   size_t offset;
 };
 
 struct DRef {
-  DRef(DInputs* inputs, size_t offset) : inputs(inputs), offset(offset) {}
+  DRef(const DInputs* inputs, size_t offset) : inputs(inputs), offset(offset) {}
 
   DRef& operator=(const DValue& value);
   DRef& operator=(const DRef& other);
 
-  size_t n() const { return inputs->n(); }
+  void FillComparedValues(const void** __restrict compared_values) const;
 
+  size_t n() const { return inputs->n(); }
   std::byte* ptr(size_t i) const { return inputs->ptr(i, offset); }
   size_t primitive_size(size_t i) const { return inputs->primitive_size(i); }
 
-  const void* compared_value(size_t i) const { return ptr(i); }
-
-  DInputs* inputs;
+  const DInputs* inputs;
   size_t offset;
 };
 
@@ -326,9 +336,27 @@ ABSL_ATTRIBUTE_ALWAYS_INLINE Value<n>::Value(const Ref<n>& ref) {
   }
 }
 
+template <size_t n>
+ABSL_ATTRIBUTE_ALWAYS_INLINE void Value<n>::FillComparedValues(
+    const void** __restrict compared_values) const {
+  for (const ValueStorage& value : values) {
+    *compared_values = value.data();
+    compared_values += 2;
+  }
+}
+
 ABSL_ATTRIBUTE_ALWAYS_INLINE DValue::DValue(const DRef& ref) : values(ref.n()) {
   for (size_t i = 0, end = ref.n(); i < end; ++i) {
     Memcpy(values.data()[i].data(), ref.ptr(i), ref.primitive_size(i));
+  }
+}
+
+ABSL_ATTRIBUTE_ALWAYS_INLINE void DValue::FillComparedValues(
+    const void** __restrict compared_values) const {
+#pragma unroll 8
+  for (const ValueStorage& value : values) {
+    *compared_values = value.data();
+    compared_values += 2;
   }
 }
 
@@ -349,6 +377,15 @@ ABSL_ATTRIBUTE_ALWAYS_INLINE Ref<n>& Ref<n>::operator=(const Ref<n>& other) {
   return *this;
 }
 
+template <size_t n>
+ABSL_ATTRIBUTE_ALWAYS_INLINE void Ref<n>::FillComparedValues(
+    const void** __restrict compared_values) const {
+  for (size_t i = 0; i < n; ++i) {
+    *compared_values = ptr(i);
+    compared_values += 2;
+  }
+}
+
 ABSL_ATTRIBUTE_ALWAYS_INLINE DRef& DRef::operator=(const DValue& value) {
   for (size_t i = 0, end = n(); i < end; ++i) {
     Memcpy(ptr(i), value.values.data()[i].data(), primitive_size(i));
@@ -362,6 +399,15 @@ ABSL_ATTRIBUTE_ALWAYS_INLINE DRef& DRef::operator=(const DRef& other) {
     Memcpy(ptr(i), other.ptr(i), primitive_size(i));
   }
   return *this;
+}
+
+ABSL_ATTRIBUTE_ALWAYS_INLINE void DRef::FillComparedValues(
+    const void** __restrict compared_values) const {
+#pragma unroll 8
+  for (size_t i = 0, end = n(); i < end; ++i) {
+    *compared_values = ptr(i);
+    compared_values += 2;
+  }
 }
 
 // Swap function required by `std::sort` and `std::stable_sort` implementations.
@@ -389,7 +435,7 @@ struct Ptr {
 
   Ptr() = default;
 
-  explicit Ptr(Inputs<n>* inputs, size_t offset = 0)
+  explicit Ptr(const Inputs<n>* inputs, size_t offset = 0)
       : inputs(inputs), offset(offset) {}
 
   Ref<n> operator*() const { return Ref<n>{inputs, offset}; }
@@ -423,8 +469,8 @@ struct Ptr {
   bool operator>=(const Ptr& rhs) const { return offset >= rhs.offset; }
   bool operator<=(const Ptr& rhs) const { return offset <= rhs.offset; }
 
-  Inputs<n>* inputs;  // pointer to the input arrays
-  size_t offset;      // offset into the inputs arrays
+  const Inputs<n>* inputs;  // pointer to the input arrays
+  size_t offset;            // offset into the inputs arrays
 };
 
 struct DPtr {
@@ -432,7 +478,7 @@ struct DPtr {
 
   DPtr() = default;
 
-  explicit DPtr(DInputs* inputs, size_t offset = 0)
+  explicit DPtr(const DInputs* inputs, size_t offset = 0)
       : inputs(inputs), offset(offset) {}
 
   DRef operator*() const { return DRef{inputs, offset}; }
@@ -466,8 +512,8 @@ struct DPtr {
   bool operator>=(const DPtr& rhs) const { return offset >= rhs.offset; }
   bool operator<=(const DPtr& rhs) const { return offset <= rhs.offset; }
 
-  DInputs* inputs;  // pointer to the input arrays
-  size_t offset;    // offset into the inputs arrays
+  const DInputs* inputs;  // pointer to the input arrays
+  size_t offset;          // offset into the inputs arrays
 };
 
 // We rely on `std::sort` and `std::stable_sort` to sort the raw data. We sort
@@ -644,10 +690,8 @@ static void SortInplace(const SortDims& sort_dims, int64_t offset,
 
   auto compare = [&](const auto& a, const auto& b) {
     std::array<const void*, 2 * n> values;
-    for (size_t i = 0, j = 0; i < n; i += 1, j += 2) {
-      values[j] = a.compared_value(i);
-      values[j + 1] = b.compared_value(i);
-    }
+    a.FillComparedValues(&values[0]);
+    b.FillComparedValues(&values[1]);
     return (*less_than)(values.data());
   };
 
@@ -680,10 +724,8 @@ static void DSortInplace(const SortDims& sort_dims, int64_t offset,
   std::vector<const void*> values(2 * n);
 
   auto compare = [&, values = values.data()](const auto& a, const auto& b) {
-    for (size_t i = 0, j = 0; i < n; i += 1, j += 2) {
-      values[j] = a.compared_value(i);
-      values[j + 1] = b.compared_value(i);
-    }
+    a.FillComparedValues(&values[0]);
+    b.FillComparedValues(&values[1]);
     return (*less_than)(values);
   };
 

@@ -38,8 +38,11 @@ limitations under the License.
 #include "xla/comparison_util.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/literal.h"
+#include "xla/python/nb_absl_inlined_vector.h"  // IWYU pragma: keep
 #include "xla/python/nb_absl_span.h"  // IWYU pragma: keep
+#include "xla/service/buffer_assignment.h"
 #include "xla/shape.h"
 #include "xla/util.h"
 
@@ -118,11 +121,8 @@ class DummyAddKernelRunner final : public KernelRunner {
 NB_MODULE(_extension, kernel_runner_module) {
   namespace nb = nanobind;
 
-  nb::class_<KernelSource>(kernel_runner_module, "KernelSource");
-
-  nb::class_<LlvmIrKernelSource, KernelSource>(kernel_runner_module,
-                                               "LlvmIrKernelSource")
-      .def("__str__", &LlvmIrKernelSource::ToString);
+  nb::class_<KernelSource>(kernel_runner_module, "KernelSource")
+      .def("__str__", &KernelSource::ToString);
 
   nb::class_<KernelSpec>(kernel_runner_module, "KernelSpec")
       .def("kernel_source", &KernelSpec::kernel_source,
@@ -173,6 +173,20 @@ NB_MODULE(_extension, kernel_runner_module) {
       .def_static("create_ternary", &HloInstruction::CreateTernary)
       .def_static("create_variadic", &HloInstruction::CreateVariadic)
       .def_static("create_compare", &CreateComparisonHloInstruction);
+
+  // Accessors
+  hlo_instruction.def("opcode", &HloInstruction::opcode);
+  hlo_instruction.def("shape", &HloInstruction::shape);
+  hlo_instruction.def("operands", &HloInstruction::operands,
+                      nb::rv_policy::reference_internal);
+  hlo_instruction.def(
+      "__str__", [](const HloInstruction& self) { return self.ToString(); });
+
+  nb::class_<BufferAssignment>(kernel_runner_module, "BufferAssignment")
+      .def("__str__", &BufferAssignment::ToString);
+
+  nb::class_<HloSchedule>(kernel_runner_module, "HloSchedule")
+      .def("__str__", &HloSchedule::ToString);
 }
 
 }  // namespace xla
