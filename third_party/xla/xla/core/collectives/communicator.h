@@ -81,7 +81,7 @@ class Communicator {
   // all other devices.
   virtual absl::Status Broadcast(se::DeviceMemoryBase send_buffer,
                                  se::DeviceMemoryBase recv_buffer,
-                                 PrimitiveType dtype, size_t count, size_t root,
+                                 PrimitiveType dtype, size_t count, RankId root,
                                  const Executor& executor) = 0;
 
   // Reduce data in `send_buff` from all devices using the `reduction_kind`
@@ -91,7 +91,6 @@ class Communicator {
                                      se::DeviceMemoryBase recv_buffer,
                                      PrimitiveType dtype, size_t count,
                                      ReductionKind reduction_kind,
-
                                      const Executor& executor) = 0;
 
   // Gather `count` values from all devices into `recv_buffer`, receiving data
