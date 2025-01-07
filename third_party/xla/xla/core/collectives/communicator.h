@@ -18,11 +18,13 @@ limitations under the License.
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "xla/core/collectives/rank_id.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/stream_executor/device_memory.h"
@@ -99,6 +101,23 @@ class Communicator {
                                  se::DeviceMemoryBase recv_buffer,
                                  PrimitiveType dtype, size_t count,
                                  const Executor& executor) = 0;
+
+  // Sends data from `send_buffer` to `target_ranks` and receives data from
+  // `source_rank` into `recv_buffer`. If `source_rank` is not specified, the
+  // output is filled with zeros.
+  virtual absl::Status CollectivePermute(se::DeviceMemoryBase send_buffer,
+                                         se::DeviceMemoryBase recv_buffer,
+                                         PrimitiveType dtype, size_t count,
+                                         std::optional<RankId> source_rank,
+                                         absl::Span<const RankId> target_ranks,
+                                         const Executor& executor) = 0;
+
+  // Sends `count` values from `send_buffers` to other ranks and receives data
+  // from other ranks into `recv_buffers`.
+  virtual absl::Status AllToAll(
+      absl::Span<const se::DeviceMemoryBase> send_buffers,
+      absl::Span<const se::DeviceMemoryBase> recv_buffers, PrimitiveType dtype,
+      size_t count, const Executor& executor) = 0;
 
   // Send data from `send_buff` to rank `peer`.
   virtual absl::Status Send(se::DeviceMemoryBase send_buffer,
