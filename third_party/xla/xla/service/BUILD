@@ -257,11 +257,36 @@ cc_library(
 )
 
 cc_library(
+    name = "collective_permute_utils",
+    srcs = ["collective_permute_utils.cc"],
+    hdrs = ["collective_permute_utils.h"],
+    deps = [
+        "//xla/hlo/ir:hlo",
+        "//xla/service/graphcycles",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_permute_utils_test",
+    srcs = ["collective_permute_utils_test.cc"],
+    deps = [
+        ":collective_permute_utils",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "collective_permute_decomposer",
     srcs = ["collective_permute_decomposer.cc"],
     hdrs = ["collective_permute_decomposer.h"],
     deps = [
         ":collective_ops_utils",
+        ":collective_permute_utils",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -4587,14 +4612,21 @@ cc_library(
     deps = [
         ":computation_placer",
         ":executable",
-        "//xla:status_macros",
-        "//xla:types",
+        ":hlo_module_config",
+        "//xla:literal",
+        "//xla:shape_util",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
