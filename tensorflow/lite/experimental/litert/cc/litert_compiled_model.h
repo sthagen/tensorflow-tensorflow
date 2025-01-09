@@ -69,7 +69,7 @@ class CompiledModel
   // returned object.
   static Expected<CompiledModel> Create(
       litert::Model& model,
-      LiteRtCompilationOptions compilation_options = kLiteRtHwAccelatorNone) {
+      LiteRtCompilationOptions compilation_options = kLiteRtHwAccelatorCpu) {
     LiteRtCompiledModel compiled_model;
     if (auto status = LiteRtCreateCompiledModel(
             model.Get(), compilation_options, &compiled_model);
@@ -119,16 +119,16 @@ class CompiledModel
   Expected<std::vector<TensorBuffer>> CreateOutputBuffers(
       size_t signature_index);
 
-  // Runs the model of the given signature with the provided input/output
+  // Runs the model of the given signature index with the provided input/output
   // TensorBuffers.
   Expected<void> Run(size_t signature_index,
                      const std::vector<TensorBuffer>& input_buffers,
                      const std::vector<TensorBuffer>& output_buffers);
 
-  // Runs the model of the given signature with the provided input/output
+  // Runs the model of the given signature key with the provided input/output
   // TensorBuffer map.
   Expected<void> Run(
-      size_t signature_index,
+      absl::string_view signature_key,
       const absl::flat_hash_map<absl::string_view, TensorBuffer>& input_map,
       const absl::flat_hash_map<absl::string_view, TensorBuffer>& output_map);
 

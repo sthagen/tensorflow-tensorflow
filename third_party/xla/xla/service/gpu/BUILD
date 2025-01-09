@@ -1728,6 +1728,7 @@ xla_test(
         "//xla/service:pattern_matcher_gmock",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/log",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:logging",
     ],
@@ -2318,6 +2319,7 @@ gpu_kernel_library(
         "@local_config_cuda//cuda:cuda_headers",
     ]) + if_rocm_is_configured([
         "@local_config_rocm//rocm:rocm_headers",
+        "@local_config_rocm//rocm:rocm_config",
     ]),
 )
 
@@ -2478,6 +2480,10 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:ml_dtypes",
         "@local_tsl//tsl/platform:statusor",
+    ]) + if_rocm_is_configured([
+        # keep sorted
+        "@local_config_rocm//rocm:rocm_config",
+        "@local_config_rocm//rocm:rocm_headers",
     ]),
 )
 
@@ -2488,7 +2494,9 @@ gpu_kernel_library(
     deps = [
         "//xla:shape_util",
         "//xla:types",
-    ],
+    ] + if_rocm_is_configured([
+        "@local_config_rocm//rocm:rocm_headers",
+    ]),
 )
 
 xla_test(
@@ -2727,6 +2735,8 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:typed_kernel_factory",
         "//xla/stream_executor/gpu:gpu_stream_header",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/platform:errors",
@@ -3071,13 +3081,13 @@ cc_library(
     hdrs = ["gpu_collective_combiner_utils.h"],
     deps = [
         ":backend_configs_cc",
+        ":gpu_hlo_schedule",
         "//xla/hlo/ir:hlo",
         "//xla/service:collective_ops_utils",
         "//xla/service:collective_utils",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@local_tsl//tsl/platform:statusor",
     ],
 )
@@ -3088,7 +3098,6 @@ xla_cc_test(
     deps = [
         ":backend_configs_cc",
         ":gpu_collective_combiner_utils",
-        ":gpu_hlo_schedule",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
@@ -3096,16 +3105,12 @@ xla_cc_test(
         "//xla/hlo/transforms/simplifiers:hlo_dce",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:collective_pipeliner",
-        "//xla/service:collective_utils",
         "//xla/service:hlo_module_config",
         "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
-        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -3116,7 +3121,6 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":gpu_collective_combiner_utils",
-        ":gpu_hlo_schedule",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/transforms/collectives:all_gather_combiner",
@@ -3155,7 +3159,6 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":gpu_collective_combiner_utils",
-        ":gpu_hlo_schedule",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/service:hlo_domain_map",
@@ -3192,7 +3195,6 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":gpu_collective_combiner_utils",
-        ":gpu_hlo_schedule",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/transforms/collectives:all_reduce_combiner",
