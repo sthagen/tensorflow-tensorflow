@@ -100,7 +100,6 @@ cc_library(
     deps = [
         ":cpu_collectives",
         ":in_process_communicator",
-        "//xla:refcounting_hash_map",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
@@ -133,7 +132,6 @@ cc_library(
     hdrs = ["in_process_communicator.h"],
     deps = [
         ":cpu_collectives",
-        "//xla:refcounting_hash_map",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
@@ -142,8 +140,11 @@ cc_library(
         "//xla/core/collectives:rank_id",
         "//xla/service:collective_ops_utils",
         "//xla/service:global_device_id",
+        "//xla/service:rendezvous",
         "//xla/stream_executor:device_memory",
+        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -151,7 +152,6 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:errors",
     ],
 )
 

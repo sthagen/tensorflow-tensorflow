@@ -37,16 +37,10 @@ namespace xla::cpu {
 class InProcessCollectives : public CpuCollectives {
  public:
   absl::StatusOr<std::vector<std::unique_ptr<Communicator>>>
-  CreateCommunicators(int32_t nranks, const CliqueKey& clique_key,
+  CreateCommunicators(const CliqueKey& clique_key,
                       const std::optional<CliqueId>& clique_id,
                       absl::Span<const DeviceRank> ranks,
                       const Config& config) final;
-
- private:
-  absl::Mutex mu_;
-
-  // State shared by all constructed communicators.
-  std::weak_ptr<InProcessCommunicator::State> state_ ABSL_GUARDED_BY(mu_);
 };
 
 }  // namespace xla::cpu

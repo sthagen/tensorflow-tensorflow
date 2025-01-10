@@ -2124,13 +2124,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       int32_setter_for(
           &DebugOptions::set_xla_gpu_executable_warn_stuck_timeout_seconds),
       debug_options->xla_gpu_executable_warn_stuck_timeout_seconds(),
-      "Set timeout for RendezvousSingle stuck warning"));
+      "Set timeout for Rendezvous stuck warning"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_executable_terminate_timeout",
       int32_setter_for(
           &DebugOptions::set_xla_gpu_executable_terminate_timeout_seconds),
       debug_options->xla_gpu_executable_terminate_timeout_seconds(),
-      "Set timeout for RendezvousSingle termination"));
+      "Set timeout for Rendezvous termination"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_disable_binary_libraries",
       bool_setter_for(
@@ -2186,6 +2186,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(),
       "Internal: Enable the RaggedAllToAllDecomposer, an experimental pass "
       "that rewrites ragged-all-to-all as a dense all-to-all operation."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_enable_alltoall_windowed_einsum",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_experimental_enable_alltoall_windowed_einsum),
+      debug_options->xla_gpu_experimental_enable_alltoall_windowed_einsum(),
+      "Enable windowed einsum rewrite for all-to-all+gemm pattern, "
+      "This optimization slices the all-to-all into smaller all-to-alls."
+      "It is an experimental feature."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
