@@ -232,6 +232,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_exhaustive_tiling_search(false);
 
   opts.set_xla_gpu_experimental_enable_triton_heroless_priority_fusion(false);
+  opts.set_xla_gpu_experimental_enable_triton_i4_rewrites(false);
 
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_gb(0);
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_ratio(1.1);
@@ -1644,7 +1645,26 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "xla_gpu_memory_limit_slop_factor",
       int32_setter_for(&DebugOptions::set_xla_gpu_memory_limit_slop_factor),
       debug_options->xla_gpu_memory_limit_slop_factor(),
-      "Slop factor for memory limits in XLA:GPU"));
+      "Slop factor for memory limits in XLA:GPU. This flag serves as a "
+      "multiplier "
+      "applied to the total available memory, creating a threshold that guides "
+      "the "
+      "Latency Hiding Scheduler (LHS) in balancing memory reduction and "
+      "latency "
+      "hiding optimizations. This factor effectively establishes a memory "
+      "limit "
+      "for compiler passes, determining when the scheduler should prioritize: "
+      "  1. Memory reduction: When memory usage approaches or exceeds the "
+      "calculated "
+      "     threshold. "
+      "  2. Latency hiding: When memory usage is below the threshold, allowing "
+      "for "
+      "     more aggressive optimizations that may temporarily increase memory "
+      "usage "
+      "     but improve overall performance. "
+      "By adjusting this factor, users can fine-tune the trade-off between "
+      "memory "
+      "efficiency and performance optimizations. The default value is 95."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_highest_priority_async_stream",
       bool_setter_for(
@@ -2097,6 +2117,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
   flag_list->push_back(tsl::Flag("xla_gpu_enable_triton_gemm_int4",
                                  noop_flag_setter<bool>, true,
                                  "[Deprecated, do not use]"));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_enable_triton_i4_rewrites",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_enable_triton_i4_rewrites),
+      debug_options->xla_gpu_experimental_enable_triton_i4_rewrites(),
+      "When enabled, the Triton emitter for dot will use int4 as native type "
+      "and later the Triton IR will be rewritten by Triton IR rewriting pass "
+      "to use int4 packed into int8."));
   flag_list->push_back(
       tsl::Flag("xla_gpu_async_dot",
                 bool_setter_for(&DebugOptions::set_xla_gpu_async_dot),
