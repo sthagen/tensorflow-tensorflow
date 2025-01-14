@@ -34,7 +34,7 @@ xla_tests_package_groups()
 generate_backend_suites()
 
 # Target to add main for tests. Do not link this target and
-# //third_party/tensorflow/tsl/platform:test_main into the same target.
+# @com_google_googletest//:gtest_main into the same target.
 cc_library(
     name = "xla_internal_test_main",
     testonly = True,
@@ -170,6 +170,7 @@ cc_library(
     srcs = ["hlo_test_base.cc"],
     hdrs = ["hlo_test_base.h"],
     deps = [
+        ":hlo_runner_agnostic_reference_mixin",
         ":hlo_runner_agnostic_test_base",
         ":pjrt_client_registry",
         "//xla:error_spec",
@@ -177,9 +178,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/testlib:filecheck",
-        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/pjrt:pjrt_client",
         "//xla/service:backend",
         "//xla/service:computation_placer_hdr",
@@ -193,16 +192,14 @@ cc_library(
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream_executor_memory_allocator",
         "//xla/tsl/lib/core:status_test_util",
-        "@com_google_absl//absl/base:core_headers",
+        "//xla/tsl/platform:status",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -216,7 +213,6 @@ cc_library(
         ":test_utils",
         "//xla:error_spec",
         "//xla:literal",
-        "//xla:shape_util",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -295,13 +291,10 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/pjrt:pjrt_client",
-        "//xla/pjrt/interpreter:interpreter_client",
         "//xla/service:hlo_runner_interface",
         "//xla/service:hlo_runner_pjrt",
-        "//xla/service:interpreter_plugin",  # reference backend
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
-        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -367,6 +360,37 @@ cc_library(
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:ml_dtypes",
         "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "client_library_test_runner_mixin",
+    testonly = True,
+    hdrs = ["client_library_test_runner_mixin.h"],
+    deps = [
+        ":hlo_runner_agnostic_test_base",
+        ":literal_test_util",
+        "//xla:array2d",
+        "//xla:array3d",
+        "//xla:array4d",
+        "//xla:error_spec",
+        "//xla:execution_options_util",
+        "//xla:literal",
+        "//xla:literal_util",
+        "//xla:shape_util",
+        "//xla:types",
+        "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
+        "//xla/hlo/builder:xla_builder",
+        "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_module_config",
+        "//xla/tsl/lib/core:bitmap",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:logging",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -1124,19 +1148,26 @@ xla_test(
     ],
     deps = [
         ":client_library_test_base",
+        ":hlo_pjrt_interpreter_reference_mixin",
         ":hlo_pjrt_test_base",
+        ":literal_test_util",
         ":test_macros_header",
         ":xla_internal_test_main",
         "//xla:array",
+        "//xla:error_spec",
         "//xla:execution_options_util",
         "//xla:literal",
         "//xla:literal_util",
+        "//xla:shape_util",
         "//xla/hlo/builder:xla_builder",
+        "//xla/hlo/builder:xla_computation",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:test",
         "//xla/service",
         "//xla/service:hlo_module_config",
-        "@local_tsl//tsl/platform:statusor",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -2597,6 +2628,7 @@ xla_test(
         "//xla:literal_util",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:test",
         "//xla/hlo/testlib:test_helpers",
         "//xla/service:computation_placer_hdr",
         "//xla/service:hlo_runner_interface",
@@ -2828,11 +2860,11 @@ xla_test(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream_executor_h",
         "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Core",
         "@local_tsl//tsl/platform:casts",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
@@ -2931,9 +2963,9 @@ xla_cc_test(
     deps = [
         "//xla:executable_run_options",
         "@com_google_absl//absl/base:dynamic_annotations",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
@@ -3025,7 +3057,7 @@ xla_cc_test(
         "//xla/hlo/testlib:test_helpers",
         "//xla/service:cpu_plugin",
         "//xla/service:local_service",
-        "@local_tsl//tsl/platform:test_main",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -3092,11 +3124,11 @@ xla_cc_test(
         "//xla:literal",
         "//xla/hlo/testlib:test_helpers",
         "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
