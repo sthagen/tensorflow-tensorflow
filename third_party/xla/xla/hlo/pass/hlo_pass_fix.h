@@ -19,6 +19,7 @@ limitations under the License.
 #include <algorithm>
 #include <type_traits>
 
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_module_group.h"
