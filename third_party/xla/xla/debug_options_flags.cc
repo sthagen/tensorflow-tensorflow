@@ -179,6 +179,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   sol_estimator_defaults->emplace(
       "nccl_op_launch_us",
       absl::StrCat(static_cast<int>(100.0f * kDefaultNcclCostModelCoeff)));
+  // GBytes per second = 10^9 bytes per second
   sol_estimator_defaults->emplace(
       "nic_speed_gbps",
       absl::StrCat(static_cast<int>(55.56f * kDefaultNcclCostModelCoeff)));
@@ -233,7 +234,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_exhaustive_tiling_search(false);
 
   opts.set_xla_gpu_experimental_enable_triton_heroless_priority_fusion(false);
-  opts.set_xla_gpu_experimental_enable_triton_i4_rewrites(false);
+  opts.set_xla_gpu_experimental_enable_triton_i4_rewrites(true);
 
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_gb(0);
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_ratio(1.1);
