@@ -38,15 +38,10 @@ gentbl_cc_library(
 cc_library(
     name = "passes",
     srcs = [
-        "atomic_rmw_utils.cc",
         "convert_float_nvidia.cc",
         "convert_xla_gpu_pure_call_ops.cc",
         "erase_dead_functions.cc",
-        "expand_float_ops.cc",
-        "flatten_tensors.cc",
         "fuse_loops.cc",
-        "lower_tensors.cc",
-        "lower_to_llvm.cc",
         "lower_xla_gpu_to_scf.cc",
         "merge_pointers_to_same_slice.cc",
         "optimize_loops.cc",
@@ -67,6 +62,7 @@ cc_library(
         "//xla/backends/gpu/codegen/emitters/ir:xla_gpu",
         "//xla/codegen/emitters:elemental_hlo_to_mlir",
         "//xla/codegen/emitters/ir:xla",
+        "//xla/codegen/emitters/transforms:atomic_rmw_utils",
         "//xla/hlo/analysis:indexing_analysis",
         "//xla/mlir_hlo",
         "//xla/mlir_hlo:map_mhlo_to_scalar_op",

@@ -46,6 +46,7 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "xla/backends/gpu/codegen/emitters/transforms/passes.h"
 #include "xla/codegen/emitters/ir/xla_ops.h"
+#include "xla/codegen/emitters/transforms/atomic_rmw_utils.h"
 #include "xla/stream_executor/device_description.h"
 
 namespace xla {
@@ -356,7 +357,7 @@ struct VectorizeAtomicRMW : mlir::OpRewritePattern<AtomicRMWOp> {
 
     mlir::ImplicitLocOpBuilder b(op.getLoc(), rewriter);
     b.setInsertionPoint(loop);
-    auto atomic_modifier_parameters = GetAtomicModifierParameters(op);
+    auto atomic_modifier_parameters = emitters::GetAtomicModifierParameters(op);
     if (!atomic_modifier_parameters.has_value() ||
         atomic_modifier_parameters->second != ml::AtomicBinOp::fadd) {
       return rewriter.notifyMatchFailure(op,
