@@ -881,7 +881,7 @@ cc_library(
         ":kernel_c_api",
         ":thunk",
         "//xla:util",
-        "//xla/backends/cpu/codegen:llvm_ir_kernel_spec",
+        "//xla/codegen:kernel_spec",
         "//xla/runtime:buffer_use",
         "//xla/service:buffer_assignment",
         "//xla/stream_executor:device_memory",
