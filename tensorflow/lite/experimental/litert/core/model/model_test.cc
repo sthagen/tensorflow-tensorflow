@@ -101,6 +101,40 @@ TEST(ModelTest, SignatureDNE) {
   EXPECT_FALSE(found_signature);
 }
 
+TEST(ModelTest, AttachExternalBufferToOp) {
+  static constexpr absl::string_view kBufferData = "BUFFER_DATA";
+  static constexpr absl::string_view kOpName = "OP1";
+  static constexpr absl::string_view kOp2Name = "OP2";
+
+  LiteRtModelT model;
+  auto& subgraph = model.EmplaceSubgraph();
+  auto& op = subgraph.EmplaceOp();
+  auto& op2 = subgraph.EmplaceOp();
+
+  OwningBufferRef<uint8_t> external_buf(kBufferData);
+
+  auto buf1_id = model.RegisterExternalBuffer(std::move(external_buf));
+
+  model.AttachExternalBufferToOp(&op, buf1_id, std::string(kOpName));
+  model.AttachExternalBufferToOp(&op2, buf1_id, std::string(kOp2Name));
+
+  auto op_1_res = model.FindExternalBuffer(&op);
+  ASSERT_TRUE(op_1_res);
+  EXPECT_EQ(op_1_res->second, kOpName);
+  EXPECT_EQ(op_1_res->first, buf1_id);
+
+  auto op_2_res = model.FindExternalBuffer(&op2);
+  ASSERT_TRUE(op_2_res);
+  EXPECT_EQ(op_2_res->second, kOp2Name);
+  EXPECT_EQ(op_2_res->first, buf1_id);
+}
+
+TEST(ModelTest, ExternalBufferNotFound) {
+  LiteRtModelT model;
+  LiteRtOpT op;
+  ASSERT_FALSE(model.FindExternalBuffer(&op));
+}
+
 //
 // Subgraph
 //
