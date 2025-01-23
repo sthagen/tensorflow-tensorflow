@@ -205,7 +205,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_collective_permute_decomposer_threshold(
       std::numeric_limits<int64_t>::max());
-  opts.set_xla_gpu_enable_experimental_pipeline_parallelism_opt(false);
+  opts.set_xla_gpu_experimental_enable_pipeline_parallelism_opt(false);
 
   opts.set_xla_cpu_enable_mlir_tiling_and_fusion(true);
   opts.set_xla_cpu_enable_custom_matmul_tiling(false);
@@ -1713,11 +1713,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_collective_permute_decomposer_threshold(),
       "Collective permute decomposer threshold."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_experimental_pipeline_parallelism_opt",
+      "xla_gpu_experimental_enable_pipeline_parallelism_opt",
       bool_setter_for(
           &DebugOptions::
-              set_xla_gpu_enable_experimental_pipeline_parallelism_opt),
-      debug_options->xla_gpu_enable_experimental_pipeline_parallelism_opt(),
+              set_xla_gpu_experimental_enable_pipeline_parallelism_opt),
+      debug_options->xla_gpu_experimental_enable_pipeline_parallelism_opt(),
       "Experimental optimizations for SPMD-based pipeline parallelism on "
       "GPU."));
   flag_list->push_back(tsl::Flag(
@@ -1817,9 +1817,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Forces any reductions during matrix multiplications to use the "
       "accumulator type and not the output type. The precision of the dot "
       "operation may not increase that much if there is output fusion."));
-  flag_list->push_back(tsl::Flag("xla_gpu_triton_fusion_level",
-                                 noop_flag_setter<int>, 2,
-                                 "[Deprecated, do not use]"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_dump_autotuned_gemm_fusions",
       bool_setter_for(&DebugOptions::set_xla_gpu_dump_autotuned_gemm_fusions),

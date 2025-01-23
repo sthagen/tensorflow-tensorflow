@@ -136,6 +136,7 @@ cc_library(
         "//xla/pjrt/plugin/xla_cpu:cpu_client_options",
         "//xla/pjrt/plugin/xla_cpu:xla_cpu_pjrt_client",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -149,6 +150,7 @@ cc_library(
         "//xla/pjrt/gpu:gpu_helpers",
         "//xla/pjrt/gpu:se_gpu_pjrt_client",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -162,6 +164,7 @@ cc_library(
         "//xla/pjrt:pjrt_client",
         "//xla/pjrt/interpreter:interpreter_client",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -454,10 +457,13 @@ cc_library(
         "//xla/service:local_service",
         "//xla/service:platform_util",
         "//xla/service:shaped_buffer",
+        "//xla/service:stream_pool",
         "//xla/service:transfer_manager",
         "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:stream_executor_memory_allocator",
+        "//xla/tsl/platform:errors",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -896,8 +902,6 @@ xla_test(
         "//xla:types",
         "//xla/hlo/builder:xla_builder",
         "//xla/hlo/testlib:test",
-        "//xla/stream_executor:device_description",
-        "//xla/stream_executor:semantic_version",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/base",

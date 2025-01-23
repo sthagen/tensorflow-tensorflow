@@ -181,16 +181,15 @@ LiteRtStatus UnpackSubgraph(FlatbufferContext& context,
                             LiteRtSubgraphT& litert_subgraph) {
   // Unpack tensors.
   for (auto& tfl_tensor : tfl_subgraph->tensors) {
-    LITERT_RETURN_STATUS_IF_NOT_OK(UnpackTensor(
-        context, std::move(tfl_tensor), litert_subgraph.EmplaceTensor()));
+    LITERT_RETURN_IF_ERROR(UnpackTensor(context, std::move(tfl_tensor),
+                                        litert_subgraph.EmplaceTensor()));
   }
 
   // Unpack ops, pass litert_subgraph so they can look up the new litert
   // tensors.
   for (auto& tfl_op : tfl_subgraph->operators) {
-    LITERT_RETURN_STATUS_IF_NOT_OK(UnpackOp(context, litert_subgraph,
-                                            std::move(tfl_op),
-                                            litert_subgraph.EmplaceOp()));
+    LITERT_RETURN_IF_ERROR(UnpackOp(context, litert_subgraph, std::move(tfl_op),
+                                    litert_subgraph.EmplaceOp()));
   }
 
   // Update subgraph I/O.
@@ -282,12 +281,14 @@ Expected<LiteRtModelT::Ptr> UnpackModel(TflModelPtr tfl_model) {
   FlatbufferContext context(*tfl_model);
 
   for (auto& tfl_subgraph : tfl_model->subgraphs) {
-    LITERT_EXPECT_OK(UnpackSubgraph(context, std::move(tfl_subgraph),
-                                    litert_model->EmplaceSubgraph()));
+    LITERT_RETURN_IF_ERROR(UnpackSubgraph(context, std::move(tfl_subgraph),
+                                          litert_model->EmplaceSubgraph()));
   }
 
-  LITERT_EXPECT_OK(UnpackSignatures(tfl_model->signature_defs, *litert_model));
-  LITERT_EXPECT_OK(UnpackMetadata(context, tfl_model->metadata, *litert_model));
+  LITERT_RETURN_IF_ERROR(
+      UnpackSignatures(tfl_model->signature_defs, *litert_model));
+  LITERT_RETURN_IF_ERROR(
+      UnpackMetadata(context, tfl_model->metadata, *litert_model));
   detail::SetTflOpCodes(*litert_model, std::move(tfl_model->operator_codes));
 
   return litert_model;

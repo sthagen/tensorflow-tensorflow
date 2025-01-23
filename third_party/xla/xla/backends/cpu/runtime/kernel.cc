@@ -22,7 +22,6 @@ limitations under the License.
 #include <memory>
 #include <utility>
 
-#include "absl/base/attributes.h"
 #include "absl/base/optimization.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
@@ -61,12 +60,11 @@ static absl::InlinedVector<XLA_CPU_KernelArg, 8> ConvertBuffersToKernelArgs(
   return args;
 }
 
-namespace {
-// A kernel parallel task that is used to parallelize host kernel execution.
-class KernelParallelTask {
+template <bool thread_dim_x_only>
+class Kernel::ParallelTask {
  public:
-  KernelParallelTask(XLA_CPU_Kernel* kernel, Kernel::ThreadDim thread_dims,
-                     absl::Span<const XLA_CPU_KernelArg> args);
+  ParallelTask(XLA_CPU_Kernel* kernel, Kernel::ThreadDim thread_dims,
+               absl::Span<const XLA_CPU_KernelArg> args);
 
   // Invokes a host kernel for a given task index.
   absl::Status operator()(size_t task_index) const;
@@ -79,20 +77,29 @@ class KernelParallelTask {
   XLA_CPU_Kernel* kernel_;
   XLA_CPU_KernelThreadDim thread_dims_;
   absl::InlinedVector<XLA_CPU_KernelArg, 8> args_;
-};
-}  // namespace
 
-KernelParallelTask::KernelParallelTask(XLA_CPU_Kernel* kernel,
-                                       Kernel::ThreadDim thread_dims,
-                                       absl::Span<const XLA_CPU_KernelArg> args)
+  size_t num_tasks_;
+
+  // Strides for delinearizing task index to (x, y, z) coordinate.
+  uint64_t stride_z_;
+  uint64_t stride_y_;
+};
+
+template <bool thread_dim_x_only>
+Kernel::ParallelTask<thread_dim_x_only>::ParallelTask(
+    XLA_CPU_Kernel* kernel, Kernel::ThreadDim thread_dims,
+    absl::Span<const XLA_CPU_KernelArg> args)
     : kernel_(kernel),
       thread_dims_({thread_dims.x, thread_dims.y, thread_dims.z}),
-      args_(args.begin(), args.end()) {}
+      args_(args.begin(), args.end()),
+      num_tasks_(thread_dims_.x * thread_dims_.y * thread_dims_.z),
+      stride_z_(thread_dims_.y * thread_dims_.x),
+      stride_y_(thread_dims_.x) {}
 
-ABSL_ATTRIBUTE_ALWAYS_INLINE absl::Status KernelParallelTask::operator()(
+template <bool thread_dim_x_only>
+absl::Status Kernel::ParallelTask<thread_dim_x_only>::operator()(
     uint64_t task_index) const {
-  size_t num_tasks = thread_dims_.x * thread_dims_.y * thread_dims_.z;
-  DCHECK_LT(task_index, num_tasks) << "Task index out of range";  // Crash OK
+  DCHECK_LT(task_index, num_tasks_) << "Task index out of range";  // Crash OK
 
   XLA_CPU_KernelThread kernel_thread = Delinearize(task_index);
   XLA_CPU_KernelCallFrame call_frame = {&thread_dims_, &kernel_thread,
@@ -108,17 +115,19 @@ ABSL_ATTRIBUTE_ALWAYS_INLINE absl::Status KernelParallelTask::operator()(
   }
 }
 
-XLA_CPU_KernelThread KernelParallelTask::Delinearize(
+template <bool thread_dim_x_only>
+XLA_CPU_KernelThread Kernel::ParallelTask<thread_dim_x_only>::Delinearize(
     uint64_t task_index) const {
-  uint64_t stride_z = thread_dims_.y * thread_dims_.x;
-  uint64_t stride_y = thread_dims_.x;
+  // In the most common case we parallelize only over the `x` dimension.
+  if constexpr (thread_dim_x_only) {
+    return XLA_CPU_KernelThread{task_index, 1, 1};
+  }
 
-  uint64_t z = task_index / stride_z;
-  task_index = task_index % stride_z;
-
-  uint64_t y = task_index / stride_y;
-  task_index = task_index % stride_y;
-
+  // Convert linear task index to (x, y, z) coordinate.
+  uint64_t z = task_index / stride_z_;
+  task_index = task_index % stride_z_;
+  uint64_t y = task_index / stride_y_;
+  task_index = task_index % stride_y_;
   uint64_t x = task_index;
 
   return XLA_CPU_KernelThread{x, y, z};
@@ -187,8 +196,13 @@ tsl::AsyncValueRef<LaunchEvent> Kernel::Launch(
       std::min<size_t>(std::min<size_t>(num_tasks, device->numThreadsInPool()),
                        std::numeric_limits<uint16_t>::max());
 
-  return Worker::Parallelize(device, num_workers, num_tasks,
-                             KernelParallelTask(kernel_, thread_dims, args));
+  if (ABSL_PREDICT_TRUE(thread_dims.y == 1 && thread_dims.z == 1)) {
+    return Worker::Parallelize(device, num_workers, num_tasks,
+                               ParallelTask<true>(kernel_, thread_dims, args));
+  } else {
+    return Worker::Parallelize(device, num_workers, num_tasks,
+                               ParallelTask<false>(kernel_, thread_dims, args));
+  }
 }
 
 }  // namespace xla::cpu

@@ -81,7 +81,7 @@ std::optional<OwningBufferRef<uint8_t>> PopByteCodeIfNeedsPostProcess(
 Expected<OwningBufferRef<uint8_t>> AppendByteCode(
     OwningBufferRef<uint8_t> flatbuffer,
     OwningBufferRef<uint8_t> npu_byte_code) {
-  LITERT_EXPECT_OK(
+  LITERT_RETURN_IF_ERROR(
       FinishByteCodePlaceholders(flatbuffer, npu_byte_code.Size()));
 
   const auto res_size = flatbuffer.Size() + npu_byte_code.Size();
@@ -240,7 +240,7 @@ LiteRtStatus PackSubgraph(SerializationContext& builder,
   for (auto* tensor : litert_subgraph.Tensors()) {
     tfl_subgraph.tensors.push_back(std::make_unique<TflTensor>());
     tensor_map.insert({tensor, tfl_subgraph.tensors.size() - 1});
-    LITERT_RETURN_STATUS_IF_NOT_OK(
+    LITERT_RETURN_IF_ERROR(
         PackTensor(builder, *tensor, *tfl_subgraph.tensors.back()));
   }
 
@@ -249,7 +249,7 @@ LiteRtStatus PackSubgraph(SerializationContext& builder,
 
     tfl_subgraph.operators.push_back(std::make_unique<TflOp>());
     auto& tfl_op = *tfl_subgraph.operators.back();
-    LITERT_RETURN_STATUS_IF_NOT_OK(PackOp(builder, *op, tfl_op, tensor_map));
+    LITERT_RETURN_IF_ERROR(PackOp(builder, *op, tfl_op, tensor_map));
 
     // Set custom options.
     if (auto external_buffer = builder.LitertModel().FindExternalBuffer(op)) {
@@ -295,7 +295,7 @@ Expected<TflModelPtr> PackAsTflite(SerializationContext& builder) {
     auto& litert_subgraph = litert_model.Subgraph(i);
     auto& tfl_subgraph = *builder.Model().subgraphs.emplace_back(
         std::make_unique<TflSubgraph>());
-    LITERT_EXPECT_OK(
+    LITERT_RETURN_IF_ERROR(
         PackSubgraph(builder, litert_subgraph, tfl_subgraph, tensor_map, i));
   }
 
