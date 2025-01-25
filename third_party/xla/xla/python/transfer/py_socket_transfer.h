@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,27 +12,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#ifndef XLA_PYTHON_TRANSFER_PY_SOCKET_TRANSFER_H_
+#define XLA_PYTHON_TRANSFER_PY_SOCKET_TRANSFER_H_
 
-#include "xla/service/time_utils.h"
+#include "nanobind/nanobind.h"
 
-#include <cstdint>
+namespace aux {
 
-namespace xla {
+void RegisterTransferServerTypes(nanobind::module_& m);
 
-int64_t ExclusiveToInclusiveStartTime(int64_t exclusive_time) {
-  return exclusive_time + 1;
-}
+}  // namespace aux
 
-int64_t InclusiveToExclusiveStartTime(int64_t inclusive_time) {
-  return inclusive_time - 1;
-}
-
-int64_t ExclusiveToInclusiveEndTime(int64_t exclusive_time) {
-  return exclusive_time - 1;
-}
-
-int64_t InclusiveToExclusiveEndTime(int64_t inclusive_time) {
-  return inclusive_time + 1;
-}
-
-}  // namespace xla
+#endif  // XLA_PYTHON_TRANSFER_PY_SOCKET_TRANSFER_H_

@@ -17,7 +17,6 @@
 #include <alloca.h>
 #include <stdio.h>
 
-#include <algorithm>
 #include <cstdint>
 
 #include "absl/container/flat_hash_map.h"
@@ -136,6 +135,11 @@ LiteRtStatus GraphMapper::LegalizeAndRegister(LiteRtTensor litert_tensor,
 
   LITERT_LOG(LITERT_INFO, "Legalized and registered tensor %d",
              qnn_tensor.v2.id);
+
+  for (int i = 0; i < qnn_tensor.v2.rank; ++i) {
+    LITERT_LOG(LITERT_INFO, "qnn_tensor dim[%d] = %d", i,
+               qnn_tensor.v2.dimensions[i]);
+  }
 
   return kLiteRtStatusOk;
 }

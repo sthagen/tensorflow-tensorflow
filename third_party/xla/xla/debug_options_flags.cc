@@ -91,7 +91,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_cpu_use_xnnpack(false);
   opts.set_xla_cpu_parallel_codegen_split_count(32);
   opts.set_xla_cpu_copy_insertion_use_region_analysis(false);
-  opts.set_xla_cpu_enable_concurrency_optimized_scheduler(false);
+  opts.set_xla_cpu_enable_concurrency_optimized_scheduler(true);
   opts.set_xla_cpu_prefer_vector_width(256);
   opts.set_xla_cpu_max_isa("");
 
@@ -207,14 +207,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       std::numeric_limits<int64_t>::max());
   opts.set_xla_gpu_experimental_enable_pipeline_parallelism_opt(false);
 
-  opts.set_xla_cpu_enable_mlir_tiling_and_fusion(true);
-  opts.set_xla_cpu_enable_custom_matmul_tiling(false);
-  opts.set_xla_cpu_matmul_tiling_m_dim(8);
-  opts.set_xla_cpu_matmul_tiling_n_dim(8);
-  opts.set_xla_cpu_matmul_tiling_k_dim(8);
-  opts.set_xla_cpu_enable_mlir_fusion_outlining(true);
-  opts.set_xla_cpu_enable_experimental_deallocation(true);
-
   opts.set_xla_partitioning_algorithm(
       DebugOptions::PARTITIONING_ALGORITHM_NOOP);
 
@@ -268,8 +260,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
       stream_executor::IsLibNvPtxCompilerSupported());
   opts.set_xla_gpu_libnvjitlink_mode(DebugOptions::LIB_NV_JIT_LINK_MODE_AUTO);
 
-  opts.set_xla_gpu_enable_bf16_6way_gemm(false);
-  opts.set_xla_gpu_enable_bf16_3way_gemm(false);
   opts.set_xla_gpu_nccl_collective_max_nchannels(0);
   opts.set_xla_gpu_nccl_p2p_max_nchannels(0);
   opts.set_xla_gpu_multi_streamed_windowed_einsum(true);
@@ -1575,42 +1565,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       bool_setter_for(&DebugOptions::set_xla_dump_latency_hiding_schedule),
       debug_options->xla_dump_latency_hiding_schedule(),
       "Dump the schedule from the latency-hiding scheduler."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_enable_mlir_tiling_and_fusion",
-      bool_setter_for(&DebugOptions::set_xla_cpu_enable_mlir_tiling_and_fusion),
-      debug_options->xla_cpu_enable_mlir_tiling_and_fusion(),
-      "Enable MLIR tiling and fusion."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_enable_mlir_fusion_outlining",
-      bool_setter_for(&DebugOptions::set_xla_cpu_enable_mlir_fusion_outlining),
-      debug_options->xla_cpu_enable_mlir_fusion_outlining(),
-      "Enable MLIR fusion outlining (to improve compile time)."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_enable_custom_matmul_tiling",
-      bool_setter_for(&DebugOptions::set_xla_cpu_enable_custom_matmul_tiling),
-      debug_options->xla_cpu_enable_custom_matmul_tiling(),
-      "Enable custom tiling given by M, K, N parameters."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_matmul_tiling_m_dim",
-      int64_setter_for(&DebugOptions::set_xla_cpu_matmul_tiling_m_dim),
-      debug_options->xla_cpu_matmul_tiling_m_dim(),
-      "Custom tile size for matmul's M dimension."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_matmul_tiling_n_dim",
-      int64_setter_for(&DebugOptions::set_xla_cpu_matmul_tiling_n_dim),
-      debug_options->xla_cpu_matmul_tiling_n_dim(),
-      "Custom tile size for matmul's N dimension."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_matmul_tiling_k_dim",
-      int64_setter_for(&DebugOptions::set_xla_cpu_matmul_tiling_k_dim),
-      debug_options->xla_cpu_matmul_tiling_k_dim(),
-      "Custom tile size for matmul's K dimension."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_enable_experimental_deallocation",
-      bool_setter_for(
-          &DebugOptions::set_xla_cpu_enable_experimental_deallocation),
-      debug_options->xla_cpu_enable_experimental_deallocation(),
-      "Enable experimental deallocation."));
   flag_list->push_back(
       tsl::Flag("xla_gpu_enable_latency_hiding_scheduler",
                 bool_setter_for(
@@ -1987,19 +1941,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       stream_executor::IsLibNvJitLinkSupported(),
       "Use libnvjitlink for PTX-to-GPU-assembly compilation instead of "
       "calling ptxas."));
-  flag_list->push_back(tsl::Flag("xla_gpu_enable_dot_strength_reduction",
-                                 noop_flag_setter<bool>, true,
-                                 "[Deprecated, do not use]"));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_bf16_6way_gemm",
-      bool_setter_for(&DebugOptions::set_xla_gpu_enable_bf16_6way_gemm),
-      debug_options->xla_gpu_enable_bf16_6way_gemm(),
-      "Use BF16 6way gemm to compute F32 gemm."));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_bf16_3way_gemm",
-      bool_setter_for(&DebugOptions::set_xla_gpu_enable_bf16_3way_gemm),
-      debug_options->xla_gpu_enable_bf16_3way_gemm(),
-      "Use BF16 3way gemm to compute F32 gemm."));
   flag_list->push_back(
       tsl::Flag("xla_gpu_nccl_collective_max_nchannels",
                 int64_setter_for(

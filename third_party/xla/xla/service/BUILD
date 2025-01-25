@@ -2493,6 +2493,7 @@ xla_cc_test(
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -4659,17 +4660,14 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:hlo_module_group",
-        "//xla/hlo/parser:hlo_parser",
         "//xla/service/gpu:gpu_executable_run_options",
+        "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_memory_allocator",
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor:stream_executor_memory_allocator",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/platform:blocking_counter",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -4694,6 +4692,7 @@ cc_library(
         "//xla/pjrt:host_memory_spaces",
         "//xla/pjrt:pjrt_client",
         "//xla/pjrt:pjrt_common",
+        "//xla/pjrt:pjrt_compiler",
         "//xla/pjrt:pjrt_executable",
         "//xla/pjrt:pjrt_future",
         "//xla/tsl/platform:env",
@@ -6337,7 +6336,6 @@ cc_library(
 
 cc_library(
     name = "time_utils",
-    srcs = ["time_utils.cc"],
     hdrs = ["time_utils.h"],
     deps = [],
 )

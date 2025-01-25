@@ -11,7 +11,17 @@ package(
 
 cc_library(
     name = "litert_common",
+    srcs = ["litert_common.cc"],
     hdrs = ["litert_common.h"],
+)
+
+cc_test(
+    name = "litert_common_test",
+    srcs = ["litert_common_test.cc"],
+    deps = [
+        ":litert_common",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_library(
@@ -228,11 +238,23 @@ cc_library(
 
 cc_library(
     name = "litert_compiled_model_options",
+    srcs = ["litert_compiled_model_options.cc"],
     hdrs = [
         "litert_compiled_model_options.h",
     ],
     deps = [
         ":litert_common",
+        ":litert_logging",
+    ],
+)
+
+cc_test(
+    name = "litert_compiled_model_options_test",
+    srcs = ["litert_compiled_model_options_test.cc"],
+    deps = [
+        ":litert_common",
+        ":litert_compiled_model_options",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
