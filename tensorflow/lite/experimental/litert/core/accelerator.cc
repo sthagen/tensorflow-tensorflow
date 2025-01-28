@@ -24,6 +24,7 @@ namespace litert::internal {
 
 void AcceleratorRegistry::DestroyAccelerator(LiteRtAcceleratorT* accelerator) {
   if (accelerator && accelerator->ReleaseData) {
+    accelerator->env = nullptr;
     accelerator->ReleaseData(accelerator->data);
   }
   delete accelerator;
@@ -58,3 +59,37 @@ Expected<LiteRtParamIndex> AcceleratorRegistry::FindAcceleratorIndex(
 }
 
 }  // namespace litert::internal
+
+extern "C" {
+
+LiteRtStatus LiteRtSetAcceleratorCompilationOptionsDestructor(
+    LiteRtAcceleratorCompilationOptionsHeader* options,
+    void (*Destructor)(LiteRtAcceleratorCompilationOptionsHeader*)) {
+  if (!options) {
+    return kLiteRtStatusErrorInvalidArgument;
+  }
+  options->ReleaseData = Destructor;
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus LiteRtSetAcceleratorCompilationOptionsIdentifier(
+    LiteRtAcceleratorCompilationOptionsHeader* options,
+    const char* identifier) {
+  if (!options) {
+    return kLiteRtStatusErrorInvalidArgument;
+  }
+  options->identifier = identifier;
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus LiteRtSetAcceleratorCompilationOptionsVersion(
+    LiteRtAcceleratorCompilationOptionsHeader* options,
+    LiteRtApiVersion version) {
+  if (!options) {
+    return kLiteRtStatusErrorInvalidArgument;
+  }
+  options->version = version;
+  return kLiteRtStatusOk;
+}
+
+}  // extern "C"

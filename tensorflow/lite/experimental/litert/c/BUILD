@@ -36,6 +36,7 @@ cc_library(
     deps = [
         ":litert_any",
         ":litert_common",
+        ":litert_logging",
         "//tensorflow/lite/experimental/litert/core:environment",
         "@com_google_absl//absl/types:span",
     ],
@@ -226,6 +227,7 @@ cc_library(
         "litert_dispatch_delegate.h",
     ],
     deps = [
+        ":litert_environment",
         "//tensorflow/lite/c:c_api",
         "//tensorflow/lite/c:c_api_opaque",
         "//tensorflow/lite/c:c_api_types",
@@ -243,6 +245,7 @@ cc_library(
         "litert_compiled_model_options.h",
     ],
     deps = [
+        ":litert_accelerator_options",
         ":litert_common",
         ":litert_logging",
     ],
@@ -252,8 +255,10 @@ cc_test(
     name = "litert_compiled_model_options_test",
     srcs = ["litert_compiled_model_options_test.cc"],
     deps = [
+        ":litert_accelerator_options",
         ":litert_common",
         ":litert_compiled_model_options",
+        "//tensorflow/lite/experimental/litert/core:accelerator",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -267,12 +272,12 @@ cc_library(
     deps = [
         ":litert_common",
         ":litert_compiled_model_options",
+        ":litert_environment",
         ":litert_logging",
         ":litert_model",
         ":litert_tensor_buffer",
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/experimental/litert/runtime:compiled_model",
-        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -288,6 +293,7 @@ cc_test(
         ":litert_common",
         ":litert_compiled_model",
         ":litert_compiled_model_options",
+        ":litert_environment",
         ":litert_model",
         ":litert_tensor_buffer",
         "//tensorflow/lite/experimental/litert/test:common",
@@ -295,6 +301,27 @@ cc_test(
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "litert_accelerator_options",
+    srcs = ["litert_accelerator_options.cc"],
+    hdrs = ["litert_accelerator_options.h"],
+    deps = [
+        ":litert_common",
+        "//tensorflow/lite/experimental/litert/core:accelerator",
+    ],
+)
+
+cc_test(
+    name = "litert_accelerator_options_test",
+    srcs = ["litert_accelerator_options_test.cc"],
+    deps = [
+        ":litert_accelerator_options",
+        ":litert_common",
+        "//tensorflow/lite/experimental/litert/core:accelerator",
         "@com_google_googletest//:gtest_main",
     ],
 )

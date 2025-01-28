@@ -17,6 +17,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -30,6 +32,8 @@ namespace litert::internal {
 
 // Extra info about how the buffer is handled during load or serialization.
 struct BufferContext {
+  using Ref = std::reference_wrapper<BufferContext>;
+
   // Whether the buffer should be appended to the flatbuffer during
   // serialization.
   bool should_append = false;
@@ -39,7 +43,11 @@ struct BufferContext {
 // buffers may be owned or non-owned by the model. Uses id based indexing.
 class BufferManager {
  public:
+  using Ptr = std::unique_ptr<BufferManager>;
+
+  // Unique identifier for a buffer. 0 is reserved for empty buffers.
   using BufferId = uint32_t;
+  static constexpr BufferId kEmptyBufferId = 0;
 
   // Register a buffer that is not owned by the model. Caller must ensure the
   // buffer outlives the model.
@@ -69,17 +77,21 @@ class BufferManager {
   }
 
   // Get the context of the buffer at the given id.
-  Expected<BufferContext> GetContext(BufferId id) {
+  Expected<BufferContext::Ref> GetContext(BufferId id) {
     if (id >= buffers_.size()) {
       return Error(kLiteRtStatusErrorIndexOOB);
     }
-    return buffers_[id].second;
+    return std::ref(buffers_[id].second);
   }
 
   // Number of buffers. Ids will be 0 <-> num - 1.
   size_t NumBuffers() const { return buffers_.size(); }
 
-  BufferManager() = default;
+  BufferManager() {
+    // Zero is reserved for empty buffers.
+    buffers_.emplace_back(
+        BufferWithContext(BufferRef<uint8_t>(), BufferContext{}));
+  }
   BufferManager(const BufferManager&) = delete;
   BufferManager& operator=(const BufferManager&) = delete;
   BufferManager(BufferManager&& other) = default;
