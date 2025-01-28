@@ -148,6 +148,32 @@ entries {
     }
   }
 }
+
+3. Parallelize file generation on 8 GPUs easily using GNU parallel.
+
+Make sure you have GNU parallel installed.
+
+```
+user@host:~$ parallel --version
+GNU parallel 20240222
+...
+```
+
+Then run the following command to read HLOs from `path/to/hlos` and split the work on 8 GPUs.
+
+user@host:~$ find `realpath path/to/hlos/` -type f -print0 | parallel -u -j 8 -0 -a - 'CUDA_VISIBLE_DEVICES=$(({%}-1)) bazel --output_base=/tmp/out-$(({%}-1)) run matmul_perf_table_gen_main --config=cuda -- --alsologtostderr --output=/tmp/out-$(({%}-1)).pbtxt --hlo_scan_path={}'
+
+You will end up with a set of files in /tmp
+
+```
+out-0.pbtxt
+out-1.pbtxt
+...
+out-7.pbtxt
+```
+
+Each containing profiled ops supporting `xla.gpu.DeviceHloInstructionProfiles` proto format.
+
 )";
 
 using ::xla::gpu::MatmulPerfTableGen;
@@ -216,12 +242,6 @@ std::vector<MatmulPerfTableGen::DataTypeSpec> ParseDataTypes(
   return result;
 }
 
-std::string ValidateFilepath(absl::string_view filepath) {
-  std::string path = std::string(filepath);
-  CHECK_OK(tsl::Env::Default()->IsDirectory(path));
-  return path;
-}
-
 MatmulPerfTableGen::Config CreateConfig(
     absl::string_view m_spec, absl::string_view n_spec,
     absl::string_view k_spec, absl::string_view dtypes,
@@ -233,7 +253,7 @@ MatmulPerfTableGen::Config CreateConfig(
   cfg.n_spec = ParseSpec(n_spec);
   cfg.k_spec = ParseSpec(k_spec);
   cfg.dtypes = ParseDataTypes(dtypes);
-  cfg.hlo_scan_path = ValidateFilepath(hlo_scan_path);
+  cfg.hlo_scan_path = hlo_scan_path;
 
   // Execution opts.
   cfg.dry_run = dry_run;
@@ -242,7 +262,6 @@ MatmulPerfTableGen::Config CreateConfig(
 }
 
 // TODO(b/390097558): Sweep through minor and major dimensions for dots.
-// TODO(b/390097558): Implement sharding on devices.
 int main(int argc, char* argv[]) {
   std::string m_spec;
   std::string n_spec;
@@ -250,6 +269,7 @@ int main(int argc, char* argv[]) {
   std::string dtypes;
   std::string out;
   std::string hlo_scan_path;
+  std::string merge_path;
   bool dry_run = false;
 
   std::vector<tsl::Flag> flag_list = {
@@ -273,6 +293,8 @@ int main(int argc, char* argv[]) {
       tsl::Flag("hlo_scan_path", &hlo_scan_path,
                 "Path to HLO files. Tool will scan provided HLOs for dot "
                 "ops and use those for gathering profiling data."),
+      tsl::Flag("merge_path", &merge_path,
+                "Path to DeviceHloInstructionProfiles files."),
       tsl::Flag("dry_run", &dry_run,
                 "For a defined search space does not perform measurements but "
                 "runs everything else."),
@@ -288,6 +310,15 @@ int main(int argc, char* argv[]) {
   MatmulPerfTableGen::Config cfg =
       CreateConfig(m_spec, n_spec, k_spec, dtypes, out, hlo_scan_path, dry_run);
   MatmulPerfTableGen table_gen(std::move(cfg));
+
+  if (!merge_path.empty()) {
+    LOG(INFO) << "Merging profiling data from: " << merge_path;
+    auto profile_data = table_gen.Merge(merge_path);
+    CHECK_OK(profile_data);
+    CHECK_OK(table_gen.Dump(*profile_data));
+    return 0;
+  }
+
   xla::gpu::DeviceHloInstructionProfiles result = table_gen.ComputeTable();
   CHECK_OK(table_gen.Dump(result));
 
