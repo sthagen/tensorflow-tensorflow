@@ -43,6 +43,7 @@
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer_requirements.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_dispatch_delegate.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_tensor_buffer_requirements.h"
@@ -93,13 +94,13 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
   auto compiled_model = std::make_unique<LiteRtCompiledModelT>();
 
   std::optional<OwningBufferRef<uint8_t>> new_flatbuffer;
-  LiteRtHwAcceleratorSet hardware_accelerators = kLiteRtHwAccelatorNone;
+  LiteRtHwAcceleratorSet hardware_accelerators = kLiteRtHwAcceleratorNone;
   if (compilation_options) {
     LiteRtGetCompilationOptionsHardwareAccelerators(compilation_options.get(),
                                                     &hardware_accelerators);
   }
   // TODO: b/379317134 - Support other delegates with compilation options.
-  if (hardware_accelerators != kLiteRtHwAccelatorNone) {
+  if (hardware_accelerators != kLiteRtHwAcceleratorNone) {
     LITERT_LOG(LITERT_INFO, "Applying compiler plugins...");
     if (auto result =
             litert::internal::ApplyPlugins(env, model, hardware_accelerators);
@@ -127,7 +128,7 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
   if (new_flatbuffer) {
     model_buffer = reinterpret_cast<const char*>(new_flatbuffer->Data());
     model_buffer_size = new_flatbuffer->Size();
-  } else if (auto init_model_buffer = detail::GetTflInitFlatbuffer(*model);
+  } else if (auto init_model_buffer = detail::GetTflFlatbuffer(*model).Buf();
              init_model_buffer.Size() != 0) {
     // Use the saved the original FB pointer when the LiteRtModel was created
     // from a buffer.
