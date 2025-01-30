@@ -56,6 +56,7 @@ limitations under the License.
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_common.h"
 #include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/status.h"
 #include "tensorflow/core/common_runtime/device/device_utils.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/stringpiece.h"
@@ -387,6 +388,19 @@ class CStreamExecutor : public StreamExecutorCommon {
             return std::make_unique<GenericMemoryAllocation>(
                 ptr, size, [this](void* ptr, uint64_t size) {
                   stream_executor_->unified_memory_deallocate(&device_, ptr);
+                });
+          });
+    } else if (type == MemoryType::kHost) {
+      return std::make_unique<GenericMemoryAllocator>(
+          [this](uint64_t size)
+              -> absl::StatusOr<std::unique_ptr<MemoryAllocation>> {
+            void* ptr = stream_executor_->host_memory_allocate(&device_, size);
+            if (ptr == nullptr) {
+              return absl::InternalError("Failed to allocate host memory");
+            }
+            return std::make_unique<GenericMemoryAllocation>(
+                ptr, size, [this](void* ptr, uint64_t size) {
+                  stream_executor_->host_memory_deallocate(&device_, ptr);
                 });
           });
     }
