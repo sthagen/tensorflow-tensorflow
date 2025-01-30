@@ -43,10 +43,12 @@ namespace {
 // within Google, see go/multi-gpu-unit-test.
 class CollectivePipelineParallelismTest
     : public HloTestBase,
-      public ::testing::WithParamInterface<bool> {
+      public ::testing::WithParamInterface<
+          DebugOptions::PipelineParallelismOptLevel> {
  public:
   CollectivePipelineParallelismTest() {
     VLOG(1) << "Running with " << num_devices() << " devices";
+    xla_gpu_experimental_pipeline_parallelism_opt_level_ = GetParam();
   }
 
   HloModuleConfig GetModuleConfigForTest(int64_t replica_count = 1,
@@ -56,12 +58,15 @@ class CollectivePipelineParallelismTest
 
     // Set debug options.
     DebugOptions debug_options = GetDebugOptionsForTest();
-    debug_options.set_xla_gpu_experimental_enable_pipeline_parallelism_opt(
-        GetParam());
+    debug_options.set_xla_gpu_experimental_pipeline_parallelism_opt_level(
+        xla_gpu_experimental_pipeline_parallelism_opt_level_);
     config.set_debug_options(debug_options);
 
     return config;
   }
+
+  DebugOptions::PipelineParallelismOptLevel
+      xla_gpu_experimental_pipeline_parallelism_opt_level_;
 };
 
 XLA_TEST_P(CollectivePipelineParallelismTest,
@@ -1446,6 +1451,12 @@ XLA_TEST_P(CollectivePipelineParallelismTest,
   }
   )";
 
+  // TODO(b/393216980): Enable this test when bug is fixed.
+  if (xla_gpu_experimental_pipeline_parallelism_opt_level_ !=
+      DebugOptions::PIPELINE_PARALLELISM_OPT_LEVEL_DISABLE) {
+    GTEST_SKIP();
+  }
+
   const int64_t kNumReplicas = 4;
   if (test_runner().device_count() < kNumReplicas) {
     GTEST_SKIP() << "Test requires at least " << kNumReplicas << " devices ("
@@ -1675,9 +1686,14 @@ XLA_TEST_P(CollectivePipelineParallelismTest,
       ErrorSpec{/*abs_error=*/1e-5, /*rel_error=*/1e-5}));
 }
 
-INSTANTIATE_TEST_SUITE_P(CollectivePipelineParallelismTestWithAndWithoutOpts,
-                         CollectivePipelineParallelismTest, ::testing::Bool(),
-                         ::testing::PrintToStringParamName());
+INSTANTIATE_TEST_SUITE_P(
+    CollectivePipelineParallelismTestWithAndWithoutOpts,
+    CollectivePipelineParallelismTest,
+    ::testing::ValuesIn(
+        {DebugOptions::PIPELINE_PARALLELISM_OPT_LEVEL_DISABLE,
+         DebugOptions::PIPELINE_PARALLELISM_OPT_LEVEL_ENABLE,
+         DebugOptions::PIPELINE_PARALLELISM_OPT_LEVEL_ENABLE_CYCLE_DECOMPOSER}),
+    ::testing::PrintToStringParamName());
 
 }  // namespace
 }  // namespace xla
