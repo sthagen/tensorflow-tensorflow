@@ -43,6 +43,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/plugin/xla_cpu/cpu_client_options.h"
+#include "xla/pjrt/plugin/xla_cpu/xla_cpu_pjrt_client.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
@@ -386,7 +387,7 @@ TEST(TfrtCpuClientTest, CreateErrorBuffer) {
   xla::Shape shape = ShapeUtil::MakeShape(U32, {3, 2});
   TF_ASSERT_OK_AND_ASSIGN(
       auto buffer, client->CreateErrorBuffer(Internal("foobar"), shape,
-                                             client->addressable_devices()[0]));
+                                             client->memory_spaces()[0]));
   EXPECT_THAT(
       buffer->ToLiteralSync(),
       tsl::testing::StatusIs(tsl::error::INTERNAL, HasSubstr("foobar")));
@@ -681,6 +682,31 @@ TEST(TfrtCpuClientTest, CopyRawToHost) {
 
   ASSERT_EQ(absl::string_view(raw_data, raw_data_size),
             absl::string_view(raw_data_result, raw_data_size));
+}
+
+TEST(TfrtCpuClientTest, SubByteLiteralToBufferRoundtrip) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtClient> client,
+                          GetXlaPjrtCpuClient(CpuClientOptions()));
+  ASSERT_NE(client->addressable_device_count(), 0)
+      << "No addressable devices available.";
+  PjRtDevice* const device = client->addressable_devices().front();
+  ASSERT_NE(device, nullptr) << "Found device but it is null.";
+  TF_ASSERT_OK_AND_ASSIGN(PjRtMemorySpace * memory_space,
+                          device->default_memory_space());
+
+  const Literal literal =
+      LiteralUtil::CreateR1<s4>({s4(0), s4(1), s4(2), s4(-8)});
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtBuffer> buffer,
+                          client->BufferFromHostLiteral(literal, memory_space));
+  TF_ASSERT_OK(buffer->GetReadyFuture().Await());
+  TF_ASSERT_OK_AND_ASSIGN(const size_t on_device_size,
+                          buffer->GetOnDeviceSizeInBytes());
+  EXPECT_EQ(on_device_size, 2);
+
+  Literal literal_result(literal.shape());
+  TF_ASSERT_OK(buffer->ToLiteralSync(&literal_result));
+
+  EXPECT_TRUE(LiteralTestUtil::Equal(literal, literal_result));
 }
 
 }  // namespace

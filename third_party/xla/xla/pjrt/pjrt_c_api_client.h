@@ -321,7 +321,7 @@ class PjRtCApiClient : public PjRtClient {
       std::optional<CompileOptions> options) override;
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateUninitializedBuffer(
-      const Shape& shape, PjRtDevice* device) override {
+      const Shape& shape, PjRtMemorySpace* memory_space) override {
     return Unimplemented(
         "PJRT C API does not support CreateUninitializedBuffer. Please report "
         "an issue at https://github.com/google/jax/issues if you need this "
@@ -373,7 +373,7 @@ class PjRtCApiClient : public PjRtClient {
       PjRtMemorySpace* memory_space, const Layout* device_layout) override;
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostLiteral(
-      const LiteralSlice& literal, PjRtDevice* device) override {
+      const LiteralSlice& literal, PjRtMemorySpace* memory_space) override {
     return Unimplemented(
         "PJRT C API does not support BufferFromHostLiteral. Please report an "
         "issue at https://github.com/google/jax/issues if you need this "
