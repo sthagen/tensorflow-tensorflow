@@ -18,37 +18,6 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
-def ConvertPureCallOpsPass
-    : Pass<"xla-gpu-convert-pure-call-ops", "mlir::func::FuncOp"> {
-  let summary = "Converts xla_gpu.pure_call to func.call";
-  let description = [{
-      We use xla_gpu.pure_call ops for calls to enable CSE and other
-      transformations (e.g. LICM). This pass rewrites our custom ops to standard
-      ops.
-  }];
-  let dependentDialects = [
-    "mlir::func::FuncDialect",
-    "xla::XlaDialect"
-  ];
-  let constructor = "CreateConvertPureCallOpsPass()";
-}
-
-def MergePointersToSameSlicePass :
-   Pass<"xla-gpu-merge-pointers", "mlir::ModuleOp"> {
-  let summary = "Merges pointers that share slices.";
-
-  let description = [{
-      When a function has multiple pointer arguments with the same slice index,
-      merges them.
-  }];
-
-  let dependentDialects = [
-    "mlir::func::FuncDialect"
-  ];
-
-  let constructor = "CreateMergePointersToSameSlicePass()";
-}
-
 def ConvertIndexTypePass : Pass<"xla-gpu-convert-index-type", "mlir::ModuleOp"> {
   let summary = "Converts index types to module data layout index type.";
 
@@ -76,42 +45,6 @@ def ConvertFloatNvidiaPass : Pass<"xla-gpu-convert-float-nvidia", "mlir::ModuleO
   ];
 
   let constructor = "CreateConvertFloatNvidiaPass()";
-}
-
-def LowerXlaGpuToScfPass :
-   Pass<"xla-gpu-lower-xla-gpu-to-scf", "mlir::func::FuncOp"> {
-  let summary = "Lowers xla_gpu to SCF.";
-
-  let dependentDialects = [
-    "mlir::gpu::GPUDialect", "mlir::LLVM::LLVMDialect", "mlir::scf::SCFDialect",
-    "mlir::tensor::TensorDialect", "xla::gpu::XlaGpuDialect",
-    "xla::XlaDialect", "mlir::vector::VectorDialect",
-  ];
-
-  let options = [
-    Option<"warp_size", "warp_size", "int64_t", /*default=*/"32", "Warp size.">,
-  ];
-  let constructor = "CreateLowerXlaGpuToScfPass()";
-}
-
-def LowerXlaGpuLoopsToScfPass : Pass<
-    "xla-gpu-lower-xla-gpu-loops-to-scf", "mlir::func::FuncOp"> {
-  let summary = "Lowers xla_gpu.loop to SCF.";
-
-  let description = [{
-    This pass is separate from lower-xla-gpu-to-scf because
-    lower-xla-gpu-to-scf, inliner, peeling and lower-xla-gpu-loops-to-scf
-    have to run in that order.
-  }];
-
-  let dependentDialects = [
-    "mlir::scf::SCFDialect",
-    "mlir::tensor::TensorDialect",
-    "xla::gpu::XlaGpuDialect",
-    "xla::XlaDialect",
-  ];
-
-  let constructor = "CreateLowerXlaGpuLoopsToScfPass()";
 }
 
 def VectorizeLoadsAndStoresPass :
@@ -195,54 +128,6 @@ def OptimizeLoopsPass :
   ];
 
   let constructor = "CreateOptimizeLoopsPass()";
-}
-
-def UnswitchLoopsPass :
-   Pass<"xla-gpu-unswitch-loops", "mlir::func::FuncOp"> {
-  let summary = "Swaps scf.if and scf.for.";
-
-  let description = [{
-      Extracts `scf.if` ops with conditions that are independent of the loop
-      variable from `scf.for` by doing the following rewrite:
-
-      Before:
-
-      %cond = some_cond() : i1
-      %results = scf.for {
-        %some_val = scf.if %cond  {
-        } else {
-        }
-        scf.yield %some_val
-      }
-
-      After:
-
-      %cond = some_cond() : i1
-      %results = scf.if %cond {
-         %results = scf.for {
-            %some_val = scf.if %true  {
-            } else {
-            }
-         }
-         yield %results
-      } else {
-         %results = scf.for {
-            %some_val = scf.if %false  {
-            } else {
-            }
-         }
-         yield %results
-      }
-
-      This only triggers if there is a single `scf.if` op in the loop body (and
-      nothing else).
-  }];
-
-  let dependentDialects = [
-    "mlir::func::FuncDialect", "mlir::scf::SCFDialect"
-  ];
-
-  let constructor = "CreateUnswitchLoopsPass()";
 }
 
 #endif  // XLA_SERVICE_GPU_FUSIONS_TRANSFORMS_PASSES_TD_
