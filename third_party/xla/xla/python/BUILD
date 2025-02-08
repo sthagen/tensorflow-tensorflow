@@ -101,6 +101,9 @@ py_strict_test(
     name = "xla_client_test_cpu",
     srcs = ["xla_client_test.py"],
     args = ["--backend=cpu"],
+    env = {
+        "XLA_FLAGS": "--xla_force_host_platform_device_count=4",
+    },
     main = "xla_client_test.py",
     python_version = "PY3",
     srcs_version = "PY3",
@@ -432,15 +435,7 @@ cc_library(
         "@local_tsl//tsl/profiler/lib:profiler_session",
         "@local_tsl//tsl/profiler/lib:traceme",
         "@local_tsl//tsl/profiler/protobuf:profiled_instructions_proto_cc",
-    ] + if_cuda([
-        "@local_config_cuda//cuda:cuda_headers",
-    ]) + if_rocm([
-        # keep sorted
-        "@local_config_rocm//rocm:hip",
-        "@local_config_rocm//rocm:rocm_headers",
-    ]) + if_cuda_or_rocm([
-        ":py_client_gpu",  # TODO(b/337876408): remove after migration to plugin
-    ]) + if_google(["@com_google_protobuf//:any_cc_proto"]),
+    ] + if_google(["@com_google_protobuf//:any_cc_proto"]),
 )
 
 cc_library(
@@ -645,6 +640,22 @@ cc_library(
 )
 
 cc_library(
+    name = "custom_call_batch_partitioner",
+    srcs = ["custom_call_batch_partitioner.cc"],
+    hdrs = ["custom_call_batch_partitioner.h"],
+    deps = [
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_sharding_util",
+        "//xla/service:custom_call_sharding_helper",
+        "//xla/service/spmd:spmd_partitioner",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "custom_call_sharding",
     srcs = ["custom_call_sharding.cc"],
     hdrs = ["custom_call_sharding.h"],
@@ -656,11 +667,13 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = ["//visibility:private"],
     deps = [
+        ":custom_call_batch_partitioner",
         ":custom_partition_callback",
         ":inspect_sharding",
         # placeholder for index annotation deps
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@nanobind",
         "//xla:shape_util",
         "//xla:util",
