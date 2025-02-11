@@ -48,7 +48,7 @@ from setuptools.dist import Distribution
 # result for pip.
 # Also update tensorflow/tensorflow.bzl and
 # tensorflow/core/public/version.h
-_VERSION = '2.19.0'
+_VERSION = '2.20.0'
 
 
 # We use the same setup.py for all tensorflow_* packages and for the nightly
@@ -159,7 +159,7 @@ EXTRA_PACKAGES['and-cuda'] = [
     'nvidia-curand-cu12 == 10.3.6.82',
     'nvidia-cusolver-cu12 == 11.6.3.83',
     'nvidia-cusparse-cu12 == 12.5.1.3',
-    'nvidia-nccl-cu12 == 2.23.4',
+    'nvidia-nccl-cu12 == 2.25.1',
     'nvidia-nvjitlink-cu12 == 12.5.82',
 ]
 
