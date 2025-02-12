@@ -101,7 +101,7 @@ class BuildType(enum.Enum):
   JAX_X86_GPU_T4_SELF_HOSTED = enum.auto()
 
   TENSORFLOW_CPU_SELF_HOSTED = enum.auto()
-  TENSORFLOW_GPU = enum.auto()
+  TENSORFLOW_X86_GPU_T4_SELF_HOSTED = enum.auto()
 
 
 @dataclasses.dataclass(frozen=True, **_KW_ONLY_IF_PYTHON310)
@@ -213,7 +213,7 @@ class Build:
     # manually).
     if self.type_ not in (
         BuildType.TENSORFLOW_CPU_SELF_HOSTED,
-        BuildType.TENSORFLOW_GPU,
+        BuildType.TENSORFLOW_X86_GPU_T4_SELF_HOSTED,
         BuildType.MACOS_CPU_X86,
     ):
       cmds.append(
@@ -458,10 +458,11 @@ _TENSORFLOW_CPU_SELF_HOSTED_BUILD = Build(
         profile="profile.json.gz",
     ),
 )
-_TENSORFLOW_GPU_BUILD = Build(
-    type_=BuildType.TENSORFLOW_GPU,
+
+_TENSORFLOW_GPU_SELF_HOSTED_BUILD = Build(
+    type_=BuildType.TENSORFLOW_X86_GPU_T4_SELF_HOSTED,
     repo="tensorflow/tensorflow",
-    image_url=_ML_BUILD_IMAGE,
+    image_url=None,
     configs=(
         "release_gpu_linux",
         "rbe_linux_cuda",
@@ -479,7 +480,7 @@ _TENSORFLOW_GPU_BUILD = Build(
     options=dict(
         verbose_failures=True,
         test_output="errors",
-        override_repository="xla=/github/xla",
+        override_repository=f"xla={_GITHUB_WORKSPACE}/openxla/xla",
         profile="profile.json.gz",
     ),
 )
@@ -489,13 +490,13 @@ _KOKORO_JOB_NAME_TO_BUILD_MAP = {
     "tensorflow/xla/linux/github_continuous/build_gpu": _GPU_BUILD,
     "tensorflow/xla/macos/github_continuous/cpu_py39_full": _MACOS_X86_BUILD,
     "tensorflow/xla/jax/gpu/build_gpu": _JAX_GPU_BUILD,
-    "tensorflow/xla/tensorflow/gpu/build_gpu": _TENSORFLOW_GPU_BUILD,
     "xla-linux-x86-cpu": _CPU_X86_SELF_HOSTED_BUILD,
     "xla-linux-arm64-cpu": _CPU_ARM64_SELF_HOSTED_BUILD,
     "xla-linux-x86-gpu-t4": _GPU_T4_SELF_HOSTED_BUILD,
     "jax-linux-x86-cpu": _JAX_CPU_SELF_HOSTED_BUILD,
     "jax-linux-x86-gpu-t4": _JAX_GPU_SELF_HOSTED_BUILD,
     "tensorflow-linux-x86-cpu": _TENSORFLOW_CPU_SELF_HOSTED_BUILD,
+    "tensorflow-linux-x86-gpu-t4": _TENSORFLOW_GPU_SELF_HOSTED_BUILD,
 }
 
 
