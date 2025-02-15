@@ -16,17 +16,18 @@
 
 #include <dlfcn.h>
 
-#include <cstddef>
 #include <cstring>
 #include <string>
+#include <vector>
 
-#include "absl/strings/str_format.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_event.h"
 #include "tensorflow/lite/experimental/litert/c/litert_logging.h"
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer_requirements.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
+#include "tensorflow/lite/experimental/litert/core/dynamic_loading.h"
 #include "tensorflow/lite/experimental/litert/vendors/c/litert_dispatch_api.h"
 
 #define INVOKE_FUNC(function, ...)                                \
@@ -64,8 +65,6 @@
 
 namespace {
 
-constexpr const char* kSharedLibName = "libLiteRtDispatch.so";
-
 bool IsTheApiInitialized = false;
 LiteRtDispatchApi TheApi = {
     /*.version=*/{/*.major=*/0, /*.minor=*/0, /*.patch=*/0},
@@ -78,17 +77,25 @@ LiteRtStatus Initialize(const LiteRtDispatchOption* options, int num_options) {
   INVOKE_FUNC(initialize, options, num_options);
 }
 
-std::string GetSharedLibraryPath(const LiteRtDispatchOption* options,
-                                 int num_options) {
+litert::Expected<std::string> GetSharedLibraryPath(
+    const LiteRtDispatchOption* options, int num_options) {
+  std::vector<std::string> dispatch_lib_paths;
   for (auto i = 0; i < num_options; ++i) {
     auto& option = options[i];
     if (!strcmp(option.name, kDispatchOptionSharedLibraryDir)) {
-      return absl::StrFormat("%s/%s", option.value.str_value, kSharedLibName);
+      litert::internal::FindLiteRtDispatchSharedLibs(option.value.str_value,
+                                                     dispatch_lib_paths);
     }
   }
-  return kSharedLibName;
+  if (dispatch_lib_paths.empty()) {
+    LITERT_LOG(LITERT_ERROR, "No dispatch library found");
+    return litert::Error(kLiteRtStatusErrorRuntimeFailure);
+  }
+  if (dispatch_lib_paths.size() > 1) {
+    LITERT_LOG(LITERT_WARNING, "Multiple dispatch libraries found");
+  }
+  return dispatch_lib_paths[0];
 }
-
 }  // namespace
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -101,11 +108,19 @@ LiteRtStatus LiteRtDispatchInitialize(const LiteRtDispatchOption* options,
     return kLiteRtStatusOk;
   }
 
+  // TODO(piyu): support Android systems where libraries are not unpacked in the
+  // system directory.
   auto shared_lib_path = GetSharedLibraryPath(options, num_options);
-  void* lib_handle = ::dlopen(shared_lib_path.data(), RTLD_NOW | RTLD_LOCAL);
+  if (!shared_lib_path) {
+    return kLiteRtStatusErrorNotFound;
+  }
+  LITERT_LOG(LITERT_INFO, "Loading shared library: %s",
+             shared_lib_path.Value().c_str());
+  void* lib_handle =
+      ::dlopen(shared_lib_path.Value().c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!lib_handle) {
-    LITERT_LOG(LITERT_ERROR, "Failed to load dispatch library: %s",
-               ::dlerror());
+    LITERT_LOG(LITERT_ERROR, "Failed to load dispatch library: %s %s",
+               ::dlerror(), shared_lib_path.Value().data());
     return kLiteRtStatusErrorRuntimeFailure;
   }
 
@@ -241,16 +256,17 @@ LiteRtStatus LiteRtDispatchUnregisterTensorBuffer(
 
 LiteRtStatus LiteRtDispatchInvocationContextCreate(
     LiteRtDispatchDeviceContext device_context,
-    LiteRtDispatchExecutableType exec_type, const void* exec_bytecode_ptr,
-    size_t exec_bytecode_size, const char* function_name, int num_inputs,
-    int num_outputs, LiteRtDispatchInvocationContext* invocation_context) {
-  if (!device_context || !exec_bytecode_ptr || !invocation_context) {
+    LiteRtDispatchExecutableType exec_type,
+    const LiteRtMemBuffer* exec_bytecode_buffer, const char* function_name,
+    int num_inputs, int num_outputs,
+    LiteRtDispatchInvocationContext* invocation_context) {
+  if (!device_context || !exec_bytecode_buffer || !invocation_context) {
     LITERT_LOG(LITERT_ERROR, "Null input");
     return kLiteRtStatusErrorInvalidArgument;
   }
   INVOKE_FUNC(invocation_context_create, device_context, exec_type,
-              exec_bytecode_ptr, exec_bytecode_size, function_name, num_inputs,
-              num_outputs, invocation_context);
+              exec_bytecode_buffer, function_name, num_inputs, num_outputs,
+              invocation_context);
 }
 
 LiteRtStatus LiteRtDispatchInvocationContextDestroy(
@@ -481,9 +497,9 @@ LiteRtStatus LiteRtDispatchConnectGraphOutput(LiteRtDispatchGraph graph,
 
 LiteRtStatus LiteRtDispatchLoadExecutable(
     LiteRtDispatchDeviceContext device_context,
-    LiteRtDispatchExecutableType type, const void* bytecode,
-    size_t bytecode_size, LiteRtDispatchExecutableHandle* exec_handle) {
-  if (!device_context || !bytecode || !exec_handle) {
+    LiteRtDispatchExecutableType type, const LiteRtMemBuffer* bytecode_buffer,
+    LiteRtDispatchExecutableHandle* exec_handle) {
+  if (!device_context || !bytecode_buffer || !exec_handle) {
     LITERT_LOG(LITERT_ERROR, "Null input");
     return kLiteRtStatusErrorInvalidArgument;
   }
@@ -495,8 +511,8 @@ LiteRtStatus LiteRtDispatchLoadExecutable(
     LITERT_LOG(LITERT_ERROR, "load_executable not found");
     return kLiteRtStatusErrorRuntimeFailure;
   }
-  INVOKE_GRAPH_FUNC(load_executable, device_context, type, bytecode,
-                    bytecode_size, exec_handle);
+  INVOKE_GRAPH_FUNC(load_executable, device_context, type, bytecode_buffer,
+                    exec_handle);
 }
 
 LiteRtStatus LiteRtDispatchUnloadExecutable(

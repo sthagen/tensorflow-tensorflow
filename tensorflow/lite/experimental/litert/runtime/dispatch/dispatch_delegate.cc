@@ -20,7 +20,6 @@
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/span.h"
 #include "tensorflow/lite/c/c_api_opaque.h"
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/c/common.h"
@@ -129,6 +128,12 @@ TfLiteStatus LiteRtAddDispatchDelegateOption(
 TfLiteStatus LiteRtDispatchDelegateAddAllocBaseOption(
     LiteRtDispatchDelegateOptions* options, const void* alloc_base) {
   AddAllocBaseOption(alloc_base, *options);
+  return kTfLiteOk;
+}
+
+TfLiteStatus LiteRtDispatchDelegateAddAllocFdOption(
+    LiteRtDispatchDelegateOptions* options, int alloc_fd) {
+  AddAllocFdOption(alloc_fd, *options);
   return kTfLiteOk;
 }
 
