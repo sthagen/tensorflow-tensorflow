@@ -360,11 +360,6 @@ class PjRtStreamExecutorClient : public PjRtClient {
                               PjRtDevice* device,
                               PjRtCrossHostRecvNotifier notifier) override;
 
-  absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
-  MakeCrossHostReceiveBuffersForGather(
-      absl::Span<const Shape> shapes, std::vector<GatherDetails> gather_details,
-      PjRtDevice* device, PjRtCrossHostRecvNotifier notifier) override;
-
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateViewOfDeviceBuffer(
       void* device_ptr, const Shape& shape, PjRtMemorySpace* memory_space,
       std::function<void()> on_delete_callback,
@@ -402,8 +397,7 @@ class PjRtStreamExecutorClient : public PjRtClient {
   virtual absl::Status EnqueueCrossHostReceive(
       absl::Span<const std::unique_ptr<PjRtBuffer>> buffers,
       std::shared_ptr<BufferSequencingEvent> definition_event,
-      PjRtCrossHostRecvNotifier notifier,
-      std::optional<std::vector<GatherDetails>> gather_details) const {
+      PjRtCrossHostRecvNotifier notifier) const {
     return Unimplemented("Cross host receives not implemented.");
   }
 
@@ -412,16 +406,6 @@ class PjRtStreamExecutorClient : public PjRtClient {
       PjRtBuffer::RemoteSendCallback on_done) const {
     on_done(Unimplemented("Cross host sends not implemented."),
             /*sends_were_enqueued=*/false);
-  }
-
-  virtual void CopyToRemoteDeviceScattered(
-      PjRtBuffer* buffer, std::vector<std::string> serialized_descriptors,
-      std::vector<PjRtBuffer::RemoteSendCallback> callbacks,
-      const PjRtBuffer::ScatterDetails& scatter_details) const {
-    for (const auto& cb : callbacks) {
-      cb(Unimplemented("Scattered cross host sends not implemented."),
-         /*sends_were_enqueued=*/false);
-    }
   }
 
   virtual PjRtFuture<> CopyRawSubBufferToHost(PjRtBuffer* buffer,
@@ -756,11 +740,6 @@ class PjRtStreamExecutorBuffer : public PjRtBuffer {
   void CopyToRemoteDevice(PjRtFuture<std::string> serialized_descriptor,
                           RemoteSendCallback on_done) override;
 
-  void CopyToRemoteDeviceScattered(
-      PjRtFuture<std::vector<std::string>> serialized_descriptors,
-      std::vector<RemoteSendCallback> callbacks,
-      const ScatterDetails& scatter_details) override;
-
   PjRtFuture<> GetReadyFuture() override;
 
   bool IsOnCpu() const override;
@@ -966,8 +945,6 @@ class PjRtStreamExecutorLoadedExecutable : public PjRtLoadedExecutable {
   absl::StatusOr<std::string> SerializeExecutable() const override {
     return client_->SerializeExecutable(*this);
   }
-
-  bool IsReturnedFutureSupported() const override { return true; }
 
   absl::Span<const std::shared_ptr<LocalExecutable>> executables() const {
     return executables_;

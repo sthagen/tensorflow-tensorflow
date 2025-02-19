@@ -52,8 +52,10 @@ cc_library(
     hdrs = ["litert_any.h"],
     deps = [
         ":litert_expected",
+        ":litert_macros",
         "//tensorflow/lite/experimental/litert/c:litert_any",
         "//tensorflow/lite/experimental/litert/c:litert_common",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
@@ -240,6 +242,8 @@ cc_library(
         ":litert_detail",
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 

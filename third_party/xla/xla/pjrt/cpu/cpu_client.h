@@ -171,14 +171,6 @@ class TfrtCpuClient final : public PjRtClient {
     return Unimplemented("MakeCrossHostReceiveBuffers not implemented.");
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
-  MakeCrossHostReceiveBuffersForGather(
-      absl::Span<const Shape> shapes, std::vector<GatherDetails> gather_details,
-      PjRtDevice* device, PjRtCrossHostRecvNotifier notifier) override {
-    return Unimplemented(
-        "MakeCrossHostReceiveBuffersForGather not implemented.");
-  }
-
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateViewOfDeviceBuffer(
       void* device_ptr, const Shape& shape, PjRtMemorySpace* memory_space,
       std::function<void()> on_delete_callback,
@@ -421,8 +413,6 @@ class TfrtCpuExecutable final : public PjRtLoadedExecutable {
   bool IsDeleted() override;
 
   absl::StatusOr<std::string> SerializeExecutable() const override;
-
-  bool IsReturnedFutureSupported() const override { return true; }
 
   std::shared_ptr<Executable> cpu_executable() const { return cpu_executable_; }
 
