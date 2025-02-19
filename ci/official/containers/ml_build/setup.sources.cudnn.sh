@@ -1,4 +1,6 @@
-# Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+#!/usr/bin/env bash
+#
+# Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,11 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-source ci/official/envs/linux_x86
-TFCI_BAZEL_COMMON_ARGS="--repo_env=HERMETIC_PYTHON_VERSION=$TFCI_PYTHON_VERSION --repo_env=USE_PYWRAP_RULES=True --config release_gpu_linux"
-TFCI_BAZEL_TARGET_SELECTING_CONFIG_PREFIX=linux_cuda
-TFCI_BUILD_PIP_PACKAGE_WHEEL_NAME_ARG="--repo_env=WHEEL_NAME=tensorflow"
-TFCI_DOCKER_ARGS="--gpus all"
-TFCI_LIB_SUFFIX="-gpu-linux-x86_64"
-# TODO: Set back to 610M once the wheel size is fixed.
-TFCI_WHL_SIZE_LIMIT=630M
+#
+# Sets up custom apt sources for our TF images.
+
+# Prevent apt install tzinfo from asking our location (assumes UTC)
+export DEBIAN_FRONTEND=noninteractive
+
+# Fetch the NVIDIA key.
+apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub;
+
+# Set up sources for NVIDIA CUDNN.
+cat >/etc/apt/sources.list.d/nvidia.list <<SOURCES
+# NVIDIA
+deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+
+SOURCES
