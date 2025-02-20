@@ -14,12 +14,7 @@
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = [
-        # copybara:uncomment "//third_party/mediapipe/calculators/tensor:__subpackages__",
-        # copybara:uncomment "//third_party/odml/infra:__subpackages__",
-        # copybara:uncomment "//third_party/odml/litert:__subpackages__",
-        "//tensorflow/lite/experimental/litert:__subpackages__",
-    ],
+    default_visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -407,8 +402,8 @@ cc_test(
         "//tensorflow/lite/c:c_api_opaque",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/experimental/litert/c:litert_common",
-        "//tensorflow/lite/experimental/litert/c:litert_logging",
         "//tensorflow/lite/experimental/litert/test:common",
+        "//tensorflow/lite/experimental/litert/test:matchers",
         "//tensorflow/lite/experimental/litert/test:simple_model",
         "//tensorflow/lite/kernels:builtin_ops",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -450,5 +445,15 @@ cc_test(
 #     ],
 # )
 # copybara:uncomment_end
+
+cc_library(
+    name = "litert_tensor_buffer_utils",
+    srcs = ["litert_tensor_buffer_utils.cc"],
+    hdrs = ["litert_tensor_buffer_utils.h"],
+    deps = [
+        "//tensorflow/lite/experimental/litert/c:litert_logging",
+        "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer",
+    ],
+)
 
 exports_files(srcs = glob(["litert_*.h"]))
