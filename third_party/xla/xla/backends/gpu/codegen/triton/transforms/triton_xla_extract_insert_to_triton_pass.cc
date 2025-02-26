@@ -19,14 +19,18 @@ limitations under the License.
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -43,6 +47,9 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/triton/ir/triton_xla_ops.h"
 #include "xla/backends/gpu/codegen/triton/transforms/passes.h"
 #include "xla/codegen/emitter_loc_op_builder.h"
+#include "xla/stream_executor/device_description.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/Triton/IR/Types.h"
 
 namespace mlir::triton::xla {
 
@@ -75,13 +82,25 @@ bool AreRankedTensors(ArrayRef<Type> types) {
   });
 }
 
-struct RewriteFuncOp : mlir::OpRewritePattern<FuncOp> {
+void ComputeBoundaryChecks(std::vector<int32_t>& boundary_checks,
+                           const TiledTensorType& tiled_tensor_type) {
+  for (auto [dim_idx, sizes] :
+       llvm::enumerate(llvm::zip(tiled_tensor_type.getOriginalShape(),
+                                 tiled_tensor_type.getTileShape()))) {
+    auto [dim_size, tile_size] = sizes;
+    if (dim_size % tile_size) {
+      boundary_checks.push_back(dim_idx);
+    }
+  }
+}
+
+struct RewriteFuncOp : mlir::OpRewritePattern<func::FuncOp> {
   using OpRewritePattern::OpRewritePattern;
 
   // Rewrite tensors<> to !tt.ptr<tensor>
   // Remove any returns. i.e. tt.return with no operands.
   mlir::LogicalResult matchAndRewrite(
-      FuncOp op, mlir::PatternRewriter& rewriter) const override {
+      func::FuncOp op, mlir::PatternRewriter& rewriter) const override {
     ::xla::EmitterLocOpBuilder builder(op.getLoc(), rewriter);
 
     auto input_types = op.getFunctionType().getInputs();
@@ -92,17 +111,7 @@ struct RewriteFuncOp : mlir::OpRewritePattern<FuncOp> {
           op, "Expected all inputs and results to have tensor type.");
     }
 
-    mlir::Block* entry_block = &op.getBody().front();
-    SmallVector<Type> new_result_types;
-    SmallVector<Value> new_results;
-
-    // tt.return should have no operands after rewriting since we materialize
-    // all tensors.
-    entry_block->getTerminator()->eraseOperands(
-        0, entry_block->getTerminator()->getNumOperands());
-
     SmallVector<Type> new_operand_types(input_types);
-    rewriter.setInsertionPointToStart(entry_block);
     for (auto&& [index, operand_type] : llvm::enumerate(new_operand_types)) {
       mlir::BlockArgument func_arg = op.getArgument(index);
 
@@ -116,13 +125,25 @@ struct RewriteFuncOp : mlir::OpRewritePattern<FuncOp> {
     }
 
     // Replace the function arguments with the new types.
+    mlir::Block* entry_block = &op.getBody().front();
     for (auto [arg, arg_type] :
          llvm::zip(entry_block->getArguments(), new_operand_types)) {
       arg.setType(arg_type);
     }
 
-    // Update the function signature.
-    op.setType(rewriter.getFunctionType(new_operand_types, new_result_types));
+    auto new_function_type = FunctionType::get(
+        op.getContext(), new_operand_types, /*result_types=*/{});
+    auto new_func = rewriter.create<triton::FuncOp>(op.getLoc(), op.getName(),
+                                                    new_function_type);
+
+    rewriter.inlineRegionBefore(op.getRegion(), new_func.getFunctionBody(),
+                                new_func.end());
+    rewriter.replaceOp(op, new_func);
+
+    auto terminator = new_func.getBody().front().getTerminator();
+    rewriter.setInsertionPoint(terminator);
+    rewriter.create<triton::ReturnOp>(new_func.getLoc());
+    rewriter.eraseOp(terminator);
 
     return mlir::success();
   }
@@ -191,11 +212,12 @@ struct RewriteExtract : mlir::OpRewritePattern<ExtractOp> {
     auto advance =
         builder.create<AdvanceOp>(cast_to_tensor_ptr_type.getType(),
                                   cast_to_tensor_ptr_type, op.getOffsets());
-
-    // TODO(b/315957220): Actually provide boundary info here. For now, we
-    // assume perfect tiling.
     std::vector<int32_t> boundary_checks;
+    ComputeBoundaryChecks(boundary_checks, op.getSrc().getType());
     std::optional<PaddingOption> padding;
+    if (!boundary_checks.empty()) {
+      padding = PaddingOption::PAD_ZERO;
+    }
     auto load = builder
                     .create<LoadOp>(advance, boundary_checks, padding,
                                     CacheModifier::NONE, EvictionPolicy::NORMAL,
@@ -229,10 +251,12 @@ struct RewriteInsert : mlir::OpRewritePattern<InsertOp> {
     auto advance =
         builder.create<AdvanceOp>(cast_dst_to_tensor_ptr_type.getType(),
                                   cast_dst_to_tensor_ptr_type, op.getOffsets());
-
-    // TODO(b/315957220): Actually provide boundary info here. For now, we
-    // assume perfect tiling.
     std::vector<int32_t> boundary_checks;
+    ComputeBoundaryChecks(boundary_checks, op.getDst().getType());
+    std::optional<PaddingOption> padding;
+    if (!boundary_checks.empty()) {
+      padding = PaddingOption::PAD_ZERO;
+    }
     rewriter.create<StoreOp>(op->getLoc(), advance, op.getSrc(),
                              boundary_checks, CacheModifier::NONE,
                              EvictionPolicy::NORMAL);
@@ -244,25 +268,105 @@ struct RewriteInsert : mlir::OpRewritePattern<InsertOp> {
   }
 };
 
+// Rewriting tensor::InsertOp as tt.store.
+struct RewriteScalarInsert : mlir::OpRewritePattern<tensor::InsertOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult matchAndRewrite(
+      tensor::InsertOp op, mlir::PatternRewriter& rewriter) const override {
+    if (op.getDest().getType().getRank() != 0) {
+      return rewriter.notifyMatchFailure(op, "Expected dest to be scalar.");
+    }
+    ::xla::EmitterLocOpBuilder builder(op.getLoc(), rewriter);
+    auto ptr_type = GetTensorPtrType(builder, op.getScalar().getType());
+    auto cast_dst_to_tensor_ptr_type =
+        builder.create<mlir::UnrealizedConversionCastOp>(ptr_type, op.getDest())
+            .getResult(0);
+    builder.create<StoreOp>(cast_dst_to_tensor_ptr_type, op.getScalar(),
+                            /*boundary_checks=*/std::vector<int32_t>{},
+                            CacheModifier::NONE, EvictionPolicy::NORMAL);
+    rewriter.replaceOp(op, op.getDest());
+    return mlir::success();
+  }
+};
+
+struct RewriteScalarExtract : mlir::OpRewritePattern<tensor::ExtractOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  // Rewriting ExtractOp as tt.advance + tt.store.
+  mlir::LogicalResult matchAndRewrite(
+      tensor::ExtractOp op, mlir::PatternRewriter& rewriter) const override {
+    if (op.getTensor().getType().getRank() != 0) {
+      return rewriter.notifyMatchFailure(op, "Expected src to be scalar.");
+    }
+    ::xla::EmitterLocOpBuilder builder(op.getLoc(), rewriter);
+    auto ptr_type = GetTensorPtrType(builder, op.getType());
+    auto cast_src_to_tensor_ptr_type =
+        builder
+            .create<mlir::UnrealizedConversionCastOp>(ptr_type, op.getTensor())
+            .getResult(0);
+    auto scalar =
+        builder.create<LoadOp>(cast_src_to_tensor_ptr_type, CacheModifier::NONE,
+                               EvictionPolicy::NORMAL, /*isVolatile=*/false);
+    rewriter.replaceOp(op, scalar.getResult());
+    return mlir::success();
+  }
+};
+
 struct TritonXLAExtractInsertToTritonPass
     : public impl::TritonXLAExtractInsertToTritonPassBase<
           TritonXLAExtractInsertToTritonPass> {
+  explicit TritonXLAExtractInsertToTritonPass(
+      const TritonXLAExtractInsertToTritonPassOptions& options)
+      : TritonXLAExtractInsertToTritonPassBase(options) {}
+
+  explicit TritonXLAExtractInsertToTritonPass(
+      const ::xla::se::DeviceDescription& device_description, bool tma_enabled)
+      : device_description(device_description), tma_enabled(tma_enabled) {}
+
   void runOnOperation() override {
+    if (!gpu_device_info_.empty()) {
+      ::xla::se::GpuDeviceInfoProto device_info;
+      CHECK(tsl::protobuf::TextFormat::ParseFromString(gpu_device_info_,
+                                                       &device_info));
+      device_description = ::xla::se::DeviceDescription(device_info);
+    }
     mlir::MLIRContext* mlir_context = &getContext();
     mlir::RewritePatternSet patterns(mlir_context);
-    patterns.add<RewriteExtract, RewriteFuncOp, RewriteInsert, RewriteTile>(
-        mlir_context);
+    // clang-format off
+    patterns.add<
+        RewriteExtract,
+        RewriteFuncOp,
+        RewriteInsert,
+        RewriteScalarExtract,
+        RewriteScalarInsert,
+        RewriteTile
+    >( mlir_context);
+    // clang-format on
     if (mlir::failed(
             mlir::applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();
     }
   }
+
+  ::xla::se::DeviceDescription device_description;
+  bool tma_enabled;
 };
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> CreateTritonXLAExtractInsertToTritonPass() {
-  return std::make_unique<TritonXLAExtractInsertToTritonPass>();
+std::unique_ptr<mlir::Pass> CreateTritonXLAExtractInsertToTritonPass(
+    const std::string& gpu_device_info, bool tma_enabled) {
+  TritonXLAExtractInsertToTritonPassOptions options;
+  options.gpu_device_info_ = gpu_device_info;
+  options.tma_enabled_ = tma_enabled;
+  return std::make_unique<TritonXLAExtractInsertToTritonPass>(options);
+}
+
+std::unique_ptr<mlir::Pass> CreateTritonXLAExtractInsertToTritonPass(
+    const ::xla::se::DeviceDescription& device_description, bool tma_enabled) {
+  return std::make_unique<TritonXLAExtractInsertToTritonPass>(
+      device_description, tma_enabled);
 }
 
 }  // namespace mlir::triton::xla
