@@ -709,7 +709,7 @@ XLA_TEST_P(AsyncMemcpyCollectiveOps, AsyncAllToAllMultipleReplicaGroups) {
   LiteralTestUtil::ExpectR1Equal<uint32_t>({20, 23}, results[3]);
 }
 
-XLA_TEST_P(AsyncMemcpyCollectiveOps, AsyncAllToAllDegenerate) {
+XLA_TEST_P(AsyncMemcpyCollectiveOps, AsyncAllToAllDegenerateWithSplitDim) {
   const absl::string_view kModuleStr = R"(
   HloModule test
 
@@ -719,6 +719,41 @@ XLA_TEST_P(AsyncMemcpyCollectiveOps, AsyncAllToAllDegenerate) {
     a0 = u32[2] constant({10, 20})
     a1 = u32[2] add(id2, a0)
     ROOT a2a = u32[2] all-to-all(u32[2] a1), dimensions={0}, replica_groups={{0},{1}}
+  }
+  )";
+  const int64_t kNumReplicas = 2;
+  if (test_runner().device_count() < kNumReplicas) {
+    GTEST_SKIP() << "Test requires at least " << kNumReplicas << " devices ("
+                 << test_runner().device_count() << " available)";
+  }
+
+  HloModuleConfig config =
+      GetModuleConfigForTest(/*replica_count=*/kNumReplicas);
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kModuleStr, config));
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      CreateExecutable(std::move(module), /*run_hlo_passes=*/true));
+
+  TF_ASSERT_OK_AND_ASSIGN(std::vector<Literal> results,
+                          ExecuteReplicated(executable.get(), kNumReplicas));
+  ASSERT_EQ(results.size(), kNumReplicas);
+  LiteralTestUtil::ExpectR1Equal<uint32_t>({10, 20}, results[0]);
+  LiteralTestUtil::ExpectR1Equal<uint32_t>({11, 21}, results[1]);
+}
+
+XLA_TEST_P(AsyncMemcpyCollectiveOps, AsyncAllToAllDegenerateWithoutSplitDim) {
+  const absl::string_view kModuleStr = R"(
+  HloModule test
+
+  ENTRY test_computation {
+    id = u32[] replica-id()
+    id2 = u32[2] broadcast(id), dimensions={}
+    a0 = u32[2] constant({10, 20})
+    a1 = u32[2] add(id2, a0)
+    a2a = (u32[2]) all-to-all(u32[2] a1), replica_groups={{0},{1}}
+    ROOT gte0 = get-tuple-element(a2a), index=0
   }
   )";
   const int64_t kNumReplicas = 2;
@@ -1924,6 +1959,13 @@ class RaggedAllToAllTest : public AsyncMemcpyCollectiveOps {
         ragged_all_to_all->shape().dimensions().begin(),
         ragged_all_to_all->shape().dimensions().end()};
 
+    // The ragged-all-to-all accepts an output tensor as a parameter to allow
+    // buffer reuse. We initialize the output tensor with -1 to make sure that
+    // we don't accidentally overwrite data that is not part of the
+    // ragged-all-to-all update.
+    Array<float> output_init_data(ragged_tensor_sizes);
+    output_init_data.Fill(-1);
+
     Array<IndexType> output_sizes = input_sizes;
     output_sizes.TransposeDimensions({1, 0, 2});
 
@@ -1934,8 +1976,7 @@ class RaggedAllToAllTest : public AsyncMemcpyCollectiveOps {
     int64_t num_replicas = input_sizes.dim(0);
     std::vector<Array<float>> input_data(num_replicas,
                                          Array<float>(ragged_tensor_sizes));
-    std::vector<Array<float>> output_data(num_replicas,
-                                          Array<float>(ragged_tensor_sizes));
+    std::vector<Array<float>> output_data(num_replicas, output_init_data);
     FillWithRandomData(input_data, output_data, input_offsets, output_offsets,
                        input_sizes);
 
@@ -1955,9 +1996,7 @@ class RaggedAllToAllTest : public AsyncMemcpyCollectiveOps {
           GetReplicaSlice(replica_id, output_sizes)));
     }
 
-    // The ragged-all-to-all accepts an output tensor as a parameter to allow
-    // buffer reuse. We initialize the output tensor with zeros.
-    output_init_ = LiteralUtil::CreateFull(ragged_tensor_sizes, 0);
+    output_init_ = LiteralUtil::CreateFromArray(output_init_data);
   }
 
   // Returns a vector of pointers to the literals in the format needed for
