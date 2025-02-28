@@ -2055,7 +2055,7 @@ xla_test(
     timeout = "long",
     srcs = [],
     # placeholder for extra args for reduce_window_test
-    shard_count = 40,
+    shard_count = 50,
     tags = [
         "optonly",
         "test_xla_cpu_no_thunks",
@@ -3678,6 +3678,7 @@ bzl_library(
         "//xla:xla_bzl",
         "//xla/stream_executor:build_defs_bzl",
         "//xla/tsl/platform:build_config_root_bzl",
+        "//xla/tsl/platform/default:build_config_bzl",
     ] + tests_build_defs_bzl_deps(),
 )
 
