@@ -481,4 +481,70 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "litert_op_options",
+    srcs = ["litert_op_options.cc"],
+    hdrs = ["litert_op_options.h"],
+    deps = [
+        ":litert_expected",
+        ":litert_macros",
+        "//tensorflow/lite/experimental/litert/c:litert_common",
+        "//tensorflow/lite/experimental/litert/c:litert_model",
+        "//tensorflow/lite/experimental/litert/c:litert_op_code",
+        "//tensorflow/lite/experimental/litert/c:litert_options",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_test(
+    name = "litert_op_options_test",
+    srcs = ["litert_op_options_test.cc"],
+    deps = [
+        ":litert_op_options",
+        "//tensorflow/lite/experimental/litert/c:litert_op_code",
+        "//tensorflow/lite/experimental/litert/core/model",
+        "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "litert_shared_library",
+    srcs = ["litert_shared_library.cc"],
+    hdrs = ["litert_shared_library.h"],
+    deps = [
+        "//tensorflow/lite/experimental/litert/c:litert_common",
+        "//tensorflow/lite/experimental/litert/cc:litert_expected",
+        "//tensorflow/lite/experimental/litert/cc:litert_macros",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "test_litert_shared_library_impl",
+    srcs = ["test_shared_library.cc"],
+)
+
+cc_shared_library(
+    name = "test_litert_shared_library",
+    shared_lib_name = "test_shared_library.so",
+    deps = [":test_litert_shared_library_impl"],
+)
+
+cc_test(
+    name = "litert_shared_library_test",
+    srcs = ["litert_shared_library_test.cc"],
+    data = [":test_litert_shared_library"],
+    defines = ["LITERT_DEFINE_GTEST_STATUS_PRINTER"],
+    deps = [
+        ":litert_shared_library",
+        "//tensorflow/lite/experimental/litert/test:matchers",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 exports_files(srcs = glob(["litert_*.h"]))
