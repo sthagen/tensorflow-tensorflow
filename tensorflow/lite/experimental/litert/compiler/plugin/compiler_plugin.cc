@@ -45,6 +45,7 @@
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_op_options.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_shared_library.h"
 #include "tensorflow/lite/experimental/litert/compiler/plugin/algo.h"
 #include "tensorflow/lite/experimental/litert/core/build_stamp.h"
 #include "tensorflow/lite/experimental/litert/core/dynamic_loading.h"
@@ -58,17 +59,6 @@
 #include "tensorflow/lite/experimental/litert/vendors/c/litert_compiler_plugin_api.h"
 
 namespace litert::internal {
-
-namespace {
-
-// List of composite op names that are ignored during partitioning.
-// clang-format off
-inline constexpr absl::string_view kIgnoredCompositeOpNames[] = {
-    "odml.rms_norm"
-};
-// clang-format on
-
-}  // namespace
 
 //
 // CompiledResult
@@ -140,10 +130,9 @@ CompiledResult& CompiledResult::operator=(CompiledResult&& other) {
 namespace {
 
 #define RESOLVE_API_FUNC(name, dest) \
-  LITERT_RETURN_IF_ERROR(            \
-      ResolveLibSymbol<decltype(dest)>(lib_handle, name, &dest));
+  LITERT_ASSIGN_OR_RETURN(dest, lib.LookupSymbol<decltype(dest)>(name.data()));
 
-LiteRtStatus ResolvePluginApi(void* lib_handle,
+LiteRtStatus ResolvePluginApi(SharedLibrary& lib,
                               LiteRtCompilerPluginApi& result) {
   RESOLVE_API_FUNC(kLiteRtGetCompilerPluginVersion,
                    result.get_compiler_plugin_version);
@@ -229,11 +218,12 @@ Expected<CompilerPlugin> CompilerPlugin::LoadPlugin(
   CompilerPlugin plugin;
   LITERT_LOG(LITERT_INFO, "Loading plugin at: %s", lib_path.data());
 
-  LITERT_RETURN_IF_ERROR(OpenLib(lib_path, &plugin.lib_handle_));
+  LITERT_ASSIGN_OR_RETURN(
+      plugin.lib_,
+      SharedLibrary::Load(lib_path, RtldFlags::Now().Local().DeepBind()));
   LITERT_LOG(LITERT_INFO, "Loaded plugin at: %s", lib_path.data());
 
-  LITERT_RETURN_IF_ERROR(
-      ResolvePluginApi(plugin.lib_handle_, plugin.plugin_api_));
+  LITERT_RETURN_IF_ERROR(ResolvePluginApi(plugin.lib_, plugin.plugin_api_));
   LITERT_LOG(LITERT_INFO, "Resolved plugin api at: %s", lib_path.data());
 
   LITERT_RETURN_IF_ERROR(
@@ -298,19 +288,19 @@ Expected<std::vector<CompilerPlugin>> CompilerPlugin::LoadPlugins(
 
 CompilerPlugin::CompilerPlugin(CompilerPlugin&& other)
     : soc_models_(std::move(other.soc_models_)),
-      lib_handle_(std::move(other.lib_handle_)),
+      lib_(std::move(other.lib_)),
       plugin_api_(std::move(other.plugin_api_)),
       plugin_handle_(std::move(other.plugin_handle_)) {
   other.soc_models_ = {};
   other.plugin_api_ = {};
-  other.lib_handle_ = nullptr;
+  other.lib_.Close();
   other.plugin_handle_ = nullptr;
 }
 
 CompilerPlugin& CompilerPlugin::operator=(CompilerPlugin&& other) {
   if (this != &other) {
     std::swap(soc_models_, other.soc_models_);
-    std::swap(lib_handle_, other.lib_handle_);
+    std::swap(lib_, other.lib_);
     std::swap(plugin_api_, other.plugin_api_);
     std::swap(plugin_handle_, other.plugin_handle_);
   }
@@ -320,11 +310,6 @@ CompilerPlugin& CompilerPlugin::operator=(CompilerPlugin&& other) {
 CompilerPlugin::~CompilerPlugin() {
   if (plugin_handle_ != nullptr) {
     plugin_api_.destroy_compiler_plugin(plugin_handle_);
-  }
-  if (lib_handle_ != nullptr) {
-    if (kLiteRtStatusOk != CloseLib(lib_handle_)) {
-      LITERT_LOG(LITERT_WARNING, "%s", "Failed to close shared library\n");
-    }
   }
 }
 
@@ -398,52 +383,88 @@ LiteRtStatus PartitionSubgraph(
 
 }  // namespace
 
-void FindDecompositionSubgraphs(
-    LiteRtSubgraphT& subgraph,
-    absl::flat_hash_set<int32_t>& decomposition_subgraphs) {
-  for (auto& op : subgraph.Ops()) {
-    const auto composite_info = GetOptionsAs<CompositeOptions>(op);
-    if (!composite_info) {
-      continue;
-    }
-
-    const auto ignored_name =
-        Contains(std::begin(kIgnoredCompositeOpNames),
-                 std::end(kIgnoredCompositeOpNames), composite_info->name);
-
-    if (ignored_name) {
-      decomposition_subgraphs.insert(composite_info->subgraph);
-    }
-  }
-}
-
 Expected<PartitionResult> PartitionModel(CompilerPlugin& compiler_plugin,
                                          LiteRtModelT& model) {
-  absl::flat_hash_set<int32_t> decomposition_subgraphs;
-  for (auto* subgraph : model.Subgraphs()) {
-    FindDecompositionSubgraphs(*subgraph, decomposition_subgraphs);
-  }
+  // This algorithm decides the subgraphs to be partitioned by the plugin. This
+  // is a trivial process with the exception of composite ops and their
+  // decomposition subgraphs. Currently, we deploy the most naive approach to
+  // handling composite ops.
+  //
+  // There are two cases to consider:
+  // 1. The composite op is an "odml.npu_call", in which case it represents a
+  // parition which was explictly requested by the model author.
+  //
+  // In this case, the the composite itself is always selected, regardless of
+  // whether the plugin selects it. Its subgraph is not passed to the partition
+  // function and it is passed in its entirety to the compilation function.
+  //
+  // More advanced behavior could include:
+  // * Ensuring the plugin can compile the entire partition, and inlining it if
+  // not.
+  //
+  // 2. Standard non npu_call composite ops. Currently these are treated as a
+  // regular op, and their decomposition subgraphs are completely ignored in all
+  // phases of plugin application.
+  //
+  // More advanced behavior could include:
+  // * Allowing the plugin to compile the decomposition subgraph in the case
+  // it cannot lower the composite directly. Potentially inline in this case
+  // contingent on the availability of a suitable CPU kernel for the composite
+  // op.
+  //
+  // ASSUMPTIONS:
+  // * npu_call ops ARE NOT nested within decompositions of other npu_call ops.
+  // * Standard composite ops ARE allowed to be nested within decompositions of
+  // npu_call ops.
+  // * No two npu_call ops share the same subgraph.
 
-  // Accumulate partition results for each subgraph in model.
+  // Find decomposition subgraphs and npu_call ops. These will be used to filter
+  // subgraphs passed to the plugin and pass on auto-selected npu_call
+  // partitions.
+  absl::flat_hash_set<uint32_t> decomp_subgraphs;
+  std::vector<CompositeOptions> npu_calls;
+
+  ForEachIr(&model, [&](LiteRtOp op) {
+    auto info = GetOptionsAs<CompositeOptions>(op);
+    if (!info) {
+      return;
+    }
+    decomp_subgraphs.insert(info->subgraph);
+    if (info->name == CompositeOptions::kNpuCall) {
+      npu_calls.push_back(std::move(*info));
+    }
+  });
+
+  // Build partition result via calling plugin on non-decomposition subgraphs.
   PartitionResult result;
-  for (int i = 0; i < model.Subgraphs().size(); ++i) {
-    if (decomposition_subgraphs.contains(i)) {
-      LITERT_LOG(LITERT_INFO, "Skipping subgraph containing rms_norm");
+  for (auto i = 0; i < model.Subgraphs().size(); ++i) {
+    if (decomp_subgraphs.contains(i)) {
       continue;
     }
-
-    // Get selected ops from plugin.
-    auto selected_ops =
-        compiler_plugin.Partition(Subgraph(model.Subgraphs()[i]));
+    auto* subgraph = model.Subgraphs()[i];
+    auto selected_ops = compiler_plugin.Partition(Subgraph(subgraph));
+    // TODO ensure selected ops don't contain npu_calls.
     if (!selected_ops) {
-      LITERT_LOG(LITERT_ERROR, "Failed to get partitions from plugin");
       return selected_ops.Error();
     }
 
     LITERT_RETURN_IF_ERROR(PartitionSubgraph(
-        *selected_ops, *model.Subgraphs()[i], result, model.Buffers()));
+        std::move(*selected_ops), *subgraph, result, model.Buffers()));
+    LITERT_LOG(LITERT_INFO, "PartitionSubgraph: %d, selected num ops: %lu", i,
+               selected_ops->size());
   }
-  ABSL_DCHECK_EQ(result.first.size(), result.second.Size());
+
+  // Add npu_call partitions to result. Update the npu_call ops to be dispatch
+  // ops.
+  std::vector<size_t> decomps_to_compile;
+  for (auto& npu_call : npu_calls) {
+    auto* op = npu_call.op;
+    MakeDispatchOp(*op);
+    result.first.push_back(op);
+    decomps_to_compile.push_back(npu_call.subgraph);
+  }
+  model.TransferSubgraphTo(result.second, std::move(decomps_to_compile));
+
   return result;
 }
 
@@ -471,7 +492,7 @@ Expected<void> ApplyPluginWithPartition(CompilerPlugin& compiler_plugin,
 
   // Wrap the partitioned subgraphs in a LiteRtModel.
   LiteRtModelT sliced_model;
-  sliced_model.TransferSubgraphs(std::move(subgraphs));
+  sliced_model.TransferSubgraphsFrom(std::move(subgraphs));
 
   // Copy op codes.
   const auto& op_codes = detail::GetTflOpCodes(model);

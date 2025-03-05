@@ -26,6 +26,7 @@
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/runtime/environment.h"
 #include "tensorflow/lite/experimental/litert/runtime/opencl/buffer.h"
 #include "tensorflow/lite/experimental/litert/runtime/opencl/cl_command_queue.h"
@@ -36,7 +37,9 @@ namespace litert {
 namespace internal {
 
 template Expected<float*> OpenClBuffer::Lock<float>();
+template Expected<char*> OpenClBuffer::Lock<char>();
 template Expected<void> OpenClBuffer::Unlock<float>();
+template Expected<void> OpenClBuffer::Unlock<char>();
 
 template <typename T>
 Expected<T*> OpenClBuffer::Lock() {
@@ -96,6 +99,10 @@ bool OpenClBuffer::IsSupported() {
 }
 
 Expected<OpenClBuffer> OpenClBuffer::Alloc(size_t bytes_size) {
+  LITERT_RETURN_IF_ERROR(
+      IsSupported(),
+      Unexpected(kLiteRtStatusErrorRuntimeFailure, "OpenCL is not supported"));
+
   litert::cl::Buffer buffer;
 
   litert::cl::ClContext* cl_context =

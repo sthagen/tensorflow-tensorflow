@@ -156,6 +156,7 @@ cc_library(
         ":litert_event",
         ":litert_expected",
         ":litert_handle",
+        ":litert_macros",
         ":litert_model",
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/experimental/litert/c:litert_common",
@@ -178,15 +179,22 @@ cc_test(
     }),
     deps = [
         ":litert_layout",
+        ":litert_macros",
         ":litert_model",
         ":litert_tensor_buffer",
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "//tensorflow/lite/experimental/litert/c:litert_model",
         "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer",
         "//tensorflow/lite/experimental/litert/runtime:tensor_buffer",
+        "//tensorflow/lite/experimental/litert/test:matchers",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
-    ],
+    ] + select({
+        "//tensorflow:android": [
+            "//tensorflow/lite/delegates/gpu/gl:egl_environment",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 cc_library(
