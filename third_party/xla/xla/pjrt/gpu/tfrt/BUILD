@@ -35,6 +35,7 @@ cc_library(
         "//xla/pjrt/gpu:gpu_helpers",
         "//xla/pjrt/gpu:gpu_topology",
         "//xla/pjrt/gpu:gpu_topology_proto_cc",
+        "//xla/pjrt/plugin/xla_gpu:xla_gpu_client_options",
         "//xla/service:hlo_proto_cc",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:platform",
@@ -74,9 +75,37 @@ xla_cc_test(
     deps = [
         ":tfrt_gpu_client",
         "//xla/pjrt:host_memory_spaces",
+        "//xla/pjrt/plugin/xla_gpu:xla_gpu_client_options",
         "//xla/service:gpu_plugin",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "gpu_event",
+    srcs = ["gpu_event.cc"],
+    hdrs = ["gpu_event.h"],
+    deps = [
+        "//xla/tsl/concurrency:async_value",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "gpu_event_test",
+    srcs = ["gpu_event_test.cc"],
+    deps = [
+        ":gpu_event",
+        "//xla/tsl/concurrency:async_value",
+        "//xla/tsl/platform:status_matchers",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:test",
     ],
 )

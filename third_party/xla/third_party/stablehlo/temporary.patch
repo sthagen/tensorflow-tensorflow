@@ -1,36 +1,3 @@
-diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/unary.mlir b/stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
---- stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
-+++ stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
-@@ -123,8 +123,7 @@
- 
- // CHECK-LABEL: @transpose
- func.func @transpose(%arg0: tensor<1x2x3xf32>) -> tensor<3x2x1xf32> {
--  // CHECK: %[[VAR0:.*]] = "tosa.const"() <{value = dense<[2, 1, 0]> : tensor<3xi32>}> : () -> tensor<3xi32>
--  // CHECK: %[[VAR1:.*]] = tosa.transpose %arg0, %[[VAR0]]
-+  // CHECK: %[[VAR0:.*]] = tosa.transpose %arg0 {perms = array<i32: 2, 1, 0>}
-   %0 = "stablehlo.transpose"(%arg0) {permutation = array<i64: 2, 1, 0>} : (tensor<1x2x3xf32>) -> tensor<3x2x1xf32>
-   return %0 : tensor<3x2x1xf32>
- }
-diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp b/stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
---- stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
-+++ stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
-@@ -458,13 +458,10 @@
-     }
- 
-     auto perms = op.getPermutation();
--    auto type = RankedTensorType::get({static_cast<int64_t>(perms.size())},
--                                      rewriter.getI32Type());
-     std::vector<int32_t> perms_int32(perms.begin(), perms.end());
--    auto constOp = rewriter.create<tosa::ConstOp>(
--        op->getLoc(), type, DenseIntElementsAttr::get(type, perms_int32));
--    rewriter.replaceOpWithNewOp<tosa::TransposeOp>(op, op.getType(),
--                                                   op.getOperand(), constOp);
-+    rewriter.replaceOpWithNewOp<tosa::TransposeOp>(
-+        op, op.getType(), op.getOperand(),
-+        rewriter.getDenseI32ArrayAttr(perms_int32));
-     return success();
-   }
- };
 diff --ruN a/stablehlo/stablehlo/dialect/Base.cpp b/stablehlo/stablehlo/dialect/Base.cpp
 --- stablehlo/stablehlo/dialect/Base.cpp
 +++ stablehlo/stablehlo/dialect/Base.cpp
@@ -53,116 +20,115 @@ diff --ruN a/stablehlo/stablehlo/dialect/Base.h b/stablehlo/stablehlo/dialect/Ba
  };
  
  FailureOr<KnownDotAlgorithm> getKnownDotAlgorithm(
-diff --ruN a/stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir b/stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
---- stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
-+++ stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
-@@ -924,6 +924,15 @@
-   // CHECK: %[[RES:.+]] = stablehlo.broadcast_in_dim %arg1, dims = [] : (tensor<f32>) -> tensor<7x2xf32>
-   // CHECK: return %[[RES]]
-   return %0 : tensor<7x2xf32>
-+}
-+
-+// Can't do anything with the dynamic shape, but shouldn't crash.
-+// CHECK-LABEL: @dynamic_pad
-+func.func @dynamic_pad(%arg0: tensor<?x2x3xi1>, %arg1: tensor<i1>) -> tensor<?x2x1xi1> {
-+  %0 = stablehlo.pad %arg0, %arg1, low = [0, 0, -1], high = [0, 0, -1], interior = [0, 0, 0] : (tensor<?x2x3xi1>, tensor<i1>) -> tensor<?x2x1xi1>
-+  // CHECK-NEXT: %[[RES:.+]] = stablehlo.pad %arg0, %arg1, low = [0, 0, -1], high = [0, 0, -1], interior = [0, 0, 0] : (tensor<?x2x3xi1>, tensor<i1>) -> tensor<?x2x1xi1>
-+  // CHECK-NEXT: return %[[RES]]
-+  return %0 : tensor<?x2x1xi1>
+diff --ruN a/stablehlo/stablehlo/dialect/ChloOps.cpp b/stablehlo/stablehlo/dialect/ChloOps.cpp
+--- stablehlo/stablehlo/dialect/ChloOps.cpp
++++ stablehlo/stablehlo/dialect/ChloOps.cpp
+@@ -710,31 +710,6 @@
+   return success();
  }
  
- // -----
-@@ -1908,6 +1917,19 @@
- 
- // -----
- 
-+// CHECK-LABEL: @side_effecting_custom_call
-+func.func @side_effecting_custom_call(%arg0: tensor<0xf32>) -> (tensor<0xf32>, tensor<0xf32>) {
-+  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<> : tensor<0xf32>
-+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = true} : (tensor<0xf32>) -> tensor<0xf32>
-+  %0 = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = true} : (tensor<0xf32>) -> tensor<0xf32>
-+  // CHECK-NOT:  stablehlo.custom_call{{.*}}has_side_effect = false
-+  %1 = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = false} : (tensor<0xf32>) -> tensor<0xf32>
-+  // CHECK: return %[[CC]], %[[CST]]
-+  return %0, %1 : tensor<0xf32>, tensor<0xf32>
-+}
-+
-+// -----
-+
- /////////
- // Generic Shape Ops
- 
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/Passes.h b/stablehlo/stablehlo/transforms/optimization/Passes.h
---- stablehlo/stablehlo/transforms/optimization/Passes.h
-+++ stablehlo/stablehlo/transforms/optimization/Passes.h
-@@ -50,6 +50,13 @@
-                                           MLIRContext *context,
-                                           bool foldFloat = false,
-                                           PatternBenefit benefit = 1);
-+
-+/// Some workloads in XLA import StableHLO from HLO. Since there are a few
-+/// differences in HLO (no implicit captures, lots of tuples, etc.), this
-+/// set of patterns brings the imported HLO back to a more canonical form
-+/// without applying a full set of graph simplifications.
-+void populateStablehloHloImportCanonicalizationPatterns(
-+    MLIRContext *context, RewritePatternSet *patterns);
- }  // namespace stablehlo
- }  // namespace mlir
- 
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp b/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
---- stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
-+++ stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
-@@ -934,8 +934,12 @@
-     auto padVal = op.getPaddingValue();
- 
-     auto resultTy = cast<RankedTensorType>(op.getType());
+-LogicalResult RaggedDotOp::inferReturnTypes(
+-    MLIRContext*, std::optional<Location>, ValueRange operands,
+-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+-    SmallVectorImpl<Type>& inferredReturnTypes) {
+-  RaggedDotOp::Adaptor op(operands, attributes, properties, regions);
 -
--    if (cast<ShapedType>(operand.getType()).getNumElements() != 0)
-+    auto operandTy = cast<RankedTensorType>(operand.getType());
-+
-+    if (!operandTy.hasStaticShape())
-+      return rewriter.notifyMatchFailure(op, "operand shape is dynamic");
-+
-+    if (operandTy.getNumElements() != 0)
-       return rewriter.notifyMatchFailure(op, "operand is not empty tensor");
- 
-     if (resultTy.hasStaticShape()) {
-@@ -1399,6 +1403,12 @@
-       return rewriter.notifyMatchFailure(op, "not stablehlo");
-     if (isa<ConstantOp>(op))
-       return rewriter.notifyMatchFailure(op, "op is empty constant");
-+
-+    // Skip ops that have memory effects, similar to XLA's zero extent
-+    // simplification, replacing these doesn't save any computation.
-+    auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op);
-+    if (effectInterface && !effectInterface.hasNoEffect())
-+      return rewriter.notifyMatchFailure(op, "op has memory effect");
- 
-     // If the result is a zero-extent tensor, replace the whole op with an empty
-     // constant.
-@@ -1528,6 +1538,12 @@
-             DynamicReshapeOpIsStatic, DynamicIotaIsStatic>(context);
+-  auto rankedLhsType = cast<RankedTensorType>(op.getLhs().getType());
+-  auto rankedRhsType = cast<RankedTensorType>(op.getRhs().getType());
+-  auto rankedGroupSizesType =
+-      cast<RankedTensorType>(op.getGroupSizes().getType());
+-  auto raggedDotDimNums = op.getRaggedDotDimensionNumbers();
+-
+-  inferredReturnTypes.push_back(RankedTensorType::get(
+-      inferRaggedDotOutputDimensions(
+-          rankedLhsType, rankedRhsType, rankedGroupSizesType,
+-          raggedDotDimNums.getLhsBatchingDimensions(),
+-          raggedDotDimNums.getRhsBatchingDimensions(),
+-          raggedDotDimNums.getLhsContractingDimensions(),
+-          raggedDotDimNums.getRhsContractingDimensions(),
+-          raggedDotDimNums.getLhsRaggedDimensions(),
+-          raggedDotDimNums.getRhsGroupDimensions()),
+-      rankedLhsType.getElementType()));
+-  return success();
+-}
+-
+ //===----------------------------------------------------------------------===//
+ // TopKOp
+ //===----------------------------------------------------------------------===//
+diff --ruN a/stablehlo/stablehlo/dialect/ChloOps.td b/stablehlo/stablehlo/dialect/ChloOps.td
+--- stablehlo/stablehlo/dialect/ChloOps.td
++++ stablehlo/stablehlo/dialect/ChloOps.td
+@@ -856,8 +856,7 @@
+   let hasCustomAssemblyFormat = 1;
  }
  
-+void populateStablehloHloImportCanonicalizationPatterns(
-+    MLIRContext *context, RewritePatternSet *patterns) {
-+  patterns->add<TupleIsRepacking, TupleIsUnpacked, WhileOpImplicitCapture>(
-+      context);
-+}
-+
- std::unique_ptr<Pass> createStablehloAggressiveSimplificationPass(
-     GreedyRewriteConfig config) {
-   return std::make_unique<StablehloAggressiveSimplificationPass>(config);
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td b/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
---- stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
-+++ stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
-@@ -411,7 +411,7 @@
- // GetTupleElementOp
+-def CHLO_RaggedDotOp : CHLO_Op<"ragged_dot",
+-    [Pure, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
++def CHLO_RaggedDotOp : CHLO_Op<"ragged_dot", [Pure]> {
+   string summary = "Computes a matmul over a single ragged dimension";
  
- // Pattern: get_tuple_element(tuple(X_0, X_1, ...), i) -> X_i
--def : Pat<(StableHLO_GetTupleElementOp (StableHLO_TupleOp:$tuple $operands), $idx),
-+def TupleIsUnpacked : Pat<(StableHLO_GetTupleElementOp (StableHLO_TupleOp:$tuple $operands), $idx),
-           (GetOperandN $tuple, $idx)>;
+   string description = [{
+diff --ruN a/stablehlo/stablehlo/transforms/VhloToVersion.cpp b/stablehlo/stablehlo/transforms/VhloToVersion.cpp
+--- stablehlo/stablehlo/transforms/VhloToVersion.cpp
++++ stablehlo/stablehlo/transforms/VhloToVersion.cpp
+@@ -27,7 +27,6 @@
+ #include "mlir/IR/BuiltinAttributes.h"
+ #include "mlir/IR/BuiltinTypes.h"
+ #include "mlir/IR/Diagnostics.h"
+-#include "mlir/IR/Location.h"
+ #include "mlir/IR/PatternMatch.h"
+ #include "mlir/IR/Region.h"
+ #include "mlir/IR/Types.h"
+@@ -187,31 +186,6 @@
+   return success();
+ }
  
- ////////
+-bool isLegalLocation(Location loc, const Version& targetVersion) {
+-  // FileLineColRange locations are a forward incompatibility in upstream MLIR
+-  // just before v1.8.4 was tagged. Conservatively use 1.9.0 since StableHLO
+-  // passes require major versions for incompats.
+-  //
+-  // Support for downgrading these locations exists in
+-  // StablehloCompatibilityExpanderPass.
+-  bool isLegal = true;
+-  loc->walk([&](Location childLoc) -> WalkResult {
+-    if (auto fileLineColLoc = dyn_cast<FileLineColRange>(childLoc)) {
+-      static const Version kFileLineColLocMinVersion = Version(1, 9, 0);
+-      if (!isStrictFileLineColLoc(childLoc) &&
+-          targetVersion < kFileLineColLocMinVersion) {
+-        LLVM_DEBUG(llvm::dbgs() << "failed to legalize location " << childLoc
+-                                << " to version " << targetVersion << '\n');
+-        isLegal = false;
+-        return WalkResult::interrupt();
+-      }
+-    }
+-    return WalkResult::advance();
+-  });
+-
+-  return isLegal;
+-}
+-
+ bool isLegalOperation(Operation* op, const Version& targetVersion) {
+   // Validate op
+   auto opInterface = dyn_cast<VersionedOpInterface>(op);
+@@ -234,7 +208,6 @@
+     return succeeded(isLegalAttribute(attr.getValue(), targetVersion));
+   };
+   if (!llvm::all_of(op->getAttrs(), isLegalAttrFn)) return false;
+-  LLVM_DEBUG(llvm::dbgs() << "Legal op attributes for target. " << op << '\n');
+ 
+   // Validate types
+   auto isLegalTypeFn = [&](Type t) {
+@@ -243,11 +216,6 @@
+   if (!llvm::all_of(op->getOperandTypes(), isLegalTypeFn) ||
+       !llvm::all_of(op->getResultTypes(), isLegalTypeFn))
+     return false;
+-  LLVM_DEBUG(llvm::dbgs() << "Legal op types for target. " << op << '\n');
+-
+-  // Validate location
+-  if (!isLegalLocation(op->getLoc(), targetVersion)) return false;
+-  LLVM_DEBUG(llvm::dbgs() << "Legal op location for target. " << op << '\n');
+ 
+   return true;
+ }
 
