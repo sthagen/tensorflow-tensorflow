@@ -96,14 +96,21 @@ cc_test(
 )
 
 cc_library(
+    name = "litert_consts",
+    hdrs = [
+        "litert_consts.h",
+    ],
+)
+
+cc_library(
     name = "litert_model",
     srcs = ["litert_model.cc"],
     hdrs = [
-        "litert_consts.h",
         "litert_model.h",
     ],
     deps = [
         ":litert_buffer_ref",
+        ":litert_consts",
         ":litert_detail",
         ":litert_element_type",
         ":litert_expected",
@@ -185,6 +192,7 @@ cc_test(
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "//tensorflow/lite/experimental/litert/c:litert_model",
         "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer",
+        "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer_types",
         "//tensorflow/lite/experimental/litert/runtime:tensor_buffer",
         "//tensorflow/lite/experimental/litert/test:matchers",
         "@com_google_absl//absl/types:span",
@@ -358,7 +366,9 @@ cc_library(
     name = "litert_layout",
     hdrs = ["litert_layout.h"],
     deps = [
+        ":litert_consts",
         "//tensorflow/lite/experimental/litert/c:litert_layout",
+        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -486,7 +496,7 @@ cc_library(
     hdrs = ["litert_tensor_buffer_utils.h"],
     deps = [
         "//tensorflow/lite/experimental/litert/c:litert_logging",
-        "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer",
+        "//tensorflow/lite/experimental/litert/c:litert_tensor_buffer_types",
     ],
 )
 
