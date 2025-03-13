@@ -397,7 +397,7 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:status",
-    ] + if_cuda_is_configured(["@local_config_cuda//cuda:nvml_headers"]),
+    ] + if_cuda_is_configured(["@local_config_cuda//cuda:cuda_headers"]),
 )
 
 xla_cc_test(
@@ -924,13 +924,14 @@ cc_library(
 )
 
 [
-    xla_cc_test(
+    xla_test(
         name = "hlo_op_profiler_run_" + sm,
         timeout = "eternal",
         srcs = ["hlo_op_profiler_run.cc"],
         # Disable backend optimizations (in particular reassociate and instcombine) which would optimize
         # expressions like integer add and multiply.
         args = ["--xla_backend_optimization_level=0"],
+        backends = ["gpu"],
         # This is a development tool, not a normal test, and thus should only be run
         # manually with --config=cuda.
         tags = [
@@ -1059,6 +1060,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_proto_cc",
+        "//xla/service/gpu/transforms/collectives:collective_ops_utils",
         "//xla/stream_executor:device_description",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
@@ -1083,6 +1085,7 @@ xla_cc_test(
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_proto_cc",
         "//xla/service/gpu:gpu_device_info_for_tests",
+        "//xla/service/gpu/transforms/collectives:collective_ops_utils",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",

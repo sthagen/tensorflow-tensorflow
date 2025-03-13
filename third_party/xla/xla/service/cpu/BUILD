@@ -510,6 +510,27 @@ xla_test(
     ],
 )
 
+xla_test(
+    name = "cpu_compiler_internals_test",
+    srcs = ["cpu_compiler_internals_test.cc"],
+    backends = [
+        "cpu",
+    ],
+    deps = [
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:verified_hlo_module",
+        "//xla/service:llvm_compiler",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/strings:string_view",
+        "@llvm-project//llvm:Core",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
 tf_proto_library(
     name = "executable_proto",
     srcs = ["executable.proto"],
@@ -903,7 +924,7 @@ cc_library(
         "//xla/backends/cpu:onednn_fusion",
         "//xla/backends/cpu:xnn_emitter",
         "//xla/backends/cpu:xnn_fusion",
-        "//xla/backends/cpu/codegen:call_kernel_emitter",
+        "//xla/backends/cpu/codegen:computation_kernel_emitter",
         "//xla/backends/cpu/codegen:target_machine_features",
         "//xla/backends/cpu/codegen/dot:dot_kernel_emitter",
         "//xla/backends/cpu/codegen/elemental:concatenate_kernel_emitter",

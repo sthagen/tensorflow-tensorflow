@@ -59,14 +59,19 @@ cc_library(
     hdrs = ["ir_compiler.h"],
     deps = [
         ":polynomial_approximations",
+        "//xla:debug_options_flags",
         "//xla:util",
         "//xla/service:hlo_module_config",
+        "//xla/service/cpu:cpu_options",
         "//xla/service/llvm_ir:llvm_util",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@llvm-project//llvm:Analysis",
         "@llvm-project//llvm:Core",
@@ -362,9 +367,9 @@ cc_library(
 )
 
 cc_library(
-    name = "call_kernel_emitter",
-    srcs = ["call_kernel_emitter.cc"],
-    hdrs = ["call_kernel_emitter.h"],
+    name = "computation_kernel_emitter",
+    srcs = ["computation_kernel_emitter.cc"],
+    hdrs = ["computation_kernel_emitter.h"],
     deps = [
         ":kernel_api_ir_builder",
         ":target_machine_features",
@@ -454,8 +459,8 @@ xla_cc_test(
 )
 
 py_strict_test(
-    name = "call_kernel_emitter_test",
-    srcs = ["call_kernel_emitter_test.py"],
+    name = "computation_kernel_emitter_test",
+    srcs = ["computation_kernel_emitter_test.py"],
     tags = [
         "no_oss",
     ],
