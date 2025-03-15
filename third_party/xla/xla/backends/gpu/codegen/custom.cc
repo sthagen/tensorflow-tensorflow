@@ -1172,7 +1172,7 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
   Thunk::Kind collective_done_thunk_kind;
   switch (instr->opcode()) {
     case HloOpcode::kReduceScatter:
-      collective_done_thunk_kind = Thunk::kNcclReduceScatterDone;
+      collective_done_thunk_kind = Thunk::kReduceScatterDone;
       break;
     default:
       return absl::InternalError(
@@ -1357,8 +1357,7 @@ absl::StatusOr<FusionEmissionResult> DynamicSliceFusion::Emit(
     const HloReduceScatterInstruction* rs =
         Cast<const HloReduceScatterInstruction>(
             &maybe_collective->instruction());
-    return EmitCollective<NcclReduceScatterStartThunk,
-                          HloReduceScatterInstruction>(
+    return EmitCollective<ReduceScatterStartThunk, HloReduceScatterInstruction>(
         ir_emitter_context, adaptor, /*fusion_instr=*/fusion, /*instr=*/rs,
         /*use_global_device_ids=*/rs->use_global_device_ids(),
         /*call_graph=*/call_graph_);

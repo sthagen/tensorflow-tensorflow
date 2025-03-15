@@ -25,6 +25,7 @@
 #include "absl/cleanup/cleanup.h"
 #include "tensorflow/lite/experimental/litert/c/litert_accelerator_options.h"
 #include "tensorflow/lite/experimental/litert/c/litert_environment.h"
+#include "tensorflow/lite/experimental/litert/c/litert_environment_options.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_event.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
@@ -180,7 +181,8 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
     model_buffer = reinterpret_cast<const char*>(new_flatbuffer->Data());
     model_buffer_size = new_flatbuffer->Size();
 
-  } else if (auto init_model_buffer = detail::GetTflFlatbuffer(*model).Buf();
+  } else if (auto init_model_buffer =
+                 litert::internal::GetTflFlatbuffer(*model).Buf();
              init_model_buffer.Size() != 0) {
     // Use the saved the original FB pointer when the LiteRtModel was created
     // from a buffer.
@@ -223,7 +225,7 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
   // Add a new link in the accelerator compilation options that holds some data
   // that is computed during model compilation.
   LITERT_ASSIGN_OR_RETURN(auto model_compilation_data,
-                          litert::ModelCompilationData::Create());
+                          litert::internal::ModelCompilationData::Create());
   model_compilation_data->allocation_base = model_buffer;
 
   // Temporarily append model_compilation_data to the jit_compilation_options,
@@ -266,8 +268,12 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
   // Apply the dispatch delegate, unconditionally, since the loaded model may
   // have been compiled for NPU at AOT.
   // TODO: b/394958439 - Get the DispatchDelegate from the AcceleratorRegistry.
+
+  LiteRtEnvironmentOptions env_options = nullptr;
+  LITERT_RETURN_IF_ERROR(LiteRtGetEnvironmentOptions(env, &env_options));
+
   auto dispatch_delegate_options =
-      litert::CreateDispatchDelegateOptionsPtr(*env);
+      litert::CreateDispatchDelegateOptionsPtr(env_options);
   LiteRtDispatchDelegateAddAllocBaseOption(dispatch_delegate_options.get(),
                                            model_buffer);
 
@@ -282,7 +288,7 @@ Expected<LiteRtCompiledModelT::Ptr> LiteRtCompiledModelT::Create(
   }
 
   auto dispatch_delegate = litert::CreateDispatchDelegatePtr(
-      *env, std::move(dispatch_delegate_options));
+      env_options, std::move(dispatch_delegate_options));
   if (auto status = compiled_model->interp_->ModifyGraphWithDelegate(
           dispatch_delegate.get());
       status != kTfLiteOk) {

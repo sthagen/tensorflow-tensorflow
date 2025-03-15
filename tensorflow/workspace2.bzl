@@ -40,6 +40,7 @@ load("//third_party/implib_so:workspace.bzl", implib_so = "repo")
 load("//third_party/jpeg:workspace.bzl", jpeg = "repo")
 load("//third_party/kissfft:workspace.bzl", kissfft = "repo")
 load("//third_party/libprotobuf_mutator:workspace.bzl", libprotobuf_mutator = "repo")
+load("//third_party/libwebp:workspace.bzl", libwebp = "repo")
 load("//third_party/llvm:setup.bzl", "llvm_setup")
 load("//third_party/nanobind:workspace.bzl", nanobind = "repo")
 load("//third_party/nasm:workspace.bzl", nasm = "repo")
@@ -82,6 +83,7 @@ def _initialize_third_party():
     jpeg()
     kissfft()
     libprotobuf_mutator()
+    libwebp()
     ml_dtypes()
     nanobind()
     nasm()
@@ -916,9 +918,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "org_xprof",
-        sha256 = "66965fd6637288bc08620731e6e532576d5dcb7c61b3196fb1c09ff235f3af57",
-        strip_prefix = "profiler-8e0a7121bdac04ab9f63f0d68761de7c723a7716",
-        urls = tf_mirror_urls("https://github.com/tensorflow/profiler/archive/8e0a7121bdac04ab9f63f0d68761de7c723a7716.zip"),
+        sha256 = "de191174c2ecfe1ef47570b1567c6b01f6475aacab3ef48bb8553b0cfaa315eb",
+        strip_prefix = "profiler-16e8b2a1a013edfd4da0d22f19a1293befbe1816",
+        urls = tf_mirror_urls("https://github.com/tensorflow/profiler/archive/16e8b2a1a013edfd4da0d22f19a1293befbe1816.zip"),
     )
 
     # used for adding androidx.annotation dependencies in tflite android jni.

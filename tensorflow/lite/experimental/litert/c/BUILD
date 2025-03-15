@@ -35,12 +35,48 @@ cc_library(
     srcs = ["litert_environment.cc"],
     hdrs = ["litert_environment.h"],
     deps = [
+        ":litert_common",
+        ":litert_environment_options",
+        "//tensorflow/lite/experimental/litert/cc:litert_macros",
+        "//tensorflow/lite/experimental/litert/core:environment",
+        "//tensorflow/lite/experimental/litert/runtime:gpu_environment",
+        "//tensorflow/lite/experimental/litert/runtime/accelerators:auto_registration",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "litert_environment_options",
+    srcs = ["litert_environment_options.cc"],
+    hdrs = ["litert_environment_options.h"],
+    deps = [
         ":litert_any",
         ":litert_common",
         "//tensorflow/lite/experimental/litert/cc:litert_macros",
-        "//tensorflow/lite/experimental/litert/core:environment",
-        "//tensorflow/lite/experimental/litert/runtime/accelerators:auto_registration",
-        "@com_google_absl//absl/types:span",
+        "//tensorflow/lite/experimental/litert/core:environment_options",
+    ],
+)
+
+cc_library(
+    name = "litert_environment_options_header",
+    hdrs = ["litert_environment_options.h"],
+    tags = ["avoid_dep"],
+    deps = [
+        ":litert_any",
+        ":litert_common",
+    ],
+)
+
+cc_test(
+    name = "litert_environment_options_test",
+    srcs = ["litert_environment_options_test.cc"],
+    deps = [
+        ":litert_any",
+        ":litert_common",
+        ":litert_environment_options",
+        "//tensorflow/lite/experimental/litert/core:environment_options",
+        "//tensorflow/lite/experimental/litert/test:matchers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -155,12 +191,19 @@ cc_test(
 )
 
 cc_library(
+    name = "litert_event_type",
+    hdrs = ["litert_event_type.h"],
+)
+
+cc_library(
     name = "litert_event",
     srcs = ["litert_event.cc"],
     hdrs = ["litert_event.h"],
     deps = [
         ":litert_common",
+        ":litert_event_type",
         ":litert_logging",
+        "//tensorflow/lite/experimental/litert/cc:litert_macros",
         "//tensorflow/lite/experimental/litert/runtime:event",
     ],
 )
@@ -240,6 +283,7 @@ cc_library(
         "litert_dispatch_delegate.h",
     ],
     deps = [
+        ":litert_environment_options",
         "//tensorflow/lite/c:c_api",
         "//tensorflow/lite/c:c_api_opaque",
         "//tensorflow/lite/c:c_api_types",
@@ -469,6 +513,7 @@ cc_library(
     name = "litert_dispatch_headers",
     hdrs = [
         ":litert_environment.h",
+        ":litert_environment_options.h",
         ":litert_accelerator.h",
         ":litert_accelerator_options.h",
         ":litert_any.h",
@@ -476,6 +521,7 @@ cc_library(
         ":litert_compiled_model.h",
         ":litert_compilation_options.h",
         ":litert_event.h",
+        ":litert_event_type.h",
         ":litert_layout.h",
         ":litert_logging.h",
         ":litert_model.h",

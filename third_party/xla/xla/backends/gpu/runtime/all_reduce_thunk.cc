@@ -138,28 +138,28 @@ absl::Status AllReduceStartThunk::RunCollective(
                                   device_buffers, stream, comm_handle.comm);
 }
 
-NcclReduceScatterStartThunk::NcclReduceScatterStartThunk(
+ReduceScatterStartThunk::ReduceScatterStartThunk(
     ThunkInfo thunk_info, const HloReduceScatterInstruction* inst,
     std::vector<Buffer> buffers, bool p2p_memcpy_enabled)
-    : AllReduceReduceScatterThunkBase(
-          Thunk::kNcclReduceScatterStart, thunk_info,
-          impl::GetAllReduceConfigInst(inst), std::move(buffers),
-          IsGPUSyncCollective(*inst)) {}
+    : AllReduceReduceScatterThunkBase(Thunk::kReduceScatterStart, thunk_info,
+                                      impl::GetAllReduceConfigInst(inst),
+                                      std::move(buffers),
+                                      IsGPUSyncCollective(*inst)) {}
 
-/*static*/ absl::Status NcclReduceScatterStartThunk::CheckImplementable(
+/*static*/ absl::Status ReduceScatterStartThunk::CheckImplementable(
     const HloReduceScatterInstruction* inst, int64_t replica_count,
     int64_t partition_count) {
-  return AddOpDescription<NcclReduceScatterStartThunk>(
-      impl::CheckImplementableInst(inst, Thunk::kNcclReduceScatterStart), inst,
+  return AddOpDescription<ReduceScatterStartThunk>(
+      impl::CheckImplementableInst(inst, Thunk::kReduceScatterStart), inst,
       replica_count, partition_count);
 }
 
-/*static*/ CollectiveOpGroupMode NcclReduceScatterStartThunk::GetGroupMode(
+/*static*/ CollectiveOpGroupMode ReduceScatterStartThunk::GetGroupMode(
     const HloReduceScatterInstruction* inst) {
   return impl::GetGroupModeInst(inst);
 }
 
-absl::Status NcclReduceScatterStartThunk::RunCollective(
+absl::Status ReduceScatterStartThunk::RunCollective(
     const ExecuteParams& params, se::Stream& stream,
     CommunicatorHandle comm_handle) {
   TF_ASSIGN_OR_RETURN(
