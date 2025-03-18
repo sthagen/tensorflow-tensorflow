@@ -624,6 +624,7 @@ cc_library(
         "//xla/mlir/utils:error_util",
         "//xla/mlir_hlo:hlo_dialect_registration",
         "//xla/mlir_hlo:mhlo_passes",
+        "//xla/mlir_hlo:stablehlo_extension_passes",
         "//xla/service/spmd/shardy:constants",
         "//xla/service/spmd/shardy:utils",
         "//xla/service/spmd/shardy/sdy_round_trip:pipelines",
@@ -1109,10 +1110,12 @@ cc_library(
     srcs = ["raw_buffer.cc"],
     hdrs = ["raw_buffer.h"],
     deps = [
+        ":pjrt_client",
         ":pjrt_future",
         "//xla/tsl/concurrency:ref_count",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
     ],
 )
 
