@@ -1960,7 +1960,7 @@ CpuCompiler::CompileAheadOfTimeLegacy(
   auto llvm_module =
       std::make_unique<llvm::Module>(kXlaModuleIdentifier, *llvm_context);
   llvm_module->setDataLayout(target_machine->createDataLayout());
-  llvm_module->setTargetTriple(triple.getTriple());
+  llvm_module->setTargetTriple(triple);
   if (pic_level != llvm::PICLevel::NotPIC) {
     llvm_module->setPICLevel(pic_level);
   }
@@ -2108,7 +2108,7 @@ CpuCompiler::CompileAheadOfTimeThunks(
       std::make_unique<llvm::Module>(kXlaModuleIdentifier, *llvm_context);
 
   llvm_module->setDataLayout(target_machine->createDataLayout());
-  llvm_module->setTargetTriple(triple.getTriple());
+  llvm_module->setTargetTriple(triple);
   if (pic_level != llvm::PICLevel::NotPIC) {
     llvm_module->setPICLevel(pic_level);
   }
@@ -2364,8 +2364,14 @@ HloCostAnalysis::ShapeSizeFunction CpuCompiler::ShapeSizeBytesFunction() const {
 
 namespace {
 
-// This is a result of exporting JIT compiled CpuExecutable to AOT compilation
-// result that can be saved on disk and shipped over the wire.
+// TODO(basioli): This should be removed once new runtime is implemented, and
+// CpuAotCompilationResult will be the only implementation of
+// AotCompilationResult. This is still used as it allows us to `Export` and
+// subsequently load both runtimes.
+
+// This is a result of exporting JIT compiled
+// CpuExecutable to AOT compilation result that can be saved on disk and shipped
+// over the wire.
 class CpuExecutableAotCompilationResult : public AotCompilationResult {
  public:
   static absl::StatusOr<std::unique_ptr<CpuExecutableAotCompilationResult>>
