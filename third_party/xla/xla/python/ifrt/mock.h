@@ -82,9 +82,6 @@ class MockArray : public llvm::RTTIExtends<MockArray, Array> {
   MOCK_METHOD(absl::StatusOr<std::shared_ptr<const PjRtLayout>>, layout, (),
               (const, final));
   MOCK_METHOD(absl::StatusOr<std::vector<tsl::RCReference<Array>>>,
-              DisassembleIntoSingleDeviceArrays, (ArrayCopySemantics semantics),
-              (final));
-  MOCK_METHOD(absl::StatusOr<std::vector<tsl::RCReference<Array>>>,
               DisassembleIntoSingleDeviceArrays,
               (ArrayCopySemantics array_copy_semantics,
                SingleDeviceShardSemantics single_device_shard_semantics),
@@ -127,21 +124,6 @@ class MockClient : public llvm::RTTIExtends<MockClient, Client> {
               MakeArraysFromHostBufferShards,
               (absl::Span<MakeArraysFromHostBufferShardsSpec> specs,
                HostBufferSemantics semantics),
-              (final));
-  MOCK_METHOD(absl::StatusOr<tsl::RCReference<Array>>,
-              AssembleArrayFromSingleDeviceArrays,
-              (Shape shape,
-               absl::Nonnull<std::shared_ptr<const Sharding>> sharding,
-               absl::Span<tsl::RCReference<Array>> arrays,
-               ArrayCopySemantics semantics),
-              (final));
-  MOCK_METHOD(absl::StatusOr<tsl::RCReference<Array>>,
-              AssembleArrayFromSingleDeviceArrays,
-              (Shape shape,
-               absl::Nonnull<std::shared_ptr<const Sharding>> sharding,
-               absl::Span<tsl::RCReference<Array>> arrays,
-               ArrayCopySemantics array_copy_semantics,
-               SingleDeviceShardSemantics single_device_shard_semantics),
               (final));
   MOCK_METHOD(absl::StatusOr<tsl::RCReference<Array>>,
               AssembleArrayFromSingleDeviceArrays,
@@ -312,6 +294,8 @@ class MockLoadedExecutable
               (const, final));
   MOCK_METHOD(absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>,
               GetParameterLayouts, (), (const, final));
+  MOCK_METHOD(absl::StatusOr<absl::Span<const int>>, GetDonatableInputIndices,
+              (), (const, final));
   MOCK_METHOD(absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>,
               GetOutputLayouts, (), (const, final));
   MOCK_METHOD(absl::StatusOr<std::vector<std::vector<absl::string_view>>>,
