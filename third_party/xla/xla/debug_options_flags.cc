@@ -44,9 +44,23 @@ limitations under the License.
 #include "xla/stream_executor/cuda/ptx_compiler_support.h"
 #include "xla/tsl/util/command_line_flags.h"
 #include "xla/xla.pb.h"
+#include "tsl/platform/cpu_info.h"  // NOLINT
+#include "tsl/platform/platform.h"
 #include "tsl/platform/protobuf.h"  // IWYU pragma: keep
 
 namespace xla {
+
+inline std::string DefaultMaxIsa() {
+#ifdef PLATFORM_GOOGLE
+  return "";
+#else
+  // There are many missing SVE lowerings in LLVM. Limit features to NEON for
+  // now. There shouldn't be significant performance impact as most AAarch64
+  // CPUs still use 128-bit registers.
+  // TODO(penporn): Remove this once SVE is fully supported.
+  return tsl::port::IsAarch64CPU() ? "NEON" : "";
+#endif  // PLATFORM_GOOGLE
+}
 
 DebugOptions DefaultDebugOptionsIgnoringFlags() {
   DebugOptions opts;
@@ -96,7 +110,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_cpu_copy_insertion_use_region_analysis(false);
   opts.set_xla_cpu_enable_concurrency_optimized_scheduler(true);
   opts.set_xla_cpu_prefer_vector_width(256);
-  opts.set_xla_cpu_max_isa("");
+  opts.set_xla_cpu_max_isa(DefaultMaxIsa());
   opts.set_xla_cpu_generate_unique_c_style_kernel_entry_points(false);
 
   opts.set_xla_cpu_enable_fast_math(false);
@@ -323,6 +337,8 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_hlo_pass_fix_detect_cycles(false);
   opts.set_xla_gpu_experimental_enable_sync_collective_combining(false);
   opts.set_xla_allow_get_default_platform(true);
+  opts.set_xla_unsupported_crash_on_hlo_pass_silent_hlo_change(false);
+  opts.set_xla_unsupported_crash_on_hlo_pass_noop_change(false);
   return opts;
 }
 
@@ -2297,7 +2313,22 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "If non empty will interpret this variable as a path for performance "
       "tables for collectives. Expects `xla.gpu.DeviceHloInstructionProfiles` "
       "proto."));
-}  // NOLINT(readability/fn_size)1
+  flag_list->push_back(tsl::Flag(
+      "xla_unsupported_crash_on_hlo_pass_silent_hlo_change",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_unsupported_crash_on_hlo_pass_silent_hlo_change),
+      debug_options->xla_unsupported_crash_on_hlo_pass_silent_hlo_change(),
+      "Crash if a pass reports that it did not change the HLO but in fact it "
+      "did."));
+  flag_list->push_back(tsl::Flag(
+      "xla_unsupported_crash_on_hlo_pass_noop_change",
+      bool_setter_for(
+          &DebugOptions::set_xla_unsupported_crash_on_hlo_pass_noop_change),
+      debug_options->xla_unsupported_crash_on_hlo_pass_noop_change(),
+      "Crash if a pass reports that it did change the HLO but in fact it "
+      "did not."));
+}  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
 // than once - its call done via call_once.
