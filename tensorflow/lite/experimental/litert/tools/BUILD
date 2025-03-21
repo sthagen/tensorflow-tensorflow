@@ -38,6 +38,7 @@ cc_library(
         "//tensorflow/lite/experimental/litert/compiler/plugin:compiler_plugin",
         "//tensorflow/lite/experimental/litert/core/model:model_serialize",
         "//tensorflow/lite/experimental/litert/core/util:flatbuffer_tools",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
@@ -76,6 +77,7 @@ cc_test(
     ],
 )
 
+# TODO - @lukeboyer: Figure out some selective inclusiion of the data deps, some are very large.
 litert_cc_bin_with_qnn(
     name = "apply_plugin_main",
     srcs = ["apply_plugin_main.cc"],
