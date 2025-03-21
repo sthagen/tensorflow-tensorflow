@@ -1,5 +1,5 @@
 # copybara:uncomment load("@rules_python//python:proto.bzl", "py_proto_library")
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility")
 load(
     "//xla/tsl/platform:build_config.bzl",
@@ -177,6 +177,7 @@ cc_library(
     name = "pjrt_api",
     srcs = ["pjrt_api.cc"],
     hdrs = ["pjrt_api.h"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         "//xla/pjrt/c:pjrt_c_api_hdrs",
         "//xla/pjrt/c:pjrt_c_api_helpers",
@@ -431,7 +432,7 @@ cc_library(
 cc_library(
     name = "pjrt_layout",
     hdrs = ["pjrt_layout.h"],
-    visibility = ["//xla:friends"],
+    visibility = internal_visibility(["//xla:friends"]),
     deps = [
         "//xla:shape_util",
         "//xla/hlo/parser:hlo_parser",
@@ -615,7 +616,7 @@ cc_library(
     name = "mlir_to_hlo",
     srcs = ["mlir_to_hlo.cc"],
     hdrs = ["mlir_to_hlo.h"],
-    visibility = [":friends"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         "//xla:debug_options_flags",
         "//xla:util",
@@ -802,6 +803,7 @@ cc_library(
     name = "pjrt_c_api_client",
     srcs = ["pjrt_c_api_client.cc"],
     hdrs = ["pjrt_c_api_client.h"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         ":compile_options_proto_cc",
         ":mlir_to_hlo",
