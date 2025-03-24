@@ -730,6 +730,9 @@ cc_library(
 cc_library(
     name = "lru_cache",
     hdrs = ["lru_cache.h"],
+    visibility = internal_visibility([
+        "//xla:friends",
+    ]),
     deps = [
         "@com_google_absl//absl/container:node_hash_map",
         "@local_tsl//tsl/platform:logging",
@@ -959,6 +962,8 @@ cc_library(
         ":pjrt_executable",
         ":pjrt_future",
         "//xla:shape_util",
+        "//xla/ffi:ffi_api",
+        "//xla/ffi/api:ffi",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

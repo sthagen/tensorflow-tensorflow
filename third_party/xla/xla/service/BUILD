@@ -2906,7 +2906,6 @@ cc_library(
     srcs = ["scan_loop_accumulator_input_unification.cc"],
     hdrs = ["scan_loop_accumulator_input_unification.h"],
     deps = [
-        ":call_graph",
         ":pattern_matcher",
         ":while_loop_simplifier",
         ":while_loop_unroller",
@@ -5079,7 +5078,6 @@ cc_library(
     srcs = ["while_loop_all_reduce_code_motion.cc"],
     hdrs = ["while_loop_all_reduce_code_motion.h"],
     deps = [
-        ":call_graph",
         ":collective_ops_utils",
         "//xla:literal_util",
         "//xla:util",
