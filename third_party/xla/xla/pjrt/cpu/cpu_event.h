@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2022 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,16 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_PYTHON_SDY_H_
-#define XLA_PYTHON_SDY_H_
-
-// placeholder for index annotation headers
-#include "nanobind/nanobind.h"
+#ifndef XLA_PJRT_CPU_CPU_EVENT_H_
+#define XLA_PJRT_CPU_CPU_EVENT_H_
 
 namespace xla {
 
-void BuildSdySubmodule(nanobind::module_& m);
+// Typical use case: AsyncValueRef<CpuEvent> is used to indicate the
+// completion of a CPU operation, e.g., data transfer or running a program.
+struct CpuEvent {
+  CpuEvent() = default;
+};
 
 }  // namespace xla
 
-#endif  // XLA_PYTHON_SDY_H_
+#endif  // XLA_PJRT_CPU_CPU_EVENT_H_
