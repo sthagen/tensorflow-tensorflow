@@ -24,11 +24,7 @@ load(
     "if_llvm_system_z_available",
     "if_llvm_x86_available",
 )
-load(
-    "//xla/tsl/platform:rules_cc.bzl",
-    "cc_library",
-    "cc_library_optional_no_mkl",
-)
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 load(":build_defs.bzl", "runtime_copts")
 
 package(
@@ -204,7 +200,6 @@ cc_library(
         ":conv_canonicalization",
         ":cpu_aot_compilation_result",
         ":cpu_executable",
-        ":cpu_float_support",
         ":cpu_instruction_fusion",
         ":cpu_layout_assignment",
         ":cpu_options",
@@ -215,6 +210,7 @@ cc_library(
         ":ir_emitter2",
         ":metrics",
         ":onednn_contraction_rewriter",
+        ":onednn_float_support",
         ":onednn_ops_rewriter",
         ":parallel_task_assignment",
         ":runtime_symbol_generator",
@@ -421,11 +417,10 @@ cc_library(
     ]),
 )
 
-cc_library_optional_no_mkl(
+cc_library(
     name = "cpu_aot_compilation_result",
     srcs = ["cpu_aot_compilation_result.cc"],
     hdrs = ["cpu_aot_compilation_result.h"],
-    mkl_deps = ["//xla/backends/cpu/runtime:thunk_proto_serdes"],
     deps = [
         ":buffer_info_util",
         ":cpu_executable",
@@ -436,6 +431,7 @@ cc_library_optional_no_mkl(
         "//xla/backends/cpu/runtime:function_library",
         "//xla/backends/cpu/runtime:thunk",
         "//xla/backends/cpu/runtime:thunk_proto_cc",
+        "//xla/backends/cpu/runtime:thunk_proto_serdes",
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
         "//xla/service:buffer_value",
@@ -981,7 +977,6 @@ cc_library(
         "//xla/backends/cpu/runtime:logical_id_thunk",
         "//xla/backends/cpu/runtime:outfeed_thunk",
         "//xla/backends/cpu/runtime:reduce_scatter_thunk",
-        "//xla/backends/cpu/runtime:resource_use",
         "//xla/backends/cpu/runtime:rng_state_thunk",
         "//xla/backends/cpu/runtime:sort_thunk",
         "//xla/backends/cpu/runtime:thunk",
@@ -994,6 +989,7 @@ cc_library(
         "//xla/codegen:kernel_spec",
         "//xla/codegen:llvm_ir_kernel_source",
         "//xla/hlo/ir:hlo",
+        "//xla/runtime:resource_use",
         "//xla/service:buffer_assignment",
         "//xla/service:collective_ops_utils",
         "//xla/service:hlo_module_config",
@@ -2059,9 +2055,9 @@ cc_library(
 )
 
 cc_library(
-    name = "cpu_float_support",
-    srcs = ["cpu_float_support.cc"],
-    hdrs = ["cpu_float_support.h"],
+    name = "onednn_float_support",
+    srcs = ["onednn_float_support.cc"],
+    hdrs = ["onednn_float_support.h"],
     copts = tsl_copts(),
     deps = [
         ":onednn_contraction_rewriter",

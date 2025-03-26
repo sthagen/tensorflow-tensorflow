@@ -312,6 +312,14 @@ class TfrtGpuClient final : public PjRtClient {
   absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> CompileAndLoad(
       mlir::ModuleOp mlir_module, CompileOptions options) override;
 
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateUninitializedBuffer(
+      const Shape& shape, PjRtMemorySpace* memory_space) override;
+
+  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
+  LoadSerializedExecutable(absl::string_view serialized,
+                           std::optional<CompileOptions> options,
+                           const LoadOptions& load_options) override;
+
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateErrorBuffer(
       absl::Status error, const Shape& shape, PjRtMemorySpace* memory) override;
 
@@ -330,6 +338,9 @@ class TfrtGpuClient final : public PjRtClient {
       HostBufferSemantics host_buffer_semantics,
       absl::AnyInvocable<void() &&> on_done_with_host_buffer,
       PjRtMemorySpace* memory_space, const Layout* device_layout) override;
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostLiteral(
+      const LiteralSlice& literal, PjRtMemorySpace* memory_space) override;
 
   absl::StatusOr<std::unique_ptr<AsyncHostToDeviceTransferManager>>
   CreateBuffersForAsyncHostToDevice(
@@ -436,10 +447,7 @@ class TfrtGpuBuffer final : public PjRtBuffer {
   }
 
   PjRtFuture<> CopyRawToHostFuture(PjRtFuture<void*> dst, int64_t offset,
-                                   int64_t transfer_size) override {
-    // TODO: b/400541410 - Implement CopyRawToHostFuture.
-    return PjRtFuture<>(Unimplemented("CopyRawToHostFuture not implemented."));
-  }
+                                   int64_t transfer_size) override;
 
   void Delete() override;
 
@@ -659,6 +667,12 @@ class TfrtGpuExecutable final : public PjRtLoadedExecutable {
   void Delete() override { executables_.clear(); }
 
   bool IsDeleted() override { return executables_.empty(); }
+
+  absl::Span<const std::shared_ptr<LocalExecutable>> executables() const {
+    return executables_;
+  }
+
+  absl::StatusOr<std::string> SerializeExecutable() const override;
 
   absl::StatusOr<CompileOptions> GetCompileOptions() const override {
     return compile_options_;

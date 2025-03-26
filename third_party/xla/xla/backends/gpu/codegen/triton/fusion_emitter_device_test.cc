@@ -153,6 +153,45 @@ CHECK:  tt.store %{{.*}}, %[[ABS]] : !tt.ptr<tensor<64x512xf32>>
   EXPECT_TRUE(RunAndCompareNoHloPasses(kHloText, kExactMatch));
 }
 
+TEST_F(TritonEmitterTest, ReductionToScalarWithExtraOutputIsEmittedCorrectly) {
+  constexpr absl::string_view kHloText = R"(
+HloModule m
+
+region {
+  param_0.1 = f32[] parameter(0)
+  param_1 = f32[] parameter(1)
+  ROOT maximum = f32[] maximum(param_0.1, param_1)
+}
+
+fused_computation {
+  param_0.2 = f32[512] parameter(0)
+  abs = f32[512] abs(param_0.2)
+  constant = f32[] constant(-inf)
+  reduce = f32[] reduce(abs, constant), dimensions={0}, to_apply=region
+  ROOT tuple = (f32[], f32[512]) tuple(reduce, abs)
+}
+
+ENTRY entry_computation {
+  param_0.3 = f32[512] parameter(0)
+  ROOT fusion = (f32[], f32[512]) fusion(param_0.3), kind=kCustom,
+    calls=fused_computation,
+    backend_config={
+      "fusion_backend_config":{
+        "kind":"__triton",
+        "block_level_fusion_config":{
+          "output_tiles":[{"sizes":[]},{"sizes":["512"]}],"num_warps":"2"}}}
+})";
+  TF_EXPECT_OK(
+      CreateTritonIrAndFileCheck(this, kHloText, "fused_computation", R"(
+CHECK-COUNT-1:  tt.load
+CHECK:  %[[ABS:.*]] = math.absf
+CHECK: %[[REDUCE:.*]] = "tt.reduce"(%[[ABS:.*]]) <{axis = 0 : i32}>
+CHECK:  tt.store %{{.*}}, %[[REDUCE]] : !tt.ptr<f32>
+CHECK:  tt.store %{{.*}}, %[[ABS]] : !tt.ptr<tensor<512xf32>>
+)"));
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloText, kExactMatch));
+}
+
 TEST_F(TritonEmitterTest,
        SliceWithTilingThatNeedsPaddingHasBoundaryCheckForBothRoots) {
   constexpr absl::string_view kHloText = R"(
@@ -1924,6 +1963,141 @@ ENTRY entry {
   entry.p1 = f32[299,512] parameter(1)
   ROOT fusion = f32[32,512] fusion(entry.p0, entry.p1),
     kind=kCustom, calls=fdot, backend_config={
+      "fusion_backend_config":{
+        "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+          "output_tiles":[{"sizes":["16", "64"]}], "num_warps":"1"
+        }
+      }
+    }
+})";
+  EXPECT_TRUE(RunAndCompareNoHloPasses(
+      kHloText, ErrorSpec{/*aabs=*/1e-4, /*arel=*/1e-6}));
+}
+
+TEST_F(TritonEmitterTest, ConcatenateOfNestsIsEmittedCorrectly) {
+  const std::string kHloText = R"(
+nest0 {
+  p0 = s32[128] parameter(0)
+  ROOT abs = s32[128] abs(p0)
+}
+
+nest1 {
+  p0 = s32[128] parameter(0)
+  ROOT negate = s32[128] negate(p0)
+}
+
+nest2 {
+  ROOT p0 = s32[128] parameter(0)
+}
+
+concatenate_fusion {
+  p0 = s32[128] parameter(0)
+  p1 = s32[128] parameter(1)
+  p2 = s32[128] parameter(2)
+
+  fusion0 = s32[128] fusion(p0), kind=kCustom, calls=nest0
+  fusion1 = s32[128] fusion(p1), kind=kCustom, calls=nest1
+  fusion2 = s32[128] fusion(p2), kind=kCustom, calls=nest2
+
+  ROOT concatenate = s32[384] concatenate(fusion0, fusion1, fusion2), dimensions={0}
+}
+
+ENTRY main {
+  p0 = s32[128] parameter(0)
+  p1 = s32[128] parameter(1)
+  p2 = s32[128] parameter(2)
+  ROOT fusion = s32[384] fusion(p0, p1, p2), kind=kCustom, calls=concatenate_fusion, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["32"]}], "num_warps":"1"
+      }
+    }
+  }
+})";
+
+  TF_EXPECT_OK(
+      CreateTritonIrAndFileCheck(this, kHloText, "concatenate_fusion", R"(
+    // Check that we generate three branches. This is a bit of an implementation
+    // detail, so it doesn't seem worth enforcing a lot here.
+    CHECK-COUNT-2: scf.if
+  )"));
+
+  EXPECT_TRUE(RunAndCompareNoHloPasses(kHloText, kExactMatch));
+}
+
+TEST_F(TritonEmitterTest, NestedFusionOfNestedFusionsExecutesCorrectly) {
+  const std::string kHloText = R"(
+lhs {
+  p0 = f32[32,299] parameter(0)
+  ROOT cos = f32[32,299] cosine(p0)
+}
+
+nest0 {
+  p0 = f32[299,128] parameter(0)
+  ROOT abs = f32[299,128] abs(p0)
+}
+
+nest1 {
+  p0 = f32[299,128] parameter(0)
+  ROOT negate = f32[299,128] negate(p0)
+}
+
+nest2 {
+  ROOT p0 = f32[299,128] parameter(0)
+}
+
+nest3 {
+  p0 = f32[299,128] parameter(0)
+  ROOT cos = f32[299,128] cosine(p0)
+}
+
+rhs {
+  p0 = f32[299,128] parameter(0)
+  p1 = f32[299,128] parameter(1)
+  p2 = f32[299,128] parameter(2)
+  p3 = f32[299,128] parameter(3)
+
+  fusion0 = f32[299,128] fusion(p0), kind=kCustom, calls=nest0
+  fusion1 = f32[299,128] fusion(p1), kind=kCustom, calls=nest1
+  fusion2 = f32[299,128] fusion(p2), kind=kCustom, calls=nest2
+  fusion3 = f32[299,128] fusion(p3), kind=kCustom, calls=nest3
+
+  concatenate = f32[299,512] concatenate(fusion0, fusion1, fusion2, fusion3), dimensions={1}
+  ROOT cos = f32[299,512] cosine(concatenate)
+}
+
+dot {
+  p0 = f32[32,299] parameter(0)
+  p1 = f32[299,128] parameter(1)
+  p2 = f32[299,128] parameter(2)
+  p3 = f32[299,128] parameter(3)
+  p4 = f32[299,128] parameter(4)
+  lhs = f32[32,299] fusion(p0), kind=kCustom, calls=lhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["16", "32"]}]
+      }
+    }
+  }
+  rhs = f32[299,512]{1,0} fusion(p1, p2, p3, p4), kind=kCustom, calls=rhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["32", "64"]}]
+      }
+    }
+  }
+  ROOT dot = f32[32,512]{1,0} dot(lhs, rhs),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0}
+}
+
+ENTRY entry {
+  p0 = f32[32,299] parameter(0)
+  p1 = f32[299,128] parameter(1)
+  p2 = f32[299,128] parameter(2)
+  p3 = f32[299,128] parameter(3)
+  p4 = f32[299,128] parameter(4)
+  ROOT fusion = f32[32,512] fusion(p0, p1, p2, p3, p4),
+    kind=kCustom, calls=dot, backend_config={
       "fusion_backend_config":{
         "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
           "output_tiles":[{"sizes":["16", "64"]}], "num_warps":"1"
