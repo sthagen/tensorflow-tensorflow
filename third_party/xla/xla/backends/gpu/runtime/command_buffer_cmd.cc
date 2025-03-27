@@ -439,7 +439,7 @@ absl::Status TracedCommandBufferCmd::AddTracedCommandBuffer(
           execute_params.command_buffer_trace_stream, trace));
 
   VLOG(5) << "Add nested command buffer";
-  return command_buffer->AddNestedCommandBuffer(*nested_cmd);
+  return command_buffer->AddNestedCommandBuffer(*nested_cmd, {}).status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -571,8 +571,9 @@ absl::Status ComputationIdCmd::Record(
     }
 
     auto args = se::PackKernelArgs(/*shmem_bytes=*/0, int64_t{1}, value, dst);
-    return command_buffer->Launch(se::ThreadDim(1), se::BlockDim(1),
-                                  *memset_kernel, *args);
+    return command_buffer
+        ->Launch(se::ThreadDim(1), se::BlockDim(1), *memset_kernel, *args, {})
+        .status();
   } else {
     return command_buffer->Memset(&dst, value, /*num_elements=*/1, {}).status();
   }
@@ -638,8 +639,10 @@ absl::Status LaunchCmd::Record(const Thunk::ExecuteParams& execute_params,
   TF_ASSIGN_OR_RETURN(auto kernel_args,
                       se::PackKernelArgs(buffers, shmem_bytes_));
 
-  return command_buffer->Launch(dims_.thread_counts_per_block(),
-                                dims_.block_counts(), *kernel, *kernel_args);
+  return command_buffer
+      ->Launch(dims_.thread_counts_per_block(), dims_.block_counts(), *kernel,
+               *kernel_args, {})
+      .status();
 }
 
 CommandBufferCmd::BufferUseVector LaunchCmd::buffers() {
@@ -707,9 +710,10 @@ absl::Status CustomKernelLaunchCmd::Record(
   se::KernelArgsDeviceMemoryArray kernel_args(
       buffers, custom_kernel_.shared_memory_bytes());
 
-  return command_buffer->Launch(custom_kernel_.thread_dims(),
-                                custom_kernel_.block_dims(), *kernel,
-                                kernel_args);
+  return command_buffer
+      ->Launch(custom_kernel_.thread_dims(), custom_kernel_.block_dims(),
+               *kernel, kernel_args, {})
+      .status();
 }
 
 CommandBufferCmd::BufferUseVector CustomKernelLaunchCmd::buffers() {
@@ -750,7 +754,8 @@ absl::Status MemcpyDeviceToDeviceCmd::Record(
     return absl::OkStatus();
   }
 
-  return command_buffer->MemcpyDeviceToDevice(&dst, src, num_bytes_);
+  return command_buffer->MemcpyDeviceToDevice(&dst, src, num_bytes_, {})
+      .status();
 }
 
 CommandBufferCmd::BufferUseVector MemcpyDeviceToDeviceCmd::buffers() {
@@ -1407,7 +1412,7 @@ absl::Status CustomCallCmd::RecordLegacyCustomCall(
             return absl::OkStatus();
           }));
 
-  return command_buffer->AddNestedCommandBuffer(*nested_cmd);
+  return command_buffer->AddNestedCommandBuffer(*nested_cmd, {}).status();
 }
 
 absl::Status CustomCallCmd::RecordXlaFfiCall(
@@ -1479,7 +1484,7 @@ absl::Status CustomCallCmd::RecordXlaFfiCall(
             return ffi::Call(handler_, call_frame, options);
           }));
 
-  return command_buffer->AddNestedCommandBuffer(*nested_cmd);
+  return command_buffer->AddNestedCommandBuffer(*nested_cmd, {}).status();
 }
 
 CommandBufferCmd::BufferUseVector CustomCallCmd::buffers() {
@@ -1527,7 +1532,7 @@ absl::Status CollectiveCmd::AddTracedCommandBuffer(
                           execute_params.stream->parent(),
                           execute_params.command_buffer_trace_stream, trace));
 
-  return command_buffer->AddNestedCommandBuffer(*nested_cmd);
+  return command_buffer->AddNestedCommandBuffer(*nested_cmd, {}).status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -2061,7 +2066,8 @@ absl::Status DynamicSliceFusionCmd::Record(
           .value();
   TF_RETURN_IF_ERROR(embedded_commands_->Record(new_params, record_params,
                                                 nested_command_buffer.get()));
-  return command_buffer->AddNestedCommandBuffer(*nested_command_buffer);
+  return command_buffer->AddNestedCommandBuffer(*nested_command_buffer, {})
+      .status();
 }
 
 CommandBufferCmd::BufferUseVector DynamicSliceFusionCmd::buffers() {

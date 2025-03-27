@@ -44,7 +44,6 @@ limitations under the License.
 #include "xla/stream_executor/typed_kernel_factory.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/errors.h"
-#include "xla/tsl/platform/status.h"
 #include "xla/tsl/platform/status_matchers.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/platform/test.h"
@@ -117,8 +116,11 @@ TEST(GpuCommandBufferTest, LaunchSingleKernel) {
   TF_ASSERT_OK(stream->MemZero(&c, byte_length));
 
   // Create a command buffer with a single kernel launch.
-  auto cmd_buffer = executor->CreateCommandBuffer(primary).value();
-  TF_ASSERT_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), a, b, c));
+  TF_ASSERT_OK_AND_ASSIGN(auto cmd_buffer,
+                          executor->CreateCommandBuffer(primary));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto* launch,
+      cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c));
   TF_ASSERT_OK(cmd_buffer->Finalize());
 
   TF_ASSERT_OK(cmd_buffer->Submit(stream.get()));
@@ -136,7 +138,8 @@ TEST(GpuCommandBufferTest, LaunchSingleKernel) {
 
   // Update command buffer to write into `d` buffer.
   TF_ASSERT_OK(cmd_buffer->Update());
-  TF_ASSERT_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), a, b, d));
+  TF_ASSERT_OK(
+      cmd_buffer->Launch(launch, add, ThreadDim(), BlockDim(4), a, b, d));
   TF_ASSERT_OK(cmd_buffer->Finalize());
 
   TF_ASSERT_OK(cmd_buffer->Submit(stream.get()));
@@ -236,10 +239,13 @@ TEST(GpuCommandBufferTest, LaunchNestedCommandBuffer) {
   TF_ASSERT_OK(stream->MemZero(&c, byte_length));
 
   // Create a command buffer with a single kernel launch.
-  auto primary_cmd = executor->CreateCommandBuffer(primary).value();
-  auto nested_cmd = executor->CreateCommandBuffer(nested).value();
-  TF_ASSERT_OK(nested_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, c));
-  TF_ASSERT_OK(primary_cmd->AddNestedCommandBuffer(*nested_cmd));
+  TF_ASSERT_OK_AND_ASSIGN(auto primary_cmd,
+                          executor->CreateCommandBuffer(primary));
+  TF_ASSERT_OK_AND_ASSIGN(auto nested_cmd,
+                          executor->CreateCommandBuffer(nested));
+  TF_ASSERT_OK(nested_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c));
+  TF_ASSERT_OK_AND_ASSIGN(auto* nested_command,
+                          primary_cmd->AddNestedCommandBuffer(*nested_cmd, {}));
   TF_ASSERT_OK(primary_cmd->Finalize());
 
   TF_ASSERT_OK(primary_cmd->Submit(stream.get()));
@@ -258,9 +264,10 @@ TEST(GpuCommandBufferTest, LaunchNestedCommandBuffer) {
   // Update command buffer to write into `d` buffer by creating a new nested
   // command buffer.
   nested_cmd = executor->CreateCommandBuffer(nested).value();
-  TF_ASSERT_OK(nested_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, d));
+  TF_ASSERT_OK(nested_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, d));
   TF_ASSERT_OK(primary_cmd->Update());
-  TF_ASSERT_OK(primary_cmd->AddNestedCommandBuffer(*nested_cmd));
+  TF_ASSERT_OK(
+      primary_cmd->AddNestedCommandBuffer(nested_command, *nested_cmd));
   TF_ASSERT_OK(primary_cmd->Finalize());
 
   TF_ASSERT_OK(primary_cmd->Submit(stream.get()));
@@ -287,8 +294,10 @@ TEST(GpuCommandBufferTest, MemcpyDeviceToDevice) {
   TF_ASSERT_OK(stream->Memset32(&a, 42, byte_length));
 
   // Create a command buffer with a single a to b memcpy command.
-  auto cmd_buffer = executor->CreateCommandBuffer(primary).value();
-  TF_ASSERT_OK(cmd_buffer->MemcpyDeviceToDevice(&b, a, byte_length));
+  TF_ASSERT_OK_AND_ASSIGN(auto cmd_buffer,
+                          executor->CreateCommandBuffer(primary));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto* memcpy, cmd_buffer->MemcpyDeviceToDevice(&b, a, byte_length, {}));
   TF_ASSERT_OK(cmd_buffer->Finalize());
 
   TF_ASSERT_OK(cmd_buffer->Submit(stream.get()));
@@ -302,7 +311,7 @@ TEST(GpuCommandBufferTest, MemcpyDeviceToDevice) {
 
   // Update command buffer to swap the memcpy direction.
   TF_ASSERT_OK(cmd_buffer->Update());
-  TF_ASSERT_OK(cmd_buffer->MemcpyDeviceToDevice(&a, b, byte_length));
+  TF_ASSERT_OK(cmd_buffer->MemcpyDeviceToDevice(memcpy, &a, b, byte_length));
   TF_ASSERT_OK(cmd_buffer->Finalize());
 
   // Clear destination to test that command buffer actually copied memory.
@@ -486,7 +495,8 @@ TEST(GpuCommandBufferTest, ConditionalIf) {
 
   // if (pred == true) c = a + b
   CommandBuffer::Builder then_builder = [&](CommandBuffer* then_cmd) {
-    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, c);
+    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // Create a command buffer with a single conditional operation.
@@ -525,7 +535,8 @@ TEST(GpuCommandBufferTest, ConditionalIf) {
 
   // if (pred == true) d = a + b (write to a new location).
   then_builder = [&](CommandBuffer* then_cmd) {
-    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, d);
+    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, d)
+        .status();
   };
 
   // Update command buffer with a conditional to use new builder.
@@ -647,12 +658,14 @@ TEST(GpuCommandBufferTest, ConditionalIfElse) {
 
   // if (pred == true) c = a + b
   CommandBuffer::Builder then_builder = [&](CommandBuffer* then_cmd) {
-    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, c);
+    return then_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // if (pred == false) c = a * b
   CommandBuffer::Builder else_builder = [&](CommandBuffer* else_cmd) {
-    return else_cmd->Launch(mul, ThreadDim(), BlockDim(4), a, b, c);
+    return else_cmd->Launch(mul, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // Create a command buffer with a single conditional operation.
@@ -689,7 +702,8 @@ TEST(GpuCommandBufferTest, ConditionalIfElse) {
 
   // if (pred == false) d = a * b (write to a new location).
   else_builder = [&](CommandBuffer* else_cmd) {
-    return else_cmd->Launch(mul, ThreadDim(), BlockDim(4), a, b, d);
+    return else_cmd->Launch(mul, ThreadDim(), BlockDim(4), {}, a, b, d)
+        .status();
   };
 
   // Update command buffer with a conditional to use new `else` builder.
@@ -738,7 +752,8 @@ TEST(GpuCommandBufferTest, ConditionalCaseEmptyGraph) {
 
   // if (index == 0) c = a + b
   CommandBuffer::Builder branch0 = [&](CommandBuffer* branch0_cmd) {
-    return branch0_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, c);
+    return branch0_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // if (index == 1) c = a * b
@@ -836,8 +851,10 @@ TEST_P(GpuCommandBufferCaseTest, ConditionalMultiCase) {
     TF_ASSERT_OK(stream->Memset32(&results[i], 0, byte_length));
     branches[i] = [&, i](CommandBuffer* branch_cmd) {
       // result = i * i;
-      return branch_cmd->Launch(mul, ThreadDim(), BlockDim(kLength), values[i],
-                                values[i], results[i]);
+      return branch_cmd
+          ->Launch(mul, ThreadDim(), BlockDim(kLength), {}, values[i],
+                   values[i], results[i])
+          .status();
     };
   }
 
@@ -920,12 +937,14 @@ TEST(GpuCommandBufferTest, ConditionalCase) {
 
   // if (index == 0) c = a + b
   CommandBuffer::Builder branch0 = [&](CommandBuffer* branch0_cmd) {
-    return branch0_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, c);
+    return branch0_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // if (index == 1) c = a * b
   CommandBuffer::Builder branch1 = [&](CommandBuffer* branch1_cmd) {
-    return branch1_cmd->Launch(mul, ThreadDim(), BlockDim(4), a, b, c);
+    return branch1_cmd->Launch(mul, ThreadDim(), BlockDim(4), {}, a, b, c)
+        .status();
   };
 
   // Create a command buffer with a single conditional operation.
@@ -1002,7 +1021,8 @@ TEST(GpuCommandBufferTest, ConditionalFor) {
 
   // Loop body: b = a + b
   CommandBuffer::Builder body_builder = [&](CommandBuffer* body_cmd) {
-    return body_cmd->Launch(add, ThreadDim(), BlockDim(4), a, b, b);
+    return body_cmd->Launch(add, ThreadDim(), BlockDim(4), {}, a, b, b)
+        .status();
   };
 
   int32_t num_iters = 10;
@@ -1064,13 +1084,16 @@ TEST(GpuCommandBufferTest, ConditionalWhile) {
 
   // Loop cond: loop_counter++ < num_iters;
   CommandBuffer::Builder cond_builder = [&](CommandBuffer* cond_cmd) {
-    return cond_cmd->Launch(inc_and_cmp, ThreadDim(), BlockDim(), loop_counter,
-                            pred, num_iters);
+    return cond_cmd
+        ->Launch(inc_and_cmp, ThreadDim(), BlockDim(), {}, loop_counter, pred,
+                 num_iters)
+        .status();
   };
 
   // Loop body: b = a + b
   CommandBuffer::Builder body_builder = [&](CommandBuffer* body_cmd) {
-    return body_cmd->Launch(add, ThreadDim(), BlockDim(length), a, b, b);
+    return body_cmd->Launch(add, ThreadDim(), BlockDim(length), {}, a, b, b)
+        .status();
   };
 
   // Create a command buffer with a single conditional operation.
@@ -1135,7 +1158,8 @@ TEST(GpuCommandBufferTest, DISABLED_WhileNestedConditional) {
   CommandBuffer::Builder then_builder =
       // Then body: b = a + b
       [&](CommandBuffer* then_cmd) {
-        return then_cmd->Launch(add, ThreadDim(), BlockDim(length), a, b, b);
+        return then_cmd->Launch(add, ThreadDim(), BlockDim(length), {}, a, b, b)
+            .status();
       };
 
   auto nested_cmd = executor->CreateCommandBuffer(nested).value();
@@ -1145,13 +1169,15 @@ TEST(GpuCommandBufferTest, DISABLED_WhileNestedConditional) {
 
   // Loop cond: loop_counter++ < num_iters;
   CommandBuffer::Builder cond_builder = [&](CommandBuffer* cond_cmd) {
-    return cond_cmd->Launch(inc_and_cmp, ThreadDim(), BlockDim(length),
-                            loop_counter, pred, num_iters);
+    return cond_cmd
+        ->Launch(inc_and_cmp, ThreadDim(), BlockDim(length), {}, loop_counter,
+                 pred, num_iters)
+        .status();
   };
 
   CommandBuffer::Builder body_builder =
       [&](CommandBuffer* body_cmd) -> absl::Status {
-    CHECK_OK(body_cmd->AddNestedCommandBuffer(*nested_cmd));
+    CHECK_OK(body_cmd->AddNestedCommandBuffer(*nested_cmd, {}));
     return absl::OkStatus();
   };
 
@@ -1192,7 +1218,7 @@ static void BM_CreateCommandBuffer(benchmark::State& state) {
   for (auto s : state) {
     auto cmd_buffer = executor->CreateCommandBuffer(nested).value();
     for (int i = 1; i < state.range(0); ++i) {
-      CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), b, b, b));
+      CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), {}, b, b, b));
     }
     CHECK_OK(cmd_buffer->Finalize());
   }
@@ -1239,14 +1265,14 @@ static void BM_UpdateCommandBuffer(benchmark::State& state) {
 
   auto cmd_buffer = executor->CreateCommandBuffer(primary).value();
   for (int i = 1; i < state.range(0); ++i) {
-    CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), b, b, b));
+    CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), {}, b, b, b));
   }
   CHECK_OK(cmd_buffer->Finalize());
 
   for (auto s : state) {
     CHECK_OK(cmd_buffer->Update());
     for (int i = 1; i < state.range(0); ++i) {
-      CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), b, b, b));
+      CHECK_OK(cmd_buffer->Launch(add, ThreadDim(), BlockDim(4), {}, b, b, b));
     }
     CHECK_OK(cmd_buffer->Finalize());
   }
