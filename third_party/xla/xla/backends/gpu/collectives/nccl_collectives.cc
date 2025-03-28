@@ -243,36 +243,39 @@ NcclCollectives::SplitCommunicators(absl::Span<const Communicator* const> comms,
   // communicators only after a successful call to `GroupEnd`, so we keep a
   // vector of handles and after successful splitting convert to RAII wrappers.
   std::vector<ncclComm_t> split_comms_handles;
-  std::vector<std::unique_ptr<Communicator>> split_comms;
-  std::vector<NcclCommunicator*> nccl_comms;
   split_comms_handles.resize(comms.size(), nullptr);
-  split_comms.reserve(comms.size());
-  nccl_comms.reserve(comms.size());
 
 #if !defined(TENSORFLOW_USE_ROCM) || TF_ROCM_VERSION >= 60000
   TF_RETURN_IF_ERROR(GroupStart());
   for (size_t i = 0; i < comms.size(); ++i) {
-    VLOG(1) << "Split NCCL communicator " << comms[i] << " with color " << color
-            << " and key " << keys[i];
+    VLOG(1) << "Splitting NCCL communicator " << comms[i] << " with color "
+            << color << " and key " << keys[i];
     XLA_NCCL_RETURN_IF_ERROR(
         ncclCommSplit(Cast(comms[i]), color, keys[i].value(),
                       &split_comms_handles[i], &comm_config));
-    auto comm =
-        std::make_unique<NcclCommunicator>(this, split_comms_handles[i]);
+    // When run inside a group, ncclCommSplit does not initialize the split
+    // communicator until after the group finishes, so split_comms_handles[i]
+    // is NULL here.
+    VLOG(1) << "Split NCCL communicator " << comms[i] << " with color " << color
+            << " and key " << keys[i] << " into communicator "
+            << split_comms_handles[i];
     JoinGroup(comms[i]);
-    JoinGroup(comm.get());
-    nccl_comms.push_back(comm.get());
-    split_comms.push_back(std::move(comm));
   }
   TF_RETURN_IF_ERROR(GroupEnd());
 
+  std::vector<std::unique_ptr<Communicator>> split_comms;
+  split_comms.reserve(comms.size());
   for (size_t i = 0; i < split_comms_handles.size(); ++i) {
-    if (!JoinGroup(comms[i])) {
-      TF_RETURN_IF_ERROR(PollUntilDone(Cast(comms[i])));
+    // If color is NCCL_SPLIT_NOCOLOR, then the split communicator will be NULL.
+    // See
+    // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/comms.html#c.ncclCommSplit
+    // for details.
+    auto split_comm =
+        std::make_unique<NcclCommunicator>(this, split_comms_handles[i]);
+    if (split_comms_handles[i] != nullptr) {
+      TF_RETURN_IF_ERROR(PollUntilDone(split_comm->comm()));
     }
-    if (!JoinGroup(nccl_comms[i])) {
-      TF_RETURN_IF_ERROR(PollUntilDone(nccl_comms[i]->comm()));
-    }
+    split_comms.push_back(std::move(split_comm));
   }
   return split_comms;
 #else
@@ -312,6 +315,7 @@ absl::Status NcclCollectives::GroupEnd() {
   absl::Cleanup clear_comms = [&g]() {
     // The heap leak checker doesn't like g.comms.clear(), which may not free
     // the underlying heap-allocated memory, so we assign a new vector.
+    VLOG(5) << "Clearing group communicators";
     g.comms = std::vector<ncclComm_t>();
   };
 
@@ -330,8 +334,10 @@ bool NcclCollectives::JoinGroup(const Communicator* communicator) {
     VLOG(5) << "Adding NCCL communicator " << comm << " to group";
     g.comms.push_back(comm);
     return true;
+  } else {
+    VLOG(5) << "Not adding NCCL communicator " << comm << " to group";
+    return false;
   }
-  return false;
 }
 
 }  // namespace xla::gpu

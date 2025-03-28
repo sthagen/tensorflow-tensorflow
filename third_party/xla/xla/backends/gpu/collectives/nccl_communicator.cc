@@ -179,15 +179,20 @@ NcclCommunicator::NcclCommunicator(NcclCollectives* collectives,
 }
 
 NcclCommunicator::~NcclCommunicator() {
-  // Don't destroy the communicator if it has already been aborted.
-  if (!aborted_) {
-    VLOG(1) << "Destroy " << *this;
-    // Note that we intentionally don't call PollUntilDone. Once comm_ has been
-    // destroyed, we can no longer safely touch it.
-    XLA_NCCL_LOG_IF_ERROR(ncclCommDestroy(comm_));
-  } else {
-    VLOG(1) << "Skipping destruction; already aborted " << *this;
+  if (comm_ == nullptr) {
+    VLOG(1) << "Skipping destruction; null comm_ " << *this;
+    return;
   }
+
+  if (aborted_) {
+    VLOG(1) << "Skipping destruction; already aborted " << *this;
+    return;
+  }
+
+  VLOG(1) << "Destroy " << *this;
+  // Note that we intentionally don't call PollUntilDone. Once comm_ has been
+  // destroyed, we can no longer safely touch it.
+  XLA_NCCL_LOG_IF_ERROR(ncclCommDestroy(comm_));
 }
 
 absl::Status NcclCommunicator::Abort() {

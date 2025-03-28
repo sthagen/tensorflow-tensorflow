@@ -759,7 +759,7 @@ PartitionedHlo::ReshardAsWindowedInput(const Window& window,
   auto& cache = state_.reshard_cache->per_hlo_cache[hlo()].window_reshard_cache;
   for (auto& entry : cache) {
     if (std::get<0>(entry) == target &&
-        protobuf_util::ProtobufEquals(std::get<1>(entry), window)) {
+        protobuf_util::HaveSameSerialization(std::get<1>(entry), window)) {
       return std::get<2>(entry);
     }
   }
@@ -1124,7 +1124,7 @@ PartitionedHlo::ReshardAsWindowedInput(const Window& window,
 
   auto sharding_with_windowed_dims_replicated =
       GetShardingReplicatedOnWindowedDimension(target, window);
-  // If the currrent HLO is replicated or all windows dimensions are replicated,
+  // If the current HLO is replicated or all windows dimensions are replicated,
   // pad then slice. If the target sharding and current sharding are not the
   // same then give the halo exchange system a chance to run as it can skip
   // generating a dynamic slice.
@@ -5005,7 +5005,6 @@ SPMDCollectiveOpsCreator GetDefaultCollectiveOpsCreator(int64_t num_partitions,
                 CollectiveDeviceList(device_groups),
                 /*constrain_layout=*/false, channel_id,
                 /*use_global_device_ids=*/true));
-        reduction_clone->SetCollectiveCallInstruction(all_reduce);
         return all_reduce;
       },
       [num_replicas, num_partitions](
@@ -5022,7 +5021,6 @@ SPMDCollectiveOpsCreator GetDefaultCollectiveOpsCreator(int64_t num_partitions,
                     partition_group_list, num_replicas, num_partitions),
                 /*constrain_layout=*/false, channel_id,
                 /*use_global_device_ids=*/true));
-        reduction_clone->SetCollectiveCallInstruction(all_reduce);
         return all_reduce;
       },
       [num_partitions](SpmdBuilder* b, HloInstruction* operand,
