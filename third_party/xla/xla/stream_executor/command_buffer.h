@@ -108,11 +108,6 @@ class CommandBuffer {
   // Command buffer API
   //===--------------------------------------------------------------------===//
 
-  // Adds an execution barrier to the command buffer: all commands added
-  // before a barrier will complete before any of the commands added after a
-  // barrier.
-  virtual absl::Status Barrier() = 0;
-
   // Adds a kernel launch command.
   virtual absl::StatusOr<const Command*> Launch(
       const ThreadDim& threads, const BlockDim& blocks, const Kernel& kernel,
@@ -173,16 +168,6 @@ class CommandBuffer {
   //--------------------------------------------------------------------------//
   // Command buffer condtitional commands API
   //--------------------------------------------------------------------------//
-
-  // Adds a conditional operation that will execute a command buffer constructed
-  // by `then_builder` if `pred` value is `true`.
-  virtual absl::Status If(DeviceMemory<bool> pred, Builder then_builder) = 0;
-
-  // Adds a conditional operation that will execute a command buffer constructed
-  // by `then_builder` if `pred` value is `true`, or a command buffer
-  // constructed by `else_builder` if `pred` is `false`.
-  virtual absl::Status IfElse(DeviceMemory<bool> pred, Builder then_builder,
-                              Builder else_builder) = 0;
 
   // Adds a conditional operation that will execute a command buffer constructed
   // by the `branches` builder at `index`. If `index` is out of range, then it

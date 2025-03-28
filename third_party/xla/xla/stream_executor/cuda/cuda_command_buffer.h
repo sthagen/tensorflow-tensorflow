@@ -69,30 +69,47 @@ class CudaCommandBuffer final : public GpuCommandBuffer {
             << "; is_owned_graph=" << is_owned_graph_;
   }
 
-  absl::Status LaunchSetIfConditionKernel(
-      GraphConditionalHandle if_conditional,
-      DeviceMemory<bool> predicate) override;
+  //===--------------------------------------------------------------------===//
+  // APIs for launching kernels to update conditional handles.
+  //===--------------------------------------------------------------------===//
 
-  absl::Status LaunchSetIfElseConditionKernel(
-      GraphConditionalHandle if_conditional,
-      GraphConditionalHandle else_conditional,
-      DeviceMemory<bool> predicate) override;
+  absl::StatusOr<GraphNodeHandle> CreateSetCaseConditionNode(
+      absl::Span<const GraphConditionalHandle> conditionals,
+      DeviceMemory<uint8_t> index, bool index_is_bool, int32_t batch_offset,
+      bool enable_conditional_default,
+      absl::Span<const GraphNodeHandle> dependencies) override;
 
-  absl::Status LaunchSetCaseConditionKernel(
-      GraphConditionalHandles conditionals, DeviceMemory<uint8_t> index,
-      bool index_is_bool, int32_t batch_offset,
+  absl::Status UpdateSetCaseConditionNode(
+      GraphNodeHandle handle,
+      absl::Span<const GraphConditionalHandle> conditionals,
+      DeviceMemory<uint8_t> index, bool index_is_bool, int32_t batch_offset,
       bool enable_conditional_default) override;
 
-  absl::Status LaunchSetForConditionKernel(GraphConditionalHandle conditional,
-                                           DeviceMemory<int32_t> loop_counter,
-                                           int32_t iterations) override;
+  absl::StatusOr<GraphNodeHandle> CreateSetForConditionNode(
+      GraphConditionalHandle conditional, DeviceMemory<int32_t> loop_counter,
+      int32_t iterations,
+      absl::Span<const GraphNodeHandle> dependencies) override;
 
-  absl::Status LaunchSetWhileConditionKernel(
-      GraphConditionalHandle conditional,
+  absl::Status UpdateSetForConditionNode(GraphNodeHandle handle,
+                                         GraphConditionalHandle conditional,
+                                         DeviceMemory<int32_t> loop_counter,
+                                         int32_t iterations) override;
+
+  absl::StatusOr<GraphNodeHandle> CreateSetWhileConditionNode(
+      GraphConditionalHandle conditional, DeviceMemory<bool> predicate,
+      absl::Span<const GraphNodeHandle> dependencies) override;
+
+  absl::Status UpdateSetWhileConditionNode(
+      GraphNodeHandle handle, GraphConditionalHandle conditional,
       DeviceMemory<bool> predicate) override;
+
+  //===--------------------------------------------------------------------===//
+
+  using NoOpKernel = TypedKernel<>;
+
   absl::StatusOr<NoOpKernel*> GetNoOpKernel();
 
-  absl::StatusOr<ConditionalNodeResult> CreateConditionalNode(
+  absl::StatusOr<GraphConditionalNodeHandle> CreateConditionalNode(
       absl::Span<const GraphNodeHandle> dependencies,
       GraphConditionalHandle conditional, ConditionType type) override;
 
@@ -164,13 +181,6 @@ class CudaCommandBuffer final : public GpuCommandBuffer {
       GraphNodeHandle node) override;
 
   // A signature of a device kernels updating conditional handle(s).
-  using SetIfConditionKernel =
-      TypedKernel<CUgraphConditionalHandle, DeviceMemory<bool>>;
-
-  using SetIfElseConditionKernel =
-      TypedKernel<CUgraphConditionalHandle, CUgraphConditionalHandle,
-                  DeviceMemory<bool>>;
-
   using SetCaseConditionKernel =
       TypedKernel<CUgraphConditionalHandle, CUgraphConditionalHandle,
                   CUgraphConditionalHandle, CUgraphConditionalHandle,
@@ -186,12 +196,10 @@ class CudaCommandBuffer final : public GpuCommandBuffer {
 
   // Lazy loaded auxiliary kernels required for building CUDA graphs (no-op
   // barriers, updating conditional handles, etc.).
-  SetIfConditionKernel set_if_condition_kernel_;
-  SetIfElseConditionKernel set_if_else_condition_kernel_;
+  NoOpKernel noop_kernel_;
   SetCaseConditionKernel set_case_condition_kernel_;
   SetForConditionKernel set_for_condition_kernel_;
   SetWhileConditionKernel set_while_condition_kernel_;
-  NoOpKernel noop_kernel_;
 
   StreamExecutor* parent_;
 
