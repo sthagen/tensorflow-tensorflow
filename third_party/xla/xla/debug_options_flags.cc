@@ -227,6 +227,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_enable_triton_gemm(true);
   opts.set_xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms(false);
+  opts.set_xla_gpu_unsupported_enable_triton_multi_output_fusion(false);
   opts.set_xla_gpu_enable_cudnn_int8x32_convolution_reordering(true);
   opts.set_xla_gpu_triton_gemm_any(true);
   opts.set_xla_gpu_unsupported_force_triton_gemm(false);
@@ -321,6 +322,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_executable_warn_stuck_timeout_seconds(10);
   opts.set_xla_gpu_executable_terminate_timeout_seconds(30);
   opts.set_xla_gpu_experimental_collective_perf_table_path("");
+  opts.set_xla_gpu_experimental_matmul_perf_table_path("");
   opts.set_xla_gpu_experimental_disable_binary_libraries(false);
   // --xla_ignore_channel_id should be kept false by default while channel ids
   // are load-bearing.
@@ -1775,6 +1777,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Enable lowering Triton GEMM fusions through the generic Triton "
       "emitter."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_unsupported_enable_triton_multi_output_fusion",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms),
+      debug_options
+          ->xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms(),
+      "Enable Triton multi-output fusions."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_verify_triton_fusion_numerics",
       bool_setter_for(&DebugOptions::set_xla_gpu_verify_triton_fusion_numerics),
       debug_options->xla_gpu_verify_triton_fusion_numerics(),
@@ -2330,6 +2340,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_unsupported_crash_on_hlo_pass_noop_change(),
       "Crash if a pass reports that it did change the HLO but in fact it "
       "did not."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_matmul_perf_table_path",
+      string_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_matmul_perf_table_path),
+      debug_options->xla_gpu_experimental_matmul_perf_table_path(),
+      "If non empty will interpret this variable as a path for performance "
+      "tables for matmuls. Expects `xla.gpu.DeviceHloInstructionProfiles` "
+      "proto."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
