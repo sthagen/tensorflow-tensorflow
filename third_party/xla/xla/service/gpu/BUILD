@@ -623,16 +623,7 @@ cc_library(
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/profiler/lib:scoped_annotation",
         "@local_tsl//tsl/profiler/lib:traceme",
-    ] + if_cuda_is_configured([
-        "//xla/stream_executor/cuda:cublas_plugin",
-        "//xla/stream_executor/cuda:cudnn_plugin",
-        "//xla/stream_executor/cuda:cufft_plugin",
-        "//xla/stream_executor/cuda:stream_executor_cuda",
-        "@local_config_cuda//cuda:cuda_headers",
-    ]) + if_rocm_is_configured([
-        "//xla/stream_executor/rocm:stream_executor_rocm",
-        "@local_config_rocm//rocm:rocm_headers",
-    ]),
+    ],
 )
 
 cc_library(
@@ -1423,6 +1414,7 @@ cc_library(
         "@llvm-project//llvm:BitWriter",
         "@llvm-project//llvm:Core",
         "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:TargetParser",
         "@llvm-project//llvm:TransformUtils",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
@@ -1502,6 +1494,7 @@ cc_library(
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
         "//xla/service/gpu/model:matmul_ptable_stats_collection",
         "//xla/service/gpu/model:sol_gpu_cost_model_stats_collection",
+        "//xla/service/gpu/transforms/collectives:collective_combiner_annotator",
         "//xla/service/gpu/transforms/collectives:convert_async_collectives_to_sync",
         "//xla/service/gpu/transforms/collectives:gpu_all_gather_combiner",
         "//xla/service/gpu/transforms/collectives:gpu_all_reduce_combiner",
@@ -1650,7 +1643,7 @@ cc_library(
     ]) + xla_internal(["service:export_hlo"]) + if_google([
         "//xla/hlo/experimental/auto_sharding",
         "//xla/hlo/experimental/auto_sharding:auto_sharding_option",
-    ]) + ["@llvm-project//llvm:TargetParser"],
+    ]),
 )
 
 xla_test(
@@ -2369,6 +2362,7 @@ gpu_kernel_library(
     ]) + if_rocm_is_configured([
         "@local_config_rocm//rocm:rocm_headers",
         "@local_config_rocm//rocm:rocm_config",
+        "@local_config_rocm//rocm:hip",
     ]),
 )
 

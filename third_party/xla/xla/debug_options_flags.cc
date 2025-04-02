@@ -230,7 +230,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_unsupported_enable_triton_multi_output_fusion(false);
   opts.set_xla_gpu_enable_cudnn_int8x32_convolution_reordering(true);
   opts.set_xla_gpu_triton_gemm_any(true);
-  opts.set_xla_gpu_unsupported_force_triton_gemm(false);
   opts.set_xla_gpu_verify_triton_fusion_numerics(false);
 
   // Moving reduce-scatter out of while loops can increase memory footprint, so
@@ -270,6 +269,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_operand_bytes_threshold_for_windowed_einsum(-1);
 
   opts.set_xla_gpu_enable_triton_hopper(false);
+  opts.set_xla_gpu_experimental_enable_dynamic_dot_search_space(false);
   opts.set_xla_gpu_experimental_enable_fusion_block_level_rewriter(false);
 
   opts.set_xla_gpu_enable_llvm_module_compilation_parallelism(false);
@@ -338,7 +338,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_unsupported_crash_on_hlo_pass_fix_max_iterations(false);
   opts.set_xla_hlo_pass_fix_detect_cycles(false);
   opts.set_xla_gpu_experimental_enable_sync_collective_combining(false);
-  opts.set_xla_allow_get_default_platform(true);
   opts.set_xla_unsupported_crash_on_hlo_pass_silent_hlo_change(false);
   opts.set_xla_unsupported_crash_on_hlo_pass_noop_change(false);
   return opts;
@@ -2011,6 +2010,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_enable_triton_hopper(),
       "Currently used to enable MMA_V3 for Hopper in Triton"));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_enable_dynamic_dot_search_space",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_experimental_enable_dynamic_dot_search_space),
+      debug_options->xla_gpu_experimental_enable_dynamic_dot_search_space(),
+      "Enable dynamically generating and pruning the autotuning search space "
+      "for Triton dot fusions, based on the properties of the problem and "
+      "hardware (shapes, instructions, GPU limits, etc.)."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_fusion_block_level_rewriter",
       bool_setter_for(
           &DebugOptions::
@@ -2307,11 +2315,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
               set_xla_gpu_experimental_enable_sync_collective_combining),
       debug_options->xla_gpu_experimental_enable_sync_collective_combining(),
       "Enable sync collective combining."));
-  flag_list->push_back(tsl::Flag(
-      "xla_allow_get_default_platform",
-      bool_setter_for(&DebugOptions::set_xla_allow_get_default_platform),
-      debug_options->xla_allow_get_default_platform(),
-      "If false, GetDefaultPlatform will cause an error if called."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_collective_cse_distance_threshold",
       int64_setter_for(

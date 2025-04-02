@@ -1094,15 +1094,16 @@ cc_library(
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
         "//xla/stream_executor:stream_executor_h",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/stream_executor/cuda:cuda_platform_id",
         "//xla/stream_executor/host:host_platform_id",
         "//xla/stream_executor/rocm:rocm_platform_id",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -6240,9 +6241,9 @@ xla_cc_binary(
         "//xla/stream_executor/gpu:gpu_init",
         "//xla/stream_executor/rocm:rocm_platform",
     ]) + if_cuda([
-        "//xla/stream_executor/cuda:cublas_plugin",
+        "//xla/stream_executor/cuda:all_runtime",
     ]) + if_rocm([
-        "//xla/stream_executor/rocm:rocblas_plugin",
+        "//xla/stream_executor/rocm:all_runtime",
     ]) + xla_internal(["tools:xsymbol_repository"]),
 )
 
