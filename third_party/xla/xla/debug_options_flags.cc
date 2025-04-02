@@ -254,7 +254,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_split_k_autotuning(true);
 
   opts.set_xla_gpu_enable_reduction_epilogue_fusion(true);
-  opts.set_xla_gpu_enable_nccl_clique_optimization(false);
   opts.set_xla_gpu_cublas_fallback(true);
   opts.set_xla_gpu_cudnn_gemm_fusion_level(0);
   opts.set_xla_gpu_enable_while_loop_double_buffering(false);
@@ -334,6 +333,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_scatter_determinism_expander(true);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(false);
   opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
+  opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_experimental_pack_dot_operands_along_k_dimension(true);
   opts.set_xla_unsupported_crash_on_hlo_pass_fix_max_iterations(false);
   opts.set_xla_hlo_pass_fix_detect_cycles(false);
@@ -1920,12 +1920,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_enable_reduction_epilogue_fusion(),
       "Enable fusion for reduction epilogues"));
   flag_list->push_back(
-      tsl::Flag("xla_gpu_enable_nccl_clique_optimization",
-                bool_setter_for(
-                    &DebugOptions::set_xla_gpu_enable_nccl_clique_optimization),
-                debug_options->xla_gpu_enable_nccl_clique_optimization(),
-                "Allow early return when acquiring NCCL cliques"));
-  flag_list->push_back(
       tsl::Flag("xla_gpu_cublas_fallback",
                 bool_setter_for(&DebugOptions::set_xla_gpu_cublas_fallback),
                 debug_options->xla_gpu_cublas_fallback(),
@@ -2252,6 +2246,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "performance."
       "Note that even when this flag is disabled, scatter operations may still "
       "be deterministic, although with additional overhead."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_unsupported_enable_all_reduce_decomposer",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_unsupported_enable_all_reduce_decomposer),
+      debug_options->xla_gpu_unsupported_enable_all_reduce_decomposer(),
+      "Internal: Enable the AllReduceDecomposer, an unsupported pass that "
+      "rewrites small all-reduce operations as a sequence of all-gather and "
+      "reduce operations."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_unsupported_enable_ragged_all_to_all_decomposer",
       bool_setter_for(

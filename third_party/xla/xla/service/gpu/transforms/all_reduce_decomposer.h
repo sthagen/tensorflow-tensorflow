@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_TRANSFORMS_SCHEDULE_POSTPROCESSING_H_
-#define XLA_SERVICE_GPU_TRANSFORMS_SCHEDULE_POSTPROCESSING_H_
+#ifndef XLA_SERVICE_GPU_TRANSFORMS_ALL_REDUCE_DECOMPOSER_H_
+#define XLA_SERVICE_GPU_TRANSFORMS_ALL_REDUCE_DECOMPOSER_H_
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/statusor.h"
@@ -25,20 +25,11 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
-// Amends a schedule result with the needed information to support a runtime
-// implementation. Currently, this pass refines attribute
-// no_parallel_custom_call for asynchronous collective operations to support
-// runtime optimization, such as skipping rendezvous of all participating
-// threads for NCCL collective operations. In particular, it sets the attribute
-// value for Collective-start operations with is_sync=false; it also keeps the
-// attribute value untouch for the operations with is_sync=true and for P2P
-// operations, assumming the runtime won't use those values.
-//
-class SchedulePostprocessing : public HloModulePass {
+// Rewrites an `all-reduce` as `all-gather` and `reduce`.
+class AllReduceDecomposer : public HloModulePass {
  public:
-  absl::string_view name() const override { return "schedule-postprocessing"; }
+  absl::string_view name() const override { return "all-reduce-decomposer"; }
 
-  using HloPassInterface::Run;
   absl::StatusOr<bool> Run(
       HloModule* module,
       const absl::flat_hash_set<absl::string_view>& execution_threads) override;
@@ -47,4 +38,4 @@ class SchedulePostprocessing : public HloModulePass {
 }  // namespace gpu
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_TRANSFORMS_SCHEDULE_POSTPROCESSING_H_
+#endif  // XLA_SERVICE_GPU_TRANSFORMS_ALL_REDUCE_DECOMPOSER_H_
