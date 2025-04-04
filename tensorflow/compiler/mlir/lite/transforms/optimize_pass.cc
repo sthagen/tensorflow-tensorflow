@@ -2798,6 +2798,233 @@ struct PushTransposeThroughSqueeze : public RewritePattern {
   }
 };
 
+// Helper function to check if a constant tensor attribute has the expected
+// integer values
+bool matchConstantIntPermutation(Value permValue,
+                                 ArrayRef<int64_t> expectedPerm) {
+  DenseElementsAttr permAttr;
+  if (!matchPattern(permValue, m_Constant(&permAttr))) {
+    return false;  // Not a constant
+  }
+  if (!permAttr.getElementType().isInteger(32) &&
+      !permAttr.getElementType().isInteger(64)) {
+    // TFLite perms are often i32, but accept i64 too
+    return false;
+  }
+
+  auto values = permAttr.getValues<APInt>();
+  if (values.size() != expectedPerm.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < expectedPerm.size(); ++i) {
+    if (values[i].getSExtValue() != expectedPerm[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline DenseIntElementsAttr GetI32ElementsAttr(ArrayRef<int32_t> values,
+                                               Builder *builder) {
+  RankedTensorType ty = mlir::RankedTensorType::get(
+      {static_cast<int32_t>(values.size())}, builder->getIntegerType(32));
+  return DenseIntElementsAttr::get(ty, values);
+}
+
+inline DenseIntElementsAttr GetI32ElementsAttr(ArrayRef<int64_t> values,
+                                               Builder *builder) {
+  llvm::SmallVector<int32_t> new_values;
+  for (auto el : values) {
+    new_values.push_back(static_cast<int32_t>(el));
+  }
+  RankedTensorType ty = mlir::RankedTensorType::get(
+      {static_cast<int32_t>(values.size())}, builder->getIntegerType(32));
+  return DenseIntElementsAttr::get(ty, new_values);
+}
+
+// Reorders a Transpose-Reshape-Transpose sequence to
+// Reshape-Transpose-Transpose to allow for further optimization.
+//
+// The pattern matches:
+//   Transpose(Reshape(Transpose(input, perm: [1, 0])))
+//
+// and rewrites it to:
+//   Transpose(Transpose(Reshape(input)))
+//
+// This reordering allows for further optimization by potentially fusing the
+// reshapes and transposes.
+struct ReorderTransposeReshapeTranspose
+    : public OpRewritePattern<TFL::TransposeOp> {
+  explicit ReorderTransposeReshapeTranspose(MLIRContext *context)
+      : OpRewritePattern<TFL::TransposeOp>(context, /*benefit=*/0) {}
+
+  LogicalResult matchAndRewrite(TFL::TransposeOp outer_tpose,
+                                PatternRewriter &rewriter) const override {
+    auto reshape = outer_tpose.getInput().getDefiningOp<TFL::ReshapeOp>();
+    if (!reshape) return failure();
+
+    auto inner_tpose = reshape.getInput().getDefiningOp<TFL::TransposeOp>();
+    if (!inner_tpose) return failure();
+
+    auto inner_tpose_shape =
+        mlir::dyn_cast_or_null<RankedTensorType>(inner_tpose.getType());
+    if (!inner_tpose_shape) return failure();
+
+    auto input = inner_tpose.getInput();
+
+    auto inner_perm = inner_tpose.getPerm();
+    if (!matchConstantIntPermutation(inner_perm, {1, 0})) return failure();
+
+    int64_t perm0 = inner_tpose_shape.getDimSize(0);
+
+    llvm::SmallVector<int32_t, 4> reshape_shape;
+    {
+      DenseIntElementsAttr reshape_shape_attr;
+      if (!matchPattern(reshape.getShape(), m_Constant(&reshape_shape_attr))) {
+        return failure();
+      }
+
+      for (auto dim : reshape_shape_attr) {
+        reshape_shape.push_back(static_cast<int32_t>(dim.getSExtValue()));
+      }
+    }
+
+    // Consume dimensions until we've equaled the size of the first dim in the
+    // permuted result of the inner tpose and record the dim.
+    int32_t dim = -1;
+    for (auto i = 0, running_total = 1; i < reshape_shape.size(); i++) {
+      running_total *= reshape_shape[i];
+      if (perm0 == running_total) {
+        dim = i;
+      }
+    }
+
+    if (dim == -1) return failure();
+
+    llvm::SmallVector<int64_t, 4> new_reshape_shape(reshape_shape.size());
+    llvm::SmallVector<int32_t, 4> new_inner_perm(reshape_shape.size());
+
+    int index = 0;
+    for (auto i = dim + 1; i < reshape_shape.size(); i++) {
+      new_inner_perm[i] = index;
+      new_reshape_shape[index++] = reshape_shape[i];
+    }
+    for (auto i = 0; i <= dim; i++) {
+      new_inner_perm[i] = index;
+      new_reshape_shape[index++] = reshape_shape[i];
+    }
+
+    auto reshape_type =
+        mlir::dyn_cast_or_null<RankedTensorType>(reshape.getType());
+    if (!reshape_type) return failure();
+
+    auto new_reshape_shape_const = rewriter.create<arith::ConstantOp>(
+        reshape.getLoc(), GetI32ElementsAttr(new_reshape_shape, &rewriter));
+
+    auto new_inner_reshape = rewriter.create<TFL::ReshapeOp>(
+        reshape.getLoc(),
+        RankedTensorType::get(new_reshape_shape, reshape_type.getElementType()),
+        input, new_reshape_shape_const.getResult());
+    auto new_inner_tpose = rewriter.create<TFL::TransposeOp>(
+        inner_tpose.getLoc(), reshape_type, new_inner_reshape,
+        rewriter.create<arith::ConstantOp>(
+            inner_tpose.getLoc(),
+            GetI32ElementsAttr(new_inner_perm, &rewriter)));
+
+    rewriter.replaceOp(reshape, new_inner_tpose);
+
+    return success();
+  }
+};
+
+// Some models produce FullyConnected ops where the LHS is a const and the RHS
+// is the activation. This breaks some downstream optimizations (notably input
+// caching in XNNPack among other things). This rewrite pattern swaps the
+// operands to match the expected order and recomputes a new output shape for
+// the resuling op.
+//
+// This pattern only applies when:
+// * input and filter operands are 2D
+// * bias = none
+// * keep_num_dims = false (implied if input and filter are 2D)
+// Support for additional cases to broaden applicability can be added later.
+// TODO(b/408313959): Add support for more cases.
+//
+// Note that transposes are added to maintain correctness:
+//
+// Original: Output[B, O] = FC(Input[B, I](Const), Filter[O, I](Var), Bias=None)
+//                           ~= matmul(C, transpose(V))
+//
+// Transformed:
+//   Intermediate[O, B] = FC(Filter[O, I](Var), Input[B, I](Const), None)
+//                           ~= matmul(V, transpose(C))
+//   FinalOutput[B, O]   = Transpose(Intermediate[O, B], perm=[1, 0])
+struct FullyConnectedSwapOperandsWhenLHSIsConst
+    : public OpRewritePattern<TFL::FullyConnectedOp> {
+  explicit FullyConnectedSwapOperandsWhenLHSIsConst(MLIRContext *context)
+      : OpRewritePattern<TFL::FullyConnectedOp>(context, /*benefit=*/0) {}
+
+  LogicalResult matchAndRewrite(TFL::FullyConnectedOp fc,
+                                PatternRewriter &rewriter) const override {
+    if (!mlir::isa<NoneType>(fc.getBias().getType())) return failure();
+
+    auto input = fc.getInput();
+    auto filter = fc.getFilter();
+
+    if (!matchPattern(input, m_Constant()) ||
+        matchPattern(filter, m_Constant()))
+      return failure();
+
+    auto input_type = mlir::dyn_cast<RankedTensorType>(input.getType());
+    auto filter_type = mlir::dyn_cast<RankedTensorType>(filter.getType());
+    auto output_type =
+        mlir::dyn_cast<RankedTensorType>(fc.getResult(0).getType());
+
+    if (!input_type || !filter_type || !output_type) return failure();
+
+    if (input_type.getRank() != 2 && filter_type.getRank() != 2)
+      return failure();
+
+    // Dimensions: B=Batch, I=InputDepth, O=OutputDepth
+    // Input: [B, I], Filter: [O, I]
+    // We extract B from the input operand and O from the filter operand
+    int64_t B = input_type.getDimSize(0);
+    int64_t O = filter_type.getDimSize(0);
+
+    Type element_type = output_type.getElementType();
+    Location loc = fc.getLoc();
+
+    RankedTensorType intermediate_type =
+        RankedTensorType::get({O, B}, element_type);
+
+    auto new_fc = rewriter.create<TFL::FullyConnectedOp>(
+        loc,
+        /*resultTypes=*/intermediate_type,
+        /*input=*/filter,  // Original Filter V[O, I]
+        /*filter=*/input,  // Original Input C[B, I]
+        /*bias=*/fc.getBias(),
+        /*fused_activation_function=*/
+        rewriter.getStringAttr(fc.getFusedActivationFunction()),
+        /*weights_format=*/fc.getWeightsFormatAttr(),
+        /*keep_num_dims=*/rewriter.getBoolAttr(false),
+        /*asymmetric_quantize_inputs=*/
+        fc.getAsymmetricQuantizeInputsAttr()  // Propagate quant attr
+    );
+
+    RankedTensorType final_shape_type =
+        RankedTensorType::get({B, O}, element_type);
+
+    Value transposed_result = rewriter.create<TFL::TransposeOp>(
+        loc, final_shape_type, new_fc.getResult(0),
+        rewriter.create<arith::ConstantOp>(
+            loc, GetI32ElementsAttr(ArrayRef<int32_t>({1, 0}), &rewriter)));
+
+    rewriter.replaceOp(fc, transposed_result);
+
+    return success();
+  }
+};
+
 // Adds canonicalization patterns to the list of patterns.
 void AddCanonicalizationPatterns(MLIRContext *context,
                                  RewritePatternSet *patterns) {
@@ -2858,8 +3085,9 @@ void OptimizePass::runOnOperation() {
       OptimizeTopK, FuseAddAndStridedSlice,
       FuseReshapeAndTransposeAroundBatchMatmul,
       FuseTransposeReshapeIntoBatchMatmul, MoveReshapeAfterFullyConnected,
-      EnableFullyConnectedKeepNumDimsBeforeReshape, ConvertTFLBroadcastToMulOp>(
-      ctx);
+      EnableFullyConnectedKeepNumDimsBeforeReshape, ConvertTFLBroadcastToMulOp,
+      ReorderTransposeReshapeTranspose,
+      FullyConnectedSwapOperandsWhenLHSIsConst>(ctx);
   if (!GetOptions().disable_fuse_mul_and_fc) {
     phase_2_patterns.add<FuseMulAndFullyConnected>(ctx);
   }

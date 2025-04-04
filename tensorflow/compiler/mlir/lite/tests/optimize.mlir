@@ -4610,3 +4610,66 @@ func.func @EliminateBooleanCastCompare(%arg0: tensor<*xi1>) -> (tensor<*xi1>, te
   // CHECK: %9 = "tfl.zeros_like"(%arg0) : (tensor<*xi1>) -> tensor<*xi1>
   // CHECK: return %0, %1, %3, %arg0, %arg0, %4, %5, %7, %8, %arg0, %9, %arg0 : tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>, tensor<*xi1>
 }
+
+// CHECK-LABEL: @ReorderTransposeReshapeTranspose
+func.func @ReorderTransposeReshapeTranspose(%arg0: tensor<282x2048xf32>) -> tensor<2x1x282x1024xf32> {
+  %cst = arith.constant dense<[1, 0]> : tensor<2xi32>
+  %cst_1 = arith.constant dense<[2, 1024, 1, 282]> : tensor<4xi32>
+  %cst_2 = arith.constant dense<[0, 2, 3, 1]> : tensor<4xi32>
+  %0 = "tfl.transpose"(%arg0, %cst) : (tensor<282x2048xf32>, tensor<2xi32>) -> tensor<2048x282xf32>
+  %1 = "tfl.reshape"(%0, %cst_1) : (tensor<2048x282xf32>, tensor<4xi32>) -> tensor<2x1024x1x282xf32>
+  %2 = "tfl.transpose"(%1, %cst_2) : (tensor<2x1024x1x282xf32>, tensor<4xi32>) -> tensor<2x1x282x1024xf32>
+  return %2: tensor<2x1x282x1024xf32>
+
+  // CHECK:      %cst = arith.constant dense<[1, 3, 0, 2]> : tensor<4xi32>
+  // CHECK-NEXT: %cst_0 = arith.constant dense<[282, 2, 1024, 1]> : tensor<4xi32>
+  // CHECK-NEXT: %0 = "tfl.reshape"(%arg0, %cst_0) : (tensor<282x2048xf32>, tensor<4xi32>) -> tensor<282x2x1024x1xf32>
+  // CHECK-NEXT: %1 = "tfl.transpose"(%0, %cst) : (tensor<282x2x1024x1xf32>, tensor<4xi32>) -> tensor<2x1x282x1024xf32>
+  // CHECK-NEXT: return %1 : tensor<2x1x282x1024xf32>
+}
+
+// CHECK-LABEL: @FullyConnectedSwapOperandsWhenLHSIsConst
+func.func @FullyConnectedSwapOperandsWhenLHSIsConst(%arg0: tensor<4x2xf32>, %arg1: none) -> tensor<2x4xf32> {
+  %cst = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf32>
+  %0 = "tfl.fully_connected"(%cst, %arg0, %arg1) {asymmetric_quantize_inputs = true, fused_activation_function = "NONE", keep_num_dims = false, weights_format = "DEFAULT"} : (tensor<2x2xf32>, tensor<4x2xf32>, none) -> tensor<2x4xf32>
+  func.return %0 : tensor<2x4xf32>
+
+  // CHECK:      %cst = arith.constant dense<[1, 0]> : tensor<2xi32>
+  // CHECK-NEXT: %cst_0 = arith.constant dense<{{\[}}[1.000000e+00, 2.000000e+00], [3.000000e+00, 4.000000e+00]]> : tensor<2x2xf32>
+  // CHECK-NEXT: %0 = "tfl.fully_connected"(%arg0, %cst_0, %arg1) <{asymmetric_quantize_inputs = true, fused_activation_function = "NONE", keep_num_dims = false, weights_format = "DEFAULT"}> : (tensor<4x2xf32>, tensor<2x2xf32>, none) -> tensor<4x2xf32>
+  // CHECK-NEXT: %1 = "tfl.transpose"(%0, %cst) : (tensor<4x2xf32>, tensor<2xi32>) -> tensor<2x4xf32>
+  // CHECK-NEXT: return %1 : tensor<2x4xf32>
+}
+
+// CHECK-LABEL: @FullyConnectedSwapOperandsWhenLHSIsConstBias
+func.func @FullyConnectedSwapOperandsWhenLHSIsConstBias(%arg0: tensor<4x2xf32>) -> tensor<2x4xf32> {
+  %cst = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf32>
+  %cst_1 = arith.constant dense<2.0> : tensor<2xf32>
+  %0 = "tfl.fully_connected"(%cst, %arg0, %cst_1) {asymmetric_quantize_inputs = true, fused_activation_function = "NONE", keep_num_dims = false, weights_format = "DEFAULT"} : (tensor<2x2xf32>, tensor<4x2xf32>, tensor<2xf32>) -> tensor<2x4xf32>
+  func.return %0 : tensor<2x4xf32>
+
+  // CHECK:      [[cst:%.*]] = arith.constant
+  // CHECK-NEXT: [[cst_1:%.*]] = arith.constant
+  // CHECK-NOT:  %0 = "tfl.fully_connected"(%arg0, [[cst]], [[cst_1]])
+}
+
+// CHECK-LABEL: @FullyConnectedSwapOperandsWhenLHSIsConstKeepNumDimsTrue
+func.func @FullyConnectedSwapOperandsWhenLHSIsConstKeepNumDimsTrue(%arg0: tensor<4x2xf32>, %arg1: none) -> tensor<2x4xf32> {
+  %cst = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf32>
+  %0 = "tfl.fully_connected"(%cst, %arg0, %arg1) {asymmetric_quantize_inputs = true, fused_activation_function = "NONE", keep_num_dims = true, weights_format = "DEFAULT"} : (tensor<2x2xf32>, tensor<4x2xf32>, none) -> tensor<2x4xf32>
+  func.return %0 : tensor<2x4xf32>
+
+  // CHECK:      [[cst:%.*]] = arith.constant
+  // CHECK-NOT:  %0 = "tfl.fully_connected"(%arg0, [[cst]], %arg1)
+}
+
+// CHECK-LABEL: @FullyConnectedSwapOperandsWhenLHSIsConstFusedActivationFunction
+func.func @FullyConnectedSwapOperandsWhenLHSIsConstFusedActivationFunction(%arg0: tensor<4x2xf32>, %arg1: none) -> tensor<2x4xf32> {
+  %cst = arith.constant dense<[[1.0, 2.0], [3.0, 4.0]]> : tensor<2x2xf32>
+  %0 = "tfl.fully_connected"(%cst, %arg0, %arg1) {asymmetric_quantize_inputs = true, fused_activation_function = "RELU", keep_num_dims = false, weights_format = "DEFAULT"} : (tensor<2x2xf32>, tensor<4x2xf32>, none) -> tensor<2x4xf32>
+  func.return %0 : tensor<2x4xf32>
+
+  // CHECK:      [[cst:%.*]] = arith.constant
+  // CHECK-NOT:  %0 = "tfl.fully_connected"(%arg0, [[cst]], %arg1)
+}
+
