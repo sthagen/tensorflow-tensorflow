@@ -1360,11 +1360,12 @@ absl::StatusOr<mlir::triton::xla::TileOp> CreateTileOp(
   const Shape& shape = tiled_hlo.hlo()->shape();
   TF_ASSIGN_OR_RETURN(Type expected_element_type,
                       TritonType(b, shape.element_type()));
+  Type storage_type = StorageType(b, expected_element_type);
   auto result_type = mtx::TiledTensorType::get(
       b.getContext(), padded_tile_sizes,
       llvm::ArrayRef<int64_t>(shape.dimensions().data(),
                               shape.dimensions().size()),
-      expected_element_type);
+      storage_type);
 
   return b.create<mtx::TileOp>(
       result_type, parent_base_ptr, ptr_offsets,
@@ -1698,9 +1699,6 @@ absl::StatusOr<TritonModule> CreateTritonModule(
 
   mlir::PassManager pm(&mlir_context);
 
-  // TODO(b/315957220): Pass device and tma_flag to the pass.
-  pm.addPass(mlir::triton::xla::CreateTritonXLAExtractInsertToTritonPass());
-
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
   if (mlir::failed(pm.run(triton_module.get()))) {
@@ -1800,6 +1798,10 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   mlir::PassManager pm(&mlir_context);
   pm.enableVerifier(should_verify);
 
+  // TODO(b/315957220): Propagate TMA flag once it's supported.
+  pm.addPass(mlir::triton::xla::CreateTritonXLAExtractInsertToTritonPass(
+      device_info, /*tma_enabled=*/false));
+
   // Lower affine expressions into arithmetic ops.
   pm.addPass(mlir::createLowerAffinePass());
 
@@ -1860,8 +1862,7 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   const int shared_mem_bytes =
       triton_module->getAttrOfType<mlir::IntegerAttr>("ttg.shared").getInt();
   VLOG(2) << "Shared memory usage: " << shared_mem_bytes << " B";
-  if (std::holds_alternative<se::CudaComputeCapability>(cc) &&
-      shared_mem_bytes > device_info.shared_memory_per_block_optin()) {
+  if (shared_mem_bytes > device_info.shared_memory_per_block_optin()) {
     return absl::ResourceExhaustedError(absl::StrFormat(
         "Shared memory size limit exceeded: requested %d, available: %d",
         shared_mem_bytes, device_info.shared_memory_per_block_optin()));

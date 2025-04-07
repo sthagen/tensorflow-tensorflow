@@ -42,6 +42,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/autotune_results.pb.h"
 #include "xla/autotuning.pb.h"
+#include "xla/backends/gpu/runtime/buffer_comparator.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_clone_context.h"
@@ -65,7 +66,6 @@ limitations under the License.
 #include "xla/service/gpu/autotuning/autotuner_util.h"
 #include "xla/service/gpu/autotuning/dot_search_space.h"
 #include "xla/service/gpu/backend_configs.pb.h"
-#include "xla/service/gpu/buffer_comparator.h"
 #include "xla/service/gpu/gpu_float_support.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
@@ -331,12 +331,6 @@ absl::StatusOr<std::unique_ptr<HloModule>> TritonGemmAutotuneExtractor(
   *backend_config.mutable_triton_gemm_config() = config.ToProto();
   TF_RETURN_IF_ERROR(cloned_dot_fusion->set_backend_config(gpu_config));
 
-  if (debug_opts
-          .xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms()) {
-    NestGemmFusion nest_gemm_fusion(gpu_device_info.gpu_compute_capability());
-    TF_RETURN_IF_ERROR(nest_gemm_fusion.Run(new_module.get()).status());
-  }
-
   if (config.split_k > 1) {
     TF_RETURN_IF_ERROR(MakeDotSplitKBatch(cloned_dot_fusion, config));
     for (PrimitiveType type :
@@ -356,6 +350,13 @@ absl::StatusOr<std::unique_ptr<HloModule>> TritonGemmAutotuneExtractor(
     FusionWrapper fusion_wrapper(gpu_device_info);
     TF_RETURN_IF_ERROR(fusion_wrapper.Run(new_module.get()).status());
   }
+
+  if (debug_opts
+          .xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms()) {
+    NestGemmFusion nest_gemm_fusion(gpu_device_info.gpu_compute_capability());
+    TF_RETURN_IF_ERROR(nest_gemm_fusion.Run(new_module.get()).status());
+  }
+
   return new_module;
 }
 
