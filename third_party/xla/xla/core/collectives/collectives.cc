@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,22 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_VARIANT_VISITOR_H_
-#define XLA_SERVICE_GPU_VARIANT_VISITOR_H_
+#include "xla/core/collectives/collectives.h"
 
-namespace xla::gpu {
-// This structure is used to support C++17 overload pattern as described in
-// https://en.cppreference.com/w/cpp/utility/variant/visit
-//
-// TODO(b/319202112): Replace with absl::Overload once abs lts_2024_XXX is
-// tagged.
-template <class... Ts>
-struct VariantVisitor : Ts... {
-  using Ts::operator()...;
-};
-template <class... Ts>
-VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
+#include <utility>
 
-}  // namespace xla::gpu
+#include "absl/functional/any_invocable.h"
 
-#endif  // XLA_SERVICE_GPU_VARIANT_VISITOR_H_
+namespace xla {
+
+Collectives::~Collectives() { NotifyOnDestroyCallbacks(); }
+
+void Collectives::AddOnDestroyCallback(absl::AnyInvocable<void()> callback) {
+  on_destroy_callbacks_.push_back(std::move(callback));
+}
+
+void Collectives::NotifyOnDestroyCallbacks() {
+  auto callbacks = std::move(on_destroy_callbacks_);
+  for (auto& callback : callbacks) callback();
+}
+
+}  // namespace xla

@@ -574,6 +574,11 @@ cc_library(
     ]),
 )
 
+cc_library(
+    name = "overload",
+    hdrs = ["overload.h"],
+)
+
 xla_cc_test(
     name = "dump_test",
     srcs = ["dump_test.cc"],
@@ -3947,10 +3952,10 @@ cc_library(
         "//xla/hlo/analysis:hlo_ordering",
         "//xla/hlo/analysis:hlo_reachability",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:ptrvec",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/transforms/simplifiers:hlo_dce",
         "//xla/hlo/transforms/simplifiers:tuple_simplifier",
-        "//xla/hlo/utils:hlo_query",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -6546,15 +6551,14 @@ xla_cc_test(
     deps = [
         ":copy_insertion",
         ":while_loop_pipeline_unroller",
-        "//xla:test_helpers",
         "//xla/hlo/analysis:hlo_ordering",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:test_helpers",
         "//xla/tests:hlo_test_base",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
