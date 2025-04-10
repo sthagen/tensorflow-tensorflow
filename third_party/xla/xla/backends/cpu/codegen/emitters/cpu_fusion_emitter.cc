@@ -23,9 +23,9 @@ limitations under the License.
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
@@ -33,6 +33,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Linker/Linker.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
@@ -60,7 +61,6 @@ limitations under the License.
 #include "xla/backends/cpu/alignment.h"
 #include "xla/backends/cpu/codegen/emitters/ir/xla_cpu_ops.h"
 #include "xla/backends/cpu/codegen/emitters/ir/xla_cpu_types.h"
-#include "xla/backends/cpu/codegen/fusion_compiler.h"
 #include "xla/backends/cpu/codegen/kernel_api_ir_builder.h"
 #include "xla/codegen/emitters/computation_partitioner.h"
 #include "xla/codegen/emitters/elemental_hlo_to_mlir.h"
@@ -76,7 +76,6 @@ limitations under the License.
 #include "xla/mlir_hlo/mhlo/transforms/passes.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/dump.h"
-#include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/tsl/platform/errors.h"
@@ -130,138 +129,6 @@ bool Needs64BitIndices(const HloComputation* computation) {
   return false;
 }
 }  // namespace
-
-absl::StatusOr<CpuFusionEmissionResult> CpuFusionEmitterBase::Emit() const {
-  // Single-threaded for now.
-  TF_ASSIGN_OR_RETURN(auto module,
-                      CreateLLVMModule(*mlir_context_, *llvm_context_, *fusion_,
-                                       buffer_assignment_));
-
-  const HloModule* hlo_module = fusion_->GetModule();
-  if (hlo_module == nullptr) {
-    return Internal("HloModule is null");
-  }
-  // Create a Kernel API Builder and a throwaway kernel prototype in order to
-  // extract useful info from them, e.g. noalias, invariant_arguments and
-  // entry function attributes.
-  // TODO(ecg): find a way to obtain the same info without wasting work by
-  // creating a throwaway module. All of this additional info should probably be
-  // explicit in the generated MLIR, not added afterwards like we're doing here.
-  // TODO(ecg): some attributes on the final loads are missing wrt those
-  // generated via KernelApiIrBuilder, e.g. noalias. Add them.
-  KernelApiIrBuilder kernel_api_ir_builder(
-      *llvm_context_,
-      KernelApiIrBuilder::Options::FromHloModuleConfig(hlo_module->config()));
-  std::unique_ptr<llvm::Module> throwaway_llvm_module =
-      KernelApiIrBuilder::CreateModule(
-          absl::StrCat(fusion_->name(), "_throwaway_module"), *llvm_context_);
-  TF_ASSIGN_OR_RETURN(KernelApiIrBuilder::KernelPrototype kernel_prototype,
-                      kernel_api_ir_builder.EmitKernelPrototype(
-                          *throwaway_llvm_module, fusion_, &buffer_assignment_,
-                          "_throwaway_kernel_prototype"));
-  llvm::Function* kernel_function = module->getFunction(fusion_->name());
-  kernel_api_ir_builder.SetKernelFunctionAttributes(kernel_function);
-
-  CpuFusionEmissionResult result;
-  result.llvm_module = std::move(module);
-  result.invariant_arguments = std::move(kernel_prototype.invariant_arguments);
-  return result;
-}
-
-absl::StatusOr<std::unique_ptr<llvm::Module>>
-CpuFusionEmitterBase::CreateLLVMModule(
-    mlir::MLIRContext& mlir_context, llvm::LLVMContext& llvm_context,
-    const HloFusionInstruction& fusion,
-    const BufferAssignment& buffer_assignment) const {
-  TF_ASSIGN_OR_RETURN(auto module,
-                      CreateMLIRModule(mlir_context, fusion,
-                                       std::string(fusion.name()) + "_entry",
-                                       buffer_assignment));
-
-  FusionCompiler compiler(FusionCompiler::Options{});
-  return compiler.Compile(llvm_context, module.get());
-}
-
-absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
-CpuFusionEmitterBase::CreateMLIRModule(
-    mlir::MLIRContext& context, const HloFusionInstruction& fusion,
-    const std::string& entry_function_name,
-    const BufferAssignment& buffer_assignment,
-    mlir::interpreter::MlirCompilationTrace* trace) const {
-  mlir::OpBuilder builder(&context);
-  auto loc = mlir::NameLoc::get(builder.getStringAttr(fusion.name()));
-  mlir::OwningOpRef<mlir::ModuleOp> module = llvm_ir::CreateMlirModuleOp(loc);
-
-  TF_ASSIGN_OR_RETURN(
-      mlir::func::FuncOp entry_func,
-      EmitFusionKernelApi(module.get(), fusion, entry_function_name,
-                          buffer_assignment));
-
-  TF_RETURN_IF_ERROR(EmitMlir(module.get(), entry_func, fusion));
-  return module;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-absl::Status CpuFusionEmitterBase::EmitMlir(
-    mlir::ModuleOp module, FuncOp entry_function,
-    const HloFusionInstruction& fusion) const {
-  std::vector<emitters::EpilogueSpecification> epilogues =
-      GetEpilogues(fusion, module->getContext());
-  emitters::PartitionedComputations computations(
-      fusion.fused_instructions_computation(), module->getContext(),
-      /*epilogues=*/epilogues);
-  auto subgraph_to_mlir_fn = computations.DeclareFunctions(module);
-
-  // Erase subgraphs for all heroes that aren't used anywhere else. This is
-  // necessary because the instructions may not have elemental implementations
-  // (scatter).
-  for (const auto& epilogue : epilogues) {
-    for (auto* custom : epilogue.heroes) {
-      if (custom->user_count() == 0) {
-        subgraph_to_mlir_fn.extract(&computations.FindSubgraph(custom))
-            .mapped()
-            .erase();
-      }
-    }
-  }
-
-  // The epilogue functions replace the root tuple.
-  auto* root = fusion.fused_instructions_computation()->root_instruction();
-  if (root->opcode() == HloOpcode::kTuple && !epilogues.empty()) {
-    subgraph_to_mlir_fn.extract(&computations.FindSubgraph(root))
-        .mapped()
-        .erase();
-  }
-
-  auto call_targets =
-      computations.CreateCallTargetProvider(subgraph_to_mlir_fn);
-  for (const auto& comp : computations.partitioned_computations()) {
-    for (const auto& subgraph : comp.subgraphs()) {
-      if (subgraph_to_mlir_fn.contains(&subgraph)) {
-        TF_RETURN_IF_ERROR(emitters::SubgraphToMlirFunction(
-            comp, subgraph, subgraph_to_mlir_fn[&subgraph], call_targets));
-      }
-    }
-  }
-  for (const auto& epilogue : computations.epilogues()) {
-    if (epilogue.roots.empty()) continue;
-    TF_RETURN_IF_ERROR(emitters::SubgraphToMlirFunction(
-        computations.FindPartitionedComputation(
-            fusion.fused_instructions_computation()),
-        epilogue, subgraph_to_mlir_fn[&epilogue], call_targets));
-  }
-
-  int index_bitwidth =
-      Needs64BitIndices(fusion.fused_instructions_computation()) ? 64 : 32;
-  mlir::OpBuilder b(module->getContext());
-  auto index_layout = mlir::DataLayoutEntryAttr::get(
-      b.getIndexType(), b.getI32IntegerAttr(index_bitwidth));
-  module->setAttr(
-      mlir::DLTIDialect::kDataLayoutAttrName,
-      mlir::DataLayoutSpecAttr::get(module->getContext(), {index_layout}));
-
-  return EmitEntryFunction(computations, call_targets, entry_function, fusion);
-}
 
 using mlir::AffineExpr;
 
@@ -394,6 +261,100 @@ absl::StatusOr<mlir::func::FuncOp> EmitFusionKernelApi(
   builder.create<mlir::func::ReturnOp>(loc, error.getResult());
 
   return entry_func;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+absl::StatusOr<emitters::CallTargetProvider> EmitCallTargets(
+    mlir::ModuleOp module, const HloFusionInstruction& fusion,
+    const emitters::PartitionedComputations& computations,
+    const std::vector<emitters::EpilogueSpecification>& epilogues) {
+  auto subgraph_to_mlir_fn = computations.DeclareFunctions(module);
+
+  // Erase subgraphs for all heroes that aren't used anywhere else. This is
+  // necessary because the instructions may not have elemental implementations
+  // (scatter).
+  for (const auto& epilogue : epilogues) {
+    for (auto* custom : epilogue.heroes) {
+      if (custom->user_count() == 0) {
+        subgraph_to_mlir_fn.extract(&computations.FindSubgraph(custom))
+            .mapped()
+            .erase();
+      }
+    }
+  }
+
+  // The epilogue functions replace the root tuple.
+  auto* root = fusion.fused_instructions_computation()->root_instruction();
+  if (root->opcode() == HloOpcode::kTuple && !epilogues.empty()) {
+    subgraph_to_mlir_fn.extract(&computations.FindSubgraph(root))
+        .mapped()
+        .erase();
+  }
+
+  auto call_targets =
+      computations.CreateCallTargetProvider(subgraph_to_mlir_fn);
+  for (const auto& comp : computations.partitioned_computations()) {
+    for (const auto& subgraph : comp.subgraphs()) {
+      if (subgraph_to_mlir_fn.contains(&subgraph)) {
+        TF_RETURN_IF_ERROR(emitters::SubgraphToMlirFunction(
+            comp, subgraph, subgraph_to_mlir_fn[&subgraph], call_targets));
+      }
+    }
+  }
+  for (const auto& epilogue : computations.epilogues()) {
+    if (epilogue.roots.empty()) continue;
+    TF_RETURN_IF_ERROR(emitters::SubgraphToMlirFunction(
+        computations.FindPartitionedComputation(
+            fusion.fused_instructions_computation()),
+        epilogue, subgraph_to_mlir_fn[&epilogue], call_targets));
+  }
+
+  return call_targets;
+}
+
+void SetDataLayoutAttribute(mlir::ModuleOp module,
+                            const HloFusionInstruction& fusion) {
+  int index_bitwidth =
+      Needs64BitIndices(fusion.fused_instructions_computation()) ? 64 : 32;
+  mlir::OpBuilder b(module->getContext());
+  auto index_layout = mlir::DataLayoutEntryAttr::get(
+      b.getIndexType(), b.getI32IntegerAttr(index_bitwidth));
+  module->setAttr(
+      mlir::DLTIDialect::kDataLayoutAttrName,
+      mlir::DataLayoutSpecAttr::get(module->getContext(), {index_layout}));
+}
+
+absl::StatusOr<absl::flat_hash_set<int64_t>> SetKernelFunctionAttributes(
+    llvm::Module& module, const BufferAssignment& buffer_assignment,
+    const HloFusionInstruction* fusion) {
+  const HloModule* hlo_module = fusion->GetModule();
+  if (hlo_module == nullptr) {
+    return Internal("HloModule is null");
+  }
+
+  // Create a Kernel API Builder and a throwaway kernel prototype in order to
+  // extract useful info from them, e.g. noalias, invariant_arguments and
+  // entry function attributes.
+  // TODO(ecg): find a way to obtain the same info without wasting work by
+  // creating a throwaway module. All of this additional info should probably be
+  // explicit in the generated MLIR, not added afterwards like we're doing here.
+  // TODO(ecg): some attributes on the final loads are missing wrt those
+  // generated via KernelApiIrBuilder, e.g. noalias. Add them.
+  llvm::LLVMContext& context = module.getContext();
+  KernelApiIrBuilder kernel_api_ir_builder(
+      context,
+      KernelApiIrBuilder::Options::FromHloModuleConfig(hlo_module->config()));
+  std::unique_ptr<llvm::Module> throwaway_llvm_module =
+      KernelApiIrBuilder::CreateModule(
+          absl::StrCat(fusion->name(), "_throwaway_module"), context);
+  TF_ASSIGN_OR_RETURN(KernelApiIrBuilder::KernelPrototype kernel_prototype,
+                      kernel_api_ir_builder.EmitKernelPrototype(
+                          *throwaway_llvm_module, fusion, &buffer_assignment,
+                          "_throwaway_kernel_prototype"));
+  llvm::Function* kernel_function = module.getFunction(fusion->name());
+  kernel_api_ir_builder.SetKernelFunctionAttributes(kernel_function);
+
+  return kernel_prototype.invariant_arguments;
 }
 
 int64_t CeilDiv(int64_t a, int64_t b) { return (a + b - 1) / b; }

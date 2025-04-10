@@ -71,6 +71,12 @@ class TritonDotFusionSearchSpace {
     std::string ToString() const { return config.ToString(); }
   };
 
+  // Approximation on the maximum number of warps we would want to oversubscribe
+  // the SMs with to overlap different GPU pipes (memory, tensor core, ALU,
+  // special function unit, etc.)
+  // TODO: b/408114338 - Figure out a better model for this.
+  static constexpr int kMaxWarpsPerScheduler = 5;
+
   // Callback type for `ExtendConfigs`. The method should append zero or more
   // extensions of `config` to the `updated_configs` vector.
   using ExtendConfigCallback = void (TritonDotFusionSearchSpace::*)(
@@ -83,6 +89,14 @@ class TritonDotFusionSearchSpace {
   void ExtendConfigs(std::vector<ConfigWithNotes>& configs,
                      ExtendConfigCallback extend_config);
 
+  // Computes the maximum number of total warps we should have to sufficiently
+  // saturate the GPU.
+  //
+  // We're counting warps instead of blocks here, since we already need this
+  // value as a consideration to decide how large the blocks should be (which
+  // then impacts how many of them we should have).
+  int GetDesiredTotalWarps() const;
+
   // Computes the maximum sensible size of the output tile (block_m, block_n)
   // based on the dot shape and element type, and the available registers on
   // the core.
@@ -91,6 +105,11 @@ class TritonDotFusionSearchSpace {
   // Computes the number of result tiles we would have without
   // splitting the contracting dimension for a given output tile.
   int64_t GetNumResultTiles(OutputTile output_tile) const;
+
+  // Computes how many warps per Cooperative Thread Array (aka. CTA, aka. CUDA
+  // block) is reasonable for the given output tile and restrictions on
+  // instruction shape.
+  int GetMaxWarpsPerCta(OutputTile output_tile) const;
 
   // Computes the maximum sensible split in the contracting dimension
   // (split_k) to sufficiently occupy all available cores when using the given
@@ -107,6 +126,13 @@ class TritonDotFusionSearchSpace {
   // more configs in the output.
   void AddOutputTilings(const ConfigWithNotes& config,
                         std::vector<ConfigWithNotes>& updated_configs);
+
+  // Finds all promising values for the Cooperative Thread Array (aka. CTA, aka.
+  // CUDA block) size (num_warps), based on `config` with already determined
+  // output tiling and appends them to `updated_configs`. Each config in the
+  // input list might yield zero or more configs in the output.
+  void AddCtaSizeParameter(const ConfigWithNotes& config,
+                           std::vector<ConfigWithNotes>& updated_configs);
 
   // Removes configs that are marked with `not_enough_tiles` from the list. If
   // this results in an empty list, adds a config that should be the most

@@ -92,10 +92,11 @@ TritonDotFusionSearchSpace::TritonDotFusionSearchSpace(
       rhs_parallel_size_(ShapeUtil::ElementsIn(dot->operand(1)->shape()) /
                          (contracting_size_ * batch_size_)),
       compute_bitwidth_(primitive_util::BitWidth(dot->shape().element_type())),
+      // Figure out some basic limitations on tiling based on the above.
+      desired_total_warps_(GetDesiredTotalWarps()),
+      max_out_tile_(GetMaxOutputTile()),
       // TODO: b/404470821 - Compute these from the problem properties instead
       // of hardcoding.
-      desired_total_warps_(2160),
-      max_out_tile_(GetMaxOutputTile()),
       min_out_tile_{16, 16},
       min_warps_per_cta_(4),
       min_contracting_tile_size_(16),
@@ -134,15 +135,16 @@ std::vector<TritonGemmConfig> TritonDotFusionSearchSpace::GenerateConfigs(
   ExtendConfigs(configs, &TritonDotFusionSearchSpace::AddOutputTilings);
   EliminateLowOccupancyConfigs(configs);
 
+  ExtendConfigs(configs, &TritonDotFusionSearchSpace::AddCtaSizeParameter);
+
   std::vector<TritonGemmConfig> result;
   result.reserve(configs.size());
-  for (auto& config_with_notes : configs) {
+  for (ConfigWithNotes& config_with_notes : configs) {
     // TODO: b/404470821 - Implement this properly rather than hardcoding the
     // config parameters.
-    auto& config = config_with_notes.config;
+    TritonGemmConfig& config = config_with_notes.config;
     config.block_k = 64;
     config.num_stages = 3;
-    config.num_warps = 4;
     config.num_ctas = 1;
     result.push_back(config);
   }
@@ -158,6 +160,13 @@ std::string TritonDotFusionSearchSpace::Serialize() {
       compute_bitwidth_, max_contracting_split_, min_out_tile_.lhs_dim,
       max_out_tile_.lhs_dim, min_out_tile_.rhs_dim, max_out_tile_.rhs_dim,
       min_contracting_tile_size_, desired_total_warps_, min_warps_per_cta_);
+}
+
+int TritonDotFusionSearchSpace::GetDesiredTotalWarps() const {
+  constexpr int kSchedulersPerCore = 4;
+  constexpr int kDesiredWarpsPerCore =
+      kMaxWarpsPerScheduler * kSchedulersPerCore;
+  return kDesiredWarpsPerCore * device_description_.core_count();
 }
 
 TritonDotFusionSearchSpace::OutputTile
@@ -205,6 +214,19 @@ int64_t TritonDotFusionSearchSpace::GetNumResultTiles(
   return batch_size_ *
          CeilOfRatio<int64_t>(lhs_parallel_size_, output_tile.lhs_dim) *
          CeilOfRatio<int64_t>(rhs_parallel_size_, output_tile.rhs_dim);
+}
+
+int TritonDotFusionSearchSpace::GetMaxWarpsPerCta(OutputTile tile) const {
+  // A single mma instruction is of output shape at least 16x8 (the same
+  // also holds for wgmma: the warp-group level instruction is at least
+  // 64x8, and split 4-ways across the 4 warps in the group).
+  constexpr OutputTile kMmaSubTile = {16, 8};
+  const int max_warps = device_description_.threads_per_block_limit() /
+                        device_description_.threads_per_warp();
+  const int lhs_warps = CeilOfRatio(tile.lhs_dim, kMmaSubTile.lhs_dim);
+  const int rhs_warps = CeilOfRatio(tile.rhs_dim, kMmaSubTile.rhs_dim);
+  return std::max(min_warps_per_cta_,
+                  std::min(max_warps, lhs_warps * rhs_warps));
 }
 
 int TritonDotFusionSearchSpace::GetMaxContractingSplit(
@@ -267,9 +289,9 @@ void TritonDotFusionSearchSpace::AddOutputTilings(
   CHECK_GT(config.config.split_k, 0)
       << "Need config with contracting split already set.";
   const int split = config.config.split_k;
-  auto new_config = config;
-  auto& m = new_config.config.block_m;
-  auto& n = new_config.config.block_n;
+  ConfigWithNotes new_config = config;
+  int& m = new_config.config.block_m;
+  int& n = new_config.config.block_n;
   for (m = min_out_tile_.lhs_dim; m <= max_out_tile_.lhs_dim; m *= 2) {
     for (n = min_out_tile_.rhs_dim; n <= max_out_tile_.rhs_dim; n *= 2) {
       OutputTile tile = {m, n};
@@ -290,10 +312,29 @@ void TritonDotFusionSearchSpace::AddOutputTilings(
   }
 }
 
+void TritonDotFusionSearchSpace::AddCtaSizeParameter(
+    const ConfigWithNotes& config,
+    std::vector<ConfigWithNotes>& updated_configs) {
+  ConfigWithNotes new_config = config;
+  int tile_rows = config.config.block_m;
+  int tile_cols = config.config.block_n;
+  int& warps = new_config.config.num_warps;
+  CHECK_GT(tile_rows * tile_cols, 0)
+      << "Need configs with output tilings determined.";
+  int max_warps = GetMaxWarpsPerCta({tile_rows, tile_cols});
+  VLOG(5) << "Computing max_warps: For output_tile = " << tile_rows << "x"
+          << tile_cols
+          << " and (wg)mma instruction shape, max_warps = " << max_warps;
+  for (warps = min_warps_per_cta_; warps <= max_warps; warps *= 2) {
+    VLOG(10) << "Adding CTA size parameter: config = " << new_config.ToString();
+    updated_configs.push_back(new_config);
+  }
+}
+
 void TritonDotFusionSearchSpace::EliminateLowOccupancyConfigs(
     std::vector<ConfigWithNotes>& configs) {
   CHECK(!configs.empty());
-  auto last_config = configs.back();  // Config with the largest split.
+  ConfigWithNotes last_config = configs.back();  // Largest split.
   auto has_too_few_tiles = [](const ConfigWithNotes& config) {
     if (config.not_enough_tiles) {
       VLOG(10) << "Skipping due to fewer tiles than cores, config = "
