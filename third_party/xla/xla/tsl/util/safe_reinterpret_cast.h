@@ -48,17 +48,6 @@ struct IsByteLike<unsigned char> : std::true_type {};
 template <>
 struct IsByteLike<std::byte> : std::true_type {};
 
-// IsCvByteLike<T>::value is true if T is a possibly CV-qualified byte-like type
-// (char, unsigned char, or std::byte).
-template <typename T>
-struct IsCvByteLike : IsByteLike<T> {};
-template <typename T>
-struct IsCvByteLike<const T> : IsByteLike<T> {};
-template <typename T>
-struct IsCvByteLike<volatile T> : IsByteLike<T> {};
-template <typename T>
-struct IsCvByteLike<const volatile T> : IsByteLike<T> {};
-
 // IsSafeCast<From, To>::value is true if it is safe to reinterpret_cast a
 // value of type From to a value of type To.
 //
@@ -67,23 +56,27 @@ struct IsCvByteLike<const volatile T> : IsByteLike<T> {};
 template <typename From, typename To>
 struct IsSafeCast : std::false_type {};
 
-// It's safe to cast a pointer to/from a byte-like type, or to/from the same
-// type. Also, while not guaranteed by the C++ standard, POSIX mandates that
-// it's safe to cast a function pointer to/from a void pointer
-// (https://pubs.opengroup.org/onlinepubs/9799919799/functions/dlsym.html).
-// On Windows (with MSVC), casting a function pointer to/from a void pointer has
-// been a widely adopted practice for decades and is considered safe in
-// practice, even though it is not explicitly guaranteed by Microsoft.
+// 1.  The C++ standard guarantees that it's safe to cast a pointer to/from a
+//     pointer to a byte-like type.
+// 2a. The Google C++ style guide states that it's safe to cast a data pointer
+//     to/from a void pointer.
+// 2b. While not guaranteed by the C++ standard, POSIX mandates that it's safe
+//     to cast a function pointer to/from a void pointer
+//     (https://pubs.opengroup.org/onlinepubs/9799919799/functions/dlsym.html).
+//     On Windows (with MSVC), casting a function pointer to/from a void
+//     pointer has been a widely adopted practice for decades and is considered
+//     safe in practice, even though it is not explicitly guaranteed by
+//     Microsoft.
+// 3.  It's safe to cast a pointer or to/from the same type.
 template <typename From, typename To>
 struct IsSafeCast<From*, To*>
     : std::integral_constant<
           bool,
           // To/from a pointer to a byte-like type.
-          (IsCvByteLike<From>::value || IsCvByteLike<To>::value) ||
-              // From function pointer to void pointer.
-              (std::is_function_v<From>&& std::is_void_v<To>) ||
-              // From void pointer to function pointer.
-              (std::is_void_v<From>&& std::is_function_v<To>) ||
+          (IsByteLike<typename std::remove_cv<From>::type>::value ||
+           IsByteLike<typename std::remove_cv<To>::type>::value) ||
+              // To/from void pointer.
+              (std::is_void_v<From> || std::is_void_v<To>) ||
               // Between the same type.
               std::is_same_v<From, To>> {};
 
