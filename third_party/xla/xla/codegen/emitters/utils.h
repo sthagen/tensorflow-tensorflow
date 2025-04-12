@@ -1,4 +1,4 @@
-/* Copyright 2019 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,10 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_TRANSLATE_HLO_TO_MHLO_HLO_FUNCTION_IMPORTER_H_
-#define XLA_TRANSLATE_HLO_TO_MHLO_HLO_FUNCTION_IMPORTER_H_
+#ifndef XLA_CODEGEN_EMITTERS_UTILS_H_
+#define XLA_CODEGEN_EMITTERS_UTILS_H_
 
-// The current header will be deprecated in favour of the following.
-#include "xla/hlo/translate/hlo_to_mhlo/hlo_function_importer.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "xla/xla_data.pb.h"
 
-#endif  // XLA_TRANSLATE_HLO_TO_MHLO_HLO_FUNCTION_IMPORTER_H_
+namespace xla::emitters {
+
+mlir::DenseElementsAttr GetZeroDenseElementsAttr(mlir::ShapedType shaped_type);
+
+}  // namespace xla::emitters
+
+#endif  // XLA_CODEGEN_EMITTERS_UTILS_H_

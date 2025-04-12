@@ -85,6 +85,21 @@ func.func @test_transpose_conv2d_relu(%arg0: tensor<1x32x32x8xf32>, %cst_0: tens
 
 // -----
 
+// CHECK-LABEL: test_transpose_conv2d_outpad
+// CHECK-DAG: %[[VAR0:.*]] = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}>
+// CHECK: %[[VAR2:.*]] = tosa.transpose_conv2d %arg0, %arg1, %[[VAR0]], %[[VAR0]], %[[VAR0]] {acc_type = f32, out_pad = array<i64: 0, 1, 0, 1>, stride = array<i64: 1, 1>}
+func.func @test_transpose_conv2d_outpad(%arg0: tensor<1x32x32x8xf32>, %arg1: tensor<16x1x1x8xf32>) -> tensor<1x33x33x16xf32> {
+  %cst = arith.constant dense<[1, 33, 33, 16]> : tensor<4xi32>
+  %cst_1 = "tfl.no_value"() {value = unit} : () -> none
+  %0 = "tfl.transpose_conv"(%cst, %arg1, %arg0, %cst_1)
+    {padding = "SAME", stride_h = 1 : i32, stride_w = 1 : i32,
+     fused_activation_function = "NONE"}
+    : (tensor<4xi32>, tensor<16x1x1x8xf32>, tensor<1x32x32x8xf32>, none) -> tensor<1x33x33x16xf32>
+  func.return %0 : tensor<1x33x33x16xf32>
+}
+
+// -----
+
 // CHECK-LABEL: test_conv2d_qi8
 // CHECK-DAG: %[[VAR0:.*]] = "tosa.const"() <{values = dense<{{.*}}> : tensor<16x2x2x8xi8>}>
 // CHECK-DAG: %[[VAR1:.*]] = "tosa.const"() <{values = dense<0> : tensor<16xi32>}>
@@ -1203,6 +1218,18 @@ func.func @test_max_pool2d(%arg0: tensor<1x32x32x8xf32>) -> tensor<*xf32> {
 // CHECK: %[[VAR0:.*]] = tosa.max_pool2d %arg0 {kernel = array<i64: 1, 1>, pad = array<i64: 0, 0, 0, 0>, stride = array<i64: 1, 1>}
 func.func @test_max_pool2d_dynamic(%arg0: tensor<?x32x32x8xf32>) -> tensor<*xf32> {
   %0 = "tfl.max_pool_2d"(%arg0)  {filter_height = 1 : i32, filter_width = 1 : i32, fused_activation_function = "NONE", padding = "SAME", stride_h = 1 : i32, stride_w = 1 : i32}  : (tensor<?x32x32x8xf32>) -> tensor<*xf32>
+  func.return %0 : tensor<*xf32>
+}
+
+// -----
+
+// CHECK-LABEL: test_max_pool2d_slicing
+// CHECK-DAG: %[[VAL_1:.*]] = tosa.const_shape  {values = dense<[1, 31, 31, 8]> : tensor<4xindex>} : () -> !tosa.shape<4>
+// CHECK-DAG: %[[VAL_2:.*]] = tosa.const_shape  {values = dense<0> : tensor<4xindex>} : () -> !tosa.shape<4>
+// CHECK: %[[VAL_3:.*]] = tosa.slice %[[VAL_0]], %[[VAL_2]], %[[VAL_1]] : (tensor<1x32x32x8xf32>, !tosa.shape<4>, !tosa.shape<4>) -> tensor<1x31x31x8xf32>
+// CHECK: %[[VAL_4:.*]] = tosa.max_pool2d %[[VAL_3]] {kernel = array<i64: 3, 3>, pad = array<i64: 0, 0, 0, 0>, stride = array<i64: 2, 2>} : (tensor<1x31x31x8xf32>) -> tensor<1x15x15x8xf32>
+func.func @test_max_pool2d_slicing(%arg0: tensor<1x32x32x8xf32>) -> tensor<*xf32> {
+  %0 = "tfl.max_pool_2d"(%arg0)  {filter_height = 3 : i32, filter_width = 3 : i32, fused_activation_function = "NONE", padding = "VALID", stride_h = 2 : i32, stride_w = 2 : i32}  : (tensor<1x32x32x8xf32>) -> tensor<*xf32>
   func.return %0 : tensor<*xf32>
 }
 
@@ -3854,4 +3881,15 @@ func.func @test_transpose_conv2d_bias_f32(%arg0: tensor<1x64x64x256xf32>) -> ten
   %1 = arith.constant dense<1.000000e+00> : tensor<128xf32>
   %2 = "tfl.transpose_conv"(%cst, %0, %arg0, %1)  {padding = "VALID", stride_h = 2 : i32, stride_w = 2 : i32, fused_activation_function = "NONE"}  : (tensor<4xi32>, tensor<128x2x2x256xf32>, tensor<1x64x64x256xf32>, tensor<128xf32>) -> tensor<1x128x128x128xf32>
   return %2 : tensor<1x128x128x128xf32>
+}
+
+// -----
+
+// CHECK-LABEL: test_concat_qconst
+// CHECK-DAG: %[[VAR0:.*]] = "tosa.const"() <{values = dense<42> : tensor<28x19xi8>}> : () -> tensor<28x19x!quant.uniform<i8:f32, 1.000000e+00>>
+// CHECK-DAG: %[[VAR1:.*]] = tosa.concat %[[VAR0]], %arg0 {axis = 0 : i32} : (tensor<28x19x!quant.uniform<i8:f32, 1.000000e+00>>, tensor<1x19x!quant.uniform<i8:f32, 1.000000e+00>>) -> tensor<29x19x!quant.uniform<i8:f32, 1.000000e+00>>
+func.func @test_concat_qconst(%arg0: tensor<1x19x!quant.uniform<i8:f32, 1.0>> ) -> tensor<29x19x!quant.uniform<i8:f32, 1.0>> {
+  %0 = "tfl.pseudo_qconst"() {qtype = tensor<28x19x!quant.uniform<i8:f32, 1.0>>, value = dense<42> : tensor<28x19xi8>} : () -> tensor<28x19x!quant.uniform<i8:f32, 1.0>>
+  %1 = "tfl.concatenation"(%0, %arg0) {axis = 0 : i32, fused_activation_function = "NONE"}: (tensor<28x19x!quant.uniform<i8:f32, 1.0>>, tensor<1x19x!quant.uniform<i8:f32, 1.0>>) -> tensor<29x19x!quant.uniform<i8:f32, 1.0>>
+  return %1 : tensor<29x19x!quant.uniform<i8:f32, 1.0>>
 }

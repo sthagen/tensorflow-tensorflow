@@ -343,11 +343,12 @@ CheckStoreIntoSliceIsCompatible(HloInstruction* instr,
          ShapeUtil::ElementsIn(instr->operand(0)->shape()) < 1024)) {
       return true;
     }
+    // TODO(b/409716406): Reconsider cases where Pad can be supported.
     return HloPredicateIsOp<HloOpcode::kSlice, HloOpcode::kDynamicSlice,
-                            HloOpcode::kPad, HloOpcode::kCollectivePermute,
-                            HloOpcode::kConvert, HloOpcode::kReshape,
-                            HloOpcode::kAllReduce, HloOpcode::kTranspose,
-                            HloOpcode::kBroadcast, HloOpcode::kAllGather>(i) ||
+                            HloOpcode::kCollectivePermute, HloOpcode::kConvert,
+                            HloOpcode::kReshape, HloOpcode::kAllReduce,
+                            HloOpcode::kTranspose, HloOpcode::kBroadcast,
+                            HloOpcode::kAllGather>(i) ||
            (multi_uses_pipelining && i->IsElementwise()) ||
            i->IsCustomCall(CollectivePipeliner::kInsertedByPreviousStep) ||
            i->IsCustomCall(CollectivePipeliner::kSunkByPreviousStep);
@@ -1242,6 +1243,15 @@ void WhileLoopAnalysis::MergeIntoExistingCollectives(
                   "MergeIntoExistingCollectives ";
 }
 
+// Returns the number of dimensions of the array shape, or 0 if the shape is not
+// an array.
+static int GetNumArrayDimensionsOrZero(const Shape& shape) {
+  if (shape.IsArray()) {
+    return shape.dimensions().size();
+  }
+  return 0;
+}
+
 void WhileLoopAnalysis::CollectCollectivesToMove(
     int64_t level_to_operate_on,
     CollectivePipeliner::PipeliningDirection direction,
@@ -1303,8 +1313,8 @@ void WhileLoopAnalysis::CollectCollectivesToMove(
   for (auto* instr : instructions_post_order) {
     if (direction == CollectivePipeliner::PipeliningDirection::kForward &&
         (instr->operand_count() != 1 ||
-         instr->shape().dimensions_size() !=
-             instr->operand(0)->shape().dimensions_size())) {
+         GetNumArrayDimensionsOrZero(instr->shape()) !=
+             GetNumArrayDimensionsOrZero(instr->operand(0)->shape()))) {
       continue;
     }
     if (!should_process(instr)) {
