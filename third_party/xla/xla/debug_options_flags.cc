@@ -51,15 +51,11 @@ limitations under the License.
 namespace xla {
 
 inline std::string DefaultMaxIsa() {
-#ifdef PLATFORM_GOOGLE
-  return "";
-#else
   // There are many missing SVE lowerings in LLVM. Limit features to NEON for
   // now. There shouldn't be significant performance impact as most AAarch64
   // CPUs still use 128-bit registers.
   // TODO(penporn): Remove this once SVE is fully supported.
   return tsl::port::IsAarch64CPU() ? "NEON" : "";
-#endif  // PLATFORM_GOOGLE
 }
 
 DebugOptions DefaultDebugOptionsIgnoringFlags() {
@@ -245,7 +241,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_gb(0);
   opts.set_xla_gpu_auto_spmd_partitioning_memory_budget_ratio(1.1);
-  opts.set_xla_gpu_triton_gemm_disable_reduced_precision_reduction(false);
+  opts.set_xla_gpu_triton_gemm_disable_reduced_precision_reduction(true);
   opts.set_xla_gpu_unsafe_pipelined_loop_annotator(false);
 
   opts.set_xla_gpu_copy_insertion_use_region_analysis(false);
@@ -1779,9 +1775,8 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "xla_gpu_unsupported_enable_triton_multi_output_fusion",
       bool_setter_for(
           &DebugOptions::
-              set_xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms),
-      debug_options
-          ->xla_gpu_unsupported_enable_generic_triton_emitter_for_gemms(),
+              set_xla_gpu_unsupported_enable_triton_multi_output_fusion),
+      debug_options->xla_gpu_unsupported_enable_triton_multi_output_fusion(),
       "Enable Triton multi-output fusions."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_verify_triton_fusion_numerics",
@@ -2394,6 +2389,13 @@ void ResetThreadLocalFuel() {
   for (const auto& kv : *initial_fuel) {
     thread_fuel->emplace(kv.first, kv.second);
   }
+}
+
+bool PassFuelIsSet(absl::string_view pass) {
+  absl::call_once(flags_init, &AllocateFlags, nullptr);
+  auto* fuel_pool = thread_fuel ? thread_fuel.get() : global_fuel;
+  auto it = fuel_pool->find(pass);
+  return it != fuel_pool->end();
 }
 
 bool ConsumeFuel(absl::string_view pass, bool* just_ran_out) {
