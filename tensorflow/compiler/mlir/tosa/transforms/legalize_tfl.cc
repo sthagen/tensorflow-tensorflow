@@ -2612,7 +2612,7 @@ LogicalResult ConvertTFLReduceAllOp::matchAndRewrite(
     return rewriter.notifyMatchFailure(op, "fail to get reduction indices");
 
   std::optional<Value> result = convertReduceAllOp(
-      rewriter, op, output_type, tfl_all_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_all_op.getInput(), axes_elems, tfl_all_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2634,7 +2634,7 @@ LogicalResult ConvertTFLReduceAnyOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceAnyOp(
-      rewriter, op, output_type, tfl_any_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_any_op.getInput(), axes_elems, tfl_any_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2656,7 +2656,7 @@ LogicalResult ConvertTFLReduceMaxOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceMaxOp(
-      rewriter, op, output_type, tfl_max_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_max_op.getInput(), axes_elems, tfl_max_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2678,7 +2678,7 @@ LogicalResult ConvertTFLReduceMinOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceMinOp(
-      rewriter, op, output_type, tfl_min_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_min_op.getInput(), axes_elems, tfl_min_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2700,7 +2700,7 @@ LogicalResult ConvertTFLReduceProdOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceProdOp(
-      rewriter, op, output_type, tfl_prod_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_prod_op.getInput(), axes_elems, tfl_prod_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2722,7 +2722,7 @@ LogicalResult ConvertTFLMeanOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceMeanOp(
-      rewriter, op, output_type, tfl_mean_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_mean_op.getInput(), axes_elems, tfl_mean_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -2744,7 +2744,7 @@ LogicalResult ConvertTFLSumOp::matchAndRewrite(
     return failure();
 
   std::optional<Value> result = convertReduceSumOp(
-      rewriter, op, output_type, tfl_sum_op.getInput(), axes_elems);
+      rewriter, op, output_type, tfl_sum_op.getInput(), axes_elems, tfl_sum_op.getKeepDims());
 
   if (!result) return failure();
 
@@ -3444,17 +3444,11 @@ LogicalResult ConvertTFLHardSwishOp::matchAndRewrite(
         mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(
             output_type.getElementType());
 
-    auto hardswish_func = [](double v) -> double {
-      double w = v + 3.0;
-      w = w < 0.0 ? 0.0 : w > 6.0 ? 6.0 : w;
-      return v * w / 6.0;
-    };
-
     if (input_qtype.getStorageTypeIntegralWidth() == 8) {
       // Implement with 8-bit table lookup.
-      Value table_const = getTosaConst8bitTable(
+      Value table_const = getTosaConstHardSwish8bitTable(
           rewriter, op, input_qtype.getScale(), input_qtype.getZeroPoint(),
-          output_qtype.getScale(), output_qtype.getZeroPoint(), hardswish_func);
+          output_qtype.getScale(), output_qtype.getZeroPoint());
 
       CreateReplaceOpAndInfer<tosa::TableOp>(
           rewriter, op, output_type, tfl_hardswish_op.getInput(), table_const);
