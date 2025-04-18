@@ -160,9 +160,9 @@ def _tf_repositories():
     # LINT.IfChange(xnnpack)
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "f25179a30775d9918670fb5fb07cd8e80c2ae0a8f4ec450a6d6c496d159ba66b",
-        strip_prefix = "XNNPACK-ece21c589be842fbeaee297b0d668194d6f3a35b",
-        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/ece21c589be842fbeaee297b0d668194d6f3a35b.zip"),
+        sha256 = "7adcf80f9a10ad3eaf49777a97d16201f341970326cd52211391e2c93c65e3f4",
+        strip_prefix = "XNNPACK-a6654be72590651ebc1aec686cd41ac9c2461f59",
+        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/a6654be72590651ebc1aec686cd41ac9c2461f59.zip"),
     )
     # LINT.ThenChange(//tensorflow/lite/tools/cmake/modules/xnnpack.cmake)
 
@@ -927,9 +927,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "org_xprof",
-        sha256 = "a14e688d4145b4964bf1e9deac4cf52e0baadfb77906d513ebd397a43fa06d1f",
-        strip_prefix = "xprof-81409fb324525ba73ff204b7702db3f436773430",
-        urls = tf_mirror_urls("https://github.com/openxla/xprof/archive/81409fb324525ba73ff204b7702db3f436773430.zip"),
+        sha256 = "ff84f44bf87b2805fd6badc398b1889049f1d86d2478ecc466680c6939261afe",
+        strip_prefix = "xprof-05e9e316c9cf8de6dd5fdcd8c841723fc1e8a20f",
+        urls = tf_mirror_urls("https://github.com/openxla/xprof/archive/05e9e316c9cf8de6dd5fdcd8c841723fc1e8a20f.zip"),
     )
 
     # used for adding androidx.annotation dependencies in tflite android jni.

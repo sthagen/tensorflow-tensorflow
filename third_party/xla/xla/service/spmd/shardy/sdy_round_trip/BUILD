@@ -12,6 +12,7 @@ package_group(
     packages = [
         "//learning/deepmind/partir/compiler/mpmd/...",
         "//learning/deepmind/partir/compiler/shardonnay/...",
+        "//third_party/australis/google/ifrt/...",
         "//third_party/openxla/shardy/tools/...",
         "//third_party/py/jax/...",
         "//xla/...",
@@ -61,6 +62,7 @@ cc_library(
     deps = [
         "//xla/service/spmd/shardy:constants",
         "//xla/service/spmd/shardy:utils",
+        "@com_google_absl//absl/log",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AsmParser",
         "@llvm-project//mlir:FuncDialect",
@@ -133,6 +135,7 @@ cc_library(
     srcs = ["import_callback_custom_calls.cc"],
     hdrs = ["import_callback_custom_calls.h"],
     deps = [
+        "//xla/service/spmd/shardy:constants",
         "//xla/service/spmd/shardy:utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",

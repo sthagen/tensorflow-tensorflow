@@ -103,6 +103,7 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
         "//tensorflow/core:framework",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ],
 )
@@ -796,6 +797,7 @@ cc_library(
         "@local_xla//xla:xla_data_proto_cc",
         "@local_xla//xla/hlo/translate/hlo_to_mhlo:hlo_utils",
         "@local_xla//xla/hlo/translate/mhlo_to_hlo:type_to_shape",
+        "@local_xla//xla/mlir_hlo",
         "@local_xla//xla/service:shape_inference",
         "@local_xla//xla/tsl/platform:errors",
         "@local_xla//xla/tsl/util:env_var",

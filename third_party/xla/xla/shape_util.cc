@@ -337,12 +337,12 @@ std::ostream& operator<<(std::ostream& out, const ShapeIndex& shape_index) {
                            absl::StrJoin(dimensions, ","));
   }
   for (int i = 0, n = dimensions.size(); i < n; i++) {
-    shape.set_dynamic_dimension(i, dynamic_dimensions[i]);
     if (shape.dimensions(i) == Shape::kUnboundedSize &&
         !dynamic_dimensions[i]) {
       return InvalidArgument(
           "Cannot mark a dynamic dimension at dim=%d as static", i);
     }
+    shape.set_dynamic_dimension(i, dynamic_dimensions[i]);
   }
   return shape;
 }
@@ -1953,7 +1953,7 @@ struct ParallelState {
   explicit ParallelState(int64_t task_count) {
     // If this method is changed, please remember to change
     // GetForEachIndexParallelThreadCount() as well.
-    static auto* global_pool = new tsl::thread::ThreadPool(
+    static auto* const global_pool = new tsl::thread::ThreadPool(
         tsl::Env::Default(), "foreach", tsl::port::MaxParallelism());
     pool = global_pool;
   }

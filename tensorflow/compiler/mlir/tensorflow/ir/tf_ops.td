@@ -57,7 +57,7 @@ class TF_TensorListInitOp<string mnemonic> : TF_Op<mnemonic, [Pure]> {
     // Returns data type of the result handle. Returned type contains type of
     // the TensorList element as a subtype.
     VariantType handle_dtype() {
-      return getElementTypeOrSelf(getHandle().getType()).cast<TF::VariantType>();
+      return llvm::cast<TF::VariantType>(getElementTypeOrSelf(getHandle().getType()));
     }
   }];
 }
@@ -118,7 +118,7 @@ An n-way switch statement, implementing the following:
     // Prefer passing in SymbolTableCollection to reduce lookup costs by
     // enabling reusing cached symbol table lookup.
     func::FuncOp ResolveBranchFunction(::mlir::SymbolTableCollection* table, int index) {
-      auto flat_sym_ref = getBranches()[index].cast<FlatSymbolRefAttr>();
+      auto flat_sym_ref = llvm::cast<FlatSymbolRefAttr>(getBranches()[index]);
       if (table)
         return table->lookupNearestSymbolFrom<func::FuncOp>(*this, flat_sym_ref);
       return SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(*this, flat_sym_ref);
@@ -854,14 +854,14 @@ Example:
       "return getElementTypeOrSelf(resource_subtype());">;
   DerivedAttr shape = DerivedAttr<
       "ShapedType",
-      "return resource_subtype().cast<ShapedType>();",
+      "return llvm::cast<ShapedType>(resource_subtype());",
       [{ mlir::TF::ShapeAttr::get($_ctxt, $_self) }]>;
 
   let extraClassDeclaration = [{
     TensorType resource_subtype() { return resource_type().getSubtypes()[0]; }
 
     ResourceType resource_type() {
-      return getElementTypeOrSelf(getResource()).cast<TF::ResourceType>();
+      return llvm::cast<TF::ResourceType>(getElementTypeOrSelf(getResource()));
     }
   }];
 
@@ -2847,6 +2847,50 @@ def TF_XlaSparseDenseMatmulGradWithCsrInputOp : TF_Op<"XlaSparseDenseMatmulGradW
 
   TF_DerivedOperandSizeAttr M = TF_DerivedOperandSizeAttr<6>;
   TF_DerivedOperandSizeAttr N = TF_DerivedOperandSizeAttr<5>;
+}
+
+def TF_XlaSparseDenseMatmulCustomCombinerOnTcGradWithCsrInputOp : TF_Op<"XlaSparseDenseMatmulCustomCombinerOnTcGradWithCsrInput", [AttrSizedOperandSegments, Pure]> {
+  let summary = "This op back-propagates the activation gradients to the embedding table and the combiner weights.";
+
+  let arguments = (ins
+    TF_Int32Tensor:$row_pointers,
+    TF_Int32Tensor:$sorted_sample_ids,
+    TF_Int32Tensor:$sorted_token_ids,
+    TF_Int32Tensor:$sorted_pos_ids,
+    TF_Float32Tensor:$sorted_gains,
+    // Custom combiner learnable weights to be updated in this backward pass.
+    TF_Float32Tensor:$weights,
+    // Preserved outputs of the SparseCore embedding forward pass (for TC
+    // combiner VJP).
+    TF_Int32Tensor:$preserved_valencies,
+    TF_Float32Tensor:$preserved_vectors,
+    // Gradients of the activation.
+    TF_Float32Tensor:$activation_gradients,
+    // The embedding table and the associated slot variables.
+    Variadic<TF_Float32Tensor>:$tables,
+    // Hyperparameters of the current optimizer.
+    Variadic<TF_Float32Tensor>:$hyperparameters,
+    // Learning rate of the custom combiner weights (using SGD).
+    TF_Float32Tensor:$combiner_weights_learning_rate,
+
+    ConfinedAttr<I64Attr, [IntMinValue<0>]>:$max_valency,
+    ConfinedAttr<I64Attr, [IntMinValue<0>]>:$num_weights,
+
+    SymbolRefAttr:$combiner_table_vjp_computation,
+    SymbolRefAttr:$combiner_weights_vjp_computation,
+    SymbolRefAttr:$optimizer_custom_computation,
+    StrAttr:$table_name
+  );
+
+  let results = (outs
+    Variadic<TF_Float32Tensor>:$updated_tables,
+    TF_Float32Tensor:$updated_weights
+  );
+
+  // Number of embedding table + its associated slot variables.
+  TF_DerivedOperandSizeAttr N = TF_DerivedOperandSizeAttr<9>;
+  // Number of hyperparameters.
+  TF_DerivedOperandSizeAttr M = TF_DerivedOperandSizeAttr<10>;
 }
 
 // b/394499589: move back to tf_generated_ops.td
