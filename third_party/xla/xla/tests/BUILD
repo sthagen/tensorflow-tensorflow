@@ -92,14 +92,21 @@ cc_library(
         "//xla:literal",
         "//xla:literal_comparison",
         "//xla:literal_util",
+        "//xla:shape_util",
         "//xla:types",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/testlib:test",
         "//xla/hlo/testlib:test_helpers",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:status",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:env",
+        "@com_google_googletest//:gtest_for_library",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:test",
@@ -1124,7 +1131,6 @@ xla_test(
     ],
     deps = [
         ":client_library_test_base",
-        ":hlo_pjrt_test_base",
         ":hlo_test_base",
         ":test_macros_header",
         ":xla_internal_test_main",
@@ -1174,7 +1180,6 @@ xla_test(
     ],
     deps = [
         ":client_library_test_base",
-        ":hlo_pjrt_test_base",
         ":hlo_test_base",
         ":test_macros_header",
         ":xla_internal_test_main",
@@ -1250,6 +1255,7 @@ xla_test(
     ],
     deps = [
         "//xla/service:platform_util",
+        "//xla/tests:hlo_pjrt_test_base",
         "//xla/tsl/platform:status_matchers",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/status",
@@ -1302,7 +1308,6 @@ xla_test(
     ],
     deps = [
         ":client_library_test_base",
-        ":hlo_pjrt_test_base",
         ":hlo_test_base",
         ":test_macros_header",
         ":xla_internal_test_main",
@@ -1846,7 +1851,6 @@ xla_test(
     name = "slice_test",
     timeout = "long",
     srcs = ["slice_test.cc"],
-    # placeholder for extra args for slice_test
     shard_count = 40,
     tags = ["test_xla_cpu_no_thunks"],
     deps = [
@@ -2077,7 +2081,6 @@ xla_test(
     name = "reduce_window_test",
     timeout = "long",
     srcs = [],
-    # placeholder for extra args for reduce_window_test
     shard_count = 50,
     tags = [
         "optonly",
