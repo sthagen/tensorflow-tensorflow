@@ -1852,7 +1852,7 @@ TfrtGpuClient::BufferFromHostLiteral(const LiteralSlice& literal,
   // buffer. They are set only after h2d dispatch.
   absl::InlinedVector<tsl::AsyncValueRef<GpuEvent>, 4> definition_events;
   absl::InlinedVector<tsl::RCReference<tsl::AsyncValue>, 4> avs;
-  int num_leaf_buffers = shape.IsTuple() ? shape.tuple_shapes_size() : 1;
+  int num_leaf_buffers = shape.IsTuple() ? shape.tuple_shapes().size() : 1;
   for (int i = 0; i < num_leaf_buffers; ++i) {
     tsl::AsyncValueRef<GpuEvent> definition_event =
         tsl::MakeConstructedAsyncValueRef<GpuEvent>();
@@ -2724,12 +2724,6 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
                                           tsl::profiler::ContextType::kPjRt,
                                           run_id.ToInt());
 
-  if (VLOG_IS_ON(2)) {
-    LOG(INFO) << "ExecuteHelper " << name() << ": " << options.launch_id
-              << "; replica: " << replica << "; partition: " << partition
-              << "; mapped to device ordinal for execution: " << device->id();
-  }
-
   std::shared_ptr<DeviceAssignment> device_assignment;
   if (device == nullptr) {
     CHECK(device_assignment_ != nullptr);
@@ -2748,6 +2742,12 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
     (*device_assignment)(0, 0) = device->id();
   }
   CHECK_EQ(device->process_index(), client_->process_index());
+
+  if (VLOG_IS_ON(2)) {
+    LOG(INFO) << "ExecuteHelper " << name() << ": " << options.launch_id
+              << "; replica: " << replica << "; partition: " << partition
+              << "; mapped to device ordinal for execution: " << device->id();
+  }
 
   // Handle inputs.
   if (options.arguments_are_tupled) {
@@ -2865,9 +2865,9 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
   bool untuple_result = options.untuple_result;
   bool result_is_tuple = result_shape.IsTuple();
   if (options.untuple_result && result_shape.IsTuple()) {
-    output_buffers.reserve(result_shape.tuple_shapes_size());
+    output_buffers.reserve(result_shape.tuple_shapes().size());
     outputs.reserve(output_buffers.size());
-    for (int i = 0; i < result_shape.tuple_shapes_size(); ++i) {
+    for (int i = 0; i < result_shape.tuple_shapes().size(); ++i) {
       output_buffers.push_back(
           tsl::MakeUnconstructedAsyncValueRef<MaybeOwningGpuMemory>());
       // Program execution writes to output buffers so it's a definition
@@ -3427,7 +3427,7 @@ absl::StatusOr<std::vector<absl::string_view>> MemoryKindsFromShape(
     return {{memory_kind}};
   }
   std::vector<absl::string_view> result;
-  result.reserve(shape.tuple_shapes_size());
+  result.reserve(shape.tuple_shapes().size());
   for (const auto& element_shape : shape.tuple_shapes()) {
     TF_ASSIGN_OR_RETURN(
         absl::string_view element_memory_kind,
