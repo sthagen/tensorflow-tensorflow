@@ -2108,13 +2108,10 @@ xla_cc_test(
 
 cc_library(
     name = "gpusolver_rewriter",
-    srcs = if_gpu_is_configured(["gpusolver_rewriter.cc"]),
-    hdrs = if_gpu_is_configured(["gpusolver_rewriter.h"]),
-    deps = if_gpu_is_configured([
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
+    srcs = ["gpusolver_rewriter.cc"],
+    hdrs = ["gpusolver_rewriter.h"],
+    tags = ["gpu"],
+    deps = [
         "//xla:comparison_util",
         "//xla:literal",
         "//xla:literal_util",
@@ -2123,36 +2120,44 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
-        "//xla/stream_executor:gpu_solver_context",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/stream_executor:blas",
         "//xla/stream_executor:device_memory_allocator",
+        "//xla/stream_executor:gpu_solver_context",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
-        "@com_google_absl//absl/functional:any_invocable",
-    ]) + [
-        "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
     ],
 )
 
-xla_test(
+xla_cc_test(
     name = "gpusolver_rewriter_test",
     srcs = ["gpusolver_rewriter_test.cc"],
-    backends = ["gpu"],
-    tags = ["cuda-only"],
+    tags = ["gpu"],
     deps = [
         ":gpusolver_rewriter",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/hlo/testlib:pattern_matcher_gmock",
         "//xla/service:pattern_matcher",
-        "//xla/stream_executor/cuda:cuda_solver_context",  # fixdeps: keep
+        "//xla/stream_executor:blas",
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:gpu_solver_context",
+        "//xla/stream_executor:stream",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -3026,12 +3031,8 @@ xla_cc_test(
 
 cc_library(
     name = "sort_rewriter",
-    srcs = if_gpu_is_configured(
-        ["sort_rewriter.cc"],
-        ["sort_rewriter_stub.cc"],
-    ),
+    srcs = ["sort_rewriter.cc"],
     hdrs = ["sort_rewriter.h"],
-    visibility = ["//xla/service/gpu:__subpackages__"] + if_google(["//learning/brain/engprod/xwatch:__subpackages__"]),
     deps = [
         "//xla:comparison_util",
         "//xla:literal_util",
@@ -3075,8 +3076,10 @@ xla_test(
         "//xla/hlo/testlib:pattern_matcher_gmock",
         "//xla/hlo/testlib:verified_hlo_module",
         "//xla/service:pattern_matcher",
+        "//xla/service:platform_util",
         "//xla/service/gpu:cublas_cudnn",
         "//xla/service/gpu:gpu_device_info_for_tests",
+        "//xla/stream_executor:platform",
         "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
         "//xla/tests:hlo_pjrt_test_base",
         "//xla/tests:xla_internal_test_main",  # fixdeps: keep
@@ -3692,6 +3695,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/service:hlo_creation_utils",
+        "//xla/service/gpu:matmul_utils",
         "//xla/stream_executor:device_description",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",

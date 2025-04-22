@@ -55,8 +55,8 @@ from setuptools.dist import Distribution
 _VERSION = '0.0.0'
 
 # Update this version when a new libtpu stable version is released.
-LATEST_RELEASE_LIBTPU_VERSION = '0.0.12'
-NEXT_LIBTPU_VERSION = '0.0.13'
+LATEST_RELEASE_LIBTPU_VERSION = '0.0.13'
+NEXT_LIBTPU_VERSION = '0.0.14'
 
 # We use the same setup.py for all tensorflow_* packages and for the nightly
 # equivalents (tf_nightly_*). The package is controlled from the argument line
@@ -91,7 +91,7 @@ REQUIRED_PACKAGES = [
     'libclang >= 13.0.0',
     'opt_einsum >= 2.3.2',
     'packaging',
-    'protobuf>=4.21.6,<6.0.0dev',
+    'protobuf>=4.21.6,<7.0.0dev',
     'requests >= 2.21.0, < 3',
     'setuptools',
     'six >= 1.12.0',
