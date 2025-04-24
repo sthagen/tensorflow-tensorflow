@@ -292,9 +292,7 @@ class TfrtGpuClient final : public PjRtClient {
 
   absl::string_view platform_name() const override { return platform_name_; }
 
-  absl::string_view platform_version() const override {
-    return platform_version_;
-  }
+  absl::string_view platform_version() const override;
 
   absl::StatusOr<DeviceAssignment> GetDefaultDeviceAssignment(
       int num_replicas, int num_partitions) const override;
@@ -424,7 +422,6 @@ class TfrtGpuClient final : public PjRtClient {
   int process_index_;
 
   xla::LocalClient* xla_client_;
-  const std::string platform_version_;
 
   bool should_stage_host_to_device_transfers_;
   // Allocator to be used for staging memory transfers to devices.
@@ -449,7 +446,9 @@ class TfrtGpuClient final : public PjRtClient {
   std::unique_ptr<tsl::thread::ThreadPool> blocking_thread_pool_;
   std::unique_ptr<tsl::thread::ThreadPool> non_blocking_thread_pool_;
 
-  std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options_;
+  // TODO(caojx): Make gpu run options configurable.
+  std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options_ =
+      std::make_unique<gpu::GpuExecutableRunOptions>();
 
   // A cache for transpose plans. We use transposes to convert
   // (possibly strided) buffers provided to BufferFromHostBuffer into dense
