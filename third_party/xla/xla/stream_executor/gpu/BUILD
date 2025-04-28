@@ -136,12 +136,6 @@ xla_cc_test(
     ],
 )
 
-gpu_only_cc_library(
-    name = "gpu_diagnostics_header",
-    hdrs = ["gpu_diagnostics.h"],
-    deps = ["@com_google_absl//absl/status:statusor"],
-)
-
 cc_library(
     name = "scoped_update_mode",
     hdrs = [
@@ -882,6 +876,15 @@ cc_library(
 cc_library(
     name = "all_reduce_kernel",
     hdrs = ["all_reduce_kernel.h"],
+    deps = [
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:kernel",
+    ],
+)
+
+cc_library(
+    name = "topk_kernel",
+    hdrs = ["topk_kernel.h"],
     deps = [
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:kernel",

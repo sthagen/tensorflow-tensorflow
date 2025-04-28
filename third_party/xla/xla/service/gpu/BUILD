@@ -9,8 +9,6 @@ load(
 load("//xla:xla.default.bzl", "xla_cc_test", "xla_internal")
 load(
     "//xla/service/gpu:build_defs.bzl",
-    "build_cub_sort_kernels",
-    "get_cub_sort_kernel_types",
     "gpu_kernel_library",
 )
 load(
@@ -142,7 +140,7 @@ cc_library(
 
 xla_test(
     name = "custom_call_test",
-    srcs = if_gpu_is_configured(["custom_call_test.cc"]),
+    srcs = ["custom_call_test.cc"],
     backends = ["gpu"],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
@@ -376,6 +374,7 @@ cc_library(
         "//xla/backends/gpu/runtime:send_thunk",
         "//xla/backends/gpu/runtime:sequential_thunk",
         "//xla/backends/gpu/runtime:thunk",
+        "//xla/backends/gpu/runtime:topk",
         "//xla/backends/gpu/runtime:triangular_solve_thunk",
         "//xla/backends/gpu/runtime:wait_for_streams_thunk",
         "//xla/backends/gpu/runtime:while_thunk",
@@ -387,13 +386,13 @@ cc_library(
         "//xla/mlir/utils:error_util",
         "//xla/mlir_hlo:transforms_gpu_passes",
         "//xla/service:buffer_assignment",
+        "//xla/service:call_graph",
         "//xla/service:collective_ops_utils",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_target_registry",
         "//xla/service:global_device_id",
         "//xla/service:name_uniquer",
         "//xla/service/gpu/kernels:custom_kernel",
-        "//xla/service/gpu/kernels:topk_custom_kernel",
         "//xla/service/gpu/model:tiled_hlo_instruction_or_computation",
         "//xla/service/llvm_ir:buffer_assignment_util",
         "//xla/service/llvm_ir:ir_array",
@@ -405,6 +404,7 @@ cc_library(
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/stream_executor/gpu:gpu_blas_lt",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
@@ -738,32 +738,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:statusor",
     ],
-)
-
-gpu_kernel_library(
-    name = "gpu_prim",
-    hdrs = ["gpu_prim.h"],
-    deps = [
-        "@eigen_archive//:eigen3",
-        "@local_config_cuda//cuda:cuda_headers",
-        "@local_tsl//tsl/platform:bfloat16",
-    ] + if_cuda_is_configured(["@local_config_cuda//cuda:cub_headers"]) + if_rocm_is_configured([
-        "@local_config_rocm//rocm:rocprim",
-    ]),
-)
-
-build_cub_sort_kernels(
-    name = "cub_sort_kernel",
-    srcs = if_gpu_is_configured(["cub_sort_kernel.cu.cc"]),
-    hdrs = if_gpu_is_configured(["cub_sort_kernel.h"]),
-    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]) + if_rocm_is_configured([
-        "TENSORFLOW_USE_ROCM=1",
-    ]),
-    types = get_cub_sort_kernel_types(),
-    deps = if_gpu_is_configured([
-        ":gpu_prim",
-        "//xla/stream_executor/gpu:gpu_types_header",
-    ]),
 )
 
 cc_library(
@@ -1604,6 +1578,7 @@ cc_library(
         "//xla/service:while_loop_all_reduce_code_motion",
         "//xla/service:while_loop_constant_sinking",
         "//xla/service:while_loop_simplifier",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/stream_executor/integrations:device_mem_allocator",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_description_proto_cc",
