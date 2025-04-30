@@ -324,12 +324,19 @@ bool LegalizeSchedulingAnnotations::KeepSchedulingAnnotation(
 absl::StatusOr<bool> LegalizeSchedulingAnnotations::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
+  bool changed = false;
+  // Remove loop iteration annotation if requested.
+  if (config_.remove_loop_iteration_annotation_only) {
+    TF_ASSIGN_OR_RETURN(bool removed, RemoveLoopIterationAnnotation(module));
+    changed |= removed;
+    return changed;
+  }
+
   absl::flat_hash_map<HloInstruction*, Annotation> instruction_to_annotation;
   absl::flat_hash_map<
       Annotation,
       absl::flat_hash_map<HloComputation*, std::vector<HloInstruction*>>>
       annotation_to_instruction;
-  bool changed = false;
   // Filter the annotated ops (using config) to keep the annotations only in the
   // desired sync ops. Annotations in all async ops are kept.
   for (HloComputation* computation : module->MakeNonfusionComputations()) {
@@ -338,13 +345,6 @@ absl::StatusOr<bool> LegalizeSchedulingAnnotations::Run(
         changed |= RemoveSchedulingAnnotation(instr);
       }
     }
-  }
-
-  // Remove loop iteration annotation if needed.
-  if (config_.remove_loop_iteration_annotation) {
-    TF_ASSIGN_OR_RETURN(bool remove_loop_iteration_annotation,
-                        RemoveLoopIterationAnnotation(module));
-    changed |= remove_loop_iteration_annotation;
   }
 
   // Find the annotated instructions and save relevant information.

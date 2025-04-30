@@ -734,7 +734,7 @@ ENTRY %entry (p0: bf16[5,8,128], p1: bf16[5,1,2,128]) -> bf16[5,8,128] {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> hlo_module,
                           ParseAndReturnVerifiedModule(hlo_string));
   LegalizeSchedulingAnnotations::Config config;
-  config.remove_loop_iteration_annotation = true;
+  config.remove_loop_iteration_annotation_only = true;
   EXPECT_IS_OK(
       LegalizeSchedulingAnnotations(config).Run(hlo_module.get()).status());
   HloInstruction* all_gather =

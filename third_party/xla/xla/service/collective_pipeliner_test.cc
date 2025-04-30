@@ -4740,7 +4740,7 @@ ENTRY entry {
   EXPECT_EQ(annotation->iteration_id->iteration_id, -1);
 
   LegalizeSchedulingAnnotations::Config config;
-  config.remove_loop_iteration_annotation = true;
+  config.remove_loop_iteration_annotation_only = true;
   EXPECT_TRUE(LegalizeSchedulingAnnotations(config).Run(module.get()).value());
   annotation = GetSchedulingAnnotation(ag).value();
   EXPECT_TRUE(annotation);
@@ -4828,7 +4828,7 @@ while_body {
   EXPECT_EQ(annotation->iteration_id->iteration_id, 1);
 
   LegalizeSchedulingAnnotations::Config config;
-  config.remove_loop_iteration_annotation = true;
+  config.remove_loop_iteration_annotation_only = true;
   EXPECT_TRUE(LegalizeSchedulingAnnotations(config).Run(module.get()).value());
   annotation = GetSchedulingAnnotation(ag).value();
   EXPECT_TRUE(annotation);
@@ -4899,7 +4899,7 @@ ENTRY entry {
   EXPECT_EQ(annotation->iteration_id->iteration_id, 1);
 
   LegalizeSchedulingAnnotations::Config config;
-  config.remove_loop_iteration_annotation = true;
+  config.remove_loop_iteration_annotation_only = true;
   EXPECT_TRUE(LegalizeSchedulingAnnotations(config).Run(module.get()).value());
   annotation = GetSchedulingAnnotation(ag).value();
   EXPECT_TRUE(annotation);
@@ -4980,7 +4980,7 @@ ENTRY entry {
   EXPECT_EQ(annotation->iteration_id->iteration_id, -1);
 
   LegalizeSchedulingAnnotations::Config config;
-  config.remove_loop_iteration_annotation = true;
+  config.remove_loop_iteration_annotation_only = true;
   EXPECT_TRUE(LegalizeSchedulingAnnotations(config).Run(module.get()).value());
   annotation = GetSchedulingAnnotation(ag).value();
   EXPECT_TRUE(annotation);

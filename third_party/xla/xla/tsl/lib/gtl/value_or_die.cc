@@ -13,11 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "nanobind/nanobind.h"
-#include "xla/python/profiler.h"
+#include "xla/tsl/lib/gtl/value_or_die.h"
 
-namespace xla {
+#include "absl/base/attributes.h"
+#include "absl/status/status.h"
+#include "xla/tsl/platform/logging.h"
 
-NB_MODULE(_profiler, m) { BuildProfilerModule(m); }
+namespace tsl::gtl::internal_value_or_die {
 
-}  // namespace xla
+ABSL_ATTRIBUTE_NORETURN void DieBecauseEmptyValue(const char* file, int line,
+                                                  const absl::Status* status) {
+  if (status == nullptr) {
+    LOG(FATAL).AtLocation(file, line) << "ValueOrDie on empty value.";
+  } else {
+    LOG(FATAL).AtLocation(file, line) << "ValueOrDie on " << *status;
+  }
+}
+
+}  // namespace tsl::gtl::internal_value_or_die
