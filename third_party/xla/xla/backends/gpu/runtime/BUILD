@@ -3,6 +3,7 @@ load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/stream_executor:build_defs.bzl", "if_gpu_is_configured")
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "if_google", "internal_visibility", "nvtx_headers")
+load("//xla/tsl/platform:build_config.bzl", "tf_proto_library")
 load("//xla/tsl/platform/default:cuda_build_defs.bzl", "if_cuda_is_configured")
 
 package(
@@ -79,7 +80,6 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/runtime:buffer_use",
         "//xla/runtime:execution_graph",
-        "//xla/runtime:object_pool",
         "//xla/runtime:resource_use",
         "//xla/service:buffer_assignment",
         "//xla/service:collective_ops_utils",
@@ -548,7 +548,6 @@ cc_library(
         "//xla/ffi:ffi_api",
         "//xla/ffi/api:c_api",
         "//xla/hlo/ir:hlo",
-        "//xla/runtime:object_pool",
         "//xla/service:buffer_assignment",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_status_internal",
@@ -557,14 +556,11 @@ cc_library(
         "//xla/stream_executor:device_memory_allocator",
         "//xla/stream_executor:stream",
         "//xla/tsl/platform:errors",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -636,6 +632,15 @@ cc_library(
         "@com_google_absl//absl/status",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+tf_proto_library(
+    name = "gemm_thunk_proto",
+    srcs = ["gemm_thunk.proto"],
+    protodeps = [
+        "//xla/service:buffer_assignment_proto",
+        "//xla/stream_executor/gpu:gpu_blas_lt_proto",
     ],
 )
 

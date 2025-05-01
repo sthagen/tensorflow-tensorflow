@@ -90,7 +90,6 @@ cc_library(
     ],
     deps = [
         ":tfr_ops_inc_gen",
-        "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_attributes",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_ops",
@@ -143,7 +142,6 @@ cc_library(
     deps = [
         ":tfr",
         ":utils",
-        "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/memory",
