@@ -2348,6 +2348,14 @@ TfrtGpuBuffer::AcquireExternalReference() {
     return InvalidArgument("Buffer has been deleted or donated.");
   }
 
+  // If the external reference event is concrete, it means we previously dropped
+  // the last external reference but want to create one again without having
+  // deleted the buffer. So we need a new external_references_dropped_event_.
+  if (external_references_dropped_event_.IsConcrete()) {
+    external_references_dropped_event_ =
+        tsl::MakeConstructedAsyncValueRef<GpuEvent>();
+  }
+
   ++external_reference_counter_;
 
   tsl::BlockUntilReady(tracked_device_buffer_->definition_event());
@@ -2663,6 +2671,12 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
   // TODO: b/382117736 -  Support non-default memory spaces.
   tsl::profiler::TraceMe traceme("TfrtGpuBuffer::CopyToMemorySpace");
   PjRtDevice* dst_device = dst_memory_space->devices()[0];
+
+  // TODO(sizhi): Support copy data to the pinned host memory space.
+  if (dst_memory_space->kind() == PinnedHostMemorySpace::kKind) {
+    return Unimplemented(
+        "Copy data to pinned host memory space is not implemented.");
+  }
 
   // Copying across PjRtClients involves a copy through the host.
   if (dst_device->client() != client_) {
