@@ -400,9 +400,6 @@ class Shape {
   // Resets this to the default state (an invalid shape).
   void Clear();
 
-  std::string SerializeAsString() const {
-    return ToProto().SerializeAsString();
-  }
   std::string ShortDebugString() const { return ToProto().ShortDebugString(); }
   std::string DebugString() const { return ToProto().DebugString(); }
 
@@ -679,9 +676,6 @@ class ProgramShape {
   const std::vector<std::string>& parameter_names() const {
     return parameter_names_;
   }
-
-  std::string ShortDebugString() const { return ToProto().ShortDebugString(); }
-  std::string DebugString() const { return ToProto().DebugString(); }
 
  private:
   // Invariant: parameters_ and parameter_names_ have the same size.
