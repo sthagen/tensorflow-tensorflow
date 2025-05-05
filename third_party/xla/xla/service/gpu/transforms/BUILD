@@ -13,6 +13,7 @@ load(
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
+        "//xla/backends/autotuner/backends/gpu:__subpackages__",
         "//xla/backends/gpu:__subpackages__",
         "//xla/hlo/tools/hlo_opt:__subpackages__",
         "//xla/service/gpu:__subpackages__",
@@ -145,40 +146,6 @@ xla_cc_test(
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/lib/core:status_test_util",
-        "@local_tsl//tsl/platform:test",
-    ],
-)
-
-cc_library(
-    name = "all_gather_optimizer",
-    srcs = ["all_gather_optimizer.cc"],
-    hdrs = ["all_gather_optimizer.h"],
-    deps = [
-        "//xla:shape_util",
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/pass:hlo_pass",
-        "//xla/service:collective_ops_utils",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:logging",
-    ],
-)
-
-xla_cc_test(
-    name = "all_gather_optimizer_test",
-    srcs = ["all_gather_optimizer_test.cc"],
-    deps = [
-        ":all_gather_optimizer",
-        "//xla:util",
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
-        "//xla/service:hlo_module_config",
-        "//xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
     ],
 )
