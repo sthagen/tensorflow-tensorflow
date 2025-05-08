@@ -4351,10 +4351,43 @@ cc_library(
         "@com_google_absl//absl/log:die_if_null",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:fingerprint",
+        "@local_tsl//tsl/platform:path",
+    ],
+)
+
+xla_cc_test(
+    name = "hlo_runner_pjrt_test",
+    srcs = ["hlo_runner_pjrt_test.cc"],
+    deps = [
+        ":computation_placer_hdr",
+        ":hlo_runner_interface",
+        ":hlo_runner_pjrt",
+        "//xla:util",
+        "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/parser:hlo_parser",
+        "//xla/pjrt:pjrt_client",
+        "//xla/pjrt:pjrt_compiler",
+        "//xla/pjrt:pjrt_executable",
+        "//xla/pjrt/interpreter:interpreter_client",
+        "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:fingerprint",
+        "@local_tsl//tsl/platform:notification",
+        "@local_tsl//tsl/platform:path",
     ],
 )
 
@@ -5946,6 +5979,21 @@ xla_cc_test(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_library(
+    name = "execution_graph_renderer",
+    srcs = ["execution_graph_renderer.cc"],
+    hdrs = ["execution_graph_renderer.h"],
+    deps = [
+        "//xla/backends/cpu/runtime:thunk",
+        "//xla/runtime:execution_graph",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
     ],
 )
 

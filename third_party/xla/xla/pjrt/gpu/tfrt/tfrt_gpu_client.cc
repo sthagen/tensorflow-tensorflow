@@ -68,6 +68,7 @@ limitations under the License.
 #include "xla/pjrt/gpu/tfrt/tracked_tfrt_gpu_device_buffer.h"
 #include "xla/pjrt/host_callback.h"
 #include "xla/pjrt/host_memory_spaces.h"
+#include "xla/pjrt/layout_mode.h"
 #include "xla/pjrt/mlir_to_hlo.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -184,7 +185,8 @@ absl::StatusOr<std::unique_ptr<TfrtGpuBuffer>> AllocateTfrtGpuDestinationBuffer(
   TF_ASSIGN_OR_RETURN(
       auto device_buffer,
       MaybeOwningGpuMemory::AllocateShared(
-          client->allocator(), device->local_device_id().value(), byte_size));
+          client->allocator(), device->local_device_id().value(), byte_size,
+          LayoutUtil::MemorySpace(on_device_shape)));
   auto buffer_async_value_ref =
       tsl::MakeAvailableAsyncValueRef<MaybeOwningGpuMemory>(
           std::move(device_buffer));
@@ -223,13 +225,12 @@ std::string MakeComputeCapabilityString(
   if (std::holds_alternative<stream_executor::CudaComputeCapability>(cc)) {
     auto nvcc = std::get<stream_executor::CudaComputeCapability>(cc);
     return absl::StrCat(nvcc.major, ".", nvcc.minor);
-  } else if (std::holds_alternative<stream_executor::RocmComputeCapability>(
-                 cc)) {
+  }
+  if (std::holds_alternative<stream_executor::RocmComputeCapability>(cc)) {
     auto rocmcc = std::get<stream_executor::RocmComputeCapability>(cc);
     return rocmcc.gfx_version();
-  } else {
-    return "unknown";
   }
+  return "unknown";
 }
 
 bool IsAllZeros(const DeviceAssignment& assignment) {
@@ -1331,10 +1332,52 @@ absl::StatusOr<std::unique_ptr<PjRtExecutable>> TfrtGpuClient::Compile(
       /*use_tuple_args=*/options.parameter_is_tupled_arguments,
       /*return_tuple=*/false, exec_build_options.use_shardy_partitioner()));
 
-  // TODO: b/382117736 - Add support for LayoutModesToXlaShapes
-  // Ref:
-  // https://github.com/openxla/xla/blob/b729ae319d85d5ec1ec11c488092c2d6683a63f2/xla/pjrt/pjrt_stream_executor_client.cc#L3538-L3586
-  return Compile(xla_computation, options);
+  // If the compile options specify argument layout, then let's
+  // fall back to using the options to determine layouts.
+  if (options.argument_layouts) {
+    return Compile(xla_computation, options);
+  }
+
+  TF_ASSIGN_OR_RETURN(std::vector<LayoutMode> arg_layout_modes,
+                      GetArgLayoutModes(module));
+  TF_ASSIGN_OR_RETURN(std::vector<LayoutMode> out_layout_modes,
+                      GetOutputLayoutModes(module));
+  TF_ASSIGN_OR_RETURN(std::vector<MemorySpaceColor> arg_memory_spaces,
+                      GetArgMemoryKinds(module));
+  TF_ASSIGN_OR_RETURN(std::vector<MemorySpaceColor> out_memory_spaces,
+                      GetOutputMemoryKinds(module));
+
+  // If auto-sharding modifies shapes of arguments and/or result,
+  // we get a callback to restore the layouts. Let us restore the layouts
+  // according to the attributes we parsed from MLIR.
+  auto layout_callback = [local_client = xla_client_, &arg_layout_modes,
+                          &out_layout_modes, &arg_memory_spaces,
+                          &out_memory_spaces](const HloModule& module)
+      -> absl::StatusOr<std::pair<std::vector<Shape>, Shape>> {
+    XlaComputation xla_computation(XlaComputation(module.ToProto()));
+    return LayoutModesToXlaShapes(
+        xla_computation, arg_layout_modes, out_layout_modes, arg_memory_spaces,
+        out_memory_spaces,
+        [local_client](Shape shape) -> absl::StatusOr<Shape> {
+          return local_client->backend()
+              .transfer_manager()
+              ->ChooseCompactLayoutForShape(shape);
+        });
+  };
+
+  // This call will update result_layout in options.executable_build_options.
+  TF_ASSIGN_OR_RETURN(auto arg_layouts_and_pointers,
+                      LayoutModesToXla(
+                          xla_computation, arg_layout_modes, out_layout_modes,
+                          arg_memory_spaces, out_memory_spaces,
+                          [this](Shape shape) -> absl::StatusOr<Shape> {
+                            return this->xla_client_->backend()
+                                .transfer_manager()
+                                ->ChooseCompactLayoutForShape(shape);
+                          },
+                          options.executable_build_options));
+  return CompileInternal(xla_computation, arg_layouts_and_pointers.second,
+                         layout_callback, options);
 }
 
 absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
@@ -2752,15 +2795,11 @@ bool TfrtGpuBuffer::IsDeleted() {
 
 absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
     PjRtMemorySpace* dst_memory_space) {
-  // TODO: b/382117736 -  Support non-default memory spaces.
   tsl::profiler::TraceMe traceme("TfrtGpuBuffer::CopyToMemorySpace");
   PjRtDevice* dst_device = dst_memory_space->devices()[0];
 
-  // TODO(sizhi): Support copy data to the pinned host memory space.
-  if (dst_memory_space->kind() == PinnedHostMemorySpace::kKind) {
-    return Unimplemented(
-        "Copy data to pinned host memory space is not implemented.");
-  }
+  VLOG(2) << " TfrtGpuBuffer::CopyToMemorySpace:  dst_device: " << dst_device
+          << "dst_memory_space: " << dst_memory_space->kind();
 
   // Copying across PjRtClients involves a copy through the host.
   if (dst_device->client() != client_) {
@@ -2782,8 +2821,8 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
   }
 
   // Copy each leaf buffer to a destination buffer.
-  auto usage_event = tsl::MakeConstructedAsyncValueRef<GpuEvent>();
-  TrackedTfrtGpuDeviceBuffer* src_device_buffer = AcquireUsage(usage_event);
+  auto src_usage_event = tsl::MakeConstructedAsyncValueRef<GpuEvent>();
+  TrackedTfrtGpuDeviceBuffer* src_device_buffer = AcquireUsage(src_usage_event);
   if (src_device_buffer == nullptr) {
     return InvalidArgument(
         "CopyToMemorySpace called on deleted or donated buffer");
@@ -2792,42 +2831,43 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
   TfrtGpuDevice* gpu_dst_device = tsl::down_cast<TfrtGpuDevice*>(dst_device);
   tsl::AsyncValueRef<MaybeOwningGpuMemory> src_buffer =
       src_device_buffer->buffer();
-  auto dst_buffer = tsl::MakeUnconstructedAsyncValueRef<MaybeOwningGpuMemory>();
+
   auto dst_definition_event = tsl::MakeConstructedAsyncValueRef<GpuEvent>();
+  TF_ASSIGN_OR_RETURN(auto output_buffer,
+                      AllocateTfrtGpuDestinationBuffer(
+                          on_device_shape_, {dst_definition_event.CopyRef()},
+                          gpu_dst_device, client_, dst_memory_space));
+  auto dst_usage_event = tsl::MakeConstructedAsyncValueRef<GpuEvent>();
+  TrackedTfrtGpuDeviceBuffer* allocated_dst_device_buffer =
+      output_buffer->AcquireUsage(dst_usage_event);
+  CHECK(allocated_dst_device_buffer != nullptr);
+  auto allocated_dst_buffer = allocated_dst_device_buffer->buffer();
 
   absl::AnyInvocable<void()> transfer_d2d =
-      [src_buffer(src_buffer.CopyRef()), dst_buffer(dst_buffer.CopyRef()),
+      [src_buffer(src_buffer.CopyRef()),
+       allocated_dst_buffer(allocated_dst_buffer.CopyRef()),
        dst_definition_event(dst_definition_event.CopyRef()),
        src_definition_event(src_device_buffer->definition_event().CopyRef()),
-       dst_device(gpu_dst_device), usage_event(usage_event.CopyRef())]() {
+       dst_device(gpu_dst_device), src_usage_event(src_usage_event.CopyRef()),
+       dst_usage_event(dst_usage_event.CopyRef())]() {
         tsl::profiler::TraceMe traceme("D2D copy");
+
+        MarkGpuEventReadyOnExit ready_on_exit_src(std::move(src_usage_event));
+        MarkGpuEventReadyOnExit ready_on_exit_dst(std::move(dst_usage_event));
+
         if (const absl::Status* error =
                 dst_definition_event.GetErrorIfPresent()) {
-          dst_buffer.SetError(*error);
+          allocated_dst_buffer.SetError(*error);
           dst_definition_event.SetError(*error);
-          usage_event.SetStateConcrete();
           return;
         }
 
         if (const absl::Status* error =
                 src_definition_event.GetErrorIfPresent()) {
-          dst_buffer.SetError(*error);
+          allocated_dst_buffer.SetError(*error);
           dst_definition_event.SetError(*error);
-          usage_event.SetStateConcrete();
           return;
         }
-        MarkGpuEventReadyOnExit ready_on_exit(std::move(usage_event));
-        absl::StatusOr<MaybeOwningGpuMemory> allocated_dst_buffer =
-            MaybeOwningGpuMemory::AllocateShared(
-                dst_device->allocator(),
-                dst_device->local_hardware_id().value(),
-                src_buffer->buffer().size());
-        if (!allocated_dst_buffer.ok()) {
-          dst_buffer.SetError(allocated_dst_buffer.status());
-          dst_definition_event.SetError(allocated_dst_buffer.status());
-          return;
-        }
-        dst_buffer.emplace(std::move(allocated_dst_buffer.value()));
 
         absl::StatusOr<BoundedStreamPool::Handle> stream =
             dst_device->stream_pool().Borrow();
@@ -2835,7 +2875,7 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
           dst_definition_event.SetError(stream.status());
           return;
         }
-        se::DeviceMemoryBase dst(dst_buffer->buffer());
+        se::DeviceMemoryBase dst(allocated_dst_buffer->buffer());
         absl::Status status = stream->get()->Memcpy(
             &dst, src_buffer->buffer(), src_buffer->buffer().size());
         if (!status.ok()) {
@@ -2853,11 +2893,7 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
   EnqueueWorkWhenReady(client_->blocking_thread_pool(),
                        {src_device_buffer->definition_event().CopyRCRef()},
                        std::move(transfer_d2d));
-  return std::unique_ptr<PjRtBuffer>(std::make_unique<TfrtGpuBuffer>(
-      on_device_shape_,
-      std::make_unique<TrackedTfrtGpuDeviceBuffer>(
-          std::move(dst_buffer), std::move(dst_definition_event)),
-      client(), tsl::down_cast<TfrtGpuDevice*>(dst_device), dst_memory_space));
+  return output_buffer;
 }
 
 void TfrtGpuBuffer::DropExternalReference() {
@@ -3835,9 +3871,10 @@ absl::StatusOr<CompiledMemoryStats> TfrtGpuExecutable::GetCompiledMemoryStats()
   }
   CompiledMemoryStats memory_stats = CompiledMemoryStats();
   memory_stats.generated_code_size_in_bytes = SizeOfGeneratedCodeInBytes();
-  const HloProto* proto = executables_[0]->executable()->hlo_proto();
+  const BufferAssignmentProto* proto =
+      executables_[0]->executable()->buffer_assignment_proto();
   if (proto != nullptr) {
-    memory_stats.serialized_hlo_proto = proto->SerializeAsString();
+    memory_stats.buffer_assignment = *proto;
   }
   memory_stats.PopulateBufferStatsFromAllocations(
       executables_[0]->executable()->GetAllocations());
