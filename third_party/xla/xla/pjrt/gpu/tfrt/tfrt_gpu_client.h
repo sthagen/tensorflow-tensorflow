@@ -47,11 +47,11 @@ limitations under the License.
 #include "xla/layout.h"
 #include "xla/literal.h"
 #include "xla/maybe_owning.h"
+#include "xla/pjrt/distributed/key_value_store_interface.h"
 #include "xla/pjrt/gpu/gpu_topology.h"
 #include "xla/pjrt/gpu/se_gpu_topology_description.h"
 #include "xla/pjrt/gpu/tfrt/gpu_event.h"
 #include "xla/pjrt/gpu/tfrt/host_memory_allocator.h"
-#include "xla/pjrt/gpu/tfrt/stream_pool.h"
 #include "xla/pjrt/gpu/tfrt/tracked_tfrt_gpu_device_buffer.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -129,7 +129,6 @@ class TfrtGpuDevice final : public PjRtDevice {
     PjRtLocalDeviceId local_device_id;
     PjRtLocalHardwareId local_hardware_id;
     se::StreamExecutor* executor;
-    int stream_capacity;
     int max_inflight_computations;
     std::string platform_version;
     std::string compute_capability;
@@ -147,9 +146,7 @@ class TfrtGpuDevice final : public PjRtDevice {
 
   PjRtClient* client() const override { return client_; }
 
-  bool IsAddressable() const override {
-    return process_index() == client()->process_index();
-  }
+  bool IsAddressable() const override { return local_device_id_ != -1; }
 
   int id() const override { return id_; }
 
@@ -195,9 +192,9 @@ class TfrtGpuDevice final : public PjRtDevice {
   // Returns a fresh, PRNG-generated random seed for an XLA computation.
   int GetNewPrngSeed();
 
-  BoundedStreamPool& stream_pool() { return stream_pool_; }
+  se::Stream* stream() const { return stream_.get(); }
 
-  se::StreamExecutor* executor() { return executor_; }
+  se::StreamExecutor* executor() const { return executor_; }
 
   tsl::AsyncValueRef<GpuEvent> GetLastCollectiveLaunchEvent();
 
@@ -215,7 +212,7 @@ class TfrtGpuDevice final : public PjRtDevice {
   const PjRtLocalDeviceId local_device_id_;
   const PjRtLocalHardwareId local_hardware_id_;
   se::StreamExecutor* executor_;
-  BoundedStreamPool stream_pool_;
+  std::unique_ptr<se::Stream> stream_;
   absl::InlinedVector<PjRtMemorySpace*, 1> memory_spaces_;
   absl::flat_hash_map<int, PjRtMemorySpace*> memory_spaces_by_kind_id_;
 
@@ -244,12 +241,14 @@ class TfrtGpuDevice final : public PjRtDevice {
 
 class TfrtGpuClient final : public PjRtClient {
  public:
-  TfrtGpuClient(int process_index, xla::LocalClient* xla_client,
+  TfrtGpuClient(std::string platform_name, int process_index,
+                xla::LocalClient* xla_client,
                 std::vector<std::unique_ptr<TfrtGpuDevice>> devices,
                 bool should_stage_host_to_device_transfers,
                 MaybeOwning<se::DeviceMemoryAllocator> allocator,
                 std::unique_ptr<tsl::Allocator> host_memory_allocator,
                 std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options,
+                std::shared_ptr<KeyValueStoreInterface> kv_store,
                 std::shared_ptr<const GpuTopology> gpu_topology);
 
   ~TfrtGpuClient() override;
@@ -356,6 +355,11 @@ class TfrtGpuClient final : public PjRtClient {
     return &topology_;
   }
 
+  std::optional<std::shared_ptr<KeyValueStoreInterface>> key_value_store()
+      const override {
+    return kv_store_;
+  }
+
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostBuffer(
       const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
       std::optional<absl::Span<int64_t const>> byte_strides,
@@ -426,6 +430,9 @@ class TfrtGpuClient final : public PjRtClient {
 
   int process_index_;
 
+  // Platform name must be initialized before SetClient is called on devices.
+  const std::string platform_name_;
+
   xla::LocalClient* xla_client_;
 
   bool should_stage_host_to_device_transfers_;
@@ -464,8 +471,8 @@ class TfrtGpuClient final : public PjRtClient {
   absl::Mutex transpose_mu_;
   TransposePlanCache transpose_cache_ ABSL_GUARDED_BY(transpose_mu_);
 
-  const std::string platform_name_;
   StreamExecutorGpuTopologyDescription topology_;
+  std::shared_ptr<KeyValueStoreInterface> kv_store_;
 
   absl::Mutex dma_maps_mutex_;
   // Maps dma mapped start pointers to their sizes.
