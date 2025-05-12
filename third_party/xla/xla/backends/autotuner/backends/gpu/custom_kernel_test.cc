@@ -13,10 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/backends/autotuner/backends/gpu/cublas.h"
+#include "xla/backends/autotuner/backends/gpu/custom_kernel.h"
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -28,55 +27,48 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/service/compiler.h"
-#include "xla/service/executable.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/nvptx_compiler.h"
 #include "xla/service/platform_util.h"
-#include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/device_description.pb.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/platform/status_matchers.h"
 #include "xla/tsl/platform/statusor.h"
-#include "xla/tsl/util/proto/proto_matchers.h"
 
 namespace xla {
 namespace gpu {
 
 using CublasBackendConfig = AutotuneResult::GemmKey;
 
-using ::tsl::proto_testing::EqualsProto;
-using ::tsl::testing::IsOk;
+using tsl::testing::IsOk;
+using tsl::testing::StatusIs;
 
-const char kCublasCustomCallHlo[] = R"(
-    HloModule module, entry_computation_layout={(f32[100,100]{1,0}, f32[100,100]{1,0})->f32[100,100]{1,0}}
+const char kCustomKernelFusionHlo[] = R"(
+HloModule extracted
 
-    ENTRY %main (arg0: f32[100,100], arg1: f32[100,100]) -> f32[100,100] {
-      %arg0 = f32[100,100]{1,0} parameter(0)
-      %arg1 = f32[100,100]{1,0} parameter(1)
-      %custom-call.1 = (f32[100,100]{1,0}, s8[80000]{0}) custom-call(%arg0, %arg1), 
-      custom_call_target="__cublas$gemm", 
-      backend_config={
-        "gemm_backend_config":{
-          "dot_dimension_numbers":
-            {
-              "lhs_contracting_dimensions":["1"],
-              "rhs_contracting_dimensions":["0"],
-              "lhs_batch_dimensions":[],
-              "rhs_batch_dimensions":[]
-          }
-        }
-      }
-      ROOT %get-tuple-element = f32[100,100]{1,0} get-tuple-element(%custom-call.1), index=0
-    })";
+cutlass_gemm {
+  p0 = f32[15,19]{1,0} parameter(0)
+  p1 = f32[19,17]{1,0} parameter(1)
+  ROOT r = f32[15, 17]{1,0} dot(p0, p1), lhs_contracting_dims={1},
+  rhs_contracting_dims={0}
+}
 
-class CublasBackendTest : public HloHardwareIndependentTestBase {
+ENTRY region_198.14436 {
+  p.0 = f32[15,19]{1,0} parameter(0)
+  p.1 = f32[19,17]{1,0} parameter(1)
+  ROOT cutlass_gemm = f32[15,17]{1,0} fusion(p.0, p.1), kind=kCustom,
+  calls=cutlass_gemm,
+  backend_config={"operation_queue_id":"0","wait_on_operation_queues":[],"fusion_backend_config":{"kind":"__custom_fusion","custom_fusion_config":{"name":"cutlass_gemm","kernel_index":-1}},"force_earliest_schedule":false}
+})";
+
+class CustomKernelBackendTest : public HloHardwareIndependentTestBase {
  protected:
   DebugOptions debug_options_;
   NVPTXCompiler compiler_;
   Compiler::TargetConfig target_config_;
-  CublasBackend backend_;
+  CustomKernelBackend backend_;
 
-  CublasBackendTest()
+  CustomKernelBackendTest()
       : target_config_([]() {
           se::GpuTargetConfigProto target_config_proto;
           *target_config_proto.mutable_gpu_device_info() =
@@ -84,40 +76,32 @@ class CublasBackendTest : public HloHardwareIndependentTestBase {
           return Compiler::TargetConfig(target_config_proto);
         }()),
         backend_(&target_config_, &debug_options_, &compiler_) {}
-
-  CublasBackendConfig ExpectedDefaultAlgorithm() {
-    auto config = AutotuneResult::GemmKey();
-    config.set_algorithm(se::blas::kDefaultAlgorithm);
-    return config;
-  }
 };
 
-TEST_F(CublasBackendTest, CanCreateCublasBackend) {
+TEST_F(CustomKernelBackendTest, CanCreateCublasBackend) {
   ASSERT_NE(nullptr, &backend_);
 }
 
-TEST_F(CublasBackendTest, GetSupportedConfigsFromCublasCustomCall) {
+TEST_F(CustomKernelBackendTest, GetSupportedConfigsFromCustomKernelFusion) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(kCublasCustomCallHlo));
+                          ParseAndReturnVerifiedModule(kCustomKernelFusionHlo));
   se::StreamExecutor* stream_executor =
       PlatformUtil::GetDefaultPlatform().value()->ExecutorForDevice(0).value();
   absl::StatusOr<std::vector<std::unique_ptr<BackendConfig>>> configs =
       backend_.GetSupportedConfigs(
-          (*module->entry_computation()->root_instruction()->operand(0)),
-          stream_executor);
+          (*module->entry_computation()->root_instruction()), stream_executor);
   EXPECT_THAT(configs, IsOk());
-  EXPECT_GT(configs.value().size(), 0);
+  EXPECT_FALSE(configs.value().empty());
 }
 
-TEST_F(CublasBackendTest, GetDefaultConfigFromCublasCustomCall) {
+TEST_F(CustomKernelBackendTest, GetDefaultConfigFails) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(kCublasCustomCallHlo));
+                          ParseAndReturnVerifiedModule(kCustomKernelFusionHlo));
 
   absl::StatusOr<std::unique_ptr<BackendConfig>> config =
       backend_.GetDefaultConfig(
           (*module->entry_computation()->root_instruction()->operand(0)));
-  EXPECT_THAT(static_cast<const CublasBackendConfig&>(*config.value()),
-              EqualsProto(ExpectedDefaultAlgorithm()));
+  EXPECT_THAT(config, StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 }  // namespace gpu
