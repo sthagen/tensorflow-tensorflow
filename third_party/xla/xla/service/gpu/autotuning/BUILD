@@ -192,6 +192,7 @@ cc_library(
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/profiler/lib:scoped_annotation",
+        "@local_tsl//tsl/profiler/lib:traceme",
     ],
 )
 
@@ -270,6 +271,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:util",
         "//xla/hlo/ir:hlo",
+        "//xla/hlo/utils:hlo_traversal",
         "//xla/service/gpu:matmul_utils",
         "//xla/stream_executor:device_description",
         "//xla/tsl/lib/core:bits",
@@ -427,6 +429,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/profiler/lib:traceme",
     ],
 )
 
@@ -453,6 +456,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/profiler/lib:traceme",
     ],
 )
 
