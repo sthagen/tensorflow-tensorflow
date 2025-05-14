@@ -1,4 +1,4 @@
-/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,20 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_TF_STABLEHLO_PASSES_H_
-#define TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_TF_STABLEHLO_PASSES_H_
+#include "xla/service/schedule_config.h"
 
-#include <memory>
+#include <gtest/gtest.h>
 
-#include "mlir/Pass/Pass.h"  // from @llvm-project
+namespace xla {
+namespace {
 
-namespace mlir {
-namespace odml::tf_quant {
+TEST(ScheduleConfigTest, ConfigToProtoToConfigMatchesOriginal) {
+  ScheduleConfig config = {{"op1", "op2", "op3"}};
+  EXPECT_EQ(ScheduleConfig::FromProto(ScheduleConfig::ToProto(config)), config);
+  config = {};
+  EXPECT_EQ(ScheduleConfig::FromProto(ScheduleConfig::ToProto(config)), config);
+}
 
-// Fuses MHLO binary element-wise ops and convolution op.
-std::unique_ptr<Pass> CreateTfFuseConvolutionPass();
-
-}  // namespace odml::tf_quant
-}  // namespace mlir
-
-#endif  // TENSORFLOW_COMPILER_MLIR_STABLEHLO_TRANSFORMS_TF_STABLEHLO_PASSES_H_
+}  // namespace
+}  // namespace xla
