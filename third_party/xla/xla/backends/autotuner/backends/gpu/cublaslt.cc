@@ -48,6 +48,8 @@ using se::gpu::BlasLt;
 
 using CublasLtBackendConfig = AutotuneResult::GemmKey;
 
+namespace {
+
 absl::StatusOr<BlasLt::Epilogue> AsBlasLtEpilogue(
     GemmBackendConfig_Epilogue epilogue) {
   switch (epilogue) {
@@ -75,6 +77,8 @@ absl::StatusOr<BlasLt::Epilogue> AsBlasLtEpilogue(
 bool IsSupported(const HloInstruction& instr) {
   return IsCublasLtMatmul(instr) || IsCublasLtMatmulF8(instr);
 }
+
+}  // namespace
 
 absl::StatusOr<std::vector<std::unique_ptr<BackendConfig>>>
 CublasLtBackend::GetSupportedConfigs(
@@ -142,17 +146,6 @@ CublasLtBackend::GetDefaultConfig(const HloInstruction& instr) {
   AutotuneResult::GemmKey gemm_key;
   gemm_key.set_algorithm(se::blas::kDefaultAlgorithm);
   return std::make_unique<CublasLtBackendConfig>(gemm_key);
-}
-
-absl::StatusOr<std::unique_ptr<HloModule>> CublasLtBackend::WrapInModule(
-    const HloInstruction& hlo_instruction, const BackendConfig& config) {
-  return absl::UnimplementedError("Not implemented.");
-}
-
-absl::StatusOr<std::unique_ptr<HloModule>> CublasLtBackend::RunHloPasses(
-    std::unique_ptr<HloModule> hlo_module,
-    const Compiler::CompileOptions& options) {
-  return absl::UnimplementedError("Not implemented.");
 }
 
 }  // namespace gpu

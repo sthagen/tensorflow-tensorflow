@@ -44,6 +44,7 @@ namespace se = ::stream_executor;
 
 using CustomKernelBackendConfig = AutotuneResult::CustomKernelFusionKey;
 
+namespace {
 bool IsSupported(const HloInstruction& instr) {
   if (instr.opcode() != HloOpcode::kFusion) {
     LOG(ERROR)
@@ -60,6 +61,7 @@ bool IsSupported(const HloInstruction& instr) {
 
   return true;
 }
+}  // namespace
 
 absl::StatusOr<std::vector<CustomKernel>> LoadKernels(
     const HloInstruction* fusion_instruction,
@@ -122,19 +124,6 @@ CustomKernelBackend::GetDefaultConfig(const HloInstruction& instr) {
   auto config = std::make_unique<CustomKernelBackendConfig>();
   config->set_kernel_index(0);
   return config;
-}
-
-absl::StatusOr<std::unique_ptr<HloModule>> CustomKernelBackend::WrapInModule(
-    const HloInstruction& hlo_instruction, const BackendConfig& config) {
-  return absl::InvalidArgumentError(
-      "CustomKernelBackend doesn't support wrapping in a module.");
-}
-
-absl::StatusOr<std::unique_ptr<HloModule>> CustomKernelBackend::RunHloPasses(
-    std::unique_ptr<HloModule> hlo_module,
-    const Compiler::CompileOptions& options) {
-  return absl::InvalidArgumentError(
-      "CustomKernelBackend doesn't support wrapping in a module.");
 }
 
 }  // namespace gpu
