@@ -35,6 +35,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/LogicalResult.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -385,11 +386,12 @@ MeshAxesAndIds findMeshAxesAndIds(ModuleOp moduleOp) {
     // TODO(zixuanjiang). Support cases without common factorizations.
   }
 
-  // 3. Create a mesh.
+  // 3. Create a mesh with fake axis names that starts with and underscore so
+  //    that we can replace the fake axis names with real axis names later.
   namedAxes.reserve(axes.size());
   for (auto [axisIndex, axisSize] : llvm::enumerate(axes)) {
     auto name = StringAttr::get(moduleOp->getContext(),
-                                absl::StrCat("axis_", axisIndex));
+                                absl::StrCat("_axis_", axisIndex));
     namedAxes.push_back(
         MeshAxisAttr::get(moduleOp->getContext(), name, axisSize));
   }
@@ -525,6 +527,14 @@ bool shouldOpenDims(ArrayRef<bool> allowPropagationToTensors, int64_t index) {
   return allowPropagationToTensors[index];
 }
 
+// TODO(bixia): Use the function getTensorRank() from sdy/utils/utils.h.
+int64_t getRank(mlir::Type type) {
+  if (auto tensorType = llvm::dyn_cast<mlir::ShapedType>(type)) {
+    return tensorType.getRank();
+  }
+  return 0;
+}
+
 // Convert the shardings in `funcOp` from kXlaShardingAttr into kShardingAttr.
 LogicalResult importShardings(
     FuncOp funcOp, MeshAttr globalMesh,
@@ -537,8 +547,7 @@ LogicalResult importShardings(
       funcOp.setArgAttr(
           argNum, kShardingAttr,
           convertToSdySharding(parseShardingFromString(oldSharding), globalMesh,
-                               deviceIdToMaximalMeshName,
-                               mlir::cast<ShapedType>(argType).getRank(),
+                               deviceIdToMaximalMeshName, getRank(argType),
                                shouldOpenDims(allowPropagationToArgs, argNum)));
       funcOp.removeArgAttr(argNum, kXlaShardingAttr);
     }
@@ -551,8 +560,7 @@ LogicalResult importShardings(
           resNum, kShardingAttr,
           convertToSdySharding(
               parseShardingFromString(oldSharding), globalMesh,
-              deviceIdToMaximalMeshName,
-              mlir::cast<ShapedType>(resType).getRank(),
+              deviceIdToMaximalMeshName, getRank(resType),
               shouldOpenDims(allowPropagationToResults, resNum)));
       funcOp.removeResultAttr(
           resNum, StringAttr::get(funcOp.getContext(), kXlaShardingAttr));
@@ -570,10 +578,10 @@ LogicalResult importShardings(
       newShardings.reserve(op->getNumResults());
       for (const auto& [resHloSharding, resType] :
            llvm::zip_equal(flatHloSharding, op->getResultTypes())) {
-        newShardings.push_back(convertToSdySharding(
-            resHloSharding, globalMesh, deviceIdToMaximalMeshName,
-            mlir::cast<ShapedType>(resType).getRank(),
-            /*openDims=*/false));
+        newShardings.push_back(convertToSdySharding(resHloSharding, globalMesh,
+                                                    deviceIdToMaximalMeshName,
+                                                    getRank(resType),
+                                                    /*openDims=*/false));
       }
       mlir::sdy::setShardings(op, newShardings);
       op->removeAttr(kXlaShardingAttr);

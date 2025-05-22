@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_BACKENDS_CPU_AUTOTUNER_BACKENDS_CPU_CODEGEN_BACKEND_H_
-#define XLA_BACKENDS_CPU_AUTOTUNER_BACKENDS_CPU_CODEGEN_BACKEND_H_
+#ifndef XLA_BACKENDS_CPU_AUTOTUNER_CPU_CODEGEN_BACKEND_H_
+#define XLA_BACKENDS_CPU_AUTOTUNER_CPU_CODEGEN_BACKEND_H_
 
 #include <memory>
 #include <string>
@@ -57,19 +57,19 @@ class CpuCodegenBackend : public CodegenBackend {
 
   absl::string_view name() const override { return name_; }
 
-  absl::StatusOr<std::vector<std::unique_ptr<BackendConfig>>>
+  absl::StatusOr<std::vector<std::unique_ptr<xla::BackendConfig>>>
   GetSupportedConfigs(const HloInstruction& instr,
                       stream_executor::StreamExecutor* stream_executor) final {
     return GetSupportedConfigs(instr);
   }
 
   // No need for stream executor for CPU backends.
-  virtual absl::StatusOr<std::vector<std::unique_ptr<BackendConfig>>>
+  virtual absl::StatusOr<std::vector<std::unique_ptr<xla::BackendConfig>>>
   GetSupportedConfigs(const HloInstruction& instr) = 0;
 
   absl::StatusOr<std::unique_ptr<Executable>> Compile(
       const HloInstruction& hlo_instruction,
-      const BackendConfig& config) override {
+      const xla::BackendConfig& config) override {
     std::unique_ptr<HloModule> hlo_module =
         ExtractInstructionIntoNewModule(hlo_instruction);
 
@@ -91,4 +91,4 @@ class CpuCodegenBackend : public CodegenBackend {
 }  // namespace cpu
 }  // namespace xla
 
-#endif  // XLA_BACKENDS_CPU_AUTOTUNER_BACKENDS_CPU_CODEGEN_BACKEND_H_
+#endif  // XLA_BACKENDS_CPU_AUTOTUNER_CPU_CODEGEN_BACKEND_H_

@@ -26,6 +26,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "xla/core/collectives/rank_id.h"
 #include "xla/primitive_util.h"
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/stream_executor/device_memory.h"
@@ -135,8 +136,11 @@ TYPED_TEST(AllReduceKernelTest, SimpleKernelTest) {
     TF_ASSERT_OK(RunAllReduceKernel(
         streams[i].get(), launch_dimensions,
         primitive_util::NativeToPrimitiveType<T>(), remote_input_buffers_span,
-        local_input_buffers[i].memory(), data_buffers[i].memory(),
-        /*rank=*/i, /*num_ranks=*/kNumRanks, kNumElements,
+        // Memory is aliased for both input and output (similar to what nccl
+        // would do).
+        /*local_input_buffer=*/local_input_buffers[i].memory(),
+        /*output_buffer=*/local_input_buffers[i].memory(),
+        /*rank=*/RankId(i), /*num_ranks=*/kNumRanks, kNumElements,
         signal_flags_buffers_span));
   }
 
@@ -147,7 +151,7 @@ TYPED_TEST(AllReduceKernelTest, SimpleKernelTest) {
   for (int i = 0; i < kNumRanks; ++i) {
     std::vector<T> output_results(kNumElements);
     TF_ASSERT_OK(streams[i]->Memcpy(output_results.data(),
-                                    data_buffers[i].memory(),
+                                    local_input_buffers[i].memory(),
                                     kNumElements * sizeof(T)));
 
     EXPECT_EQ(output_results, output_data);
