@@ -12,12 +12,26 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include "xla/pjrt/plugin/test/plugin_test_fixture.h"
 
-#ifndef XLA_PYTHON_VERSION_H_
-#define XLA_PYTHON_VERSION_H_
+#include <string>
+#include <vector>
 
-// An increasing version number to protect jax code against breaking changes.
-// In JAX, reference this via jax._src.lib.ifrt_version.
-#define JAX_IFRT_VERSION_NUMBER 10
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "xla/pjrt/pjrt_api.h"
+#include "xla/tsl/platform/statusor.h"
 
-#endif  // XLA_PYTHON_VERSION_H_
+namespace xla {
+
+absl::StatusOr<std::string> GetRegisteredPluginName() {
+  TF_ASSIGN_OR_RETURN(std::vector<std::string> pjrt_apis,
+                      pjrt::GetRegisteredPjrtApis());
+  if (pjrt_apis.size() != 1) {
+    return absl::InvalidArgumentError(
+        "Expected exactly one plugin to be registered.");
+  }
+  return pjrt_apis[0];
+}
+
+}  // namespace xla
