@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-namespace xla::gpu::repeat_buffer_kernel {
+#ifndef XLA_HLO_TOOLS_HLO_DIFF_GRAPH_UTILS_CYCLE_DETECTOR_H_
+#define XLA_HLO_TOOLS_HLO_DIFF_GRAPH_UTILS_CYCLE_DETECTOR_H_
 
-// Stub to make CPU build linker find undefined symbol.
-void* kernel() { return nullptr; }
+#include <vector>
 
-}  // namespace xla::gpu::repeat_buffer_kernel
+#include "xla/hlo/tools/hlo_diff/graph/hlo_gumgraph_node.h"
+
+namespace xla {
+namespace hlo_diff {
+
+// Detects and logs all cycles in the provided graph.
+std::vector<std::vector<const HloInstructionNode*>> DetectAndLogAllCycles(
+    const std::vector<HloInstructionNode*>& graph_nodes);
+
+}  // namespace hlo_diff
+}  // namespace xla
+
+#endif  // XLA_HLO_TOOLS_HLO_DIFF_GRAPH_UTILS_CYCLE_DETECTOR_H_

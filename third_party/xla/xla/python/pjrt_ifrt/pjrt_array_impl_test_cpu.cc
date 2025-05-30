@@ -1,4 +1,4 @@
-/* Copyright 2025 The OpenXLA Authors.
+/* Copyright 2022 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,11 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_PJRT_COMPILE_OPTIONS_PB_H_
-#define XLA_PJRT_COMPILE_OPTIONS_PB_H_
+#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
+#include "xla/python/ifrt/test_util.h"
 
-// TODO(b/401293975): Delete this file and migrate Jax to use the proto target
-// directly.
-#include "xla/pjrt/proto/compile_options.pb.h"
+int main(int argc, char** argv) {
+  // CpuBuffer::ToLiteral() currently does not respect the layout of the
+  // destination literal.
+  static constexpr absl::string_view kFilter =
+      "-ArrayImplTest."
+      "MakeArrayFromHostBufferAndCopyToHostBufferWithByteStrides";
+  xla::ifrt::test_util::SetTestFilterIfNotUserSpecified(kFilter);
 
-#endif  // XLA_PJRT_COMPILE_OPTIONS_PB_H_
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
