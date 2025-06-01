@@ -453,24 +453,10 @@ xla_cc_test(
 
 cc_library(
     name = "pjrt_common",
-    srcs = ["pjrt_common.cc"],
     hdrs = ["pjrt_common.h"],
     visibility = internal_visibility([":friends"]),
     deps = [
-        "//xla/pjrt/proto:pjrt_value_type_proto_cc",
         "//xla/tsl/lib/gtl:int_type",
-    ],
-)
-
-xla_cc_test(
-    name = "pjrt_common_test",
-    srcs = ["pjrt_common_test.cc"],
-    deps = [
-        ":pjrt_common",
-        "//xla/pjrt/proto:pjrt_value_type_proto_cc",
-        "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:status_matchers",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -895,11 +881,11 @@ xla_cc_test(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test_benchmark",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
