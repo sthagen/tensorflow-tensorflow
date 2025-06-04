@@ -2171,40 +2171,39 @@ TfrtGpuClient::BufferFromHostLiteral(const LiteralSlice& literal,
   // It is OK to capture `buffer` pointer because the `output_buffer` can't
   // be deleted until all the usage holds have gone away.
   VLOG(4) << "BufferFromHostLiteral for device_buffer: " << device_buffer;
-  EnqueueWork(non_blocking_thread_pool_.get(),
-              [literal, av = avs[0], device_buffer, shape, this,
-               device = tsl::down_cast<TfrtGpuDevice*>(device),
-               usage_event = std::move(usage_event)]() mutable {
-                tsl::profiler::TraceMe traceme(
-                    "BufferFromHostLiteral::H2D_Dispatch");
-                TransferManager* transfer_manager =
-                    xla_client()->backend().transfer_manager();
+  EnqueueWork(
+      non_blocking_thread_pool_.get(),
+      [literal, av = avs[0], device_buffer, shape, this,
+       device = tsl::down_cast<TfrtGpuDevice*>(device),
+       usage_event = std::move(usage_event)]() mutable {
+        tsl::profiler::TraceMe traceme("BufferFromHostLiteral::H2D_Dispatch");
+        TransferManager* transfer_manager =
+            xla_client()->backend().transfer_manager();
 
-                auto stream = device->stream();
+        auto stream = device->stream();
 
-                const auto& buffer = device_buffer->buffer();
-                if (literal.shape().IsArray()) {
-                  CHECK_EQ(literal.size_bytes(), buffer->size_bytes());
-                }
+        const auto& buffer = device_buffer->buffer();
+        if (literal.shape().IsArray()) {
+          CHECK_EQ(literal.size_bytes(), buffer->size_bytes());
+        }
 
-                ShapedBuffer shaped_buffer =
-                    buffer->AsShapedBuffer(shape, device);
+        ShapedBuffer shaped_buffer = buffer->AsShapedBuffer(shape, device);
 
-                TF_CHECK_OK(transfer_manager->TransferLiteralToDeviceAsync(
-                    stream, literal, shaped_buffer));
+        TF_CHECK_OK(transfer_manager->TransferLiteralToDeviceAsync(
+            stream, literal, shaped_buffer));
 
-                absl::Status status;
-                {
-                  tsl::profiler::TraceMe traceme("BlockHostUntilDone");
-                  status = stream->BlockHostUntilDone();
-                }
-                CHECK_OK(status) << "Failed to block host until done";
-                VLOG(3) << "BufferFromHostLiteral done for device_buffer: "
-                        << device_buffer << " AsyncValue: " << av.get();
+        absl::Status status;
+        {
+          tsl::profiler::TraceMe traceme("BlockHostUntilDone");
+          status = stream->BlockHostUntilDone();
+        }
+        CHECK_OK(status) << "Failed to block host until done";
+        VLOG(3) << "BufferFromHostLiteral done for device_buffer: "
+                << device_buffer << " AsyncValue: " << av.get();
 
-                av->SetStateConcrete();
-                usage_event.SetStateConcrete();
-              });
+        av->SetStateConcrete();
+        usage_event.SetStateConcrete();
+      });
   return std::unique_ptr<PjRtBuffer>(std::move(output_buffer));
 }
 
@@ -3413,9 +3412,14 @@ TfrtGpuExecutable::TfrtGpuExecutable(
 absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
     absl::Span<PjRtBuffer* const> argument_handles, int replica, int partition,
     const ExecuteOptions& options, bool fill_future, TfrtGpuDevice* device) {
-  tsl::profiler::TraceMeProducer activity("TfrtGpuExecutable::ExecuteHelper",
-                                          tsl::profiler::ContextType::kPjRt,
-                                          options.launch_id);
+  tsl::profiler::TraceMeProducer activity(
+      [&] {
+        return tsl::profiler::TraceMeEncode("TfrtGpuExecutable::ExecuteHelper",
+                                            {{"launch_id", options.launch_id},
+                                             {"device_id", device->id()},
+                                             {"name", name()}});
+      },
+      tsl::profiler::ContextType::kPjRt, options.launch_id);
 
   std::shared_ptr<DeviceAssignment> device_assignment;
   if (device == nullptr) {
@@ -3689,15 +3693,15 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
                 << ", launch_id: " << launch_id << ", replica: " << replica
                 << ", device: " << device->DebugString();
 
-        tsl::profiler::TraceMeProducer producer(
+        tsl::profiler::TraceMeConsumer producer(
             [&] {
               return tsl::profiler::TraceMeEncode(
                   "execute_fn", {
-                                    {"launch_id", std::to_string(launch_id)},
+                                    {"launch_id", launch_id},
                                     {"device_id", device->id()},
                                 });
             },
-            tsl::profiler::ContextType::kTfExecutor, launch_id);
+            tsl::profiler::ContextType::kPjRt, launch_id);
 
         auto set_error = [&](absl::Status status) {
           for (auto& output_buffer : output_buffers) {
@@ -3862,7 +3866,14 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtGpuExecutable::ExecuteHelper(
        input_buffer_sizes_in_bytes(
            input_buffer_sizes_in_bytes_[executable_idx])]() mutable {
         tsl::profiler::TraceMeConsumer activity(
-            "prepare_inputs", tsl::profiler::ContextType::kPjRt, launch_id);
+            [&] {
+              return tsl::profiler::TraceMeEncode(
+                  "prepare_inputs", {
+                                        {"launch_id", launch_id},
+                                        {"device_id", device->id()},
+                                    });
+            },
+            tsl::profiler::ContextType::kPjRt, launch_id);
 
         auto set_error = [&](absl::Status status) {
           complete_event.SetError(status);
