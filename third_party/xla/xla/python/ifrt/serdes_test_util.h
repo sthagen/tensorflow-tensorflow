@@ -1,4 +1,4 @@
-/* Copyright 2022 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,21 +13,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <gtest/gtest.h>
+#ifndef XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_
+#define XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_
 
-int main(int argc, char** argv) {
-  // Skip all tests. This is to verify that implementation tests build
-  // successfully without registering an IFRT client factory.
-  //
-  // Actual implementation tests may link with the standard `gtest_main` to run
-  // all tests or define a custom `main` function to filter out some tests.
-  const char* kFilter = "-*";
-#ifdef GTEST_FLAG_SET
-  GTEST_FLAG_SET(filter, kFilter);
-#else
-  testing::GTEST_FLAG(filter) = kFilter;
-#endif
+#include <vector>
 
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
+#include "xla/python/ifrt/serdes_version.h"
+
+namespace xla {
+namespace ifrt {
+namespace test_util {
+
+// Returns all supported SerDes versions. Expected to be used to construct the
+// test parameters for parameterized tests.
+std::vector<SerDesVersion> AllSupportedSerDesVersions();
+
+}  // namespace test_util
+}  // namespace ifrt
+}  // namespace xla
+
+#endif  // XLA_PYTHON_IFRT_SERDES_TEST_UTIL_H_
