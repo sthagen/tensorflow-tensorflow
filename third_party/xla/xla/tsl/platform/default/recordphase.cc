@@ -1,4 +1,4 @@
-/* Copyright 2017 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/tests/test_macros.h"
+#include "xla/tsl/platform/recordphase.h"
 
-#include "tsl/platform/logging.h"
+#include <string>
+#include <vector>
 
-namespace xla {
+#include "absl/strings/string_view.h"
 
-static bool InitModule() {
-  *TestPlatform() = XLA_PLATFORM;
-  VLOG(1) << "TestPlatform: " << *TestPlatform();
-  return true;
+namespace tsl::recordphase {
+void StartPhase(const absl::string_view phase_name,
+                const std::vector<absl::string_view>& dependencies) {}
+
+std::string StartPhaseUnique(
+    absl::string_view phase_name,
+    const std::vector<absl::string_view>& dependencies) {
+  return std::string(phase_name);
 }
 
-static bool module_initialized = InitModule();
-
-}  // namespace xla
+void EndPhase(const absl::string_view phase_name) {}
+}  // namespace tsl::recordphase
