@@ -160,9 +160,9 @@ def _tf_repositories():
     # LINT.IfChange(xnnpack)
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "8665f9876227fc1f5aaea9ca46bd24dac65d85053a510a6e71857ee32055e126",
-        strip_prefix = "XNNPACK-0a3103ab29306b25a6d1293a746945754a556b9c",
-        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/0a3103ab29306b25a6d1293a746945754a556b9c.zip"),
+        sha256 = "361b8e4b914e53c6aef161cb36550a8059bd79330c7aa8f200896761bfc0d39d",
+        strip_prefix = "XNNPACK-800ffc1792873f09af89518a1578a53fdaf78219",
+        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/800ffc1792873f09af89518a1578a53fdaf78219.zip"),
     )
     # LINT.ThenChange(//tensorflow/lite/tools/cmake/modules/xnnpack.cmake)
 
@@ -416,10 +416,10 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "com_google_googletest",
-        # Use the commit on 2025/3/21:
-        # https://github.com/google/googletest/commit/2ae29b52fdff88c52fef655fa0d245fc514ca35b
-        sha256 = "21a3a4021fd5e3127c90547234e2126d24f23571fedefa0d9370bf706a870fba",
-        strip_prefix = "googletest-2ae29b52fdff88c52fef655fa0d245fc514ca35b",
+        # Use the commit on 2025/6/09:
+        # https://github.com/google/googletest/commit/28e9d1f26771c6517c3b4be10254887673c94018
+        sha256 = "f253ca1a07262f8efde8328e4b2c68979e40ddfcfc001f70d1d5f612c7de2974",
+        strip_prefix = "googletest-28e9d1f26771c6517c3b4be10254887673c94018",
         # Patch googletest to:
         #   - avoid dependencies on @fuchsia_sdk,
         #   - refer to re2 as @com_googlesource_code_re2,
@@ -431,13 +431,13 @@ def _tf_repositories():
         # $ cd github
         # $ git clone https://github.com/google/googletest.git
         # $ cd googletest
-        # $ git checkout 2ae29b52fdff88c52fef655fa0d245fc514ca35b
+        # $ git checkout 28e9d1f26771c6517c3b4be10254887673c94018
         # ... make local changes to googletest ...
         # $ git diff > <client-root>/third_party/tensorflow/third_party/googletest/googletest.patch
         #
         # The patch path is relative to third_party/tensorflow.
         patch_file = ["@local_xla//third_party/googletest:googletest.patch"],
-        urls = tf_mirror_urls("https://github.com/google/googletest/archive/2ae29b52fdff88c52fef655fa0d245fc514ca35b.zip"),
+        urls = tf_mirror_urls("https://github.com/google/googletest/archive/28e9d1f26771c6517c3b4be10254887673c940189.zip"),
     )
 
     tf_http_archive(

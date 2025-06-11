@@ -3120,11 +3120,16 @@ cc_library(
         "//xla/stream_executor/host:host_platform_id",
         "//xla/stream_executor/rocm:rocm_platform_id",
         "//xla/stream_executor/sycl:sycl_platform_id",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:status",
@@ -4060,7 +4065,7 @@ xla_test(
         "gpu",
     ],
     # TODO(b/332870133): Enable when it passes on H100.
-    disabled_backends = ["gpu_h100"],
+    disabled_backends = ["h100"],
     tags = [
         "no_windows",  # TODO(b/152037541)
     ],
@@ -5095,6 +5100,7 @@ cc_library(
         "//xla:executable_run_options",
         "//xla:literal",
         "//xla:literal_util",
+        "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
