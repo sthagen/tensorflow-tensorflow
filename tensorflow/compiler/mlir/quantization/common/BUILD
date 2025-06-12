@@ -32,7 +32,7 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":tf_attrs_and_constraints",
-        "//tensorflow/compiler/mlir/quantization/common/tf_quantization_lib",
+        "//tensorflow/compiler/mlir/quantization/common/quantization_lib",
         "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_config_proto_cc",
         "//tensorflow/compiler/mlir/quantization/stablehlo:stablehlo_type_utils",
         "//tensorflow/compiler/mlir/quantization/tensorflow/cc:quantization_unit_loc",
@@ -118,33 +118,6 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":func",
-        "//tensorflow/compiler/mlir/lite:tensorflow_lite",
-        "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
-        "//tensorflow/compiler/mlir/quantization/common/ir:QuantOps",
-        "//tensorflow/compiler/mlir/quantization/stablehlo/cc:context",
-        "//tensorflow/compiler/mlir/tensorflow",
-        "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
-        "//tensorflow/core:test",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_googletest//:gtest_main",
-        "@llvm-project//mlir:ArithDialect",
-        "@llvm-project//mlir:FuncDialect",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Parser",
-        "@llvm-project//mlir:QuantOps",
-        "@llvm-project//mlir:Support",
-        "@stablehlo//:stablehlo_ops",
-    ],
-)
-
-cc_library(
-    name = "tf_test_base",
-    testonly = 1,
-    srcs = [],
-    hdrs = ["tf_test_base.h"],
-    compatible_with = get_compatible_with_portable(),
-    deps = [
-        ":func",
         "//tensorflow/compiler/mlir/quantization/common/ir:QuantOps",
         "//tensorflow/compiler/mlir/quantization/stablehlo/cc:context",
         "//tensorflow/compiler/mlir/tensorflow",
@@ -173,7 +146,7 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":tf_uniform_quantized_types",
-        "//tensorflow/compiler/mlir/quantization/common/tf_quantization_lib",
+        "//tensorflow/compiler/mlir/quantization/common/quantization_lib",
         "//tensorflow/compiler/mlir/quantization/tensorflow:quantization_options_proto_cc",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:xla_call_module_attrs",
