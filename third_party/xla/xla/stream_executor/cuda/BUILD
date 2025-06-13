@@ -19,14 +19,10 @@ load(
     "internal_visibility",
     "tsl_copts",
 )
-
-# copybara:comment_begin
 load(
     "//xla/tsl:tsl.default.bzl",
     "if_cuda_tools",
 )
-
-# copybara:comment_end
 load("//xla/tsl/platform:build_config.bzl", "tf_proto_library")
 load(
     "//xla/tsl/platform:build_config_root.bzl",
@@ -438,6 +434,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":cuda_compute_capability",
         ":cuda_diagnostics",
         ":cuda_platform_id",
         ":cudnn_frontend_helpers",
@@ -454,6 +451,8 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/platform:initialize",
         "//xla/tsl/cuda:cudnn",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/protobuf:dnn_proto_cc",
         "//xla/tsl/util:env_var",
@@ -476,10 +475,6 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@local_config_cuda//cuda:cuda_headers",
         "@local_config_cuda//cuda:cudnn_header",  # build_cleaner: keep
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:status",
-        "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:tensor_float_32_hdr_lib",
         "@local_tsl//tsl/platform:tensor_float_32_utils",
     ],
@@ -1339,20 +1334,20 @@ cc_library(
     name = "subprocess_compilation",
     srcs = ["subprocess_compilation.cc"],
     hdrs = ["subprocess_compilation.h"],
-    # copybara:uncomment_begin
-    # data = [
-    # "@local_config_cuda//cuda:runtime_fatbinary",
-    # "@local_config_cuda//cuda:runtime_nvlink",
-    # "@local_config_cuda//cuda:runtime_ptxas",
-    # ],
-    # copybara:uncomment_end
-    # copybara:comment_begin
-    data = if_cuda_tools([
-        "@cuda_nvcc//:fatbinary",
-        "@cuda_nvcc//:nvlink",
-        "@cuda_nvcc//:ptxas",
-    ]),
-    # copybara:comment_end
+    data = if_google(
+        google_value = [
+            "@local_config_cuda//cuda:runtime_fatbinary",
+            "@local_config_cuda//cuda:runtime_nvlink",
+            "@local_config_cuda//cuda:runtime_ptxas",
+        ],
+        oss_value = if_cuda_tools(
+            [
+                "@local_config_cuda//cuda:runtime_fatbinary",
+                "@local_config_cuda//cuda:runtime_nvlink",
+                "@local_config_cuda//cuda:runtime_ptxas",
+            ],
+        ),
+    ),
     local_defines = if_windows(["PLATFORM_WINDOWS"]),
     deps = [
         ":cubin_or_ptx_image",
