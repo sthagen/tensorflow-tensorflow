@@ -389,6 +389,9 @@ cc_library(
         "//xla/backends/gpu/runtime:infeed_thunk",
         "//xla/backends/gpu/runtime:kernel_thunk",
         "//xla/backends/gpu/runtime:norm_thunk",
+        "//xla/backends/gpu/runtime:nvshmem_collective_permute_thunk",
+        "//xla/backends/gpu/runtime:nvshmem_collective_thunk",
+        "//xla/backends/gpu/runtime:nvshmem_p2p_thunk_common",
         "//xla/backends/gpu/runtime:outfeed_thunk",
         "//xla/backends/gpu/runtime:p2p_thunk_common",
         "//xla/backends/gpu/runtime:ragged_all_to_all_thunk",
@@ -2536,6 +2539,7 @@ xla_test(
         "a100",
         "h100",
         "b200",
+        "amdgpu_any",
     ],
     deps = [
         "//xla:error_spec",
@@ -2559,7 +2563,6 @@ xla_test(
         "//xla/service/gpu/tests:gpu_codegen_test",  # fixdeps: keep
         "//xla/stream_executor:device_description",
         "//xla/tests:hlo_test_base",
-        "//xla/tests:test_macros_header",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:test",
     ],
