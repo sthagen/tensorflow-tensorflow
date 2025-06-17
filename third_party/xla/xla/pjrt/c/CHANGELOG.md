@@ -2,13 +2,12 @@
 
 ## 0.70
 
-*   Added `overridden_serialized_compile_options` and
-    `overridden_serialized_compile_options_size` fields to
-    `PJRT_Executable_DeserializeAndLoad_Args`.
+* Sharding ops may appear directly in the payload (previously they were
+  serialized in `custom_calls`).
 
 ## 0.69
 
-*   Implemented PjRtClient::CreateUninitializedBuffer
+* Implemented PjRtClient::CreateUninitializedBuffer
 
 ## 0.68
 

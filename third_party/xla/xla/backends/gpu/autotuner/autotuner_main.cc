@@ -86,9 +86,8 @@ absl::Status Autotune(HloModule& module) {
   TF_ASSIGN_OR_RETURN(std::unique_ptr<Compiler> compiler,
                       xla::Compiler::GetForPlatform(platform));
   se::StreamExecutor* stream_executor = platform->ExecutorForDevice(0).value();
-  Compiler::TargetConfig target_config(stream_executor);
   DebugOptions debug_options = GetDebugOptionsFromFlags();
-  auto backends = gpu::GetAllGpuCodegenBackends(&target_config, &debug_options,
+  auto backends = gpu::GetAllGpuCodegenBackends(stream_executor, &debug_options,
                                                 compiler.get());
 
   auto profiler = gpu::GpuProfiler::Create(stream_executor, ProfileOptions());
@@ -97,7 +96,7 @@ absl::Status Autotune(HloModule& module) {
   }
 
   TF_ASSIGN_OR_RETURN(std::unique_ptr<Autotuner> autotuner,
-                      Autotuner::Create(std::move(backends), stream_executor,
+                      Autotuner::Create(std::move(backends),
                                         std::move(profiler), AutotuneConfig()));
 
   // TODO: b/407494793 - Expand the filter to include more instructions.

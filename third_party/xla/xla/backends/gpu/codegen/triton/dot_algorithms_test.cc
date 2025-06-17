@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -22,6 +23,7 @@ limitations under the License.
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -1563,7 +1565,8 @@ double GetMaxRelErrorForSmallContractingDim(Backend backend,
       {PC::ALG_DOT_BF16_BF16_F32_X3, 7.9e-6},
       {PC::ALG_DOT_BF16_BF16_F32_X6, 1.3e-7},
       {PC::ALG_DOT_BF16_BF16_F32_X9, 1.2e-7},
-      {PC::ALG_DOT_TF32_TF32_F32_X3, 5e-7}};
+      {PC::ALG_DOT_TF32_TF32_F32_X3, 5e-7},
+      {PC::ALG_DOT_F32_F32_F32, 2e-07}};
 
   const absl::flat_hash_map<PC::Algorithm, double> kMaxMeanRelErrorBlas = {
       {PC::ALG_DOT_BF16_BF16_F32, 3.3e-3},
@@ -1571,7 +1574,8 @@ double GetMaxRelErrorForSmallContractingDim(Backend backend,
       {PC::ALG_DOT_BF16_BF16_F32_X3, 2.4e-5},
       {PC::ALG_DOT_TF32_TF32_F32_X3, 5e-7},
       {PC::ALG_DOT_BF16_BF16_F32_X6, 1.6e-7},
-      {PC::ALG_DOT_BF16_BF16_F32_X9, 6e-8}};
+      {PC::ALG_DOT_BF16_BF16_F32_X9, 6e-8},
+      {PC::ALG_DOT_F32_F32_F32, 2e-07}};
   if (backend == Backend::kTriton) {
     auto max_rel_error_it = kMaxMeanRelErrorTriton.find(algorithm);
     CHECK(max_rel_error_it != kMaxMeanRelErrorTriton.end());
@@ -1597,9 +1601,24 @@ INSTANTIATE_TEST_SUITE_P(
          PC::ALG_DOT_TF32_TF32_F32_X3, PC::ALG_DOT_F64_F64_F64, PC::ALG_UNSET}),
     AlgorithmTestParamToString);
 
+template <typename... Args>
+void Log(absl::string_view name, const absl::FormatSpec<Args...>& format,
+         const Args&... args) {
+  std::cerr << "stats: " << name << " " << absl::StrFormat(format, args...)
+            << "\n";
+}
+
+double CalculateStdDev(absl::Span<const double> values, double mean) {
+  double sum = 0.0;
+  for (int i = 0; i < values.size(); ++i) {
+    sum += (values[i] - mean) * (values[i] - mean);
+  }
+  return std::sqrt(sum / values.size());
+}
+
 template <typename T>
-void PrintHistogram(absl::string_view name, absl::Span<T> values,
-                    const std::vector<double>& expected_values) {
+void PrintStats(absl::string_view name, absl::Span<T> values,
+                const std::vector<double>& expected_values) {
   // Build the histogram of the relative differences.
   std::vector<double> rel_errors;
   rel_errors.reserve(values.size());
@@ -1613,30 +1632,34 @@ void PrintHistogram(absl::string_view name, absl::Span<T> values,
   double min_rel_error =
       *std::min_element(rel_errors.begin(), rel_errors.end());
   double rel_error_range = max_rel_error - min_rel_error;
-  constexpr int kNumBins = 40;
-  double bin_width = rel_error_range / kNumBins;
-  std::vector<int> histogram(kNumBins, 0);
-  double rel_error_sum = 0.0;
+  double rel_error_sum =
+      std::accumulate(rel_errors.begin(), rel_errors.end(), 0.0);
+  double mean_rel_error = rel_error_sum / rel_errors.size();
+  double std_dev_rel_error = CalculateStdDev(rel_errors, mean_rel_error);
+
+  int num_bins = std::ceil(std::log2(values.size() + 1));
+  double bin_width = rel_error_range / num_bins;
+  std::vector<int> histogram(num_bins, 0);
+  int samples_count = rel_errors.size();
   for (int i = 0; i < rel_errors.size(); ++i) {
-    rel_error_sum += rel_errors[i];
     int bin = static_cast<int>((rel_errors[i] - min_rel_error) / bin_width);
-    if (bin >= kNumBins) {
-      bin = kNumBins - 1;
+    if (bin >= num_bins) {
+      bin = num_bins - 1;
     }
     histogram[bin]++;
   }
-  int samples_count = values.size();
-  int bar_width = 200;
+  int max_bin_size = *std::max_element(histogram.begin(), histogram.end());
+  constexpr int kMaxBarHeight = 100;
   int64_t samples = 0;
-  double mean_rel_error = rel_error_sum / values.size();
   bool median_found = false;
   std::tuple<int, double, double> median_bin;
-  for (int i = 0; i < kNumBins; ++i) {
+  for (int i = 0; i < num_bins; ++i) {
     samples += histogram[i];
     double bin_start = min_rel_error + i * bin_width;
     double bin_end = min_rel_error + (i + 1) * bin_width;
+    int bar_size = histogram[i] * kMaxBarHeight / max_bin_size;
     std::string bar =
-        std::string(histogram[i] * bar_width / samples_count, '*');
+        absl::StrCat(std::string(bar_size, '*'), " ", bar_size, " ");
     if (!median_found && samples >= samples_count / 2) {
       median_bin = std::make_tuple(i, bin_start, bin_end);
       median_found = true;
@@ -1653,23 +1676,17 @@ void PrintHistogram(absl::string_view name, absl::Span<T> values,
                         histogram[i], bar.c_str());
     std::cerr << "hist: " << line;
   }
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat("min rel error, %1.3e\n", min_rel_error);
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat("max rel error, %1.3e\n", max_rel_error);
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat(
-                   "max abs rel error, %1.3e\n",
-                   std::max(std::abs(min_rel_error), std::abs(max_rel_error)));
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat("rel error range, %1.3e\n",
-                               max_rel_error - min_rel_error);
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat("median bin, %d [%1.3e - %1.3e)\n",
-                               std::get<0>(median_bin), std::get<1>(median_bin),
-                               std::get<2>(median_bin));
-  std::cerr << "stats: " << name << " "
-            << absl::StrFormat("mean rel error, %1.3e\n", mean_rel_error);
+  double max_abs_rel_error =
+      std::max(std::abs(min_rel_error), std::abs(max_rel_error));
+  Log(name, "min(rel_errors), %1.3e", min_rel_error);
+  Log(name, "max(rel_errors), %1.3e", max_rel_error);
+  Log(name, "max(abs(rel_errors)), %1.3e", max_abs_rel_error);
+  Log(name, "mean(rel_errors), %1.3e", mean_rel_error);
+  Log(name, "std_dev(rel_errors), %1.3e", std_dev_rel_error);
+  Log(name, "CV(rel_errors) = %1.3f", std_dev_rel_error / mean_rel_error);
+  Log(name, "range(rel_errors), %1.3e", rel_error_range);
+  Log(name, "median bin, %d [%1.3e - %1.3e)", std::get<0>(median_bin),
+      std::get<1>(median_bin), std::get<2>(median_bin));
 }
 
 class PrecisionTests
@@ -1786,6 +1803,22 @@ TEST_P(PrecisionTests, PrecisionCheck) {
 
   PC::Algorithm algorithm = std::get<0>(GetParam());
   Backend backend = std::get<1>(GetParam());
+  if (backend == Backend::kBlas && algorithm == PC::ALG_DOT_F32_F32_F32) {
+    auto desc = device_desc();
+    std::cerr << "platform version: " << desc.platform_version();
+    std::cerr << "driver version: " << desc.driver_version();
+    std::cerr << "runtime version: " << desc.runtime_version();
+    std::cerr << "compile_time_toolkit_version: "
+              << desc.compile_time_toolkit_version();
+    std::cerr << "Name: " << desc.name();
+    EXPECT_THAT(absl::string_view(getenv("CUBLAS_EMULATE_SINGLE_PRECISION")),
+                ::testing::Eq("1"))
+        << "For F32 precision and BLAS, we want to test single precision "
+           "emulation with BF16x9 cublas algorithm. It was introduced in "
+           "cublas 12.9.";
+    EXPECT_THAT(absl::string_view(getenv("CUBLAS_EMULATION_STRATEGY")),
+                ::testing::Eq("performant"));
+  }
   // Use small contracting dimensions to avoid false-negatives due to changing
   // contracting dimension tiling factors.
   constexpr int kLhsOuterDim = 1024;
@@ -1826,7 +1859,7 @@ TEST_P(PrecisionTests, PrecisionCheck) {
   std::cerr << "\n";
   auto name =
       absl::StrCat(BackendToString(backend), "_", AlgorithmToString(algorithm));
-  PrintHistogram(name, test_result.data<float>(), ref_result);
+  PrintStats(name, test_result.data<float>(), ref_result);
   std::cerr << "stats: " << name << " min execution time, " << min_time
             << "ns\n";
   std::cerr << "stats: \n";
@@ -1839,7 +1872,8 @@ INSTANTIATE_TEST_SUITE_P(
     PrecisionTests, PrecisionTests,
     Combine(Values(PC::ALG_DOT_TF32_TF32_F32, PC::ALG_DOT_TF32_TF32_F32_X3,
                    PC::ALG_DOT_BF16_BF16_F32, PC::ALG_DOT_BF16_BF16_F32_X3,
-                   PC::ALG_DOT_BF16_BF16_F32_X6, PC::ALG_DOT_BF16_BF16_F32_X9),
+                   PC::ALG_DOT_BF16_BF16_F32_X6, PC::ALG_DOT_BF16_BF16_F32_X9,
+                   PC::ALG_DOT_F32_F32_F32),
             Values(Backend::kTriton, Backend::kBlas)),
     AlgorithmAndBackendTestParamToString);
 
