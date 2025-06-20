@@ -15,10 +15,10 @@ limitations under the License.
 
 #include "xla/backends/gpu/runtime/all_reduce.h"
 
-#include <array>
 #include <cstdint>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/casts.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
@@ -40,59 +40,74 @@ namespace xla::gpu {
 
 namespace {
 
-struct AddF32Tag {
-  using ElementType = float;
-  static constexpr ReductionKind kReductionKind = ReductionKind::SUM;
+using ::stream_executor::gpu::AllReduceStrategy;
+
+template <typename T, ReductionKind kReductionKindV>
+class TagRegistry {
+ private:
+  template <AllReduceStrategy kAllReduceStrategyV>
+  struct Impl {
+    using ElementType = T;
+    static constexpr ReductionKind kReductionKind = kReductionKindV;
+    static constexpr AllReduceStrategy kAllReduceStrategy = kAllReduceStrategyV;
+  };
+
+ public:
+  static constexpr auto kOneShot = Impl<AllReduceStrategy::kOneShot>{};
 };
 
-struct AddBF16Tag {
-  using ElementType = bfloat16;
-  static constexpr ReductionKind kReductionKind = ReductionKind::SUM;
-};
+// Static set of supported kernel tags.
+static constexpr auto kAddF32Tags = TagRegistry<float, ReductionKind::SUM>{};
+static constexpr auto kAddBF16Tags =
+    TagRegistry<bfloat16, ReductionKind::SUM>{};
+static constexpr auto kOrPredTags = TagRegistry<bool, ReductionKind::MAX>{};
 
-struct OrPredTag {
-  using ElementType = bool;
-  static constexpr ReductionKind kReductionKind = ReductionKind::MAX;
-};
-
-template <typename T>
+template <typename TagType>
 absl::Status LaunchTypedKernel(
-    se::Stream* stream, const LaunchDimensions& launch_dimensions,
+    TagType, se::Stream* stream, const LaunchDimensions& launch_dimensions,
     absl::Span<const se::DeviceMemoryBase> remote_input_buffers,
     se::DeviceMemoryBase local_input_buffer, se::DeviceMemoryBase output_buffer,
     int64_t rank, int64_t num_ranks, int64_t num_elements,
     absl::Span<const se::DeviceMemoryBase> signal_flags_buffers,
     uint32_t signal_value) {
-  using ElementType = typename T::ElementType;
+  using ElementType = typename TagType::ElementType;
 
   TF_ASSIGN_OR_RETURN(
       auto kernel,
       (se::gpu::GpuKernelRegistry::GetGlobalRegistry()
            .LoadKernel<
-               se::gpu::AllReduceKernel<ElementType, T::kReductionKind>>(
+               se::gpu::AllReduceKernel<ElementType, TagType::kReductionKind,
+                                        TagType::kAllReduceStrategy>>(
                stream->parent())));
 
-  std::array<ElementType*, stream_executor::gpu::kMaxNumAllReduceInputPtrs>
-      remote_input_ptrs;
+  se::gpu::AllReduceKernelParams<ElementType> params{};
   absl::c_transform(
-      remote_input_buffers, remote_input_ptrs.begin(),
+      remote_input_buffers, params.remote_input_buffers.begin(),
       [](se::DeviceMemoryBase buffer) {
         return tsl::safe_reinterpret_cast<ElementType*>(buffer.opaque());
       });
-
-  std::array<uint32_t*, stream_executor::gpu::kMaxNumAllReduceInputPtrs>
-      signal_flags_ptrs;
+  params.input_buffer =
+      tsl::safe_reinterpret_cast<ElementType*>(local_input_buffer.opaque());
+  params.output_buffer =
+      tsl::safe_reinterpret_cast<ElementType*>(output_buffer.opaque());
+  params.rank = rank;
+  params.num_ranks = num_ranks;
+  params.num_elements = num_elements;
+  params.num_elements_per_rank = num_elements;
+  params.num_elements_per_block = RoundUpTo(
+      CeilOfRatio(params.num_elements_per_rank,
+                  absl::implicit_cast<int64_t>(launch_dimensions.num_blocks())),
+      se::gpu::kNumElementsPerThread);
   absl::c_transform(
-      signal_flags_buffers, signal_flags_ptrs.begin(),
+      signal_flags_buffers, params.signal_flags_buffers.begin(),
       [](se::DeviceMemoryBase buffer) {
         return tsl::safe_reinterpret_cast<uint32_t*>(buffer.opaque());
       });
+  params.signal_value = signal_value;
 
   return kernel.Launch(launch_dimensions.thread_counts_per_block(),
                        launch_dimensions.block_counts(), stream,
-                       remote_input_ptrs, local_input_buffer, output_buffer,
-                       rank, num_ranks, num_elements, signal_flags_ptrs,
-                       signal_value);
+                       std::move(params));
 }
 }  // namespace
 
@@ -128,6 +143,7 @@ absl::Status RunAllReduceKernel(
     const LaunchDimensions& launch_dimensions,                    //
     PrimitiveType element_type,                                   //
     ReductionKind reduction_kind,                                 //
+    AllReduceStrategy all_reduce_strategy,                        //
     absl::Span<const se::DeviceMemoryBase> remote_input_buffers,  //
     se::DeviceMemoryBase local_input_buffer,                      //
     se::DeviceMemoryBase output_buffer,                           //
@@ -154,25 +170,30 @@ absl::Status RunAllReduceKernel(
         "input pointers.");
   }
 
-  auto launch_kernel = [&](auto type) -> absl::Status {
-    using T = decltype(type);
-
-    return LaunchTypedKernel<T>(stream, launch_dimensions, remote_input_buffers,
-                                local_input_buffer, output_buffer, rank.value(),
-                                num_ranks, num_elements, signal_flags_buffers,
-                                signal_value);
+  const auto launch_kernel_impl = [&](auto tag) -> absl::Status {
+    return LaunchTypedKernel(tag, stream, launch_dimensions,
+                             remote_input_buffers, local_input_buffer,
+                             output_buffer, rank.value(), num_ranks,
+                             num_elements, signal_flags_buffers, signal_value);
+  };
+  const auto launch_kernel = [&](auto tag_registry,
+                                 AllReduceStrategy strategy) -> absl::Status {
+    switch (strategy) {
+      case AllReduceStrategy::kOneShot:
+        return launch_kernel_impl(tag_registry.kOneShot);
+    }
   };
 
   if (element_type == F32 && reduction_kind == ReductionKind::SUM) {
-    return launch_kernel(AddF32Tag{});
+    return launch_kernel(kAddF32Tags, all_reduce_strategy);
   }
 
   if (element_type == BF16 && reduction_kind == ReductionKind::SUM) {
-    return launch_kernel(AddBF16Tag{});
+    return launch_kernel(kAddBF16Tags, all_reduce_strategy);
   }
 
   if (element_type == PRED && reduction_kind == ReductionKind::MAX) {
-    return launch_kernel(OrPredTag{});
+    return launch_kernel(kOrPredTags, all_reduce_strategy);
   }
 
   return absl::InvalidArgumentError(
