@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -141,20 +142,9 @@ absl::Status RecursivelyRemoveDeadInstructionAndDeadOperands(
 
 namespace {
 
-bool IsFoldable(const HloInstruction* instruction,
-                HloConstantFolding::Level level) {
-  // Don't fold Constant, Parameter, and Tuple instructions.  Tuple
-  // constants are not directly supported by any backends, hence folding
-  // Tuple is not useful and would in fact be expanded back into kTuple by
-  // Algebraic Simplifier.
-  //
-  // (We do allow folding subcomputations that contain these instructions.)
-  if (instruction->opcode() == HloOpcode::kParameter ||
-      instruction->opcode() == HloOpcode::kConstant ||
-      instruction->opcode() == HloOpcode::kTuple) {
-    return false;
-  }
-
+bool IsFoldable(
+    const HloInstruction* instruction, HloConstantFolding::Level level,
+    absl::flat_hash_map<HloComputation*, bool>& is_foldable_computation) {
   // Broadcasts dramatically increase the size of constants, which is often
   // detrimental to performance and memory capacity, so do not fold
   // broadcasts.
@@ -182,6 +172,23 @@ bool IsFoldable(const HloInstruction* instruction,
     return false;
   }
 
+  // Don't fold if any of the subcomputations are not foldable. Note that this
+  // will recurse into deeper called computations.
+  for (HloComputation* subcomputation : instruction->called_computations()) {
+    auto iter = is_foldable_computation.find(subcomputation);
+    if (iter == is_foldable_computation.end()) {
+      for (auto* sub_instruction : subcomputation->MakeInstructionPostOrder()) {
+        if (!IsFoldable(sub_instruction, level, is_foldable_computation)) {
+          is_foldable_computation[subcomputation] = false;
+          return false;
+        }
+      }
+      is_foldable_computation[subcomputation] = true;
+    } else if (!iter->second) {
+      return false;
+    }
+  }
+
   // Check for instructions that we can't fold even if they appear inside of
   // a subcomputation (e.g. a kCall).
   if (IsOrContainsIllegalInstr(instruction)) {
@@ -194,8 +201,8 @@ bool IsFoldable(const HloInstruction* instruction,
     return false;
   }
 
-  // Skip constant folding for instructions that cannot be safely removed.
-  if (!instruction->parent()->IsSafelyRemovable(instruction)) {
+  // Skip constant folding for instructions that have control dependencies.
+  if (instruction->HasControlDependencies()) {
     return false;
   }
 
@@ -246,6 +253,9 @@ absl::StatusOr<bool> HloConstantFolding::Run(
 
   bool changed = false;
 
+  // For each computation, cache whether we can fold all the instructions in it.
+  absl::flat_hash_map<HloComputation*, bool> is_foldable_computation;
+
   for (auto* computation :
        module->MakeNonfusionComputations(execution_threads)) {
     for (auto* instruction : computation->MakeInstructionPostOrder()) {
@@ -283,7 +293,19 @@ absl::StatusOr<bool> HloConstantFolding::Run(
         continue;
       }
 
-      if (!IsFoldable(instruction, level_)) {
+      // Don't fold Constant, Parameter, and Tuple instructions.  Tuple
+      // constants are not directly supported by any backends, hence folding
+      // Tuple is not useful and would in fact be expanded back into kTuple by
+      // Algebraic Simplifier.
+      //
+      // (We do allow folding subcomputations that contain these instructions.)
+      if (instruction->opcode() == HloOpcode::kParameter ||
+          instruction->opcode() == HloOpcode::kConstant ||
+          instruction->opcode() == HloOpcode::kTuple) {
+        continue;
+      }
+
+      if (!IsFoldable(instruction, level_, is_foldable_computation)) {
         continue;
       }
       VLOG(5) << "Constant folding: " << instruction->ToString();
@@ -291,24 +313,21 @@ absl::StatusOr<bool> HloConstantFolding::Run(
       absl::Duration slow_timeout =
           absl::Seconds(uint64_t{1} << slow_op_counter_.load());
       SlowOperationAlarm slow_alarm(slow_timeout, [instruction, slow_timeout] {
-        const bool ndebug =
 #if NDEBUG
-            true;
-#else
-            false;
-#endif
         absl::string_view explanation_msg =
-            ndebug
-                ? "This isn't necessarily a bug; constant-folding is "
-                  "inherently a trade-off between compilation time and speed "
-                  "at runtime. XLA has some guards that attempt to keep "
-                  "constant folding from taking too long, but fundamentally "
-                  "you'll always be able to come up with an input program that "
-                  "takes a long time.\n\n"
-                  "If you'd like to file a bug, run with envvar "
-                  "XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results."
-                : "XLA was built without compiler optimizations, which can be "
-                  "slow. Try rebuilding with -c opt.";
+            "This isn't necessarily a bug; constant-folding is "
+            "inherently a trade-off between compilation time and speed "
+            "at runtime. XLA has some guards that attempt to keep "
+            "constant folding from taking too long, but fundamentally "
+            "you'll always be able to come up with an input program that "
+            "takes a long time.\n\n"
+            "If you'd like to file a bug, run with envvar "
+            "XLA_FLAGS=--xla_dump_to=/tmp/foo and attach the results.";
+#else
+        absl::string_view explanation_msg =
+            "XLA was built without compiler optimizations, which can be "
+            "slow. Try rebuilding with -c opt.";
+#endif
         return absl::StrFormat(
             "Constant folding an instruction is taking > %s:\n\n"
             "  %s\n\n"  // instruction->name() or instruction->ToString()
