@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2025 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,27 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_CPU_BUFFER_DESC_H_
-#define XLA_SERVICE_CPU_BUFFER_DESC_H_
+#ifndef TENSORFLOW_COMPILER_MLIR_LITE_UTILS_METADATA_UTILS_H_
+#define TENSORFLOW_COMPILER_MLIR_LITE_UTILS_METADATA_UTILS_H_
 
-#include <cstddef>
+namespace mlir {
+namespace TFL {
 
-namespace xla {
-namespace cpu {
+// This constant serves as a marker on a FusedLoc to identify it as a
+// temporary wrapper added by the TFLite importer for roundtrip purposes.
+inline constexpr char kImporterWrapper[] = "tflite.importer_wrapper";
 
-// BufferDesc for passing raw `buffer` (i.e. void ptr + size) arguments.
-class BufferDesc {
- public:
-  BufferDesc(void* data, size_t size) : data_(data), size_(size) {}
-  void* data() const { return data_; }
-  size_t size() const { return size_; }
+}  // namespace TFL
+}  // namespace mlir
 
- private:
-  void* data_;
-  size_t size_;
-};
-
-}  // namespace cpu
-}  // namespace xla
-
-#endif  // XLA_SERVICE_CPU_BUFFER_DESC_H_
+#endif  // TENSORFLOW_COMPILER_MLIR_LITE_UTILS_METADATA_UTILS_H_
