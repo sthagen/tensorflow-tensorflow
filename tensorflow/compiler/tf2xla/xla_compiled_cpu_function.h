@@ -314,7 +314,7 @@ class XlaCompiledCpuFunction {
   // The index remains constant for every instance of XlaCompiledCpuFunction
   // generated from the same static data, and might not be cheap to determine.
   // Recommended usage is to capture this in a variable for re-use.
-  int LookupVariableIndex(const string& name) const;
+  int LookupVariableIndex(absl::string_view name) const;
 
   // Returns the 0-based index for the result with the given `name`.
   // Returns -1 if the name wasn't found, or data isn't available.
@@ -352,7 +352,7 @@ class XlaCompiledCpuFunction {
       std::string,
       /*xla::cpu::AotCompiledFunctionLibrary::FunctionPtr*/ void*>&
   function_library_symbol_map() const {
-    return function_library_symbol_map_;
+    return *function_library_symbol_map_;
   }
 
   const xla::ExecutableRunOptions* run_options() const { return &run_options_; }
@@ -518,9 +518,9 @@ class XlaCompiledCpuFunction {
   static void set_static_data_use_xla_runtime(StaticData* static_data, bool) {}
 
  private:
-  absl::flat_hash_map<
+  const absl::flat_hash_map<
       std::string,
-      /*xla::cpu::AotCompiledFunctionLibrary::FunctionPtr*/ void*>
+      /*xla::cpu::AotCompiledFunctionLibrary::FunctionPtr*/ void*>*
       function_library_symbol_map_;
 
   const std::optional<size_t> temp_allocation_index_;
