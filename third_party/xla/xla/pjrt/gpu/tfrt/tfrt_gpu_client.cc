@@ -1466,7 +1466,7 @@ absl::StatusOr<std::unique_ptr<PjRtExecutable>> TfrtGpuClient::CompileInternal(
       xla_client_->Compile(computation, argument_layout_pointers,
                            options.executable_build_options));
 
-  return BuildPjRtExecutable(std::move(local_executables),
+  return BuildPjRtExecutable(computation.proto(), std::move(local_executables),
                              std::move(input_options));
 }
 
@@ -1618,6 +1618,7 @@ absl::StatusOr<std::string> TfrtGpuExecutable::SerializeExecutable() const {
 
 absl::StatusOr<std::unique_ptr<PjRtExecutable>>
 TfrtGpuClient::BuildPjRtExecutable(
+    std::optional<HloModuleProto> unoptimized_hlo_module_proto,
     std::vector<std::unique_ptr<LocalExecutable>> local_executables,
     CompileOptions compile_options) {
   if (local_executables.empty()) {
@@ -1638,9 +1639,9 @@ TfrtGpuClient::BuildPjRtExecutable(
   const std::string fingerprint = hlo_module.GetFingerprint128();
 
   return std::make_unique<StreamExecutorExecutable>(
-      std::move(compile_options), std::move(local_executables), xla_client_,
-      num_replicas, num_partitions, name, fingerprint,
-      memory_spaces()[0]->kind());
+      std::move(compile_options), std::move(unoptimized_hlo_module_proto),
+      std::move(local_executables), xla_client_, num_replicas, num_partitions,
+      name, fingerprint, memory_spaces()[0]->kind());
 }
 
 absl::StatusOr<std::unique_ptr<PjRtExecutable>>
@@ -1651,7 +1652,8 @@ TfrtGpuClient::DeserializeExecutable(
       auto local_executables_and_options,
       DeserializeToLocalExecutable(serialized, compile_options));
 
-  return BuildPjRtExecutable(std::move(local_executables_and_options.first),
+  return BuildPjRtExecutable(/*unoptimized_hlo_module_proto=*/std::nullopt,
+                             std::move(local_executables_and_options.first),
                              local_executables_and_options.second);
 }
 
@@ -3228,8 +3230,8 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
           return;
         }
 
-        // TODO: Use the destination device stream for D2D copies.
-        auto stream = src_device->stream();
+        auto stream = dst_device->stream();
+
         se::DeviceMemoryBase dst(allocated_dst_buffer->buffer());
         VLOG(3) << "D2D copy: " << src_buffer->buffer().opaque() << " -> "
                 << dst.opaque() << " (" << src_buffer->buffer().size()
@@ -3255,7 +3257,7 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> TfrtGpuBuffer::CopyToMemorySpace(
       };
 
   EnqueueWorkWhenReady(client_->blocking_thread_pool(),
-                       {src_device_buffer->definition_event().CopyRCRef()},
+                       {src_device_buffer->ready_event().CopyRCRef()},
                        std::move(transfer_d2d));
   return output_buffer;
 }
