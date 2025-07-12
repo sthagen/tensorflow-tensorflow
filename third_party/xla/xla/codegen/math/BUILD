@@ -23,13 +23,29 @@ package_group(
 
 cc_library(
     name = "intrinsic",
+    srcs = ["intrinsic.cc"],
     hdrs = ["intrinsic.h"],
     deps = [
         "//xla:shape_util",
+        "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla/service/llvm_ir:llvm_util",
+        "@com_google_absl//absl/functional:overload",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",
+    ],
+)
+
+xla_cc_test(
+    name = "intrinsic_test",
+    srcs = ["intrinsic_test.cc"],
+    deps = [
+        ":intrinsic",
+        "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:status_matchers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -67,6 +83,7 @@ cc_library(
     srcs = ["ldexp.cc"],
     hdrs = ["ldexp.h"],
     deps = [
+        ":intrinsic",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",  # buildcleaner: keep
@@ -79,6 +96,7 @@ xla_cc_test(
     name = "ldexp_test",
     srcs = ["ldexp_test.cc"],
     deps = [
+        ":intrinsic",
         ":ldexp",
         ":simple_jit_runner",
         ":test_matchers",
@@ -225,6 +243,36 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "log1p",
+    srcs = ["log1p.cc"],
+    hdrs = ["log1p.h"],
+    deps = [
+        ":intrinsic",
+        "//xla:xla_data_proto_cc",
+        "//xla/service/llvm_ir:llvm_util",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:ir_headers",
+    ],
+)
+
+xla_cc_test(
+    name = "log1p_test",
+    srcs = ["log1p_test.cc"],
+    deps = [
+        ":log1p",
+        ":simple_jit_runner",
+        ":test_matchers",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:JITLink",
+        "@llvm-project//llvm:ir_headers",
+    ],
+)
+
 xla_cc_test(
     name = "exp_test",
     srcs = ["exp_test.cc"],
@@ -246,10 +294,13 @@ cc_library(
     srcs = ["rsqrt.cc"],
     hdrs = ["rsqrt.h"],
     deps = [
+        ":intrinsic",
         "//xla:xla_data_proto_cc",
         "//xla/service/llvm_ir:llvm_util",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",  # buildcleaner: keep
         "@llvm-project//llvm:Support",
@@ -261,6 +312,7 @@ xla_cc_test(
     name = "rsqrt_test",
     srcs = ["rsqrt_test.cc"],
     deps = [
+        ":intrinsic",
         ":rsqrt",
         ":simple_jit_runner",
         ":test_matchers",
@@ -280,6 +332,7 @@ xla_cc_test(
     fail_if_no_test_linked = False,  # NOLINT=This contains benchmarks only, no tests.
     fail_if_no_test_selected = False,  # NOLINT=This contains benchmarks only, no tests.
     deps = [
+        ":intrinsic",
         ":rsqrt",
         ":simple_jit_runner",
         "//xla:shape_util",

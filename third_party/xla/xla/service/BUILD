@@ -106,6 +106,21 @@ cc_library(
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_opt_utils_test",
+    srcs = ["collective_opt_utils_test.cc"],
+    deps = [
+        ":collective_opt_utils",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/parser:hlo_parser",
+        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -4093,6 +4108,7 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/codegen/math:fptrunc",
         "//xla/codegen/math:intrinsic",
+        "//xla/codegen/math:log1p",
         "//xla/hlo/ir:hlo",
         "//xla/service/llvm_ir:ir_array",
         "//xla/service/llvm_ir:ir_builder_mixin",
