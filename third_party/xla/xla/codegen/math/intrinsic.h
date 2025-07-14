@@ -64,6 +64,7 @@ class Intrinsic {
   // that get forwarded to the concrete implementation.
   //
   // go/keep-sorted start
+  class Erf;
   class Exp;
   class FpTrunc;
   class Ldexp;
@@ -87,8 +88,10 @@ class Intrinsic {
     using std::variant<Scalar, Vec>::variant;
 
     std::string name() const;
+    bool is_scalar() const;
+    bool is_vector() const;
     PrimitiveType element_type() const;
-    std::optional<size_t> width() const;
+    std::optional<size_t> vector_width() const;
   };
 
   // Shortened builders for the scalar and vector types defined above.
@@ -101,6 +104,9 @@ class Intrinsic {
   // Verifies that the two types have the same width and element type.
   static absl::Status VerifySameWidthAndElementType(const Type& a,
                                                     const Type& b);
+
+  // Returns the LLVM IR type for the given intrinsic type.
+  static llvm::Type* TypeToIrType(Type type, llvm::LLVMContext& context);
 
   // Returns the name of the scalar intrinsic for the given data type.
   template <typename Intrinsic>

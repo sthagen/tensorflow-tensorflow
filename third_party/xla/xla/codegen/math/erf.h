@@ -13,34 +13,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_CODEGEN_MATH_FPTRUNC_H_
-#define XLA_CODEGEN_MATH_FPTRUNC_H_
+#ifndef XLA_CODEGEN_MATH_ERF_H_
+#define XLA_CODEGEN_MATH_ERF_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
-#include "absl/status/statusor.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Value.h"
 #include "xla/codegen/math/intrinsic.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla::codegen {
 
-// XLA intrinsic for truncating floating point values (scalars and vectors).
-class Intrinsic::FpTrunc {
+class Intrinsic::Erf {
  public:
-  static std::string Name(Type from, Type to);
+  static std::string Name(PrimitiveType type);
+  static std::string Name(PrimitiveType type, int64_t vector_width);
 
-  static llvm::Function* GetOrInsertDeclaration(llvm::Module* module, Type from,
-                                                Type to);
-
-  static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
-                                                          PrimitiveType from,
-                                                          PrimitiveType to,
-                                                          int64_t vector_width);
+  static llvm::Function* GetOrInsertDeclaration(llvm::Module* module,
+                                                PrimitiveType type);
 };
 
+namespace math {
+
+// Return the XLA intrinsic name for the erf function:
+//
+// `xla.erf.v<num_elements><type>`
+std::string ErfFunctionName(size_t num_elements, PrimitiveType type);
+
+llvm::Function* CreateErf(llvm::Module* module, llvm::Type* type);
+
+}  // namespace math
 }  // namespace xla::codegen
 
-#endif  // XLA_CODEGEN_MATH_FPTRUNC_H_
+#endif  // XLA_CODEGEN_MATH_ERF_H_
