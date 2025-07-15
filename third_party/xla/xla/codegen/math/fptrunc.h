@@ -16,12 +16,14 @@ limitations under the License.
 #ifndef XLA_CODEGEN_MATH_FPTRUNC_H_
 #define XLA_CODEGEN_MATH_FPTRUNC_H_
 
-#include <cstdint>
 #include <string>
 
 #include "absl/status/statusor.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Value.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "xla/codegen/math/intrinsic.h"
 #include "xla/xla_data.pb.h"
 
@@ -35,10 +37,12 @@ class Intrinsic::FpTrunc {
   static llvm::Function* GetOrInsertDeclaration(llvm::Module* module, Type from,
                                                 Type to);
 
+  static mlir::func::FuncOp GetOrInsertDeclaration(mlir::OpBuilder& b,
+                                                   mlir::ModuleOp module,
+                                                   Type from, Type to);
+
   static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
-                                                          PrimitiveType from,
-                                                          PrimitiveType to,
-                                                          int64_t vector_width);
+                                                          Type from, Type to);
 };
 
 }  // namespace xla::codegen

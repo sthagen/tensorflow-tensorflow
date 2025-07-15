@@ -1200,7 +1200,6 @@ cc_library(
             "//xla/service:collective_utils",
             "//xla/stream_executor/cuda:nvjitlink_support",
             "//xla/stream_executor/cuda:ptx_compiler_support",
-            "//xla/tsl/platform:env",
             "//xla/tsl/platform:logging",
             "//xla/tsl/util:command_line_flags",
             "@com_google_absl//absl/algorithm:container",
@@ -1213,7 +1212,6 @@ cc_library(
             "@com_google_absl//absl/status:statusor",
             "@com_google_absl//absl/strings",
             "@com_google_absl//absl/strings:str_format",
-            "@local_tsl//tsl/platform",
             "@local_tsl//tsl/platform:platform_port",
             "@local_tsl//tsl/platform:protobuf",
         ],
@@ -1240,6 +1238,7 @@ cc_library(
     deps = [
         "//xla/backends/cpu:alignment",
         "//xla/tsl/util:safe_reinterpret_cast",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:dynamic_annotations",
     ],
 )

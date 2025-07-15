@@ -25,8 +25,14 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
 #include "xla/primitive_util.h"
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/xla_data.pb.h"
@@ -84,14 +90,22 @@ class Intrinsic {
   };
 
   // Intrinsics overloaded on the arguments and result types.
-  struct Type : public std::variant<Scalar, Vec> {
+  class Type : public std::variant<Scalar, Vec> {
+   public:
     using std::variant<Scalar, Vec>::variant;
+
+    Type(PrimitiveType type, std::optional<size_t> vector_width);
 
     std::string name() const;
     bool is_scalar() const;
     bool is_vector() const;
     PrimitiveType element_type() const;
     std::optional<size_t> vector_width() const;
+
+    template <typename Sink>
+    friend void AbslStringify(Sink& sink, const Type& type) {
+      absl::Format(&sink, "%s", type.name());
+    }
   };
 
   // Shortened builders for the scalar and vector types defined above.
@@ -107,6 +121,9 @@ class Intrinsic {
 
   // Returns the LLVM IR type for the given intrinsic type.
   static llvm::Type* TypeToIrType(Type type, llvm::LLVMContext& context);
+
+  // Returns the MLIR type for the given intrinsic type.
+  static mlir::Type TypeToIrType(Type type, mlir::MLIRContext& context);
 
   // Returns the name of the scalar intrinsic for the given data type.
   template <typename Intrinsic>
@@ -173,6 +190,12 @@ class Intrinsic {
   static std::string VectorName(PrimitiveType type, int64_t vector_width) {
     return absl::StrCat("v", vector_width, ScalarName(type));
   }
+
+ private:
+  static mlir::func::FuncOp GetOrInsertDeclaration(mlir::OpBuilder& b,
+                                                   mlir::ModuleOp& module,
+                                                   absl::string_view name,
+                                                   mlir::FunctionType type);
 };
 
 namespace intrinsics {
