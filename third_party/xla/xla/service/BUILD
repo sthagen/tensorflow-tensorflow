@@ -1837,8 +1837,6 @@ cc_library(
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
-        "//xla/hlo/analysis:hlo_alias_analysis",
-        "//xla/hlo/analysis:tuple_points_to_analysis",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -4063,16 +4061,23 @@ xla_cc_test(
 
 cc_library(
     name = "maybe_owning_device_memory",
-    srcs = [
-        "maybe_owning_device_memory.cc",
-    ],
-    hdrs = [
-        "maybe_owning_device_memory.h",
-    ],
+    srcs = ["maybe_owning_device_memory.cc"],
+    hdrs = ["maybe_owning_device_memory.h"],
     deps = [
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:device_memory_allocator",
         "@com_google_absl//absl/types:variant",
+    ],
+)
+
+xla_cc_test(
+    name = "maybe_owning_device_memory_test",
+    srcs = ["maybe_owning_device_memory_test.cc"],
+    deps = [
+        ":maybe_owning_device_memory",
+        "//xla/tsl/platform:test",
+        "//xla/tsl/platform:test_benchmark",
+        "//xla/tsl/platform:test_main",
     ],
 )
 
@@ -4394,8 +4399,10 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/log:die_if_null",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
