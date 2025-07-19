@@ -344,8 +344,8 @@ absl::Status runShardingPropagation(HloModule* hloModule,
 
   mlir::PassManager pm(mlirModule->getContext());
   pm.enableVerifier(enableVerifier);
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(shardyDir,
-                                               "sdy_module_before_xla_import"));
+  // TODO(tomnatan): add dump index and remove hard coded in name.
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(shardyDir, "00.input_module"));
 
   if (importMhloShardings) {
     auto spanToArrayRef = [](absl::Span<const bool> span) {
@@ -369,8 +369,8 @@ absl::Status runShardingPropagation(HloModule* hloModule,
   options.conservativePropagation = hloModule->use_auto_spmd_partitioning();
   mlir::sdy::addPropagationPipeline(pm, options);
   addStablehloExportPipeline(pm);
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(shardyDir,
-                                               "sdy_module_after_xla_export"));
+  // TODO(tomnatan): add dump index and remove hard coded in name.
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(shardyDir, "04.output_module"));
   tsl::StatusScopedDiagnosticHandler diagnosticHandler(
       mlirModule->getContext());
   return diagnosticHandler.consumeStatus(pm.run(mlirModule));
@@ -463,7 +463,8 @@ absl::StatusOr<bool> ShardyXLA::Run(
   // We don't fully replace the HLO module, so it will continue to have the
   // temporary frontend attributes. So clean them up as XLA won't need them.
   removeFrontendAttributes(
-      hloModule, {kUseTupleArgs, kImportMhloShardings, kMeshesRoundTripAttr});
+      hloModule, {kUseTupleArgs, kImportMhloShardings, kMeshesRoundTripAttr,
+                  kInTupleShardings, kOutTupleShardings});
 
   return true;
 }
