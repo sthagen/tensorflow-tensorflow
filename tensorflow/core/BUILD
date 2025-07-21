@@ -348,6 +348,7 @@ cc_library(
         ":lib_internal",
         ":protos_all_cc",
         "//tensorflow/core/kernels:required",
+        "@com_google_absl//absl/status:status_matchers",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_benchmark",
     ] + tf_additional_test_deps(),
@@ -1917,32 +1918,6 @@ tf_cc_tests(
         "//tensorflow/core/lib/strings:legacy_low_level_library_tests",
         "//tensorflow/core/lib/wav:wav_io_test.cc",
         "@local_xla//xla/tsl/lib/core:legacy_lib_core_all_tests",
-    ],
-    deps = [
-        ":lib",
-        ":lib_internal",
-        ":lib_test_internal",
-        ":protos_all_cc",
-        ":test",
-        ":test_main",
-        "//tensorflow/core/platform:scanner",
-        "//tensorflow/core/platform:str_util",
-        "//tensorflow/core/platform:strcat",
-        "//tensorflow/core/platform:stringpiece",
-        "//tensorflow/core/platform:stringprintf",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/types:optional",
-        "@eigen_archive//:eigen3",
-        "@zlib",
-    ],
-)
-
-tf_cc_tests(
-    name = "legacy_lib_core_tests",
-    size = "medium",
-    srcs = [
-        "//tensorflow/core/lib/core:legacy_lib_core_all_tests",
     ],
     deps = [
         ":lib",

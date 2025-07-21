@@ -1616,8 +1616,7 @@ DefaultSchedulerCore::FindAndExtractBestNodeAvailable(
       if (ready_chosen.node == nullptr) {
         skipped_nodes_and_reasons.push_back(
             {ready_node, SkipNodeReason::kShouldSkipNodeFunction});
-        VLOG(2) << "Skipped due to kShouldSkipNodeFunction: "
-                << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
+        VLOG(2) << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
                 << " node: " << ready_node->GetInstr().name();
       }
       continue;
@@ -1630,8 +1629,7 @@ DefaultSchedulerCore::FindAndExtractBestNodeAvailable(
       if (ready_chosen.node == nullptr) {
         skipped_nodes_and_reasons.push_back(
             {ready_node, SkipNodeReason::kAnnotationGroupNotReady});
-        VLOG(2) << "Skipped due to kShouldSkipNodeFunction: "
-                << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
+        VLOG(2) << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
                 << " node: " << ready_node->GetInstr().name();
       }
       continue;
@@ -1643,8 +1641,7 @@ DefaultSchedulerCore::FindAndExtractBestNodeAvailable(
       if (ready_chosen.node == nullptr) {
         skipped_nodes_and_reasons.push_back(
             {ready_node, SkipNodeReason::kExceedsOverlapLimit});
-        VLOG(2) << "Skipped due to kShouldSkipNodeFunction: "
-                << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
+        VLOG(2) << SkipNodeReasonString(skipped_nodes_and_reasons.back().second)
                 << " node: " << ready_node->GetInstr().name();
       }
       continue;
@@ -3215,7 +3212,10 @@ LatencyHidingScheduler::ScheduleWithPreferences(
 
   ComputationScheduleInfo schedule_info;
   schedule_info.total_wasted_cycles = stats.GetTotalWastedCycles();
-  schedule_info.peak_memory = scheduler_core_->GetMemoryPeak();
+
+  // Return the peak memory of this computation instead of the whole module
+  // to allow heuristic to optimize this functions memory usage.
+  schedule_info.peak_memory = stats.memory_pressure_peak;
 
   return std::make_pair(new_schedule, schedule_info);
 }
