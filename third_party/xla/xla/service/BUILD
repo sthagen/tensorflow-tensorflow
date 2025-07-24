@@ -104,6 +104,8 @@ cc_library(
     hdrs = ["collective_opt_utils.h"],
     deps = [
         ":collective_ops_utils",
+        ":pattern_matcher",
+        "//xla:shape_util",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/tsl/platform:statusor",
@@ -1512,6 +1514,7 @@ cc_library(
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/lib/strings:proto_serialization",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
@@ -3798,6 +3801,7 @@ cc_library(
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/tsl/platform:errors",
@@ -4349,8 +4353,14 @@ cc_library(
     srcs = ["stream_pool.cc"],
     hdrs = ["stream_pool.h"],
     deps = [
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
     ],
 )
 
@@ -4360,10 +4370,13 @@ xla_cc_test(
     deps = [
         ":stream_pool",
         "//xla/hlo/testlib:test_helpers",
+        "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/host:host_platform",
         "//xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -5202,6 +5215,7 @@ cc_library(
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:device_memory",
         "//xla/tsl/platform:statusor",
