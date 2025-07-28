@@ -27,12 +27,14 @@ cc_library(
     deps = [
         ":tiling_space",
         "//xla:literal_util",
+        "//xla:permutation_util",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/analysis:indexing_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:matmul_indexing_utils",
         "//xla/service/gpu/model:constraint_expression",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -111,5 +113,31 @@ xla_cc_test(
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:test",
+    ],
+)
+
+cc_library(
+    name = "symbolic_expr",
+    srcs = ["symbolic_expr.cc"],
+    hdrs = ["symbolic_expr.h"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+xla_cc_test(
+    name = "symbolic_expr_test",
+    srcs = ["symbolic_expr_test.cc"],
+    deps = [
+        ":symbolic_expr",
+        "//xla/hlo/analysis:indexing_test_utils",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
     ],
 )
