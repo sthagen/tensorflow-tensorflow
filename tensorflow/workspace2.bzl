@@ -153,9 +153,9 @@ def _tf_repositories():
     # LINT.IfChange(xnnpack)
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "70ff0edaaabd0092d0315c5da75572d36f70ea4c0d9c2e3d9c147f18bdd65fff",
-        strip_prefix = "XNNPACK-7566fefb2d5d035c9bb375f9aca5370a13a2b6c1",
-        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/7566fefb2d5d035c9bb375f9aca5370a13a2b6c1.zip"),
+        sha256 = "36a2d2bac5cf50c6c88fe46b0a3c175e42984353090b61d1e0fe97da254f5381",
+        strip_prefix = "XNNPACK-643b2101ef2bafa5c7427704beee3ff604b4fb02",
+        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/643b2101ef2bafa5c7427704beee3ff604b4fb02.zip"),
     )
     # LINT.ThenChange(//tensorflow/lite/tools/cmake/modules/xnnpack.cmake)
 
@@ -389,10 +389,14 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "com_google_protobuf",
-        patch_file = ["@local_xla//third_party/protobuf:protobuf.patch"],
-        sha256 = "f645e6e42745ce922ca5388b1883ca583bafe4366cc74cf35c3c9299005136e2",
-        strip_prefix = "protobuf-5.28.3",
-        urls = tf_mirror_urls("https://github.com/protocolbuffers/protobuf/archive/refs/tags/v5.28.3.zip"),
+        patch_file = ["@local_xla//third_party/protobuf:protobuf-6.31.1.patch"],
+        sha256 = "6e09bbc950ba60c3a7b30280210cd285af8d7d8ed5e0a6ed101c72aff22e8d88",
+        strip_prefix = "protobuf-6.31.1",
+        urls = tf_mirror_urls("https://github.com/protocolbuffers/protobuf/archive/refs/tags/v6.31.1.zip"),
+        repo_mapping = {
+            "@abseil-cpp": "@com_google_absl",
+            "@protobuf_pip_deps": "@pypi",
+        },
     )
 
     tf_http_archive(
@@ -444,16 +448,15 @@ def _tf_repositories():
         urls = tf_mirror_urls("https://curl.se/download/curl-8.11.0.tar.gz"),
     )
 
-    # WARNING: make sure ncteisen@ and vpai@ are cc-ed on any CL to change the below rule
     tf_http_archive(
         name = "com_github_grpc_grpc",
-        sha256 = "ae14a0de222485fd6e3baf52028c74acbd9ad8d685c813580401d3832cfae9f1",
-        strip_prefix = "grpc-1.72.2",
+        sha256 = "dd6a2fa311ba8441bbefd2764c55b99136ff10f7ea42954be96006a2723d33fc",
+        strip_prefix = "grpc-1.74.0",
         system_build_file = "//third_party/systemlibs:grpc.BUILD",
         patch_file = [
             "@local_xla//third_party/grpc:grpc.patch",
         ],
-        urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/refs/tags/v1.72.2.tar.gz"),
+        urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/refs/tags/v1.74.0.tar.gz"),
     )
 
     tf_http_archive(
@@ -535,9 +538,9 @@ def _tf_repositories():
     tf_http_archive(
         name = "nvtx_archive",
         build_file = "@local_xla//third_party:nvtx/BUILD.bazel",
-        sha256 = "e4438f921fb88a564b0b92791c1c1fdd0f388901213e6a31fdd0dc3803fb9764",
-        strip_prefix = "NVTX-bf31d7859ab3130cbf1ef77c33d18d0ebb8c8d08/c/include",
-        urls = tf_mirror_urls("https://github.com/NVIDIA/NVTX/archive/bf31d7859ab3130cbf1ef77c33d18d0ebb8c8d08.tar.gz"),
+        sha256 = "5a581c3234c5a6b2fd94363e3fdd5a4f5d2a3d9c53c4b9442b0784e6cdfe722c",
+        strip_prefix = "NVTX-2942f167cc30c5e3a44a2aecd5b0d9c07ff61a07/c/include",
+        urls = tf_mirror_urls("https://github.com/NVIDIA/NVTX/archive/2942f167cc30c5e3a44a2aecd5b0d9c07ff61a07.tar.gz"),
     )
 
     java_import_external(

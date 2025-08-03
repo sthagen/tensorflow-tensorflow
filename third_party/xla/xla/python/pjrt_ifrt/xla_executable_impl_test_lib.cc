@@ -41,6 +41,7 @@ limitations under the License.
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
 #include "xla/python/ifrt/test_util.h"
+#include "xla/python/ifrt/user_context.h"
 #include "xla/python/pjrt_ifrt/xla_compiler.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/statusor.h"
@@ -156,10 +157,15 @@ TEST(LoadedExecutableImplTest, CompileAndExecute) {
   Compiler* compiler = client->GetDefaultCompiler();
 
   std::vector<Device*> devices = {client->addressable_devices().at(0)};
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto loaded_executable,
-      CompileOnDevices(client.get(), compiler, module_add_one, devices,
-                       /*replicated=*/false));
+  LoadedExecutableRef loaded_executable;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(20));
+    TF_ASSERT_OK_AND_ASSIGN(
+        loaded_executable,
+        CompileOnDevices(client.get(), compiler, module_add_one, devices,
+                         /*replicated=*/false));
+  }
+  EXPECT_EQ(loaded_executable->user_context()->Fingerprint(), 20);
 
   DType dtype(DType::kF32);
   Shape shape({2, 3});
@@ -177,12 +183,17 @@ TEST(LoadedExecutableImplTest, CompileAndExecute) {
 
   ExecuteOptions execute_options;
   execute_options.fill_status = true;
-  TF_ASSERT_OK_AND_ASSIGN(
-      LoadedExecutable::ExecuteResult result,
-      loaded_executable->Execute(absl::MakeSpan(&array, 1), execute_options,
-                                 /*devices=*/std::nullopt));
+  LoadedExecutable::ExecuteResult result;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(100));
+    TF_ASSERT_OK_AND_ASSIGN(
+        result,
+        loaded_executable->Execute(absl::MakeSpan(&array, 1), execute_options,
+                                   /*devices=*/std::nullopt));
+  }
   TF_ASSERT_OK(result.status.Await());
   EXPECT_THAT(result.outputs, SizeIs(1));
+  EXPECT_EQ(result.outputs[0]->user_context()->Fingerprint(), 100);
 
   std::vector<float> out_data(6);
   auto future = result.outputs[0]->CopyToHostBuffer(
@@ -200,10 +211,15 @@ TEST(LoadedExecutableImplTest, CompileAndExecutePortable) {
   Compiler* compiler = client->GetDefaultCompiler();
 
   std::vector<Device*> devices = {};
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto loaded_executable,
-      CompileOnDevices(client.get(), compiler, module_add_one, devices,
-                       /*replicated=*/false));
+  LoadedExecutableRef loaded_executable;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(20));
+    TF_ASSERT_OK_AND_ASSIGN(
+        loaded_executable,
+        CompileOnDevices(client.get(), compiler, module_add_one, devices,
+                         /*replicated=*/false));
+  }
+  EXPECT_EQ(loaded_executable->user_context()->Fingerprint(), 20);
 
   DType dtype(DType::kF32);
   Shape shape({2, 3});
@@ -223,12 +239,17 @@ TEST(LoadedExecutableImplTest, CompileAndExecutePortable) {
                           client->MakeDeviceList({device}));
   ExecuteOptions execute_options;
   execute_options.fill_status = true;
-  TF_ASSERT_OK_AND_ASSIGN(
-      LoadedExecutable::ExecuteResult result,
-      loaded_executable->Execute(absl::MakeSpan(&array, 1), execute_options,
-                                 /*devices=*/std::move(device_list)));
+  LoadedExecutable::ExecuteResult result;
+  {
+    UserContextScope user_context_scope(test_util::MakeUserContext(100));
+    TF_ASSERT_OK_AND_ASSIGN(
+        result,
+        loaded_executable->Execute(absl::MakeSpan(&array, 1), execute_options,
+                                   /*devices=*/std::move(device_list)));
+  }
   TF_ASSERT_OK(result.status.Await());
   EXPECT_THAT(result.outputs, SizeIs(1));
+  EXPECT_EQ(result.outputs[0]->user_context()->Fingerprint(), 100);
 
   std::vector<float> out_data(6);
   auto future = result.outputs[0]->CopyToHostBuffer(
@@ -267,12 +288,14 @@ TEST(LoadedExecutableImplTest, DoNotFillStatus) {
 
   ExecuteOptions execute_options;
   execute_options.fill_status = false;
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       LoadedExecutable::ExecuteResult result,
       loaded_executable->Execute(absl::MakeSpan(&array, 1), execute_options,
                                  /*devices=*/std::nullopt));
   EXPECT_FALSE(result.status.IsValid());
   EXPECT_THAT(result.outputs, SizeIs(1));
+  EXPECT_EQ(result.outputs[0]->user_context()->Fingerprint(), 100);
 
   std::vector<float> out_data(6);
   auto future = result.outputs[0]->CopyToHostBuffer(

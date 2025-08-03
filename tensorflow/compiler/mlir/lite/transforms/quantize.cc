@@ -244,7 +244,6 @@ class StrictQuantizationPattern : public RewritePattern {
       }
 
       auto op_quant_type = GetOpQuantizationType(quantizing_op);
-
       if (op_quant_type == OpQuantizationType::kWeightOnly) {
         return rewriter.notifyMatchFailure(
             quantizing_op,
@@ -280,7 +279,7 @@ class StrictQuantizationPattern : public RewritePattern {
           inputs.push_back(fq_input);
         } else if (auto ele_type = getElementTypeOrSelf(operand_type);
                    ele_type.isF32() || ele_type.isInteger(32) ||
-                   ele_type.isInteger(1)) {
+                   ele_type.isInteger(64) || ele_type.isInteger(1)) {
           // If it's F32 (non-weight-only and non-drq) or I32 or bool, just
           // directly add the input.
           inputs.push_back(operand);
@@ -385,8 +384,8 @@ class StrictQuantizationPattern : public RewritePattern {
             if (!matchPattern(q.getOperand(), m_Constant(&attr))) {
               continue;
             }
-            auto cst = rewriter.create<arith::ConstantOp>(
-                quantized_op->getLoc(), attr);
+            auto cst = arith::ConstantOp::create(rewriter,
+                                                 quantized_op->getLoc(), attr);
             quantizing_op->setOperand(i, cst.getResult());
           }
         }
@@ -606,7 +605,7 @@ class QuantizeConstPattern : public OpRewritePattern<QuantizeOp> {
       }
       if (quantized_attr) {
         auto qconst_op =
-            rewriter.create<QConstOp>(op.getLoc(), qtype, quantized_attr);
+            QConstOp::create(rewriter, op.getLoc(), qtype, quantized_attr);
         if (auto volatile_attr = op->getAttr(kVolatileOpAttrName)) {
           qconst_op->setAttr(kVolatileOpAttrName, volatile_attr);
         }

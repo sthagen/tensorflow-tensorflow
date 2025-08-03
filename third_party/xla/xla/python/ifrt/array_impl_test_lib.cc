@@ -41,6 +41,7 @@ limitations under the License.
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
 #include "xla/python/ifrt/test_util.h"
+#include "xla/python/ifrt/user_context.h"
 #include "xla/python/ifrt/value.h"
 #include "xla/tsl/concurrency/ref_count.h"
 #include "xla/tsl/lib/core/status_test_util.h"
@@ -90,6 +91,7 @@ TEST(ArrayImplTest, MakeArrayFromHostBuffer) {
   std::iota(data->begin(), data->end(), 0);
   Device* device = client->addressable_devices().at(0);
   ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array, client->MakeArrayFromHostBuffer(
@@ -101,6 +103,7 @@ TEST(ArrayImplTest, MakeArrayFromHostBuffer) {
   EXPECT_EQ(array->dtype(), dtype);
   EXPECT_EQ(array->shape(), shape);
   EXPECT_EQ(array->shared_ptr_sharding().get(), sharding.get());
+  EXPECT_EQ(array->user_context()->Fingerprint(), 100);
 }
 
 TEST(ArrayImplTest,
@@ -128,6 +131,7 @@ TEST(ArrayImplTest,
       std::move(device_list), xla::ifrt::MemoryKind(), shape,
       /*shard_shape=*/shape,
       /*is_fully_replicated=*/true);
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array, client->MakeArrayFromHostBuffer(
@@ -139,6 +143,7 @@ TEST(ArrayImplTest,
   EXPECT_EQ(array->dtype(), dtype);
   EXPECT_EQ(array->shape(), shape);
   EXPECT_EQ(array->shared_ptr_sharding().get(), sharding.get());
+  EXPECT_EQ(array->user_context()->Fingerprint(), 100);
 }
 
 class ArrayImplWithHostBufferSemanticsTest
@@ -456,11 +461,11 @@ TEST(ArrayImplTest, MakeArraysFromHostBufferShardsAndCopyToHostBuffer) {
       /*array_spec=*/{dtype, shape, sharding, /*layout=*/nullptr},
   });
 
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       auto arrays, client->MakeArraysFromHostBufferShards(
                        absl::MakeSpan(specs),
-                       Client::HostBufferSemantics::kImmutableOnlyDuringCall,
-                       client->CreateUserContext()));
+                       Client::HostBufferSemantics::kImmutableOnlyDuringCall));
   ASSERT_THAT(arrays, SizeIs(2));
 
   // Once the `Array` has become ready, the host buffer is not accessed.
@@ -471,6 +476,7 @@ TEST(ArrayImplTest, MakeArraysFromHostBufferShardsAndCopyToHostBuffer) {
   // There should be no use-after-free.
 
   for (int i = 0; i < arrays.size(); ++i) {
+    EXPECT_EQ(arrays[i]->user_context()->Fingerprint(), 100);
     TF_ASSERT_OK_AND_ASSIGN(
         auto single_device_arrays,
         arrays[i]->DisassembleIntoSingleDeviceArrays(
@@ -531,10 +537,10 @@ TEST(ArrayImplTest, MakeArraysFromHostBufferShardsWithDifferentDevices) {
   });
 
   absl::Status status;
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   auto result = client->MakeArraysFromHostBufferShards(
       absl::MakeSpan(specs),
-      Client::HostBufferSemantics::kImmutableOnlyDuringCall,
-      client->CreateUserContext());
+      Client::HostBufferSemantics::kImmutableOnlyDuringCall);
   if (result.ok()) {
     // Implementations may poison outputs instead of immediately returning an
     // error.
@@ -587,10 +593,10 @@ TEST(ArrayImplTest, MakeArraysFromHostBufferShardsWithDifferentMemoryKinds) {
   });
 
   absl::Status status;
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   auto result = client->MakeArraysFromHostBufferShards(
       absl::MakeSpan(specs),
-      Client::HostBufferSemantics::kImmutableOnlyDuringCall,
-      client->CreateUserContext());
+      Client::HostBufferSemantics::kImmutableOnlyDuringCall);
   if (result.ok()) {
     // Implementations may poison outputs instead of immediately returning an
     // error.
@@ -619,6 +625,7 @@ TEST(ArrayImplTest, MakeArrayFromHostBufferAndCopyToHostBufferWithString) {
   void* data_ptr = static_cast<void*>(cords->data());
   Device* device = cpu_devices.front();
   ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array,
@@ -627,6 +634,7 @@ TEST(ArrayImplTest, MakeArrayFromHostBufferAndCopyToHostBufferWithString) {
           /*byte_strides=*/std::nullopt, std::move(sharding),
           Client::HostBufferSemantics::kImmutableUntilTransferCompletes,
           /*on_done_with_host_buffer=*/[cords = std::move(cords)]() {}));
+  EXPECT_EQ(array->user_context()->Fingerprint(), 100);
 
   std::vector<absl::Cord> out_data(shape.num_elements());
   auto future =
@@ -702,12 +710,12 @@ TEST(ArrayImplTest,
       /*array_spec=*/{dtype, shape, sharding, /*layout=*/nullptr},
   });
 
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       auto arrays,
       client->MakeArraysFromHostBufferShards(
           absl::MakeSpan(specs),
-          Client::HostBufferSemantics::kImmutableUntilTransferCompletes,
-          client->CreateUserContext()));
+          Client::HostBufferSemantics::kImmutableUntilTransferCompletes));
   ASSERT_THAT(arrays, SizeIs(2));
 
   // Resetting these references does not necessarily destroy host buffers
@@ -722,6 +730,7 @@ TEST(ArrayImplTest,
   cords1 = nullptr;
 
   for (int i = 0; i < arrays.size(); ++i) {
+    EXPECT_EQ(arrays[i]->user_context()->Fingerprint(), 100);
     TF_ASSERT_OK_AND_ASSIGN(
         auto single_device_arrays,
         arrays[i]->DisassembleIntoSingleDeviceArrays(
@@ -773,16 +782,18 @@ TEST(ArrayImplTest, MakeErrorArrays) {
   };
 
   const absl::Status error = absl::InternalError("injected error");
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       const std::vector<xla::ifrt::ArrayRef> arrays,
-      client->MakeErrorArrays(error, {array_spec, array_spec},
-                              client->CreateUserContext()));
+      client->MakeErrorArrays(error, {array_spec, array_spec}));
   ASSERT_EQ(arrays.size(), 2);
 
   EXPECT_THAT(arrays[0]->GetReadyFuture().Await(),
               StatusIs(_, HasSubstr("injected error")));
   EXPECT_THAT(arrays[1]->GetReadyFuture().Await(),
               StatusIs(_, HasSubstr("injected error")));
+  EXPECT_EQ(arrays[0]->user_context()->Fingerprint(), 100);
+  EXPECT_EQ(arrays[1]->user_context()->Fingerprint(), 100);
 }
 
 TEST(ArrayImplTest, MakeErrorArraysWithAddressableAndNonAddressableDevice) {
@@ -811,16 +822,18 @@ TEST(ArrayImplTest, MakeErrorArraysWithAddressableAndNonAddressableDevice) {
                           /*sharding=*/sharding};
 
   const absl::Status error = absl::InternalError("injected error");
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       const std::vector<xla::ifrt::ArrayRef> arrays,
-      client->MakeErrorArrays(error, {array_spec, array_spec},
-                              client->CreateUserContext()));
+      client->MakeErrorArrays(error, {array_spec, array_spec}));
   ASSERT_EQ(arrays.size(), 2);
 
   EXPECT_THAT(arrays[0]->GetReadyFuture().Await(),
               StatusIs(_, HasSubstr("injected error")));
   EXPECT_THAT(arrays[1]->GetReadyFuture().Await(),
               StatusIs(_, HasSubstr("injected error")));
+  EXPECT_EQ(arrays[0]->user_context()->Fingerprint(), 100);
+  EXPECT_EQ(arrays[1]->user_context()->Fingerprint(), 100);
 }
 
 TEST(ArrayImplTest, AssembleArray) {
@@ -857,6 +870,7 @@ TEST(ArrayImplTest, AssembleArray) {
            array1->sharding().devices()->devices().front()}));
   ShardingRef assembled_sharding =
       OpaqueSharding::Create(std::move(device_list), MemoryKind());
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       auto assembled_array,
       client->AssembleArrayFromSingleDeviceArrays(
@@ -868,6 +882,7 @@ TEST(ArrayImplTest, AssembleArray) {
   EXPECT_EQ(assembled_array->shape(), assembled_shape);
   EXPECT_EQ(assembled_array->shared_ptr_sharding().get(),
             assembled_sharding.get());
+  EXPECT_EQ(assembled_array->user_context()->Fingerprint(), 100);
 }
 
 TEST(ArrayImplTest, AssembleAndDisassembleArray) {
@@ -881,6 +896,11 @@ TEST(ArrayImplTest, AssembleAndDisassembleArray) {
   ShardingRef sharding0 = SingleDeviceSharding::Create(device0, MemoryKind());
   Device* device1 = client->addressable_devices().at(1);
   ShardingRef sharding1 = SingleDeviceSharding::Create(device1, MemoryKind());
+
+  // TODO(b/318709106): Make this broad `UserContextScope` to more specific to
+  // assembly/diassembly calls once IFRT implementations stop reusing the input
+  // single-device `Array` instance as-is when assembling/disassembling it.
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array0, client->MakeArrayFromHostBuffer(
@@ -931,10 +951,12 @@ TEST(ArrayImplTest, AssembleAndDisassembleArray) {
     EXPECT_EQ(single_device_arrays[0]->shape(), array0->shape());
     EXPECT_THAT(single_device_arrays[0]->sharding().devices()->devices(),
                 ElementsAreArray(array0->sharding().devices()->devices()));
+    EXPECT_EQ(single_device_arrays[0]->user_context()->Fingerprint(), 100);
     EXPECT_EQ(single_device_arrays[1]->dtype(), array1->dtype());
     EXPECT_EQ(single_device_arrays[1]->shape(), array1->shape());
     EXPECT_THAT(single_device_arrays[1]->sharding().devices()->devices(),
                 ElementsAreArray(array1->sharding().devices()->devices()));
+    EXPECT_EQ(single_device_arrays[1]->user_context()->Fingerprint(), 100);
   }
 }
 
@@ -947,6 +969,11 @@ TEST(ArrayImplTest, AssembleAndDisassembleSingleDeviceArray) {
   absl::c_iota(data, 0);
   Device* device = client->addressable_devices().at(0);
   ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
+
+  // TODO(b/318709106): Make this broad `UserContextScope` to more specific to
+  // assembly/diassembly calls once IFRT implementations stop reusing the input
+  // single-device `Array` instance as-is when assembling/disassembling it.
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array, client->MakeArrayFromHostBuffer(
@@ -978,6 +1005,7 @@ TEST(ArrayImplTest, AssembleAndDisassembleSingleDeviceArray) {
   ASSERT_EQ(single_device_arrays[0]->shape(), array->shape());
   EXPECT_THAT(single_device_arrays[0]->sharding().devices()->devices(),
               ElementsAreArray(array->sharding().devices()->devices()));
+  EXPECT_EQ(single_device_arrays[0]->user_context()->Fingerprint(), 100);
 }
 
 TEST(ArrayImplTest, CopyToSameDevices) {
@@ -990,6 +1018,7 @@ TEST(ArrayImplTest, CopyToSameDevices) {
   Device* device = client->addressable_devices().at(0);
   ShardingRef sharding = SingleDeviceSharding::Create(device, MemoryKind());
   auto semantics = Client::HostBufferSemantics::kImmutableOnlyDuringCall;
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   TF_ASSERT_OK_AND_ASSIGN(
       auto array, client->MakeArrayFromHostBuffer(
@@ -1001,6 +1030,8 @@ TEST(ArrayImplTest, CopyToSameDevices) {
       auto new_arrays,
       client->CopyArrays(absl::MakeSpan(&array, 1), sharding->devices(),
                          MemoryKind(), ArrayCopySemantics::kAlwaysCopy));
+  ASSERT_THAT(new_arrays, SizeIs(1));
+  EXPECT_EQ(new_arrays[0]->user_context()->Fingerprint(), 100);
 
   std::vector<float> out_data(6);
   auto future = new_arrays[0]->CopyToHostBuffer(
@@ -1027,6 +1058,7 @@ TEST(ArrayImplTest, AssembleAndDisassembleNonAddressableArray) {
   ShardingRef sharding0 = SingleDeviceSharding::Create(device0, MemoryKind());
   Device* device1 = client->addressable_devices().at(1);
   ShardingRef sharding1 = SingleDeviceSharding::Create(device1, MemoryKind());
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
 
   std::vector<ArrayRef> arrays;
   Shape assembled_shape({4, 3});
@@ -1056,6 +1088,7 @@ TEST(ArrayImplTest, AssembleAndDisassembleNonAddressableArray) {
             dtype, assembled_shape, assembled_sharding, absl::MakeSpan(arrays),
             ArrayCopySemantics::kAlwaysCopy,
             SingleDeviceShardSemantics::kAddressableShards));
+    EXPECT_EQ(assembled_array->user_context()->Fingerprint(), 100);
 
     TF_ASSERT_OK_AND_ASSIGN(
         auto single_device_arrays,
@@ -1120,6 +1153,7 @@ TEST(ArrayImplTest, CopyToDifferentDevice) {
   }
   TF_ASSERT_OK_AND_ASSIGN(DeviceListRef device_list,
                           client->MakeDeviceList(new_devices));
+  UserContextScope user_context_scope(test_util::MakeUserContext(100));
   TF_ASSERT_OK_AND_ASSIGN(
       auto new_arrays,
       client->CopyArrays(absl::MakeSpan(arrays), device_list, MemoryKind(),
@@ -1130,6 +1164,7 @@ TEST(ArrayImplTest, CopyToDifferentDevice) {
         auto expected_sharding,
         arrays[i]->sharding().WithDeviceAssignment(device_list, MemoryKind()));
     EXPECT_EQ(new_arrays[i]->sharding(), *expected_sharding);
+    EXPECT_EQ(new_arrays[i]->user_context()->Fingerprint(), 100);
 
     TF_ASSERT_OK_AND_ASSIGN(
         auto shards, arrays[i]->DisassembleIntoSingleDeviceArrays(

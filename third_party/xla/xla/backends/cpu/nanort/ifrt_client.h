@@ -94,17 +94,15 @@ class NanoIfrtClient : public llvm::RTTIExtends<NanoIfrtClient, ifrt::Client> {
       const void* data, ifrt::DType dtype, ifrt::Shape shape,
       std::optional<absl::Span<const int64_t>> byte_strides,
       ifrt::ShardingRef sharding, HostBufferSemantics semantics,
-      std::function<void()> on_done_with_host_buffer,
-      tsl::RCReference<ifrt::UserContext> user_context) override;
+      std::function<void()> on_done_with_host_buffer) override;
 
   absl::StatusOr<std::vector<ifrt::ArrayRef>> MakeArraysFromHostBufferShards(
       absl::Span<MakeArraysFromHostBufferShardsSpec> specs,
-      HostBufferSemantics semantics,
-      tsl::RCReference<ifrt::UserContext> user_context) override;
+      HostBufferSemantics semantics) override;
 
   absl::StatusOr<std::vector<ifrt::ArrayRef>> MakeErrorArrays(
-      const absl::Status& error, absl::Span<const ifrt::ArraySpec> array_specs,
-      tsl::RCReference<ifrt::UserContext> user_context) override;
+      const absl::Status& error,
+      absl::Span<const ifrt::ArraySpec> array_specs) override;
 
   // Assembles a sharded array from a list of single device arrays. If the
   // provided sharding is specific enough to assemble a dense array, this method
@@ -190,6 +188,10 @@ class NanoIfrtClient : public llvm::RTTIExtends<NanoIfrtClient, ifrt::Client> {
   // Some of the ifrt::Client methods return a span of devices, so we need to
   // keep storage for them here.
   std::vector<ifrt::Device*> devices_;
+
+  // Single-device device lists pre-constructed for all `devices_`. We cache it
+  // in the client to avoid constructing them all the time on a hot path.
+  std::vector<ifrt::DeviceListRef> single_device_lists_;
 };
 
 }  // namespace xla::cpu

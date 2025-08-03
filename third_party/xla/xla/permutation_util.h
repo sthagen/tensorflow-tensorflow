@@ -102,8 +102,6 @@ Container InversePermutation(absl::Span<const int64_t> input_permutation) {
 template <typename Container>
 Container ComposePermutations(absl::Span<const int64_t> p1,
                               absl::Span<const int64_t> p2) {
-  DCHECK(IsPermutation(p1));
-  DCHECK(IsPermutation(p2));
   CHECK_EQ(p1.size(), p2.size());
   Container output;
   output.reserve(p1.size());
