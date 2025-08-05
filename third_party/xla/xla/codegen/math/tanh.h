@@ -13,45 +13,41 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_CODEGEN_MATH_FPTRUNC_H_
-#define XLA_CODEGEN_MATH_FPTRUNC_H_
+#ifndef XLA_CODEGEN_MATH_TANH_H_
+#define XLA_CODEGEN_MATH_TANH_H_
 
-#include <cstdint>
 #include <vector>
 
-#include "absl/log/check.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Value.h"
+#include "llvm/IR/Module.h"
 #include "xla/codegen/math/intrinsic.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla::codegen::intrinsics {
 
-// XLA intrinsic for truncating floating point values (scalars and vectors).
-class FpTrunc : public Intrinsic<FpTrunc> {
+class Tanh : public Intrinsic<Tanh> {
  public:
-  static constexpr absl::string_view kName = "fptrunc";
-  static constexpr bool kLastArgIsReturnType = true;
-  static constexpr int8_t kNumArgs = 2;  // Second arg is the return type.
+  static constexpr absl::string_view kName = "tanh";
   static std::vector<std::vector<Type>> SupportedVectorTypes() {
+    // F16 via upcast to F32.
     return {
-        {Type::S(xla::F32), Type::S(xla::BF16)},
-        {Type::V(xla::F32, 2), Type::V(xla::BF16, 2)},
-        {Type::V(xla::F32, 4), Type::V(xla::BF16, 4)},
-        {Type::V(xla::F32, 8), Type::V(xla::BF16, 8)},
-        {Type::S(F8E5M2), Type::S(F16)},
-        {Type::V(F8E5M2, 2), Type::V(F16, 2)},
-        {Type::V(F8E5M2, 4), Type::V(F16, 4)},
-        {Type::V(F8E5M2, 8), Type::V(F16, 8)},
+        {Type::S(xla::F16)},    {Type::V(xla::F16, 8)}, {Type::V(xla::F16, 16)},
+        {Type::S(xla::F32)},
+
+        {Type::V(xla::F32, 4)}, {Type::V(xla::F32, 8)}, {Type::V(xla::F32, 16)},
+        // TODO(penporn): Re-enable after fixing JAX issue #23590.
+        // {Type::S(xla::F64)},
+        // {Type::V(xla::F64, 2)},
+        // {Type::V(xla::F64, 4)},
+        // {Type::V(xla::F64, 8)},
     };
   }
-
   static absl::StatusOr<llvm::Function*> CreateDefinition(llvm::Module* module,
-                                                          Type from, Type to);
+                                                          Type type);
 };
 
 }  // namespace xla::codegen::intrinsics
 
-#endif  // XLA_CODEGEN_MATH_FPTRUNC_H_
+#endif  // XLA_CODEGEN_MATH_TANH_H_
