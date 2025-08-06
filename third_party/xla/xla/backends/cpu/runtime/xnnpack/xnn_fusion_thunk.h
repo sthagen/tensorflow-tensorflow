@@ -59,8 +59,9 @@ class XnnFusionThunk : public Thunk {
   ~XnnFusionThunk() override;
 
   struct Options {
+    // Pass xnn_scheduler_t constructed from the intra-op threadpool to the
+    // XNNPACK runtime to allow XNNPACK to parallelize the execution.
     bool use_threadpool = true;
-    bool use_slinky = false;
   };
 
   struct Argument {
@@ -98,6 +99,8 @@ class XnnFusionThunk : public Thunk {
       absl::Span<const int64_t> captured_arguments_ids);
 
   tsl::AsyncValueRef<ExecuteEvent> Execute(const ExecuteParams& params) final;
+
+  bool ExecuteMayBlock() const final { return true; }
 
   BufferUses buffer_uses() const final;
 
