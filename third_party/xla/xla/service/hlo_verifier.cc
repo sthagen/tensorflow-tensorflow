@@ -236,6 +236,38 @@ absl::Status ShapeVerifier::HandleRaggedDot(HloInstruction* ragged_dot) {
   return CheckShape(ragged_dot, expected);
 }
 
+absl::Status ShapeVerifier::HandleScaledDot(HloInstruction* scaled_dot) {
+  TF_RETURN_IF_ERROR(
+      CheckOperandCount(scaled_dot, HloScaledDotInstruction::kOperands));
+  auto lhs_shape = scaled_dot->operand(0)->shape();
+  auto lhs_scale_shape = scaled_dot->operand(1)->shape();
+  auto rhs_shape = scaled_dot->operand(2)->shape();
+  auto rhs_scale_shape = scaled_dot->operand(3)->shape();
+  auto dot_dimension_numbers = scaled_dot->dot_dimension_numbers();
+  if (dot_dimension_numbers.lhs_contracting_dimensions_size() != 1) {
+    return Internal(
+        "lhs_contracting_dimensions must have exactly one dimension but got %s "
+        "in instruction %s",
+        absl::StrJoin(dot_dimension_numbers.lhs_contracting_dimensions(), ", "),
+        scaled_dot->ToString());
+  }
+  if (dot_dimension_numbers.rhs_contracting_dimensions_size() != 1) {
+    return Internal(
+        "rhs_contracting_dimensions must have exactly one dimension but got %s "
+        "in instruction %s",
+        absl::StrJoin(dot_dimension_numbers.rhs_contracting_dimensions(), ", "),
+        scaled_dot->ToString());
+  }
+  TF_ASSIGN_OR_RETURN(
+      const Shape expected,
+      ShapeInference::InferDotOpShape(
+          scaled_dot->operand(0)->shape(), scaled_dot->operand(2)->shape(),
+          scaled_dot->dot_dimension_numbers(),
+          /*preferred_element_type=*/scaled_dot->shape().element_type()));
+  // TODO(b/436988479): Check the shapes against the scale shapes.
+  return CheckShape(scaled_dot, expected);
+}
+
 absl::Status ShapeVerifier::HandleConvolution(HloInstruction* convolution) {
   TF_ASSIGN_OR_RETURN(
       Shape expected,
@@ -1268,8 +1300,10 @@ absl::Status ShapeVerifier::HandleFusion(HloInstruction* fusion) {
     if (!ShapesSame(fused_param->shape(), fusion->operand(param_no)->shape())) {
       return Internal(
           "Shape mismatch between parameter number %d and its operand in "
-          "%s.",
-          param_no, fusion->ToString().c_str());
+          "%s. (%s != %s)",
+          param_no, fusion->ToString().c_str(),
+          fused_param->shape().ToString(true),
+          fusion->operand(param_no)->shape().ToString(true));
     }
   }
   const HloFusionInstruction* casted_fusion =
@@ -2533,14 +2567,16 @@ absl::Status HandleRecvInstruction(const HloInstruction* instruction,
 absl::Status VerifyNoCollectiveDeadlocks(const HloModule& module) {
   DfaState current_state = DfaState::kNoException;
   const HloInstruction* current_instruction = nullptr;
-  for (const HloComputation* computation : module.computations()) {
-    for (const HloInstruction* instruction : computation->instructions()) {
+  // TODO: b/434020459 - start the static verification in ENTRY and run the
+  // function recursively instead of iterating through all computations
+  // serially
+
+  for (auto& [computation_id, sequence] : module.schedule().sequences()) {
+    for (const HloInstruction* instruction : sequence.instructions()) {
       switch (instruction->opcode()) {
         case HloOpcode::kSend:
           TF_RETURN_IF_ERROR(HandleSendInstruction(instruction, current_state,
                                                    current_instruction));
-          break;
-          // Handles Recv instructions.
           break;
         case HloOpcode::kRecv:
           TF_RETURN_IF_ERROR(HandleRecvInstruction(instruction, current_state,

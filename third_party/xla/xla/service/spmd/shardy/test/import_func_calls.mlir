@@ -120,7 +120,7 @@ func.func @multiple_call_ops_same_name(%arg0: tensor<8x2xi32> {sdy.sharding = #s
   // CHECK-NEXT: %[[MOVE_TO_HOST:.*]] = stablehlo.custom_call @MoveToHost(%[[NC_1]]) {backend_config = ""} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[MOVE_TO_HOST]] : tensor<8x2xi32>
   %0 = call @foobar(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>, random_attr = "random_value", mhlo.frontend_attributes = {backend_config = "{\22flag_configs\22:[],\22scoped_memory_configs\22:[],\22device_type\22:\22DEVICE_TYPE_HOST\22,\22used_scoped_memory_configs\22:[]}"}} : (tensor<8x2xi32>) -> tensor<8x2xi32>
-  // expected-warning @+1 {{uninlineable function @foobar has multiple call ops, we need to clone the function body for each call}}
+  // expected-warning @+1 {{function @foobar has multiple call ops, we need to clone the function body for each call}}
   %1 = call @foobar(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>, random_attr = "random_value", mhlo.frontend_attributes = {backend_config = "{\22flag_configs\22:[],\22scoped_memory_configs\22:[],\22device_type\22:\22DEVICE_TYPE_HOST\22,\22used_scoped_memory_configs\22:[]}"}} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   %2 = stablehlo.custom_call @MoveToHost(%1) {backend_config = ""} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %2 : tensor<8x2xi32>
