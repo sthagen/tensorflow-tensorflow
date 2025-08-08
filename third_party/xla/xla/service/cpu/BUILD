@@ -193,6 +193,7 @@ cc_library(
         ":cpu_float_support",
         ":cpu_instruction_fusion",
         ":cpu_layout_assignment",
+        ":cpu_multi_output_fusion",
         ":cpu_options",
         ":dot_op_emitter",
         ":executable_proto_cc",
@@ -937,7 +938,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/backends/cpu:onednn_emitter",
-        "//xla/backends/cpu:onednn_fusion",
+        "//xla/backends/cpu:onednn_support",
         "//xla/backends/cpu:xnn_emitter",
         "//xla/backends/cpu:xnn_fusion",
         "//xla/backends/cpu/codegen:computation_kernel_emitter",
@@ -2026,6 +2027,35 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "cpu_multi_output_fusion",
+    srcs = ["cpu_multi_output_fusion.cc"],
+    hdrs = ["cpu_multi_output_fusion.h"],
+    deps = [
+        "//xla:shape_util",
+        "//xla/codegen/emitters:elemental_hlo_to_mlir",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:multi_output_fusion",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+xla_cc_test(
+    name = "cpu_multi_output_fusion_test",
+    srcs = ["cpu_multi_output_fusion_test.cc"],
+    deps = [
+        ":cpu_multi_output_fusion",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/hlo/utils:hlo_matchers",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

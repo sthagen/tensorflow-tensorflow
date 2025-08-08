@@ -13,12 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_BACKENDS_GPU_CODEGEN_TRITON_KERNEL_NAME_TRACER_H_
-#define XLA_BACKENDS_GPU_CODEGEN_TRITON_KERNEL_NAME_TRACER_H_
+#ifndef XLA_BACKENDS_GPU_PROFILER_KERNEL_NAME_TRACER_H_
+#define XLA_BACKENDS_GPU_PROFILER_KERNEL_NAME_TRACER_H_
 
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "absl/status/statusor.h"
+#include "xla/stream_executor/platform.h"
 
 namespace xla::gpu {
 
@@ -28,7 +31,10 @@ namespace xla::gpu {
 // This class allows to get the names of the kernels that were used.
 class KernelNameTracer {
  public:
-  static std::unique_ptr<KernelNameTracer> Create();
+  // Creates a KernelNameTracer for the given platform. If the given platform is
+  // not supported, kNotFound error is returned.
+  static absl::StatusOr<std::unique_ptr<KernelNameTracer>> Create(
+      const stream_executor::Platform::Id& platform_id);
 
   virtual void start() = 0;
 
@@ -40,4 +46,4 @@ class KernelNameTracer {
 
 }  // namespace xla::gpu
 
-#endif  // XLA_BACKENDS_GPU_CODEGEN_TRITON_KERNEL_NAME_TRACER_H_
+#endif  // XLA_BACKENDS_GPU_PROFILER_KERNEL_NAME_TRACER_H_
