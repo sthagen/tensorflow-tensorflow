@@ -47,6 +47,7 @@ limitations under the License.
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+#include "xla/util.h"
 #include "tsl/platform/platform.h"
 
 namespace xla {
@@ -299,10 +300,24 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
   CommandBufferConfig config =
       GetCommandBufferConfig(debug_options, device_info);
 
-  CommandBufferCmdExecutor::SynchronizationMode synchronization_mode =
-      debug_options.xla_gpu_graph_enable_concurrent_region()
-          ? CommandBufferCmdExecutor::SynchronizationMode::kAutomatic
-          : CommandBufferCmdExecutor::SynchronizationMode::kSerialize;
+  CommandBufferCmdExecutor::SynchronizationMode synchronization_mode;
+  auto mode = debug_options.xla_gpu_command_buffer_scheduling_mode();
+  switch (mode) {
+    case DebugOptions::SERIALIZE:
+      synchronization_mode =
+          CommandBufferCmdExecutor::SynchronizationMode::kSerialize;
+      break;
+    case DebugOptions::CONCURRENT:
+      synchronization_mode =
+          CommandBufferCmdExecutor::SynchronizationMode::kConcurrent;
+      break;
+    case DebugOptions::LHS:
+      synchronization_mode =
+          CommandBufferCmdExecutor::SynchronizationMode::kLHS;
+      break;
+    default:
+      return Internal("Unsupported command buffer scheduling mode: %d", mode);
+  }
 
   bool changed = false;
 
@@ -314,8 +329,10 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
         ConvertToCommands(thunks_to_convert,
                           ConvertToCommandsOptions{synchronization_mode}));
 
+    Thunk::ThunkInfo thunk_info;
+    thunk_info.profile_annotation = "command_buffer";
     return std::make_unique<CommandBufferThunk>(
-        std::move(cmd_executor), Thunk::ThunkInfo(),
+        std::move(cmd_executor), std::move(thunk_info),
         std::make_unique<SequentialThunk>(Thunk::ThunkInfo(),
                                           std::move(thunks_to_convert)),
         debug_options.xla_enable_command_buffers_during_profiling());

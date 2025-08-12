@@ -272,7 +272,7 @@ static tsl::thread::ThreadPool* GetCompilationThreadPool() {
   thread_options.stack_size = 4 * 1024 * 1024;  // 4 MB
 
   static auto* const thread_pool = new tsl::thread::ThreadPool(
-      tsl::Env::Default(), thread_options, "xla-cpu-llvm-codegen",
+      tsl::Env::Default(), thread_options, "xla-cpu-codegen",
       std::min(kMaxCompilationThreads, tsl::port::MaxParallelism()));
   return thread_pool;
 }
@@ -1457,6 +1457,8 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
       debug_options.xla_llvm_disable_expensive_passes(),
       /*slp_vectorizer_disabled=*/options::SlpVectorizerDisabled(config),
       /*disable_loop_unrolling=*/options::DisableLoopUnrolling(config),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(config),
   };
 
   // Compiler hooks to intercept compiled LLVM IR modules.
@@ -1566,10 +1568,13 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
     // Thunk emitter is responsible for building a Thunk sequence that will
     // resolved kernels in the compiled LLVM module and execute them together
     // with Thunks implemented as library calls (e.g. oneDNN or Eigen).
-    ThunkEmitter thunk_emitter(ir_emitter2, *assignment,
-                               target_machine_features, *module);
+    ThunkEmitter thunk_emitter(ir_emitter2, *GetCompilationThreadPool(),
+                               *assignment, target_machine_features, *module);
     TF_ASSIGN_OR_RETURN(ThunkSequence thunks,
                         thunk_emitter.EmitEntryComputation(*module));
+
+    TF_ASSIGN_OR_RETURN(std::vector<ThunkEmitter::EmittedKernel> kernels,
+                        thunk_emitter.ConsumeKernels());
 
     std::string ir_module_string;
     if (embed_ir_in_executable) {
@@ -1580,14 +1585,13 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
         absl::StrAppend(
             out, llvm_ir::DumpToString(kernel.module.getModuleUnlocked()));
       };
-      std::string thunks_ir =
-          absl::StrJoin(thunk_emitter.kernels(), "\n", thunk_kernel_fmt);
+      std::string thunks_ir = absl::StrJoin(kernels, "\n", thunk_kernel_fmt);
 
       ir_module_string = absl::StrCat(emitter2_ir, "\n", thunks_ir);
     }
 
     TF_RETURN_IF_ERROR(VerifyLlvmModule(*llvm_module));
-    for (const auto& [name, module] : thunk_emitter.kernels()) {
+    for (const auto& [name, module] : kernels) {
       TF_RETURN_IF_ERROR(VerifyLlvmModule(*module.getModuleUnlocked()));
     }
 
@@ -1624,7 +1628,7 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
     // and the maximum number of parts that we want to split the module into.
     size_t num_compiled_functions = ir_emitter2.kernels().size() +
                                     ir_emitter2.comparators().size() +
-                                    thunk_emitter.kernels().size();
+                                    kernels.size();
     size_t num_default_parts =
         std::min(num_compiled_functions - num_extra_functions,
                  parallel_codegen_split_count - num_extra_parts);
@@ -1714,13 +1718,12 @@ CpuCompiler::CompileCpuExecutable(std::unique_ptr<HloModule> module) {
     absl::flat_hash_map<FunctionLibrary::TypeId, SymbolProto::FunctionTypeId>
         symbol_type_id_to_function_type_id;
 
-    VLOG(3) << "Adding " << thunk_emitter.kernels().size()
-            << " kernels to the JIT compiler";
+    VLOG(3) << "Adding " << kernels.size() << " kernels to the JIT compiler";
     // Make sure we use all the "default" modules for maximum parallelism.
     int num_default_so_far = dylib_index - num_extra_parts;
     int kernel_dylib_index =
         num_default_so_far < num_default_parts ? num_default_so_far : 0;
-    for (auto& [name, module] : thunk_emitter.kernels()) {
+    for (auto& [name, module] : kernels) {
       compiled_symbols.push_back(
           FunctionLibrary::Sym<FunctionLibrary::Kernel>(name));
       symbol_type_id_to_function_type_id.emplace(
@@ -2149,6 +2152,8 @@ CpuCompiler::CompileAheadOfTimeLegacy(
       options::SlpVectorizerDisabled(module->config()),
       /*disable_loop_unrolling=*/
       options::DisableLoopUnrolling(module->config()),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(module->config()),
       /*dfsan_enabled=*/aot_options.sanitize_dataflow(),
       /*dfsan_abilists_enabled=*/aot_options.sanitize_abilists_dataflow()};
 
@@ -2264,10 +2269,13 @@ CpuCompiler::CompileAheadOfTimeThunks(
   // Thunk emitter is responsible for building a Thunk sequence that will
   // resolved kernels in the compiled LLVM module and execute them together
   // with Thunks implemented as library calls (e.g. oneDNN or Eigen).
-  ThunkEmitter thunk_emitter(ir_emitter2, *assignment, target_machine_features,
-                             *module, thunk_emitter_options);
+  ThunkEmitter thunk_emitter(ir_emitter2, *GetCompilationThreadPool(),
+                             *assignment, target_machine_features, *module,
+                             thunk_emitter_options);
   TF_ASSIGN_OR_RETURN(ThunkSequence thunks,
                       thunk_emitter.EmitEntryComputation(*module));
+  TF_ASSIGN_OR_RETURN(std::vector<ThunkEmitter::EmittedKernel> kernels,
+                      thunk_emitter.ConsumeKernels());
 
   // Cache these flags here since we'll want to access them after the module's
   // ownership is std::moved.
@@ -2283,14 +2291,13 @@ CpuCompiler::CompileAheadOfTimeThunks(
       absl::StrAppend(out,
                       llvm_ir::DumpToString(kernel.module.getModuleUnlocked()));
     };
-    std::string thunks_ir =
-        absl::StrJoin(thunk_emitter.kernels(), "\n", thunk_kernel_fmt);
+    std::string thunks_ir = absl::StrJoin(kernels, "\n", thunk_kernel_fmt);
 
     ir_module_string = absl::StrCat(emitter2_ir, "\n", thunks_ir);
   }
 
   TF_RETURN_IF_ERROR(VerifyLlvmModule(*llvm_module));
-  for (const auto& [name, module] : thunk_emitter.kernels()) {
+  for (const auto& [name, module] : kernels) {
     TF_RETURN_IF_ERROR(VerifyLlvmModule(*module.getModuleUnlocked()));
   }
 
@@ -2333,6 +2340,8 @@ CpuCompiler::CompileAheadOfTimeThunks(
       options::SlpVectorizerDisabled(module->config()),
       /*disable_loop_unrolling=*/
       options::DisableLoopUnrolling(module->config()),
+      /*disable_platform_dependent_math=*/
+      options::DisablePlatformDependentMath(module->config()),
       /*dfsan_enabled=*/aot_options.sanitize_dataflow(),
       /*dfsan_abilists_enabled=*/aot_options.sanitize_abilists_dataflow()};
 
@@ -2357,8 +2366,7 @@ CpuCompiler::CompileAheadOfTimeThunks(
   absl::flat_hash_map<FunctionLibrary::TypeId, SymbolProto::FunctionTypeId>
       symbol_type_id_to_function_type_id;
 
-  VLOG(3) << "Compiling " << thunk_emitter.kernels().size()
-          << " thunk kernels.";
+  VLOG(3) << "Compiling " << kernels.size() << " thunk kernels.";
 
   // We have to clone the LLVM module into a local context to be able to link
   // it with the other modules. This enables us to have one object file for all
@@ -2384,7 +2392,7 @@ CpuCompiler::CompileAheadOfTimeThunks(
 
   llvm::Linker linker(*llvm_module);
 
-  for (auto& [name, module] : thunk_emitter.kernels()) {
+  for (auto& [name, module] : kernels) {
     compiled_symbols.push_back(
         FunctionLibrary::Sym<FunctionLibrary::Kernel>(name));
     symbol_type_id_to_function_type_id.emplace(compiled_symbols.back().type_id,
