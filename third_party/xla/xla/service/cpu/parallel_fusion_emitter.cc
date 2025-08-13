@@ -50,20 +50,35 @@ class ParallelFusionEmitter::FusionCompilerPool {
   explicit FusionCompilerPool(FusionCompiler::Options options)
       : options_(options) {}
 
+  ~FusionCompilerPool();
+
   // Get a single fusion compiler instance from the pool.
   // When the shared_ptr is destroyed, the instance is returned to the pool.
   std::shared_ptr<CompilerInstance> GetInstance();
 
  private:
   std::shared_ptr<CompilerInstance> CreateSharedInstance(
-      CompilerInstance instance);
+      CompilerInstance instance)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(instances_mutex_);
   void RecycleCompilerInstance(CompilerInstance* instance);
 
   FusionCompiler::Options options_;
 
   absl::Mutex instances_mutex_;
+  int64_t outstanding_instances_ ABSL_GUARDED_BY(instances_mutex_) = 0;
   std::stack<CompilerInstance> instances_ ABSL_GUARDED_BY(instances_mutex_);
 };
+
+ParallelFusionEmitter::FusionCompilerPool::~FusionCompilerPool() {
+  // We must wait for all instances to be returned to the pool before
+  // destroying it.
+  absl::MutexLock lock(&instances_mutex_);
+  instances_mutex_.Await(absl::Condition(
+      +[](int64_t* outstanding_instances) {
+        return *outstanding_instances == 0;
+      },
+      &outstanding_instances_));
+}
 
 auto ParallelFusionEmitter::FusionCompilerPool::GetInstance()
     -> std::shared_ptr<CompilerInstance> {
@@ -83,6 +98,7 @@ auto ParallelFusionEmitter::FusionCompilerPool::GetInstance()
 
 auto ParallelFusionEmitter::FusionCompilerPool::CreateSharedInstance(
     CompilerInstance instance) -> std::shared_ptr<CompilerInstance> {
+  outstanding_instances_++;
   return std::shared_ptr<CompilerInstance>(
       new CompilerInstance(std::move(instance)),
       absl::bind_front(&FusionCompilerPool::RecycleCompilerInstance, this));
@@ -91,6 +107,7 @@ auto ParallelFusionEmitter::FusionCompilerPool::CreateSharedInstance(
 void ParallelFusionEmitter::FusionCompilerPool::RecycleCompilerInstance(
     CompilerInstance* instance) {
   absl::MutexLock lock(&instances_mutex_);
+  outstanding_instances_--;
   instances_.push(std::move(*instance));
   delete instance;
 }

@@ -240,7 +240,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUSTOM_CALL);
   opts.add_xla_gpu_enable_command_buffer(DebugOptions::CUDNN);
   opts.set_xla_gpu_graph_min_graph_size(5);
-  opts.set_xla_gpu_command_buffer_scheduling_mode(DebugOptions::SERIALIZE);
+  opts.set_xla_gpu_command_buffer_scheduling_mode(DebugOptions::LHS);
   opts.set_xla_cmd_buffer_trace_cache_size(16);
 
   opts.set_xla_gpu_collectives_use_persistent_cliques(false);
@@ -676,21 +676,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
         debug_options->set_xla_partitioning_algorithm(partitioning_algorithm);
         return true;
       };
-
-  // Custom "sub-parser" lambda for xla_gpu_graph_level.
-  auto setter_for_xla_gpu_graph_level = [debug_options](const int32_t level) {
-    debug_options->clear_xla_gpu_enable_command_buffer();
-    if (level >= 1) {
-      debug_options->add_xla_gpu_enable_command_buffer(DebugOptions::FUSION);
-    }
-    if (level >= 2) {
-      debug_options->add_xla_gpu_enable_command_buffer(DebugOptions::CUBLAS);
-    }
-    if (level >= 3) {
-      debug_options->add_xla_gpu_enable_command_buffer(DebugOptions::CUDNN);
-    }
-    return true;
-  };
 
   auto command_types_to_string =
       [](tsl::protobuf::RepeatedField<int> command_types) -> std::string {
@@ -1571,10 +1556,9 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_gpu_dump_llvmir),
                 debug_options->xla_gpu_dump_llvmir(), "Dump LLVM IR."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_dump_hlo_unoptimized_snapshots",
-      bool_setter_for(
-          &DebugOptions::set_xla_gpu_dump_hlo_unoptimized_snapshots),
-      debug_options->xla_gpu_dump_hlo_unoptimized_snapshots(),
+      "xla_dump_hlo_unoptimized_snapshots",
+      bool_setter_for(&DebugOptions::set_xla_dump_hlo_unoptimized_snapshots),
+      debug_options->xla_dump_hlo_unoptimized_snapshots(),
       "Every time an HLO module is run, dumps an HloUnoptimizedSnapshot to the "
       "directory specified by --xla_dump_to."));
   flag_list->push_back(tsl::Flag("xla_gpu_enable_cudnn_fmha",
@@ -1601,11 +1585,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
           &DebugOptions::set_xla_gpu_collectives_use_persistent_cliques),
       debug_options->xla_gpu_collectives_use_persistent_cliques(),
       "Use persistent per-process XLA:GPU collectives cliques"));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_graph_level", setter_for_xla_gpu_graph_level, 1,
-      "The legacy flag for setting GPU graph level. Use "
-      "xla_gpu_enable_command_buffer in new use cases. 0 = off; 1 = capture "
-      "fusions and memcpys; 2 = capture gemms; 3 = capture convolutions."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_command_buffer",
       SetterForRepeatedEnum<DebugOptions::CommandBufferCmdType>(
@@ -1777,14 +1756,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "By default, XLA:CPU will run fp16 dot/conv as fp32, as this is "
       "generally (much) faster on our hardware. Set this flag to true to "
       "disable this behavior."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_dump_unoptimized_hlo_snapshots",
-      bool_setter_for(
-          &DebugOptions::set_xla_cpu_dump_unoptimized_hlo_snapshots),
-      debug_options->xla_cpu_dump_unoptimized_hlo_snapshots(),
-      "Dump HloSnapshot with an unoptimized HloModule into the --xla_dump_to "
-      "directory. If --xla_dump_hlo_snapshots is not set, this flag is "
-      "ignored."));
   flag_list->push_back(tsl::Flag(
       "xla_dump_latency_hiding_schedule",
       bool_setter_for(&DebugOptions::set_xla_dump_latency_hiding_schedule),

@@ -3789,6 +3789,23 @@ cc_library(
 )
 
 cc_library(
+    name = "hlo_cycle_detection",
+    hdrs = ["hlo_cycle_detection.h"],
+    deps = [
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/ir:hlo_module_group",
+        "//xla/hlo/pass:hlo_pass",
+        "//xla/tsl/platform:errors",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
     name = "hlo_verifier",
     srcs = ["hlo_verifier.cc"],
     hdrs = ["hlo_verifier.h"],
@@ -3796,6 +3813,7 @@ cc_library(
         ":collective_ops_utils",
         ":collective_permute_cycle",
         ":hlo_module_config",
+        ":matmul_indexing_utils",
         ":shape_inference",
         ":source_target_pairs",
         "//xla:comparison_util",
@@ -3808,7 +3826,6 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
-        "//xla/service:matmul_indexing_utils",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
@@ -3820,6 +3837,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -3841,11 +3859,11 @@ xla_cc_test(
         "//xla/hlo/testlib:test_helpers",
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/lib/core:status_test_util",
-        "//xla/tsl/platform:status_matchers",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:log_severity",
         "@com_google_absl//absl/log:scoped_mock_log",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -6211,6 +6229,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",

@@ -40,7 +40,6 @@ cc_library(
         "//xla:shape_util",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
-        "//xla/backends/gpu/codegen/triton:tma_utils",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
         "//xla/service/gpu:backend_configs_cc",
@@ -48,6 +47,7 @@ cc_library(
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/cuda:cuda_compute_capability",
+        "//xla/stream_executor/gpu:tma_metadata",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:nullability",
@@ -96,6 +96,7 @@ cc_library(
     name = "cublas",
     srcs = ["cublas.cc"],
     hdrs = ["cublas.h"],
+    tags = ["gpu"],
     deps = [
         ":gpu_codegen_backend",
         "//xla:autotuning_proto_cc",
@@ -133,6 +134,7 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
     ] + if_cuda([
         "//xla/stream_executor/cuda:repeat_buffer_kernel_cuda",
+        "//xla/stream_executor/cuda:cublas_plugin",
     ]),
 )
 
@@ -474,7 +476,6 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
-        "//xla/backends/gpu/codegen/triton:tma_utils",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/transforms/simplifiers:float_normalization",
         "//xla/hlo/utils:hlo_query",
@@ -492,7 +493,7 @@ cc_library(
         "//xla/service/gpu/transforms:priority_fusion",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/stream_executor/cuda:cuda_compute_capability",
+        "//xla/stream_executor/gpu:tma_metadata",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
@@ -629,6 +630,7 @@ xla_cc_binary(
         "//xla:debug_options_flags",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner",
+        "//xla/backends/autotuner:file_based_autotuner_cache",
         "//xla/backends/autotuner:profiler",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",

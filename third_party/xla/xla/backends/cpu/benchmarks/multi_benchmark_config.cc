@@ -1,4 +1,4 @@
-/* Copyright 2024 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,20 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
-#define XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
+#include "xla/backends/cpu/benchmarks/multi_benchmark_config.h"
 
-namespace stream_executor::gpu {
+#include "absl/flags/flag.h"
 
-// RAII wrapper for `GpuCommandBuffer::ActivateUpdateMode` that enables updates
-// of nested command buffers.
-class ScopedUpdateMode {
- public:
-  virtual ~ScopedUpdateMode() = 0;
-};
-
-inline ScopedUpdateMode::~ScopedUpdateMode() = default;
-
-}  // namespace stream_executor::gpu
-
-#endif  // XLA_STREAM_EXECUTOR_GPU_SCOPED_UPDATE_MODE_H_
+ABSL_FLAG(bool, xla_cpu_benchmark_aot, false, "Should we run AOT benchmarks?");
