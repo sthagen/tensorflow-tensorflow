@@ -296,12 +296,11 @@ cc_library(
         "//xla:util",
         "//xla/hlo/analysis:alias_info",
         "//xla/hlo/analysis:hlo_alias_analysis",
-        "//xla/hlo/analysis:tuple_points_to_analysis",
+        "//xla/hlo/analysis:hlo_dataflow_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/service:buffer_value",
         "//xla/service:hlo_value",
-        "//xla/service:logical_buffer",
         "//xla/service/heap_simulator",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:logging",
@@ -1483,6 +1482,25 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "reduce_window_resizer",
+    srcs = ["reduce_window_resizer.cc"],
+    hdrs = ["reduce_window_resizer.h"],
+    deps = [
+        ":reduce_window_util",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/pass:hlo_pass",
+        "//xla/tsl/platform:errors",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 

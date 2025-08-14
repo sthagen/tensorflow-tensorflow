@@ -19,10 +19,14 @@ cc_library(
     srcs = [
         "tfrt_gpu_buffer.cc",
         "tfrt_gpu_client.cc",
+        "tfrt_gpu_device.cc",
+        "utils.cc",
     ],
     hdrs = [
         "tfrt_gpu_buffer.h",
         "tfrt_gpu_client.h",
+        "tfrt_gpu_device.h",
+        "utils.h",
     ],
     defines = if_cuda(["GOOGLE_CUDA=1"]) + if_rocm(["TENSORFLOW_USE_ROCM=1"]),
     visibility = internal_visibility(["//xla/pjrt/gpu:legacy_gpu_client_users"]),
@@ -200,6 +204,7 @@ xla_cc_test(
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/tests:literal_test_util",
         "//xla/tsl/concurrency:async_value",
         # copybara:uncomment "//xla/tsl/framework:allocator",

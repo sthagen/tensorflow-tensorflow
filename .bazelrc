@@ -531,7 +531,9 @@ build:verbose_logs --output_filter=
 #   avoid having to define linux/win separately.
 build:avx_linux --copt=-mavx
 build:avx_linux --host_copt=-mavx
+build:avx_linux --copt="-mf16c"
 build:avx_win --copt=/arch:AVX
+build:avx_win --copt="-mf16c"
 
 build:win_clang_base --@com_google_protobuf//build_defs:use_dlls=True
 build:win_clang_base --@com_google_absl//absl:use_dlls=True
@@ -589,6 +591,7 @@ common --experimental_repo_remote_exec
 build:use_tar_archive_files --repo_env=USE_CUDA_TAR_ARCHIVE_FILES=1
 build:use_tar_archive_files --repo_env=USE_NVSHMEM_TAR_ARCHIVE_FILES=1
 build:use_tar_archive_files --repo_env=USE_LLVM_TAR_ARCHIVE_FILES=1
+build:use_tar_archive_files --repo_env=USE_MIRRORED_TAR_ARCHIVE_FILES=1
 
 # Make Bazel not try to probe the host system for a C++ toolchain.
 build:rbe_base --config=use_tar_archive_files

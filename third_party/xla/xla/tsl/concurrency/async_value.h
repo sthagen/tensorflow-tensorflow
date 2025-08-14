@@ -320,9 +320,6 @@ class AsyncValue {
   // starting for the head of the linked list.
   void RunWaiters(WaiterListNode* list);
 
-  // Slow path for when there are many waiters.
-  static void RunWaitersSlow(WaiterListNode* list);
-
   // IsTypeIdCompatible returns true if the type value stored in this AsyncValue
   // instance can be safely cast to `T`. This is a conservative check. I.e.
   // IsTypeIdCompatible may return true even if the value cannot be safely cast
@@ -385,7 +382,7 @@ class AsyncValue {
   // callbacks are informed.
   struct WaiterListNode {
     virtual ~WaiterListNode() = default;
-    virtual void operator()() = 0;
+    virtual void RunWaiterAndDeleteWaiterNode() = 0;
 
     WaiterListNode* next = nullptr;
     Context context{ContextKind::kThread};
@@ -501,10 +498,16 @@ class AsyncValue {
 
     struct Node final : public WaiterListNode {
       explicit Node(Waiter waiter) : waiter(std::move(waiter)) {}
-      void operator()() final {
-        WithContext wc(context);
+
+      // Waiter destruction may perform work that needs to run in the same
+      // context as the waiter itself, so we choose to destroy the waiter
+      // immediately after running it (by deleting `this` linked list node).
+      void RunWaiterAndDeleteWaiterNode() final {
+        WithContext wc(std::move(context));
         std::move(waiter)();
+        delete this;
       }
+
       Waiter waiter;
     };
 
@@ -1086,27 +1089,10 @@ inline void AsyncValue::NotifyAvailable(State available_state) {
 }
 
 inline void AsyncValue::RunWaiters(WaiterListNode* list) {
-  constexpr int kNumFastPathWaiters = 8;
-  // Collect nodes into waiter_list so that they run in order.
-  std::array<WaiterListNode*, kNumFastPathWaiters> waiter_list;
-  size_t n_waiters = 0;
   while (ABSL_PREDICT_FALSE(list)) {
-    if (ABSL_PREDICT_FALSE(n_waiters >= kNumFastPathWaiters)) {
-      RunWaitersSlow(list);
-      break;
-    }
-    waiter_list[n_waiters] = list;
-    ++n_waiters;
-    list = list->next;
-  }
-  while (n_waiters) {
-    --n_waiters;
-    WaiterListNode* node = waiter_list[n_waiters];
-    (*node)();
-    // Waiter destruction may perform work that needs to run in the same context
-    // that created the waiter.
-    WithContext wc(std::move(node->context));
-    delete node;
+    WaiterListNode* node = list;
+    list = node->next;
+    node->RunWaiterAndDeleteWaiterNode();
   }
 }
 

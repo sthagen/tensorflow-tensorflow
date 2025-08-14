@@ -49,6 +49,7 @@ limitations under the License.
 #include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "tsl/platform/platform.h"
+#include "tsl/profiler/lib/traceme.h"
 
 namespace xla {
 namespace gpu {
@@ -167,6 +168,14 @@ bool AllThunksInSequentialThunkAreConvertible(
 size_t CheckAsyncRegion(absl::Span<std::unique_ptr<Thunk>> thunks,
                         const CommandBufferConfig& config);
 
+bool IsCommandBufferCompatible(const std::string& target_name) {
+  absl::StatusOr<ffi::HandlerRegistration> registration =
+      ffi::FindHandler(target_name, "gpu");
+  return registration.ok()
+             ? ffi::IsCommandBufferCompatible(registration->traits)
+             : false;
+}
+
 bool IsConvertible(const Thunk* thunk, const CommandBufferConfig& config) {
   if (thunk->IsAsyncDone()) {
     return true;
@@ -203,13 +212,7 @@ bool IsConvertible(const Thunk* thunk, const CommandBufferConfig& config) {
               << " into command buffer.";
       return true;
     }
-
-    // Check if FFI handler is compatible with command buffers.
-    absl::StatusOr<ffi::HandlerRegistration> registration =
-        ffi::FindHandler(target_name, "gpu");
-    return registration.ok()
-               ? ffi::IsCommandBufferCompatible(registration->traits)
-               : false;
+    return IsCommandBufferCompatible(target_name);
   }
   return true;
 }
@@ -299,6 +302,8 @@ absl::Span<std::unique_ptr<Thunk>> CollectAndCheckAsyncRegion(
 absl::StatusOr<bool> CommandBufferConversionPass::Run(
     SequentialThunk* root_thunk_ptr, const DebugOptions& debug_options,
     const se::DeviceDescription& device_info) {
+  tsl::profiler::TraceMe traceme("CommandBufferConversionPass");
+
   CommandBufferConfig config =
       GetCommandBufferConfig(debug_options, device_info);
 
@@ -339,7 +344,7 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
                                           std::move(thunks_to_convert)),
         debug_options.xla_enable_command_buffers_during_profiling());
   };
-
+  bool must_use_command_buffer = false;
   std::vector<std::unique_ptr<Thunk>> current_command_buffer_thunks;
 
   std::vector<std::unique_ptr<Thunk>> new_thunks;
@@ -348,11 +353,13 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
     // If we don't have enough thunks to form a command buffer, we just add
     // them to the new thunks sequence as is.
     if (current_command_buffer_thunks.size() <
-        std::max(1, debug_options.xla_gpu_graph_min_graph_size())) {
+            std::max(1, debug_options.xla_gpu_graph_min_graph_size()) &&
+        !must_use_command_buffer) {
       new_thunks.insert(
           new_thunks.end(),
           std::make_move_iterator(current_command_buffer_thunks.begin()),
           std::make_move_iterator(current_command_buffer_thunks.end()));
+      must_use_command_buffer = false;
       current_command_buffer_thunks.clear();
       return absl::OkStatus();
     }
@@ -365,6 +372,7 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
            !cmd_buffer_thunk->thunks()->thunks().empty());
     new_thunks.push_back(std::move(cmd_buffer_thunk));
     changed = true;
+    must_use_command_buffer = false;
     current_command_buffer_thunks.clear();
     return absl::OkStatus();
   };
@@ -395,7 +403,14 @@ absl::StatusOr<bool> CommandBufferConversionPass::Run(
       // Check if thunk is convertible and not an async done: async done thunks
       // can be only added to the current_command_buffer_thunks as part of a
       // valid async regions.
-
+      if (thunk->kind() == Thunk::kCustomCall) {
+        const auto* custom_call_thunk =
+            static_cast<const CustomCallThunk*>(thunk.get());
+        const std::string& target_name = custom_call_thunk->target_name();
+        if (IsCommandBufferCompatible(target_name)) {
+          must_use_command_buffer = true;
+        }
+      }
       current_command_buffer_thunks.push_back(std::move(thunk));
       continue;
     }

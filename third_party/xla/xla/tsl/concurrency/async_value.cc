@@ -20,7 +20,6 @@ limitations under the License.
 #include <cstdlib>
 #include <limits>
 #include <utility>
-#include <vector>
 
 #include "absl/base/no_destructor.h"
 #include "absl/base/optimization.h"
@@ -67,8 +66,7 @@ void AsyncValue::EnqueueWaiterListNode(WaiterListNode* waiter,
     if (waiters_and_state.state() == State::kConcrete ||
         waiters_and_state.state() == State::kError) {
       DCHECK(waiters_and_state.waiter() == nullptr);
-      (*waiter)();
-      delete waiter;
+      waiter->RunWaiterAndDeleteWaiterNode();
       return;
     }
     // Update the waiter to point to the new head of the waiter list.
@@ -122,21 +120,6 @@ void IndirectAsyncValue::ForwardTo(RCReference<AsyncValue> value) {
     av->AndThen([self = FormRef(this), value = std::move(value)]() mutable {
       self->ForwardTo(std::move(value));
     });
-  }
-}
-
-/*static*/ void AsyncValue::RunWaitersSlow(WaiterListNode* list) {
-  std::vector<WaiterListNode*> waiters;
-  for (; list; list = list->next) {
-    waiters.push_back(list);
-  }
-  for (; !waiters.empty(); waiters.pop_back()) {
-    WaiterListNode* node = waiters.back();
-    (*node)();
-    // Waiter destruction may perform work that needs to run in the same context
-    // that created the waiter.
-    WithContext wc(std::move(node->context));
-    delete node;
   }
 }
 
