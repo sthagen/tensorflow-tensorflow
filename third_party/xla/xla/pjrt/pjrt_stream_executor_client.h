@@ -47,6 +47,7 @@ limitations under the License.
 #include "xla/layout.h"
 #include "xla/literal.h"
 #include "xla/pjrt/abstract_tracked_device_buffer.h"
+#include "xla/pjrt/common_pjrt_client.h"
 #include "xla/pjrt/local_device_state.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -228,7 +229,7 @@ class PjRtStreamExecutorMemorySpace : public PjRtMemorySpace {
   std::string to_string_;
 };
 
-class PjRtStreamExecutorClient : public PjRtClient {
+class PjRtStreamExecutorClient : public CommonPjRtClient {
  public:
   // `allocator` may null, in which case the platform default allocator is used.
   explicit PjRtStreamExecutorClient(
@@ -395,6 +396,33 @@ class PjRtStreamExecutorClient : public PjRtClient {
 
   bool IsOnCpu(PjRtMemorySpace* memory_space);
 
+  AsyncWorkRunner* async_work_runner() const override {
+    return async_work_runner_.get();
+  }
+
+  bool allows_recursion() const override { return false; }
+
+  absl::StatusOr<int64_t> GetOnDeviceBytesCount(
+      PjRtMemorySpace* memory_space, const xla::Shape& shape) const override;
+
+  absl::StatusOr<xla::Shape> MakeDefaultShapeForMemorySpace(
+      PjRtMemorySpace* memory_space, xla::Shape shape,
+      const xla::Layout* layout) const override;
+
+  absl::StatusOr<tsl::RCReference<CommonPjRtRawBuffer>> AllocateRawBuffer(
+      PjRtMemorySpace* memory_space, size_t on_device_bytes_count,
+      bool retry_on_oom, tsl::AsyncValueRef<bool> allocate_after) override;
+
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> DefineBuffer(
+      const Shape& on_device_shape,
+      tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+      absl::InlinedVector<tsl::RCReference<PjRtDeviceEvent>, 4>
+          definition_device_events,
+      bool raw_buffer_is_mutable) override;
+
+  void WaitForAllocation(se::Stream* stream,
+                         const CommonPjRtRawBuffer& raw_buffer);
+
  protected:
   friend class PjRtStreamExecutorBuffer;
   friend class PjRtStreamExecutorRawBuffer;
@@ -524,6 +552,7 @@ class PjRtStreamExecutorClient : public PjRtClient {
   std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options_;
 
   tsl::thread::ThreadPool thread_pool_;
+  std::unique_ptr<AsyncWorkRunner> async_work_runner_;
 
   absl::Mutex transpose_mu_;
   TransposePlanCache transpose_cache_ ABSL_GUARDED_BY(transpose_mu_);
