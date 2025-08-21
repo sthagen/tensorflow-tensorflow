@@ -137,8 +137,8 @@ TEST_F(SymbolicExprTest, Canonicalization_Basic) {
   SymbolicExpr add_combining_constants = (c2 + v0) + 3;
   EXPECT_EQ(add_combining_constants.Canonicalize().ToString(), "(v0 + 5)");
 
-  SymbolicExpr mul_combining_constants = (c2 * v0) * 3;
-  EXPECT_EQ(mul_combining_constants.Canonicalize().ToString(), "(v0 * 6)");
+  SymbolicExpr mul_combining_constants = (c2 * v0) * -1;
+  EXPECT_EQ(mul_combining_constants.Canonicalize().ToString(), "(v0 * -2)");
 
   SymbolicExpr combination = (v0 * 3) + (v0 * 2);
   EXPECT_EQ(combination.Canonicalize().ToString(), "(v0 * 5)");
@@ -182,7 +182,7 @@ TEST_F(SymbolicExprTest, Canonicalization_MinMax) {
             "(min(v0, v1) * 2)");
 }
 
-TEST_F(SymbolicExprTest, DISABLED_Canonicalization_DivMod) {
+TEST_F(SymbolicExprTest, Canonicalization_DivMod) {
   // FloorDiv, CeilDiv, and Mod simplifications.
   EXPECT_EQ((v0.floorDiv(1)).Canonicalize().ToString(), "v0");
   EXPECT_EQ((v0.ceilDiv(1)).Canonicalize().ToString(), "v0");
@@ -201,6 +201,13 @@ TEST_F(SymbolicExprTest, DISABLED_Canonicalization_DivMod) {
 
   EXPECT_EQ(((v0 * 8) % 4).Canonicalize().ToString(), "0");
   EXPECT_EQ(((v0 * 8 + 3) % 4).Canonicalize().ToString(), "3");
+
+  // Test ceilDiv with negative divisor.
+  EXPECT_EQ((v0.ceilDiv(-1)).Canonicalize().ToString(), "(v0 * -1)");
+  EXPECT_EQ((v0.ceilDiv(-2)).Canonicalize().ToString(),
+            "((v0 floordiv 2) * -1)");
+  EXPECT_EQ(((v0 * 6).floorDiv(-3)).Canonicalize().ToString(), "(v0 * -2)");
+  EXPECT_EQ(((v0 * 6).ceilDiv(-3)).Canonicalize().ToString(), "(v0 * -2)");
 }
 
 }  // namespace
