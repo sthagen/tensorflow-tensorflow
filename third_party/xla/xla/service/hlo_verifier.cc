@@ -1721,10 +1721,13 @@ absl::Status CheckCallableInstructionThreadName(
     const HloInstruction* instruction) {
   for (const HloComputation* computation : instruction->called_computations()) {
     if (instruction->parent() != nullptr) {
-      if (instruction->parent()->execution_thread() !=
-          computation->execution_thread()) {
+      if (xla::GetInstructionCallContext(instruction->opcode()) !=
+              CallContext::kEmbedded &&
+          instruction->parent()->execution_thread() !=
+              computation->execution_thread()) {
         return Internal(
-            "callable instruction %s expects parent computation thread name "
+            "Non-Embedded context callable instruction %s expects parent "
+            "computation thread name "
             "same as called computation's thread name (%s vs %s).",
             instruction->ToString(), instruction->parent()->execution_thread(),
             computation->execution_thread());
@@ -2748,8 +2751,8 @@ absl::Status VerifyOriginalValue(const HloModule& module) {
       if (auto original_value = instruction->original_value()) {
         // An original value is expected to have intermediate nodes that are
         // always nullopt and leaves with actual values.
-        for (const auto& leaf : original_value->leaves()) {
-          if (!leaf.second.has_value()) {
+        for (const auto& pair : original_value->original_arrays()) {
+          if (!pair.second.has_value()) {
             return Internal(
                 "Leaf nodes in an original value is expected to contain values."
                 " Instruction: %s.",
@@ -3226,10 +3229,13 @@ class InstructionVerifier : public DfsHloVisitorWithDefault {
 
     if (opts_.verify_call_nested_computation_thread_name &&
         instruction->has_to_apply() &&
+        xla::GetInstructionCallContext(instruction->opcode()) !=
+            xla::CallContext::kEmbedded &&
         instruction->to_apply()->execution_thread() !=
             instruction->parent()->execution_thread()) {
       return Internal(
-          "%s top_apply computation execution thread does not match (%s vs %s)",
+          "Non-Embedded context callable instruction %s to_apply computation "
+          "execution thread does not match (%s vs %s)",
           instruction->name(), instruction->to_apply()->execution_thread(),
           instruction->parent()->execution_thread());
     }

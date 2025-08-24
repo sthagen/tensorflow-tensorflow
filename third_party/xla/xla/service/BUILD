@@ -3451,6 +3451,7 @@ xla_cc_test(
         "//xla:debug_options_flags",
         "//xla:literal_util",
         "//xla:shape_util",
+        "//xla:tuple_tree",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/analysis:alias_info",
@@ -3548,7 +3549,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:logging",
     ],
 )
 
@@ -4196,8 +4196,6 @@ xla_test(
         "cpu",
         "gpu",
     ],
-    # TODO(b/332870133): Enable when it passes on H100.
-    disabled_backends = ["h100"],
     tags = [
         "no_windows",  # TODO(b/152037541)
     ],
@@ -6173,6 +6171,7 @@ cc_library(
     srcs = ["sharding_config.cc"],
     hdrs = ["sharding_config.h"],
     deps = [
+        "//xla:printer",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo_sharding",
