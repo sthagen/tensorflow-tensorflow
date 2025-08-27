@@ -2021,19 +2021,26 @@ PartitionedHlo PartitionedHlo::TryMultipleSourceTargetDims(
 
 namespace {
 
-// Matching the following patterns, where X, Y, cannot be 1, Z can be 1.
-// 1. [..,X,..,Y,..] -> [..,X*Y,..,1,..]
-// 2. [..,Y,..,X,..] -> [..,1,..,X*Y,..]
-// 3. [..,X*Y,..,Z,..] -> [..,X,..,Y*Z,..]
-// 4. [..,Z,..,X*Y,..] -> [..,Y*Z,..,X,..]
+std::tuple<HloSharding, HloSharding, int64_t> CreateSplitShardingTuple(
+    const HloSharding& source, const HloSharding& target, int64_t dim,
+    int64_t new_dim_size) {
+  HloSharding split_source =
+      hlo_sharding_util::SplitShardingDimension(source, dim, new_dim_size);
+  HloSharding split_target =
+      hlo_sharding_util::SplitShardingDimension(target, dim, new_dim_size);
+  return std::make_tuple(std::move(split_source), std::move(split_target), dim);
+}
+
+// Matching the following patterns, where X and Y cannot be 1.
+// 1. [..,X,..,Y,..] <-> [..,X*Y,..,1,..]
+// 2. [..,Y,..,X,..] <-> [..,1,..,X*Y,..]
+// 3. [..,X*Y,..] -> [..,X,..], Y can be in any other dimension in the result.
 // Output tuple:
-// - HloSharding: The original sharding with an extra dimension added of size 1
-// or Y.
-// - HloSharding: The sharding with the new dimension added moved in the place
-// where we expect the target dimension to be.
+// - HloSharding: Split source sharding with the new dimension added.
+// - HloSharding: Split target sharding with the new dimension added.
 // - int64_t: The index of X.
 std::optional<std::tuple<HloSharding, HloSharding, int64_t>>
-PatternMatchMergeOrSplitSharding(const Shape& shape, const Shape& base_shape,
+PatternMatchMergeOrSplitSharding(const Shape& base_shape,
                                  const HloSharding& source,
                                  const HloSharding& target) {
   if (!source.IsTiled() || !target.IsTiled()) {
@@ -2049,7 +2056,11 @@ PatternMatchMergeOrSplitSharding(const Shape& shape, const Shape& base_shape,
     return std::nullopt;
   }
 
-  std::vector<int64_t> diff_index;
+  // Collect dimension indices with different tile assignment sizes.
+  // 1. diff_index_1: one of the source/target tile_assignment dimension is 1.
+  // 2. diff_index_2: two tile assignment dimensions are not 1.
+  std::vector<int64_t> diff_index_1;
+  std::vector<int64_t> diff_index_2;
   for (int64_t i = 0; i < target.TiledDataRank(); ++i) {
     int64_t si = source.tile_assignment().dim(i);
     int64_t ti = target.tile_assignment().dim(i);
@@ -2058,7 +2069,7 @@ PatternMatchMergeOrSplitSharding(const Shape& shape, const Shape& base_shape,
     }
     auto [min, max] = std::minmax(si, ti);
     if (min == 1) {
-      diff_index.push_back(i);
+      diff_index_1.push_back(i);
       continue;
     }
     if (max % min != 0) {
@@ -2067,63 +2078,27 @@ PatternMatchMergeOrSplitSharding(const Shape& shape, const Shape& base_shape,
     if (CeilOfRatio(base_shape.dimensions(i), min) * min % max != 0) {
       continue;
     }
-    diff_index.push_back(i);
+    diff_index_2.push_back(i);
   }
 
-  // Iterate every pair of elements in diff_index.
-  for (int64_t diff_index_i = 0; diff_index_i < diff_index.size();
-       ++diff_index_i) {
-    for (int64_t diff_index_j = diff_index_i + 1;
-         diff_index_j < diff_index.size(); ++diff_index_j) {
-      int64_t i = diff_index[diff_index_i];
-      int64_t j = diff_index[diff_index_j];
-      const std::vector<bool> is_one = {source.tile_assignment().dim(i) == 1,
-                                        source.tile_assignment().dim(j) == 1,
-                                        target.tile_assignment().dim(i) == 1,
-                                        target.tile_assignment().dim(j) == 1};
-      int64_t new_dim_size;
-      switch (std::count(is_one.begin(), is_one.end(), true)) {
-        case 1: {
-          if (source.tile_assignment().dim(i) *
-                  source.tile_assignment().dim(j) !=
-              target.tile_assignment().dim(i) *
-                  target.tile_assignment().dim(j)) {
-            continue;
-          }
-          if (source.tile_assignment().dim(i) == 1 ||
-              target.tile_assignment().dim(i) == 1) {
-            std::swap(i, j);
-            // After the swap, we always have the following.
-            // i is the dimension without size 1 in either source or target
-            // j is the dimension with size 1 in either source or target
-          }
-          new_dim_size = std::min(source.tile_assignment().dim(i),
-                                  target.tile_assignment().dim(i));
-          break;
-        }
-        case 0: {
-          if (source.tile_assignment().dim(i) <
-              target.tile_assignment().dim(i)) {
-            std::swap(i, j);
-          }
-          if (source.tile_assignment().dim(i) !=
-              target.tile_assignment().dim(i) *
-                  target.tile_assignment().dim(j)) {
-            continue;
-          }
-          new_dim_size = target.tile_assignment().dim(i);
-          break;
-        }
-        default:
-          continue;
+  // Iterate combination of diff_index_1 and diff_index_2.
+  for (int64_t i : diff_index_2) {
+    for (int64_t j : diff_index_1) {
+      if (source.tile_assignment().dim(i) * source.tile_assignment().dim(j) !=
+          target.tile_assignment().dim(i) * target.tile_assignment().dim(j)) {
+        continue;
       }
+      int64_t new_dim_size = std::min(source.tile_assignment().dim(i),
+                                      target.tile_assignment().dim(i));
+      return CreateSplitShardingTuple(source, target, i, new_dim_size);
+    }
+  }
 
-      HloSharding reshaped_sharding =
-          hlo_sharding_util::SplitShardingDimension(source, i, new_dim_size);
-      HloSharding new_sharding =
-          hlo_sharding_util::SplitShardingDimension(target, i, new_dim_size);
-      return std::make_tuple(std::move(reshaped_sharding),
-                             std::move(new_sharding), i);
+  // Iterate each index in diff_index_2.
+  for (int64_t i : diff_index_2) {
+    if (source.tile_assignment().dim(i) > target.tile_assignment().dim(i)) {
+      return CreateSplitShardingTuple(source, target, i,
+                                      target.tile_assignment().dim(i));
     }
   }
 
@@ -2218,8 +2193,8 @@ std::optional<PartitionedHlo> PartitionedHlo::TryComplexReshardHandling(
   const bool is_source_partially_replicated =
       sharding().ReplicateOnLastTileDim();
   const bool is_target_partially_replicated = target.ReplicateOnLastTileDim();
-  if (auto reshape = PatternMatchMergeOrSplitSharding(
-          this->hlo()->shape(), this->base_shape(), sharding(), target)) {
+  if (auto reshape = PatternMatchMergeOrSplitSharding(this->base_shape(),
+                                                      sharding(), target)) {
     auto& [before_sharding, new_reshaped_sharding, source_dim] = *reshape;
     PartitionedHlo reshaped = SplitReshapeHelper(
         *this, source_dim, this->hlo()->shape().dimensions(source_dim),
@@ -5690,14 +5665,24 @@ absl::Status SpmdPartitioner::ConvertUnreducedSharding(
       auto convert_unreduced_subgroup_sharding =
           [](HloInstruction* hlo,
              const HloSharding& sharding) -> absl::StatusOr<HloSharding> {
-        // TODO(b/438306205, b/438308782): Remove this check once the unreduced
-        // subgroup sharding is compatible with manual and replicated.
-        TF_RET_CHECK(!sharding.HasPartialReplication() &&
-                     !sharding.IsManualSubgroup())
+        // TODO(b/438306205): Remove this check once the unreduced
+        // subgroup sharding is compatible with manual.
+        TF_RET_CHECK(!sharding.IsManualSubgroup())
             << "Incompatible unreduced sharding at " << hlo->ToString();
         hlo->add_frontend_attribute(sdy::kHasUnreducedAxes, "true");
-        return HloSharding::PartialTile(sharding.tile_assignment(),
-                                        sharding.metadata());
+        TileAssignment tile_assignment = sharding.tile_assignment();
+        if (sharding.HasPartialReplication()) {
+          // When we have both replicated and unreduced, merge them into one
+          // in the tile assignment.
+          int64_t unreduced_dim = sharding.SubgroupUnreducedDim();
+          DimensionVector new_dims(tile_assignment.dimensions().begin(),
+                                   tile_assignment.dimensions().end());
+          new_dims[sharding.SubgroupReplicationDim()] *=
+              new_dims[unreduced_dim];
+          new_dims.erase(new_dims.begin() + unreduced_dim);
+          tile_assignment = tile_assignment.Reshape(new_dims);
+        }
+        return HloSharding::PartialTile(tile_assignment, sharding.metadata());
       };
       if (sharding.IsTuple()) {
         std::vector<HloSharding> subshardings = sharding.tuple_elements();
