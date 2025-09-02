@@ -620,6 +620,10 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
                                 target_machine_features)
                 .value_or(false);
   };
+
+  // xla::cpu::GetDotImplementationStrategy (used by call_library_for_dot)
+  // relies on the canonical form of dots.
+  pipeline.AddPass<DotDecomposer>();
   pipeline.AddPass<OperandUpcaster>(upcaster_filter);
 
   // Expand random number generation.
