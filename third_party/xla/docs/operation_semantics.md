@@ -194,15 +194,15 @@ for a detailed description of the algorithm.
 
 Calculates gradients of batch norm.
 
-**`BatchNormGrad(operand, scale, mean, variance, grad_output, epsilon,
-                 feature_index)`**
+**`BatchNormGrad(operand, scale, batch_mean, batch_var, grad_output, epsilon,
+feature_index)`**
 
 Arguments       | Type    | Semantics
 --------------- | ------- | ----------------------------------------------------
 `operand`       | `XlaOp` | n dimensional array to be normalized (x)
 `scale`         | `XlaOp` | 1 dimensional array ($\gamma$)
-`mean`          | `XlaOp` | 1 dimensional array ($\mu$)
-`variance`      | `XlaOp` | 1 dimensional array ($\sigma^2$)
+`batch_mean`    | `XlaOp` | 1 dimensional array ($\mu$)
+`batch_var`     | `XlaOp` | 1 dimensional array ($\sigma^2$)
 `grad_output`   | `XlaOp` | Gradients passed to `BatchNormTraining` ($\nabla y$)
 `epsilon`       | `float` | Epsilon value ($\epsilon$)
 `feature_index` | `int64` | Index to feature dimension in `operand`
@@ -235,8 +235,8 @@ d_l&=
 \end{split}
 $$
 
-The inputs `mean` and `variance` represent moments values across batch and
-spatial dimensions.
+The inputs `batch_mean` and `batch_var` represent moments values across batch
+and spatial dimensions.
 
 The output type is a tuple of three handles:
 
@@ -244,10 +244,10 @@ The output type is a tuple of three handles:
 | -------------- | ------- | ------------------------------------------------- |
 | `grad_operand` | `XlaOp` | gradient with respect to input `operand` ($\nabla |
 :                :         : x$)                                               :
-| `grad_scale`   | `XlaOp` | gradient with respect to input `scale` ($\nabla   |
-:                :         : \gamma$)                                          :
-| `grad_offset`  | `XlaOp` | gradient with respect to input `offset`($\nabla   |
-:                :         : \beta$)                                           :
+| `grad_scale`   | `XlaOp` | gradient with respect to input `scale`            |
+:                :         : ($\nabla\gamma$)                                  :
+| `grad_offset`  | `XlaOp` | gradient with respect to input                    |
+:                :         : `offset`($\nabla\beta$)                           :
 
 ## BatchNormInference
 
@@ -1021,20 +1021,26 @@ idempotent.
 See also
 [`XlaBuilder::Dot`](https://github.com/openxla/xla/tree/main/xla/hlo/builder/xla_builder.h).
 
-**`Dot(lhs, rhs)`**
+**`Dot(lhs, rhs, precision_config, preferred_element_type)`**
 
-Arguments | Type    | Semantics
---------- | ------- | ---------------
-`lhs`     | `XlaOp` | array of type T
-`rhs`     | `XlaOp` | array of type T
+| Arguments                | Type              | Semantics                   |
+| ------------------------ | ----------------- | --------------------------- |
+| `lhs`                    | `XlaOp`           | array of type T             |
+| `rhs`                    | `XlaOp`           | array of type T             |
+| `precision_config`       | optional          | enum for level of precision |
+:                          : `PrecisionConfig` :                             :
+| `preferred_element_type` | optional          | enum of scalar element type |
+:                          : `PrimitiveType`   :                             :
 
 The exact semantics of this operation depend on the ranks of the operands:
 
-| Input                               | Output          | Semantics               |
-| ----------------------------------- | --------------- | ----------------------- |
-| vector [n] `dot` vector [n]         | scalar          | vector dot product      |
-| matrix [m x k] `dot` vector [k]     | vector [m]      | matrix-vector multiplication |
-| matrix [m x k] `dot` matrix [k x n] | matrix [m x n]  | matrix-matrix multiplication |
+| Input                       | Output         | Semantics                    |
+| --------------------------- | -------------- | ---------------------------- |
+| vector [n] `dot` vector [n] | scalar         | vector dot product           |
+| matrix [m x k] `dot` vector | vector [m]     | matrix-vector multiplication |
+: [k]                         :                :                              :
+| matrix [m x k] `dot` matrix | matrix [m x n] | matrix-matrix multiplication |
+: [k x n]                     :                :                              :
 
 The operation performs sum of products over the second dimension of `lhs` (or
 the first if it has 1 dimension) and the first dimension of `rhs`. These are the
@@ -1042,18 +1048,37 @@ the first if it has 1 dimension) and the first dimension of `rhs`. These are the
 the same size. In practice, it can be used to perform dot products between
 vectors, vector/matrix multiplications or matrix/matrix multiplications.
 
+`precision_config` is used to indicate the precision configuration. The level
+dictates whether hardware should attempt to generate more machine code
+instructions to provide more accurate dtype emulation when needed (i.e.
+emulating f32 on a TPU that only supports bf16 matmuls). Values may be
+`DEFAULT`, `HIGH`, `HIGHEST`. Additional details
+[in the MXU sections](https://cloud.google.com/blog/products/ai-machine-learning/bfloat16-the-secret-to-high-performance-on-cloud-tpus).
+
+`preferred_element_type` is a scalar element of higher/lower precision output
+types used for accumulation. `preferred_element_type` recommends the
+accumulation type for the given operaiton, however it is not guaranteed. This
+allows for some hardware backends to instead accumulate in a different type and
+convert to the preferred output type.
+
 ## DotGeneral
 
 See also
 [`XlaBuilder::DotGeneral`](https://github.com/openxla/xla/tree/main/xla/hlo/builder/xla_builder.h).
 
-**`DotGeneral(lhs, rhs, dimension_numbers)`**
+**`DotGeneral(lhs, rhs, dimension_numbers, precision_config,
+preferred_element_type)`**
 
-Arguments           | Type                  | Semantics
-------------------- | --------------------- | ---------------
-`lhs`               | `XlaOp`               | array of type T
-`rhs`               | `XlaOp`               | array of type T
-`dimension_numbers` | `DotDimensionNumbers` | contracting and batch dimension numbers
+| Arguments                | Type                  | Semantics              |
+| ------------------------ | --------------------- | ---------------------- |
+| `lhs`                    | `XlaOp`               | array of type T        |
+| `rhs`                    | `XlaOp`               | array of type T        |
+| `dimension_numbers`      | `DotDimensionNumbers` | contracting and batch  |
+:                          :                       : dimension numbers      :
+| `precision_config`       | optional              | enum for level of      |
+:                          : `PrecisionConfig`     : precision              :
+| `preferred_element_type` | optional              | enum of scalar element |
+:                          : `PrimitiveType`       : type                   :
 
 Similar to Dot, but allows contracting and batch dimension numbers to be
 specified for both the `lhs` and `rhs`.
@@ -1128,6 +1153,19 @@ DotGeneral(lhs, rhs, dnums) -> { { {1.0, 2.0},
 It follows that the resulting dimension number starts with the batch dimension,
 then the `lhs` non-contracting/non-batch dimension, and finally the `rhs`
 non-contracting/non-batch dimension.
+
+`precision_config` is used to indicate the precision configuration. The level
+dictates whether hardware should attempt to generate more machine code
+instructions to provide more accurate dtype emulation when needed (i.e.
+emulating f32 on a TPU that only supports bf16 matmuls). Values may be
+`DEFAULT`, `HIGH`, `HIGHEST`. Additional details
+[can be found in the MXU sections](https://cloud.google.com/blog/products/ai-machine-learning/bfloat16-the-secret-to-high-performance-on-cloud-tpus).
+
+`preferred_element_type` is a scalar element of higher/lower precision output
+types used for accumulation. `preferred_element_type` recommends the
+accumulation type for the given operaiton, however it is not guaranteed. This
+allows for some hardware backends to instead accumulate in a different type and
+convert to the preferred output type.
 
 ## DynamicSlice
 
@@ -1425,6 +1463,60 @@ Arguments | Type    | Semantics
 The function is applied to each element in the `operand` array, resulting in an
 array with the same shape. It is allowed for `operand` to be a scalar
 (0-dimensional).
+
+### Optional Result Accuracy
+
+XlaBuilder supports these element-wise unary functions with the optional
+`result_accuracy` argument:
+
+<b>`Cbrt(operand, result_accuracy)`</b> Element-wise cubic root operation `x ->
+cbrt(x)`.
+
+<b>`Cos(operand, result_accuracy)`</b> Element-wise cosine `x -> cos(x)`.
+
+<b>`Erf(operand, result_accuracy)`</b> Element-wise error function `x -> erf(x)`
+where
+
+$$\text{erf}(x) = \frac{2}{\sqrt{\pi}}\int_0^x e^{-t^2} \, dt$$.
+
+<b>`Exp(operand, result_accuracy)`</b> Element-wise natural exponential `x ->
+e^x`.
+
+<b>`Expm1(operand, result_accuracy)`</b> Element-wise natural exponential minus
+one `x -> e^x - 1`.
+
+<b>`Log(operand, result_accuracy)`</b> Element-wise natural logarithm `x ->
+ln(x)`.
+
+<b>`Log1p(operand, result_accuracy)`</b> Element-wise shifted natural logarithm
+`x -> ln(1+x)`.
+
+<b>`Logistic(operand, result_accuracy)`</b> Element-wise logistic function
+computation `x -> logistic(x)`.
+
+<b>`Rsqrt(operand, result_accuracy)`</b> Element-wise reciprocal of square root
+operation `x -> 1.0 / sqrt(x)`.
+
+<b>`Sin(operand, result_accuracy)`</b> Element-wise sine `x -> sin(x)`.
+
+<b>`Sqrt(operand, result_accuracy)`</b> Element-wise square root operation `x ->
+sqrt(x)`.
+
+<b>`Tan(operand, result_accuracy)`</b> Element-wise tangent `x -> tan(x)`.
+
+<b>`Tanh(operand, result_accuracy)`</b> Element-wise hyperbolic tangent `x ->
+tanh(x)`.
+
+| Arguments         | Type                      | Semantics                   |
+| ----------------- | ------------------------- | --------------------------- |
+| `operand`         | `XlaOp`                   | The operand to the function |
+| `result_accuracy` | optional `ResultAccuracy` | The types of accuracy the   |
+:                   :                           : user can request for unary  :
+:                   :                           : ops with multiple           :
+:                   :                           : implementations             :
+
+For more information on `result_accuracy` see
+[Result Accuracy](https://github.com/openxla/stablehlo/blob/main/rfcs/20241015-result-accuracy.md)
 
 ## Fft
 
