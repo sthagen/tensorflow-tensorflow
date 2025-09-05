@@ -217,7 +217,6 @@ EXPORTS
   ?Build@KernelDefBuilder@tensorflow@@QEAAPEBVKernelDef@2@XZ
   ?Canonicalize@FunctionParameterCanonicalizer@tensorflow@@QEAA_NPEAU_object@@0V?$Span@PEAU_object@@@lts_20250512@absl@@@Z
   ?Capture@StackTrace@tensorflow@@SA?AV?$shared_ptr@VStackTrace@tensorflow@@@std@@H@Z
-  ?CatPieces@internal@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@V?$initializer_list@V?$basic_string_view@DU?$char_traits@D@std@@@std@@@5@@Z
   ?CatPieces@strings_internal@lts_20250512@absl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@V?$initializer_list@V?$basic_string_view@DU?$char_traits@D@std@@@std@@@5@@Z
   ?Check@PyListChecker@py_dispatch@tensorflow@@UEAA?AW4MatchType@PyTypeChecker@23@PEAU_object@@@Z
   ?Check@PyUnionChecker@py_dispatch@tensorflow@@UEAA?AW4MatchType@PyTypeChecker@23@PEAU_object@@@Z
@@ -657,10 +656,10 @@ EXPORTS
   ?StrCat@lts_20250512@absl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@000@Z
   ?StrCat@lts_20250512@absl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@00@Z
   ?StrCat@lts_20250512@absl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@0@Z
-  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@000@Z
-  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@00@Z
-  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@0@Z
-  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@12@@Z
+  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@lts_20250512@absl@@000@Z
+  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@lts_20250512@absl@@00@Z
+  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@lts_20250512@absl@@0@Z
+  ?StrCat@strings@tsl@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEBVAlphaNum@lts_20250512@absl@@@Z
   ?StripDefaultAttributes@tensorflow@@YAXAEBVOpRegistryInterface@1@PEAV?$RepeatedPtrField@VNodeDef@tensorflow@@@protobuf@google@@@Z
   ?Sub@ops@tensorflow@@YA?AVStatus@lts_20250512@absl@@PEAVAbstractContext@2@QEAVAbstractTensorHandle@2@1PEAPEAV72@PEBD3@Z
   ?SubRegisterer@gradients@tensorflow@@YAPEAVGradientFunction@12@AEBUForwardOperation@12@@Z

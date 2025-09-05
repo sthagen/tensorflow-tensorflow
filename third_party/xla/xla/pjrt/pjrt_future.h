@@ -470,10 +470,30 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
     friend class PjRtFuture;
   };
 
+  // This is a temporary class to support migration from CreatePromise() to
+  // MakePromise() and an end goal of making Promise move-only type.
+  class MoveOnlyPromise : public Promise {
+   public:
+    using Promise::Promise;
+    using Promise::Set;
+
+    MoveOnlyPromise(MoveOnlyPromise&&) = default;
+    MoveOnlyPromise& operator=(MoveOnlyPromise&&) = default;
+  };
+
   // Returns a Promise that can be used to construct a PjRtFuture, and then Set
   // later.
   static Promise CreatePromise() {
     return Promise(tsl::MakeUnconstructedAsyncValueRef<absl::StatusOr<T>>());
+  }
+
+  // Returns a pair of connected Promise and PjRtFuture<T>. Setting the returned
+  // promise will fulfill the connected future.
+  static std::pair<MoveOnlyPromise, PjRtFuture<T>> MakePromise() {
+    MoveOnlyPromise promise(
+        tsl::MakeUnconstructedAsyncValueRef<absl::StatusOr<T>>());
+    PjRtFuture<T> future(promise);
+    return std::make_pair(std::move(promise), std::move(future));
   }
 
   // Bring PjRtFutureBase constructors in scope.
@@ -517,22 +537,21 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
             std::enable_if_t<!is_move_only && std::is_constructible_v<R, U>>* =
                 nullptr>
   PjRtFuture<R> Map(F&& f) const& {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
     using Value = const absl::StatusOr<T>&;
-    OnReady([promise, f = std::forward<F>(f)](Value value) mutable {
+    OnReady([promise = std::move(promise),
+             f = std::forward<F>(f)](Value value) mutable {
       if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
         promise.Set(Base::AbortedError());
-        return;
-      }
-      if (ABSL_PREDICT_TRUE(value.ok())) {
+      } else if (ABSL_PREDICT_TRUE(value.ok())) {
         promise.emplace(absl::in_place_t{}, f(*value));
       } else {
         promise.Set(value.status());
       }
     });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // Returns an PjRtFuture<R> that is constructed from the result of invoking
@@ -550,28 +569,26 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
                 F, std::conditional_t<is_move_only, T, const T&>>,
             std::enable_if_t<std::is_constructible_v<R, U>>* = nullptr>
   PjRtFuture<R> Map(F&& f) && {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
     using Value = std::conditional_t<is_move_only, absl::StatusOr<T>,
                                      const absl::StatusOr<T>&>;
-    std::move(*this).OnReady(
-        [promise, f = std::forward<F>(f)](Value value) mutable {
-          if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
-            promise.Set(Base::AbortedError());
-            return;
-          }
-          if (ABSL_PREDICT_TRUE(value.ok())) {
-            if constexpr (is_move_only) {
-              promise.emplace(absl::in_place_t{}, f(std::move(*value)));
-            } else {
-              promise.emplace(absl::in_place_t{}, f(*value));
-            }
-          } else {
-            promise.Set(value.status());
-          }
-        });
+    std::move(*this).OnReady([promise = std::move(promise),
+                              f = std::forward<F>(f)](Value value) mutable {
+      if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
+        promise.Set(Base::AbortedError());
+      } else if (ABSL_PREDICT_TRUE(value.ok())) {
+        if constexpr (is_move_only) {
+          promise.emplace(absl::in_place_t{}, f(std::move(*value)));
+        } else {
+          promise.emplace(absl::in_place_t{}, f(*value));
+        }
+      } else {
+        promise.Set(value.status());
+      }
+    });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // Returns an PjRtFuture<R> that is constructed from the result of invoking
@@ -592,15 +609,14 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
                        std::is_constructible_v<R, typename U::value_type>>* =
           nullptr>
   PjRtFuture<R> TryMap(F&& f) const& {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
     using Value = const absl::StatusOr<T>&;
-    OnReady([promise, f = std::forward<F>(f)](Value value) mutable {
+    OnReady([promise = std::move(promise),
+             f = std::forward<F>(f)](Value value) mutable {
       if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
         promise.Set(Base::AbortedError());
-        return;
-      }
-      if (ABSL_PREDICT_TRUE(value.ok())) {
+      } else if (ABSL_PREDICT_TRUE(value.ok())) {
         auto result = f(*value);
         if (ABSL_PREDICT_TRUE(result.ok())) {
           promise.emplace(absl::in_place_t{}, *std::move(result));
@@ -612,7 +628,7 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
       }
     });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // Returns an PjRtFuture<R> that is constructed from the result of invoking
@@ -634,35 +650,33 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
                 is_status_or<U> &&
                 std::is_constructible_v<R, typename U::value_type>>* = nullptr>
   PjRtFuture<R> TryMap(F&& f) && {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
     using Value = std::conditional_t<is_move_only, absl::StatusOr<T>,
                                      const absl::StatusOr<T>&>;
-    std::move(*this).OnReady(
-        [promise, f = std::forward<F>(f)](Value value) mutable {
-          if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
-            promise.Set(Base::AbortedError());
-            return;
-          }
-          if (ABSL_PREDICT_TRUE(value.ok())) {
-            auto result = [&] {
-              if constexpr (is_move_only) {
-                return f(std::move(*value));
-              } else {
-                return f(*value);
-              }
-            }();
-            if (ABSL_PREDICT_TRUE(result.ok())) {
-              promise.emplace(absl::in_place_t{}, *std::move(result));
-            } else {
-              promise.Set(std::move(result).status());
-            }
+    std::move(*this).OnReady([promise = std::move(promise),
+                              f = std::forward<F>(f)](Value value) mutable {
+      if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
+        promise.Set(Base::AbortedError());
+      } else if (ABSL_PREDICT_TRUE(value.ok())) {
+        auto result = [&] {
+          if constexpr (is_move_only) {
+            return f(std::move(*value));
           } else {
-            promise.Set(value.status());
+            return f(*value);
           }
-        });
+        }();
+        if (ABSL_PREDICT_TRUE(result.ok())) {
+          promise.emplace(absl::in_place_t{}, *std::move(result));
+        } else {
+          promise.Set(std::move(result).status());
+        }
+      } else {
+        promise.Set(value.status());
+      }
+    });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // A `Map` overload that automatically infers the type of result from `f`.
@@ -726,6 +740,17 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
     friend class PjRtFuture<void>;
   };
 
+  // This is a temporary class to support migration from CreatePromise() to
+  // MakePromise() and an end goal of making Promise move-only type.
+  class MoveOnlyPromise : public Promise {
+   public:
+    using Promise::Promise;
+    using Promise::Set;
+
+    MoveOnlyPromise(MoveOnlyPromise&&) = default;
+    MoveOnlyPromise& operator=(MoveOnlyPromise&&) = default;
+  };
+
   // Returns a Promise that can be used to construct a PjRtFuture, and then Set
   // later.
   static Promise CreatePromise() {
@@ -734,9 +759,10 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
 
   // Returns a pair of connected Promise and PjRtFuture<>. Setting the returned
   // promise will fulfill the connected future.
-  static std::pair<Promise, PjRtFuture<>> MakePromise() {
-    auto promise = Promise(tsl::MakeUnconstructedAsyncValueRef<absl::Status>());
-    auto future = PjRtFuture<void>(promise);
+  static std::pair<MoveOnlyPromise, PjRtFuture<>> MakePromise() {
+    MoveOnlyPromise promise(
+        tsl::MakeUnconstructedAsyncValueRef<absl::Status>());
+    PjRtFuture<> future(promise);
     return std::make_pair(std::move(promise), std::move(future));
   }
 
@@ -782,21 +808,20 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
   //
   template <typename R, typename F, typename U = std::invoke_result_t<F>>
   PjRtFuture<R> Map(F&& f) {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
-    OnReady([promise, f = std::forward<F>(f)](absl::Status status) mutable {
+    OnReady([promise = std::move(promise),
+             f = std::forward<F>(f)](absl::Status status) mutable {
       if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
         promise.Set(Base::AbortedError());
-        return;
-      }
-      if (ABSL_PREDICT_TRUE(status.ok())) {
+      } else if (ABSL_PREDICT_TRUE(status.ok())) {
         promise.emplace(absl::in_place_t{}, f());
       } else {
         promise.Set(std::move(status));
       }
     });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // Returns an PjRtFuture<R> that is constructed from the result of invoking
@@ -816,14 +841,13 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
                 is_status_or<U> &&
                 std::is_constructible_v<R, typename U::value_type>>* = nullptr>
   PjRtFuture<R> TryMap(F&& f) {
-    auto promise = PjRtFuture<R>::CreatePromise();
+    auto [promise, future] = PjRtFuture<R>::MakePromise();
 
-    OnReady([promise, f = std::forward<F>(f)](absl::Status status) mutable {
+    OnReady([promise = std::move(promise),
+             f = std::forward<F>(f)](absl::Status status) mutable {
       if (ABSL_PREDICT_FALSE(promise.IsUniqueReference())) {
         promise.Set(Base::AbortedError());
-        return;
-      }
-      if (ABSL_PREDICT_TRUE(status.ok())) {
+      } else if (ABSL_PREDICT_TRUE(status.ok())) {
         auto result = f();
         if (ABSL_PREDICT_TRUE(result.ok())) {
           promise.emplace(absl::in_place_t{}, *std::move(result));
@@ -835,7 +859,7 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
       }
     });
 
-    return PjRtFuture<R>(promise);
+    return std::move(future);
   }
 
   // A `Map` overload that automatically infers the type of result from `f`.
@@ -890,7 +914,7 @@ PjRtFuture<> PjRtFutureBase<T, is_move_only>::GetReadyFuture() const {
           promise.Set(self->status());
         }
       });
-  return future;
+  return std::move(future);
 }
 
 }  // namespace internal
