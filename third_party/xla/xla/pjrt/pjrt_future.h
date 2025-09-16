@@ -219,6 +219,11 @@ class PjRtFutureBase : public PjRtFutureMoveControl<is_move_only> {
 
   explicit operator bool() const { return static_cast<bool>(promise_); }
 
+  // Returns a pointer to the underlying AsyncValue that can be used to
+  // track completion of a future. It is undefined behavior to access the
+  // value stored in the AsyncValue.
+  tsl::AsyncValue* async_value() const { return promise_.GetAsyncValue(); }
+
  protected:
   static constexpr bool IsMoveOnly() { return is_move_only; }
 
@@ -552,6 +557,10 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
   // functor `f` with *this value. If *this completes with an error, returned
   // future will also be an error.
   //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
+  //
   // Sample usage:
   //
   // future.Map<R>([](const T& value) -> U {
@@ -583,6 +592,10 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
   // Returns an PjRtFuture<R> that is constructed from the result of invoking
   // functor `f` with *this value. If *this completes with an error, returned
   // future will also be an error.
+  //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
   //
   // Sample usage: move-only type T passed by value
   //
@@ -623,6 +636,10 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
   // absl::StatusOr<U> where R is constructible from U. Returned absl::StatusOr
   // is automatically unwrapped and returned as a future payload.
   //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
+  //
   // Sample usage:
   //
   // future.TryMap<R>([](const T& value) -> absl::StatusOr<U> {
@@ -662,6 +679,10 @@ class PjRtFuture : public internal::PjRtFutureBase<absl::StatusOr<T>> {
   // future will also be an error. Functor `f` must return a value of type
   // absl::StatusOr<U> where R is constructible from U. Returned absl::StatusOr
   // is automatically unwrapped and returned as a future payload.
+  //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
   //
   // Sample usage: move-only type T passed by rvalue
   //
@@ -832,6 +853,10 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
   // functor `f`. If *this completes with an error, returned future will also be
   // an error.
   //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
+  //
   // Sample usage:
   //
   // future.Map<R>([]() -> U {
@@ -861,6 +886,10 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
   // an error. Functor `f` must return a value of type absl::StatusOr<U> where R
   // is constructible from U. Returned absl::StatusOr is automatically unwrapped
   // and returned as a future payload.
+  //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
   //
   // Sample usage:
   //
@@ -909,6 +938,10 @@ class PjRtFuture<void> : public internal::PjRtFutureBase<absl::Status> {
 
   // Returns an PjRtFuture<R> that is constructed from the given value. If *this
   // completes with an error, returned future will also be an error.
+  //
+  // Note: The implementation may choose to not run `f` if it can infer that the
+  // returned future will never be used. Do not use this method if `f` has a
+  // side effect that must always be executed when the future becomes ready.
   //
   // Sample usage: make buffer available when future is ready
   //

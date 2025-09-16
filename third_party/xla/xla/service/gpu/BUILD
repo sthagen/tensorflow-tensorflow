@@ -1720,6 +1720,10 @@ cc_library(
 xla_test(
     name = "gpu_compiler_test",
     srcs = ["gpu_compiler_test.cc"],
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
+    },
     backends = ["gpu"],
     data = ["gpu_compiler_test_autotune_db.textproto"],
     deps = [
@@ -2004,6 +2008,10 @@ xla_test(
     srcs = [
         "ptx_compilation_test.cc",
     ],
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
+    },
     backends = [
         "gpu",
     ],
@@ -2580,6 +2588,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:side_effect_util",
         "//xla:util",
+        "//xla/codegen:ir_emission_utils",
         "//xla/hlo/analysis:hlo_dataflow_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:hlo_instruction_utils",
@@ -2919,6 +2928,10 @@ xla_cc_test(
 xla_test(
     name = "determinism_test",
     srcs = ["determinism_test.cc"],
+    backend_tags = {
+        # TODO(b/445172709): Re-enable once fixed.
+        "b200": ["broken"],
+    },
     backends = ["gpu"],
     deps = [
         "//xla:literal",
@@ -3179,6 +3192,14 @@ cc_library(
     ],
     deps = [
         ":gpu_compiler",
+        ":target_constants",
+        "//xla/hlo/analysis:hlo_dataflow_analysis",
+        "//xla/hlo/ir:hlo",
+        "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor:stream_executor_h",
+        "//xla/stream_executor/sycl:sycl_platform_id",
+        "@com_google_absl//absl/status:statusor",
+        "@llvm-project//llvm:ir_headers",
     ],
 )
 

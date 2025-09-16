@@ -159,7 +159,12 @@ class Build:
 
   def __post_init__(self):
     # pylint: disable=protected-access
-    assert self.type_ not in self.__class__._builds
+    assert (
+        self.type_ not in self.__class__._builds
+    ), "Can't have multiple builds of same BuildType!"
+    assert (
+        self.repo == "openxla/xla" or self.override_repository
+    ), "Must override repo if repo under test isn't XLA!"
     self.__class__._builds[self.type_] = self
 
   @classmethod
@@ -644,9 +649,26 @@ Build(
         color="yes",
     ),
     override_repository=dict(
-        xla=f"{_GITHUB_WORKSPACE}/openxla/xla",
+        local_xla=f"{_GITHUB_WORKSPACE}/openxla/xla",
     ),
     repo_env={"USE_PYWRAP_RULES": "True"},
+    extra_setup_commands=(
+        # This is pretty devious - but we have to do some adhoc extra Copybara
+        # work here to get XLA into the shape TF expects. b/407638223
+        # pyformat:disable
+        [
+            "find",
+            f"{_GITHUB_WORKSPACE}/openxla/xla",
+            "-type", "f",
+            "-exec", "sed", "-i", "s/@local_xla/@local_xla/g", "{}", "+",
+        ],
+        [
+            "find",
+            f"{_GITHUB_WORKSPACE}/openxla/xla",
+            "-type", "f",
+            "-exec", "sed", "-i", "s/@local_tsl/@local_tsl/g", "{}", "+",
+        ],
+    ),
 )
 
 Build(
@@ -668,7 +690,7 @@ Build(
     build_tag_filters=tensorflow_gpu_tag_filters,
     test_tag_filters=tensorflow_gpu_tag_filters,
     override_repository=dict(
-        xla=f"{_GITHUB_WORKSPACE}/openxla/xla",
+        local_xla=f"{_GITHUB_WORKSPACE}/openxla/xla",
     ),
     options=dict(
         verbose_failures=True,
@@ -678,7 +700,24 @@ Build(
         color="yes",
     ),
     repo_env={"USE_PYWRAP_RULES": "True"},
-    extra_setup_commands=(["nvidia-smi"],),
+    extra_setup_commands=(
+        # This is pretty devious - but we have to do some adhoc extra Copybara
+        # work here to get XLA into the shape TF expects. b/407638223
+        # pyformat:disable
+        [
+            "find",
+            f"{_GITHUB_WORKSPACE}/openxla/xla",
+            "-type", "f",
+            "-exec", "sed", "-i", "s/@local_xla/@local_xla/g", "{}", "+",
+        ],
+        [
+            "find",
+            f"{_GITHUB_WORKSPACE}/openxla/xla",
+            "-type", "f",
+            "-exec", "sed", "-i", "s/@local_tsl/@local_tsl/g", "{}", "+",
+        ],
+        ["nvidia-smi"],
+    ),
 )
 
 
