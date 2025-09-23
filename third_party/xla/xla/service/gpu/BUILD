@@ -14,7 +14,6 @@ load(
     "if_google",
     "internal_visibility",
     "tsl_copts",
-    "tsl_gpu_library",
 )
 load("//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
 load(
@@ -1307,12 +1306,12 @@ cc_library(
         ":ir_emitter_context",
         ":ir_emitter_unnested",
         ":metrics",
-        ":runtime_intrinsics",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/gpu/runtime:runtime_intrinsics",
         "//xla/backends/gpu/runtime:sequential_thunk",
         "//xla/hlo/analysis:hlo_ordering",
         "//xla/hlo/ir:hlo",
@@ -1383,6 +1382,7 @@ cc_library(
         "//xla/service/gpu/transforms:priority_fusion",
         "//xla/service/gpu/transforms:variadic_op_splitter",
         "//xla/stream_executor:device_description",
+        "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:env",
     ],
 )
@@ -1445,7 +1445,6 @@ cc_library(
         ":metrics",
         ":pre_scheduling_copy_insertion_pipeline",
         ":reduction_utils",
-        ":runtime_intrinsics",
         ":stream_executor_util",
         "//xla:autotune_results_proto_cc",
         "//xla:debug_options_flags",
@@ -1458,6 +1457,7 @@ cc_library(
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/autotuner:block_level_emitter",
         "//xla/backends/gpu/codegen/triton:support",
+        "//xla/backends/gpu/runtime:runtime_intrinsics",
         "//xla/backends/gpu/runtime:sequential_thunk",
         "//xla/backends/gpu/runtime:thunk",
         "//xla/core/host_offloading:hlo_host_device_type_call_wrapper",
@@ -2002,6 +2002,7 @@ xla_test(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+        "@llvm-project//mlir:IR",
     ],
 )
 
@@ -2266,6 +2267,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/profiler/lib:traceme",
@@ -2315,7 +2317,7 @@ cc_library(
     srcs = ["gpu_spmd_pipeline.cc"],
     hdrs = ["gpu_spmd_pipeline.h"],
     deps = [
-        ":runtime_intrinsics",
+        "//xla/backends/gpu/runtime:runtime_intrinsics",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/pass:hlo_pass_pipeline",
@@ -2775,53 +2777,6 @@ xla_cc_test(
     ],
 )
 
-tsl_gpu_library(
-    name = "runtime_intrinsics",
-    srcs = ["runtime_intrinsics.cc"],
-    hdrs = ["runtime_intrinsics.h"],
-    deps = [
-        "//xla:literal",
-        "//xla:shape_util",
-        "//xla:util",
-        "//xla:xla_data_proto_cc",
-        "//xla/ffi",
-        "//xla/ffi:ffi_api",
-        "//xla/service:collective_ops_utils",
-        "//xla/service:custom_call_status",
-        "//xla/service:custom_call_target_registry",
-        "//xla/service:platform_util",
-        "//xla/stream_executor:memory_allocation",
-        "//xla/stream_executor:stream",
-        "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-    ],
-    alwayslink = 1,
-)
-
-xla_test(
-    name = "runtime_intrinsics_test",
-    srcs = ["runtime_intrinsics_test.cc"],
-    backends = ["gpu"],
-    deps = [
-        ":runtime_intrinsics",
-        "//xla/hlo/ir:hlo",
-        "//xla/tests:hlo_test_base",
-        "//xla/tests:xla_internal_test_main",
-        "//xla/tsl/platform:status_matchers",
-        "//xla/tsl/platform:statusor",
-        "//xla/tsl/platform:test",
-        "@com_google_absl//absl/base:log_severity",
-        "@com_google_absl//absl/log:scoped_mock_log",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
 cc_library(
     name = "hlo_fusion_stats",
     srcs = ["hlo_fusion_stats.cc"],
@@ -3058,6 +3013,7 @@ xla_cc_test(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+        "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:logging",
         "@local_tsl//tsl/platform:statusor",
