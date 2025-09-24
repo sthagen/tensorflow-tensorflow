@@ -362,7 +362,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_threshold_for_windowed_einsum_mib(100000);
   opts.set_xla_gpu_operand_bytes_threshold_for_windowed_einsum(-1);
 
-  opts.set_xla_gpu_enable_triton_hopper(false);
   opts.set_xla_gpu_experimental_enable_fusion_block_level_rewriter(false);
 
   opts.set_xla_gpu_enable_llvm_module_compilation_parallelism(false);
@@ -1673,13 +1672,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 debug_options->xla_dump_full_hlo_config(),
                 "Enable dumping the full HloModuleConfig proto."));
   flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_custom_fusions_re",
-      string_setter_for(&DebugOptions::set_xla_gpu_enable_custom_fusions_re),
-      debug_options->xla_gpu_enable_custom_fusions_re(),
-      "Limits custom fusion only to fusions which match this regular "
-      "expression. Default is all custom fusions registerered in a current "
-      "process."));
-  flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_dynamic_slice_fusion",
       bool_setter_for(&DebugOptions::set_xla_gpu_enable_dynamic_slice_fusion),
       debug_options->xla_gpu_enable_dynamic_slice_fusion(),
@@ -2119,11 +2111,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "If set >= 0, xla_gpu_threshold_for_windowed_einsum_mib is ignored."
       "Default is -1"));
 
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_triton_hopper",
-      bool_setter_for(&DebugOptions::set_xla_gpu_enable_triton_hopper),
-      debug_options->xla_gpu_enable_triton_hopper(),
-      "Currently used to enable MMA_V3 for Hopper in Triton"));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_fusion_block_level_rewriter",
       bool_setter_for(

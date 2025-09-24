@@ -13,7 +13,12 @@ load(
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility", "tsl_copts")
 load("//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
-load("//xla/tsl/mkl:build_defs.bzl", "if_graph_api", "if_onednn")
+load(
+    "//xla/tsl/mkl:build_defs.bzl",
+    "if_graph_api",
+    "if_onednn",
+    "onednn_cc_library",
+)
 load("//xla/tsl/platform:build_config.bzl", "tf_proto_library")
 load(
     "//xla/tsl/platform:build_config_root.bzl",
@@ -333,6 +338,7 @@ cc_library(
         "//xla/service:while_loop_constant_sinking",
         "//xla/service:while_loop_invariant_code_motion",
         "//xla/service:while_loop_simplifier",
+        "//xla/service/cpu:cpu_aot_loader",
         "//xla/service/llvm_ir:llvm_command_line_options",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/service/spmd:stateful_rng_spmd_partitioner",
@@ -1701,7 +1707,7 @@ tf_proto_library(
     ],
 )
 
-cc_library(
+onednn_cc_library(
     name = "onednn_util",
     srcs = ["onednn_util.cc"],
     hdrs = [
@@ -1717,9 +1723,10 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/tsl/mkl:onednn",
         "//xla/tsl/platform:env",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:platform_port",
     ],
 )
@@ -1859,7 +1866,7 @@ cc_library(
     ],
 )
 
-cc_library(
+onednn_cc_library(
     name = "onednn_pattern_utils",
     hdrs = ["onednn_pattern_utils.h"],
     visibility = ["//visibility:public"],
@@ -2166,4 +2173,42 @@ xla_cc_test(
         "//xla/tsl/lib/monitoring:collection_registry",
         "@local_tsl//tsl/platform:test",
     ],
+)
+
+cc_library(
+    name = "cpu_aot_loader",
+    srcs = ["cpu_aot_loader.cc"],
+    hdrs = ["cpu_aot_loader.h"],
+    deps = [
+        ":cpu_aot_compilation_result",
+        ":executable_proto_cc",
+        ":runtime_symbol_generator",
+        "//xla:util",
+        "//xla/backends/cpu/codegen:cpu_features",
+        "//xla/backends/cpu/codegen:execution_engine",
+        "//xla/backends/cpu/codegen:ir_compiler",
+        "//xla/backends/cpu/codegen:object_loader",
+        "//xla/backends/cpu/runtime:function_library",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:compiler",
+        "//xla/service:executable",
+        "//xla/service:hlo_module_config",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//llvm:Target",
+        "@llvm-project//llvm:ir_headers",
+    ] + if_llvm_aarch64_available([
+        "@llvm-project//llvm:AArch64CodeGen",  # fixdeps: keep
+    ]) + if_llvm_powerpc_available([
+        "@llvm-project//llvm:PowerPCCodeGen",  # fixdeps: keep
+    ]) + if_llvm_system_z_available([
+        "@llvm-project//llvm:SystemZCodeGen",  # fixdeps: keep
+    ]) + if_llvm_x86_available([
+        "@llvm-project//llvm:X86CodeGen",  # fixdeps: keep
+    ]),
 )

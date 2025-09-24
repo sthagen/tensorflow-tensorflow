@@ -241,27 +241,8 @@ absl::Status NVPTXCompiler::OptimizeHloConvolutionCanonicalization(
     pipeline.AddPass<CudnnSimplifyPadding>();
   }
 
-  // tf2xla bridge, DepthwiseConvolutionConverter, ConvRewriter, and
-  // CudnnSimplifyPadding introduce reshapes and transposes.  Run ReshapeMover
-  // to a fixed point.  Include algsimp because ReshapeMover relies on it.
-  [&, &pipeline = pipeline.AddPass<HloPassFix<HloPassPipeline>>(
-          "reshape_mover_after_conv_canonicalization")] {
-    ReshapeMoverOptions reshape_mover_options;
-    reshape_mover_options.reshape_of_1d_broadcast_is_cheap = true;
-    pipeline.AddPass<ReshapeMover>(reshape_mover_options);
-    pipeline.AddPass<GpuAlgebraicSimplifier>(algsimp_options, gpu_version);
-  }();
-
-  // The reshapes and transposes can possibly be eliminated using
-  // AlgebraicSimplifier. ConvertMover and ReshapeMover fight with each other.
-  // ConvertMover wants to move some converts down the graph, but ReshapeMover
-  // wants to move them up the graph. We run ConvertMover and algsimp to a fixed
-  // point.
-  [&, &pipeline = pipeline.AddPass<HloPassFix<HloPassPipeline>>(
-          "simplify_after_conv_canonicalization")] {
-    pipeline.AddPass<ConvertMover>();
-    pipeline.AddPass<GpuAlgebraicSimplifier>(algsimp_options, gpu_version);
-  }();
+  pipeline.AddPass<ConvertMover>();
+  pipeline.AddPass<GpuAlgebraicSimplifier>(algsimp_options, gpu_version);
 
   // ConvRewriter, ConvPaddingLegalization and
   // CudnnConvPadForTensorCores may add instructions which can be simplified
@@ -416,6 +397,12 @@ bool ShouldAutotuneBetweenFusionEmitters(const HloInstruction& instruction) {
   // kCustom fusions have already been assigned to a backend and we don't want
   // to override it.
   if (fusion->fusion_kind() == HloInstruction::FusionKind::kCustom) {
+    return false;
+  }
+  // Scatter can't go through the block-level emitter and runs into comparator
+  // issues in the autotuner as different runs can produce different results.
+  if (absl::c_any_of(fusion->fused_instructions_computation()->instructions(),
+                     HloPredicateIsOp<HloOpcode::kScatter>)) {
     return false;
   }
   return absl::c_any_of(
