@@ -13,22 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_SPMD_SHARDY_SDY_ROUND_TRIP_CLONE_MANUAL_COMPUTATION_CALLS_H_
-#define XLA_SERVICE_SPMD_SHARDY_SDY_ROUND_TRIP_CLONE_MANUAL_COMPUTATION_CALLS_H_
+#ifndef XLA_FUTURE_H_
+#define XLA_FUTURE_H_
 
-#include <memory>
-
-#include "mlir/Pass/Pass.h"
+#include "xla/tsl/concurrency/future.h"  // IWYU pragma: export
 
 namespace xla {
-namespace sdy {
 
-std::unique_ptr<mlir::Pass> createSdyRoundTripCloneManualComputationCallsPass();
+using ::tsl::Future;
+using ::tsl::FutureHelpers;
+using ::tsl::JoinFutures;
+using ::tsl::Promise;
 
-// Registers the xla-sdy-round-trip-clone-manual-computation-calls pass.
-void registerSdyRoundTripCloneManualComputationCallsPass();
-
-}  // namespace sdy
 }  // namespace xla
 
-#endif  // XLA_SERVICE_SPMD_SHARDY_SDY_ROUND_TRIP_CLONE_MANUAL_COMPUTATION_CALLS_H_
+#endif  // XLA_FUTURE_H_

@@ -1,4 +1,4 @@
-/* Copyright 2023 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/pjrt/pjrt_future.h"
+#include "xla/tsl/concurrency/future.h"
 
 #include <atomic>
 #include <cstdint>
@@ -31,34 +31,34 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 
-namespace xla {
+namespace tsl {
 
 // Construct an immediately ready promise in the static storage. This avoids
 // heap allocation and reference counting operations on a hot path.
 static tsl::internal::AsyncValueStorage<absl::Status> ready_promise_storage;
 absl::NoDestructor<tsl::AsyncValueOwningRef<absl::Status>>
-    PjRtFuture<>::ready_promise_(
+    Future<>::ready_promise_(
         tsl::MakeAvailableAsyncValueRef<absl::Status>(ready_promise_storage));
 
 namespace {
 struct State {
   explicit State(int32_t size) : pending_count(size) {
-    std::tie(promise, future) = PjRtFuture<>::MakePromise();
+    std::tie(promise, future) = Future<>::MakePromise();
   }
 
   std::atomic<int32_t> pending_count;
-  PjRtFuture<>::Promise promise;
-  PjRtFuture<> future;
+  Future<>::Promise promise;
+  Future<> future;
 
   absl::Mutex mu;
   absl::Status status ABSL_GUARDED_BY(&mu);
 };
 }  // namespace
 
-PjRtFuture<> JoinFutures(absl::Span<const PjRtFuture<>> futures) {
+Future<> JoinFutures(absl::Span<const Future<>> futures) {
   VLOG(2) << "xla::JoinFutures: " << futures.size() << " futures";
   if (futures.empty()) {
-    return PjRtFuture<>(absl::OkStatus());
+    return Future<>(absl::OkStatus());
   }
   if (futures.size() == 1) {
     return futures.front();
@@ -66,7 +66,7 @@ PjRtFuture<> JoinFutures(absl::Span<const PjRtFuture<>> futures) {
 
   auto state = std::make_shared<State>(futures.size());
 
-  for (const PjRtFuture<>& future : futures) {
+  for (const Future<>& future : futures) {
     future.OnReady([state](absl::Status status) {
       if (ABSL_PREDICT_FALSE(!status.ok())) {
         absl::MutexLock lock(&state->mu);
@@ -93,4 +93,4 @@ PjRtFuture<> JoinFutures(absl::Span<const PjRtFuture<>> futures) {
   return std::move(state->future);
 }
 
-}  // namespace xla
+}  // namespace tsl
