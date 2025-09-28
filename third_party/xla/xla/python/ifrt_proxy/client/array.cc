@@ -921,12 +921,17 @@ Future<> Array::CopyToHostBuffer(
             promise.Set(status);
             return;
           }
+          if (!mem_region.empty()) {
 #if defined(PLATFORM_GOOGLE)
-          data->CopyToArray(const_cast<char*>(mem_region.data()));
+            // NOLINTNEXTLINE
+            data->CopyToArray(const_cast<char*>(mem_region.data()));
+
 #else
-          std::memcpy(const_cast<char*>(mem_region.data()),
-                      data->Flatten().data(), data->size());
+            // NOLINTNEXTLINE
+            std::memcpy(const_cast<char*>(mem_region.data()),
+                        data->Flatten().data(), data->size());
 #endif
+          }
           promise.Set();
         });
   };
@@ -941,9 +946,9 @@ absl::StatusOr<std::shared_ptr<const PjRtLayout>> Array::pjrt_layout() const {
   }
 
   TF_ASSIGN_OR_RETURN(auto shard_shape, sharding_->GetShardShape(shape_));
-  return client_->GetDefaultLayout(dtype_, shard_shape.dims(),
-                                   sharding_->devices()->devices().front(),
-                                   sharding_->memory_kind());
+  return client_->GetDefaultPjRtLayout(dtype_, shard_shape.dims(),
+                                       sharding_->devices()->devices().front(),
+                                       sharding_->memory_kind());
 }
 
 xla::ifrt::Client* Array::client() const { return client_; }
