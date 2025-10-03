@@ -13,27 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/pjrt/pjrt_c_api_client.h"
+#include "xla/pjrt/c_api_client/pjrt_c_api_client.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string>
-#include <utility>
 #include <variant>
-#include <vector>
 
 #include "absl/cleanup/cleanup.h"
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
@@ -45,7 +39,6 @@ limitations under the License.
 #include "xla/ffi/execution_context.h"
 #include "xla/future.h"
 #include "xla/hlo/builder/xla_computation.h"
-#include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
 #include "xla/layout.h"
 #include "xla/layout_util.h"
@@ -70,7 +63,6 @@ limitations under the License.
 #include "xla/pjrt/pjrt_compiler.h"
 #include "xla/pjrt/pjrt_device_description.h"
 #include "xla/pjrt/pjrt_executable.h"
-#include "xla/pjrt/pjrt_future.h"
 #include "xla/pjrt/pjrt_layout.h"
 #include "xla/pjrt/proto/compile_options.pb.h"
 #include "xla/service/computation_placer.h"
@@ -82,7 +74,6 @@ limitations under the License.
 #include "xla/tsl/platform/status.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/protobuf/coordination_service.pb.h"
-#include "xla/util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
@@ -2839,6 +2830,33 @@ PJRT_Event* PjRtCApiBuffer::GetReadyEvent() {
 void PjRtCApiBuffer::MakePromiseTrackEvent() {
   CHECK(readiness_promise_ != nullptr);
   const PJRT_Api* api = pjrt_c_api();
+
+  // Check if device execution has finished via `PJRT_Event_IsReady`. If true,
+  // fetch the status with `PJRT_Event_Error()` and fulfill the promise
+  // immediately. This avoids unnecessary overhead for already completed events.
+  // Otherwise, register an asynchronous callback with
+  // `PJRT_Event_OnReady` to be notified when the event is ready.
+  PJRT_Event_IsReady_Args is_ready_args;
+  is_ready_args.struct_size = PJRT_Event_IsReady_Args_STRUCT_SIZE;
+  is_ready_args.extension_start = nullptr;
+  is_ready_args.event = GetReadyEvent();
+  std::unique_ptr<PJRT_Error, pjrt::PJRT_ErrorDeleter> is_ready_error{
+      api->PJRT_Event_IsReady(&is_ready_args), pjrt::MakeErrorDeleter(api)};
+  if (is_ready_error != nullptr) {
+    readiness_promise_->Set(pjrt::PjrtErrorToStatus(is_ready_error.get(), api));
+    return;
+  }
+  if (is_ready_args.is_ready) {
+    PJRT_Event_Error_Args error_args;
+    error_args.struct_size = PJRT_Event_Error_Args_STRUCT_SIZE;
+    error_args.extension_start = nullptr;
+    error_args.event = is_ready_args.event;
+    PJRT_Error* error = api->PJRT_Event_Error(&error_args);
+    readiness_promise_->Set(pjrt::PjrtErrorToStatus(error, api));
+    pjrt::MakeErrorDeleter(api)(error);
+    return;
+  }
+
   PJRT_Event_OnReady_Args args;
   args.struct_size = PJRT_Event_OnReady_Args_STRUCT_SIZE;
   args.extension_start = nullptr;
