@@ -1837,10 +1837,7 @@ xla_cc_test(
 xla_cc_test(
     name = "hlo_module_group_test",
     srcs = ["hlo_module_group_test.cc"],
-    # TODO(b/148211710) Test fails in OSS.
-    tags = ["no_oss"],
     deps = [
-        ":hlo_module_group_metadata",
         ":hlo_proto_cc",
         "//xla/hlo/ir:hlo_module_group",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
@@ -4428,6 +4425,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
+        "//xla/stream_executor/integrations:tf_allocator_adapter",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log",
@@ -4470,7 +4468,6 @@ cc_library(
         "//xla/stream_executor:device_memory_allocator",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/stream_executor:stream_executor_memory_allocator",
         "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
