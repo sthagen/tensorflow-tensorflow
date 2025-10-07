@@ -2771,7 +2771,7 @@ xla_test(
     srcs = ["collective_ops_e2e_test.cc"],
     backend_tags = {
         "gpu": [
-            "multi_gpu",
+            "multi_gpu_h100",
             "no_oss",
         ],
     },
@@ -2790,6 +2790,7 @@ xla_test(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/hlo/testlib:pattern_matcher_gmock",
         "//xla/hlo/testlib:verified_hlo_module",
         "//xla/hlo/utils:hlo_matchers",
         "//xla/service:backend",
@@ -2797,6 +2798,7 @@ xla_test(
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_runner",
         "//xla/service:hlo_runner_interface",
+        "//xla/service:pattern_matcher",
         "//xla/service:platform_util",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/service/gpu:gpu_memory_space_assignment",

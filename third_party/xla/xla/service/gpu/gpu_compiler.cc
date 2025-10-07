@@ -135,6 +135,7 @@ limitations under the License.
 #include "xla/hlo/transforms/simplifiers/simplify_fp_conversions.h"
 #include "xla/hlo/transforms/simplifiers/slice_sinker.h"
 #include "xla/hlo/transforms/simplifiers/sort_simplifier.h"
+#include "xla/hlo/transforms/simplifiers/sub_byte_collective_normalization.h"
 #include "xla/hlo/transforms/simplifiers/sub_byte_normalization.h"
 #include "xla/hlo/transforms/simplifiers/tuple_simplifier.h"
 #include "xla/hlo/transforms/simplifiers/zero_sized_hlo_elimination.h"
@@ -931,12 +932,23 @@ absl::Status RunOptimizationPasses(
     pipeline.AddPass<WhileLoopSimplifier>();
     pipeline.AddPass<SliceSinker>();
 
+    ReshapeMoverOptions reshape_mover_options;
+    reshape_mover_options.reshape_of_1d_broadcast_is_cheap = true;
+    pipeline.AddPass<ReshapeMover>(reshape_mover_options);
     pipeline.AddPass<HloConstantFolding>();
     pipeline.AddPass<ConditionalSimplifier>();
     pipeline.AddPass<RealImagExpander>();
     pipeline.AddPass<TransposeFolding>(CanFoldTransposeOperandIntoDot);
     pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/false);
     pipeline.AddPass<HloDCE>();
+  }();
+
+  // ConvertMover and ReshapeMover fight with each other: ConvertMover wants
+  // to move some converts down the graph, but ReshapeMover wants to move them
+  // up the graph.  As a compromise, let ReshapeMover run to a fixed point,
+  // and then run ConvertMover + algsimp to a fixed point.
+  [&, &pipeline =
+          pipeline.AddPass<HloPassFix<HloPassPipeline>>("simplification-2")] {
     pipeline.AddPass<ConvertMover>();
     pipeline.AddPass<GpuAlgebraicSimplifier>(layout_insensitive_algsimp_opts,
                                              gpu_version);
@@ -1842,6 +1854,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
                      .VerifyBroadcastDimensionsOrder()
                      .VerifyReshapeIsBitcast(),
                  /*debug_only=*/true);
+
+  pipeline.AddPass<SubByteCollectiveNormalization>();
 
   // Triton compilation needs normalized operations on bf16 (i.e. converted to
   // f32).

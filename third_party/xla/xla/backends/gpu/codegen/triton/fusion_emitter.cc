@@ -101,6 +101,7 @@ limitations under the License.
 #include "xla/codegen/emitters/elemental_hlo_to_mlir.h"
 #include "xla/codegen/emitters/ir/xla_ops.h"
 #include "xla/codegen/emitters/transforms/passes.h"
+#include "xla/codegen/tiling/symbolic_tile_analysis.h"
 #include "xla/codegen/tiling/tiled_hlo_computation.h"
 #include "xla/codegen/tiling/tiled_hlo_fusion_instruction.h"
 #include "xla/codegen/tiling/tiled_hlo_instruction.h"
@@ -121,10 +122,8 @@ limitations under the License.
 #include "xla/service/dump.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/ir_emission_utils.h"
-#include "xla/service/gpu/llvm_gpu_backend/amdgpu_backend.h"
 #include "xla/service/gpu/llvm_gpu_backend/nvptx_libdevice_path.h"
 #include "xla/service/gpu/model/block_level_parameters.h"
-#include "xla/service/gpu/model/symbolic_tile_analysis.h"
 #include "xla/service/gpu/model/triton_emitter_constraints.h"
 #include "xla/service/gpu/triton_fusion_analysis.h"
 #include "xla/service/hlo_module_config.h"
@@ -139,7 +138,6 @@ limitations under the License.
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/tools/hlo_decomposer.h"
 #include "xla/tsl/platform/errors.h"
-#include "xla/tsl/platform/rocm_rocdl_path.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "xla/xla.pb.h"
@@ -2314,8 +2312,7 @@ std::string GetLibdevicePath(const HloModuleConfig& hlo_config,
     return nvptx::LibDevicePath(
         hlo_config.debug_options().xla_gpu_cuda_data_dir());
   }
-  return amdgpu::LibDevicePath(
-      device_info.rocm_compute_capability().gcn_arch_name(), tsl::RocdlRoot());
+  return "";
 }
 
 }  // namespace gpu

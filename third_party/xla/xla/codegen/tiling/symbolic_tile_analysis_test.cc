@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/model/symbolic_tile_analysis.h"
+#include "xla/codegen/tiling/symbolic_tile_analysis.h"
 
 #include <cstdint>
 #include <iterator>
@@ -36,6 +36,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "mlir/IR/MLIRContext.h"
 #include "xla/codegen/tiling/constraint_expression.h"
+#include "xla/codegen/tiling/symbolic_tiled_hlo_instruction.h"
 #include "xla/codegen/tiling/tiled_hlo_computation.h"
 #include "xla/codegen/tiling/tiled_hlo_fusion_instruction.h"
 #include "xla/hlo/analysis/indexing_test_utils.h"
@@ -46,7 +47,6 @@ limitations under the License.
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/hlo/utils/hlo_traversal.h"
-#include "xla/service/gpu/model/symbolic_tiled_hlo_instruction.h"
 #include "xla/service/instruction_fusion.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/errors.h"
@@ -54,7 +54,6 @@ limitations under the License.
 #include "xla/util.h"
 
 namespace xla {
-namespace gpu {
 namespace {
 
 using absl_testing::IsOkAndHolds;
@@ -2676,5 +2675,4 @@ ENTRY main {
 }
 
 }  // namespace
-}  // namespace gpu
 }  // namespace xla
