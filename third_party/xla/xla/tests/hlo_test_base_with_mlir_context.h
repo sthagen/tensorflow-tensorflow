@@ -1,4 +1,4 @@
-/* Copyright 2022 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,19 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_GPU_RUNTIME_INTRINSICS_H_
-#define XLA_SERVICE_GPU_RUNTIME_INTRINSICS_H_
+#ifndef XLA_TESTS_HLO_TEST_BASE_WITH_MLIR_CONTEXT_H_
+#define XLA_TESTS_HLO_TEST_BASE_WITH_MLIR_CONTEXT_H_
 
-#include "absl/strings/string_view.h"
+#include "mlir/IR/MLIRContext.h"
+#include "xla/tests/hlo_test_base.h"
 
 namespace xla {
 
-inline constexpr absl::string_view kXlaGpuAssertCustomCallTag =
-    "__xla_gpu_assert";
+class HloTestBaseWithMlirContext : public HloTestBase {
+ public:
+  mlir::MLIRContext* mlir_context() { return &mlir_context_; }
 
-inline constexpr absl::string_view kXlaGpuDebugPrintCustomCallTag =
-    "__xla_gpu_debug_print";
+ private:
+  mlir::MLIRContext mlir_context_;
+};
 
 }  // namespace xla
 
-#endif  // XLA_SERVICE_GPU_RUNTIME_INTRINSICS_H_
+#endif  // XLA_TESTS_HLO_TEST_BASE_WITH_MLIR_CONTEXT_H_

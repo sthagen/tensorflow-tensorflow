@@ -1540,6 +1540,7 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/service:buffer_assignment",
         "//xla/service/gpu:gpu_norm_runner",
+        "//xla/service/gpu:gpu_norm_runner_proto_cc",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:lazy_op_runner",
         "//xla/stream_executor:stream",
@@ -1547,8 +1548,26 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "norm_thunk_test",
+    srcs = ["norm_thunk_test.cc"],
+    deps = [
+        ":norm_thunk",
+        ":thunk",
+        ":thunk_proto_cc",
+        "//xla/service:buffer_assignment",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -2254,6 +2273,8 @@ tf_proto_library(
         ":dynamic_slice_thunk_proto",
         "//xla:xla_data_proto",
         "//xla/service:buffer_assignment_proto",
+        "//xla/service/gpu:backend_configs",
+        "//xla/service/gpu:gpu_norm_runner_proto",
         "//xla/service/gpu:launch_dimensions_proto",
         "//xla/stream_executor:launch_dim_proto",
         "//xla/stream_executor/gpu:gpu_blas_lt_proto",
@@ -2287,6 +2308,7 @@ cc_library(
         ":infeed_thunk",
         ":kernel_thunk",
         ":memset_thunk",
+        ":norm_thunk",
         ":replica_id_thunk",
         ":sequential_thunk",
         ":thunk",
@@ -2302,7 +2324,7 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:protobuf",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 

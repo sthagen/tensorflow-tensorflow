@@ -93,6 +93,11 @@ cc_library(
 )
 
 cc_library(
+    name = "pjrt_c_api_tpu_constants",
+    hdrs = ["pjrt_c_api_tpu_constants.h"],
+)
+
+cc_library(
     name = "pjrt_c_api_phase_compile_extension_hdrs",
     hdrs = ["pjrt_c_api_phase_compile_extension.h"],
     visibility = ["//visibility:public"],
@@ -210,8 +215,8 @@ cc_library(
         ":pjrt_c_api_helpers",
         ":pjrt_c_api_raw_buffer_extension_hdrs",
         "//xla:future",
-        "//xla/pjrt:pjrt_c_api_client",
         "//xla/pjrt:raw_buffer",
+        "//xla/pjrt/c_api_client:pjrt_c_api_client",
         "//xla/tsl/concurrency:ref_count",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",

@@ -40,6 +40,7 @@ limitations under the License.
 #include "xla/service/cpu/onednn_layer_norm.h"
 #include "xla/service/cpu/onednn_matmul.h"
 #include "xla/service/cpu/onednn_memory_util.h"
+#include "xla/service/cpu/onednn_softmax.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 #include "xla/tsl/platform/logging.h"
@@ -110,6 +111,10 @@ OneDnnOpThunk::OneDnnRuntime::Invoke(
     const auto& ln_config = std::get<OneDnnNormConfig>(config);
     ExecuteOneDnnLayerNorm(arguments, results, ln_config, cpu_engine,
                            onednn_stream, resources);
+  } else if (target == "__onednn$softmax") {
+    const auto& softmax_config = std::get<OneDnnSoftmaxConfig>(config);
+    ExecuteOneDnnSoftmax(arguments, results, softmax_config, cpu_engine,
+                         onednn_stream, resources);
   } else {
     return absl::InvalidArgumentError(
         absl::StrFormat("Unsupported oneDNN operation target: `%s`", target));
@@ -138,10 +143,10 @@ OneDnnOpThunk::~OneDnnOpThunk() = default;
 OneDnnOpThunk::BufferUses OneDnnOpThunk::buffer_uses() const {
   BufferUses buffer_uses;
   for (const auto& argument : op_buffers_.arguments_buffers) {
-    buffer_uses.emplace_back(argument, BufferUse::kRead);
+    buffer_uses.emplace_back(BufferUse::Read(argument));
   }
   for (const auto& result : op_buffers_.results_buffers) {
-    buffer_uses.emplace_back(result, BufferUse::kWrite);
+    buffer_uses.emplace_back(BufferUse::Write(result));
   }
   return buffer_uses;
 }
