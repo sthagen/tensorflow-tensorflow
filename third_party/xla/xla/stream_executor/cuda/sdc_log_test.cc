@@ -20,7 +20,12 @@ limitations under the License.
 #include <memory>
 #include <optional>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
+#include "absl/status/status_matchers.h"
+#include "xla/backends/gpu/runtime/sdc_log_structs.h"
+#include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/platform_manager.h"
 #include "xla/stream_executor/stream.h"
@@ -28,60 +33,79 @@ limitations under the License.
 #include "xla/stream_executor/stream_executor_memory_allocator.h"
 #include "xla/tsl/platform/statusor.h"
 
-namespace se = stream_executor;
-
+namespace stream_executor::cuda {
 namespace {
+
+using ::xla::gpu::SdcLogEntry;
+using ::xla::gpu::SdcLogHeader;
 
 class SdcLogTest : public ::testing::Test {
  protected:
   void SetUp() override {
     TF_ASSERT_OK_AND_ASSIGN(platform_,
-                            se::PlatformManager::PlatformWithName("CUDA"));
+                            PlatformManager::PlatformWithName("CUDA"));
     TF_ASSERT_OK_AND_ASSIGN(executor_, platform_->ExecutorForDevice(0));
     TF_ASSERT_OK_AND_ASSIGN(stream_, executor_->CreateStream(std::nullopt));
     allocator_ =
-        std::make_unique<se::StreamExecutorMemoryAllocator>(stream_->parent());
+        std::make_unique<StreamExecutorMemoryAllocator>(stream_->parent());
   }
 
-  se::Platform* platform_;
-  se::StreamExecutor* executor_;
-  std::unique_ptr<se::Stream> stream_;
-  std::unique_ptr<se::StreamExecutorMemoryAllocator> allocator_;
+  Platform* platform_;
+  StreamExecutor* executor_;
+  std::unique_ptr<Stream> stream_;
+  std::unique_ptr<StreamExecutorMemoryAllocator> allocator_;
 };
 
-TEST_F(SdcLogTest, CreateSdcLogOnDevice_AllocatesEmptyLog) {
-  TF_ASSERT_OK_AND_ASSIGN(se::cuda::SdcLog device_log,
-                          se::cuda::SdcLog::CreateOnDevice(
-                              /*max_entries=*/10, *stream_, *allocator_));
+TEST_F(SdcLogTest, CreateSdcLogOnDevice_InitializesEmptyLog) {
+  DeviceMemory<uint8_t> log_buffer = executor_->AllocateArray<uint8_t>(1024);
+
+  TF_ASSERT_OK_AND_ASSIGN(SdcLog device_log,
+                          SdcLog::CreateOnDevice(*stream_, log_buffer));
   TF_ASSERT_OK_AND_ASSIGN(auto host_log, device_log.ReadFromDevice(*stream_));
 
   EXPECT_EQ(host_log.size(), 0);
 }
 
-TEST_F(SdcLogTest, CreateSdcLogOnDevice_AllocatesEnoughSpace) {
-  constexpr uint32_t kMaxEntries = 10;
-  constexpr size_t kExpectedHeaderSize = sizeof(se::cuda::SdcLogHeader);
-  constexpr size_t kExpectedEntriesSize =
-      sizeof(se::cuda::SdcLogEntry) * kMaxEntries;
+TEST_F(SdcLogTest, CreateSdcLogOnDevice_InitializesLogWithCorrectCapacity) {
+  constexpr size_t kMaxEntries = 10;
+  constexpr size_t kExpectedHeaderSize = sizeof(SdcLogHeader);
+  constexpr size_t kExpectedEntriesSize = sizeof(SdcLogEntry) * kMaxEntries;
+  DeviceMemory<uint8_t> log_buffer = executor_->AllocateArray<uint8_t>(
+      kExpectedHeaderSize + kExpectedEntriesSize);
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      se::cuda::SdcLog device_log,
-      se::cuda::SdcLog::CreateOnDevice(kMaxEntries, *stream_, *allocator_));
+  TF_ASSERT_OK_AND_ASSIGN(SdcLog device_log,
+                          SdcLog::CreateOnDevice(*stream_, log_buffer));
+
   EXPECT_EQ(device_log.GetDeviceHeader().size(), kExpectedHeaderSize);
   EXPECT_EQ(device_log.GetDeviceEntries().size(), kExpectedEntriesSize);
 }
 
 TEST_F(SdcLogTest, CreateSdcLogOnDevice_InitializesHeader) {
-  constexpr uint32_t kMaxEntries = 10;
+  constexpr size_t kMaxEntries = 123;
+  DeviceMemory<uint8_t> log_buffer = executor_->AllocateArray<uint8_t>(
+      SdcLog::RequiredSizeForEntries(kMaxEntries));
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      se::cuda::SdcLog device_log,
-      se::cuda::SdcLog::CreateOnDevice(kMaxEntries, *stream_, *allocator_));
-
-  TF_ASSERT_OK_AND_ASSIGN(se::cuda::SdcLogHeader header,
+  TF_ASSERT_OK_AND_ASSIGN(SdcLog device_log,
+                          SdcLog::CreateOnDevice(*stream_, log_buffer));
+  TF_ASSERT_OK_AND_ASSIGN(SdcLogHeader header,
                           device_log.ReadHeaderFromDevice(*stream_));
+
   EXPECT_EQ(header.write_idx, 0);
   EXPECT_EQ(header.capacity, kMaxEntries);
 }
 
+TEST_F(SdcLogTest, CreateSdcLogOnDevice_FailsForNullBuffer) {
+  EXPECT_THAT(SdcLog::CreateOnDevice(*stream_, DeviceMemory<uint8_t>()),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST_F(SdcLogTest, CreateSdcLogOnDevice_FailsForTooSmallBuffer) {
+  DeviceMemory<uint8_t> log_buffer =
+      executor_->AllocateArray<uint8_t>(SdcLog::RequiredSizeForEntries(1) - 1);
+
+  EXPECT_THAT(SdcLog::CreateOnDevice(*stream_, log_buffer),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
 }  // namespace
+}  // namespace stream_executor::cuda
