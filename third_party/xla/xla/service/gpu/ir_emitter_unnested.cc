@@ -86,11 +86,11 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/command_buffer_cmd_emitter.h"
 #include "xla/backends/gpu/runtime/command_buffer_thunk.h"
 #include "xla/backends/gpu/runtime/conditional_thunk.h"
+#include "xla/backends/gpu/runtime/convolution_reorder_thunk.h"
 #include "xla/backends/gpu/runtime/convolution_thunk.h"
 #include "xla/backends/gpu/runtime/copy_thunk.h"
 #include "xla/backends/gpu/runtime/cub_sort_thunk.h"
 #include "xla/backends/gpu/runtime/cudnn_thunk.h"
-#include "xla/backends/gpu/runtime/custom_call_target.h"
 #include "xla/backends/gpu/runtime/custom_call_thunk.h"
 #include "xla/backends/gpu/runtime/fft_thunk.h"
 #include "xla/backends/gpu/runtime/gemm_thunk.h"
@@ -119,9 +119,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/wait_for_streams_thunk.h"
 #include "xla/backends/gpu/runtime/while_thunk.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
-#include "xla/ffi/api/c_api.h"
 #include "xla/ffi/attribute_map.h"
-#include "xla/ffi/ffi_api.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -139,8 +137,6 @@ limitations under the License.
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/call_graph.h"
 #include "xla/service/collective_ops_utils.h"
-#include "xla/service/custom_call_status.h"
-#include "xla/service/custom_call_target_registry.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/cublas_cudnn.h"
@@ -181,7 +177,6 @@ limitations under the License.
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/platform/platform_object_registry.h"
-#include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tools/hlo_decomposer.h"
 #include "xla/tsl/platform/errors.h"
@@ -191,7 +186,6 @@ limitations under the License.
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/human_readable_json.h"
-#include "tsl/platform/platform.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace xla {
@@ -897,9 +891,11 @@ absl::Status IrEmitterUnnested::EmitConvolutionReorderThunk(
     return Internal("Unexpected shape for convolution reorder: %s",
                     instr->ToString());
   }
-  absl::InlinedVector<int64_t, 4> filter_dims = {
-      shape.dimensions(0), shape.dimensions(1) * 32, shape.dimensions(2),
-      shape.dimensions(3)};
+  ConvolutionFilterDimensions filter_dimensions;
+  filter_dimensions.set_output_feature_map_count(shape.dimensions(0));
+  filter_dimensions.set_input_feature_map_count(shape.dimensions(1) * 32);
+  filter_dimensions.set_input_filter_height(shape.dimensions(2));
+  filter_dimensions.set_input_filter_width(shape.dimensions(3));
 
   absl::InlinedVector<BufferAllocation::Slice, 2> operand_slices;
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice filter_input,
@@ -928,7 +924,7 @@ absl::Status IrEmitterUnnested::EmitConvolutionReorderThunk(
   auto thunk = std::make_unique<ConvolutionReorderThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(
           instr, ir_emitter_context_->GetNextThunkId()),
-      absl::MakeSpan(filter_dims), operand_slices, result_slices);
+      std::move(filter_dimensions), operand_slices, result_slices);
   AddThunkToThunkSequence(std::move(thunk));
   return absl::OkStatus();
 }
@@ -1168,35 +1164,9 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
   const std::string& call_target_name = instr->custom_call_target();
 
   // Typed FFI custom calls is a replacement for legacy custom calls
-  // with a rich type safe API. It's under construction and not
-  // fully supported.
+  // with a rich type safe API.
   bool is_ffi_custom_call =
       instr->api_version() == CustomCallApiVersion::API_VERSION_TYPED_FFI;
-
-  void* call_target = CustomCallTargetRegistry::Global()->Lookup(
-      call_target_name, std::string(platform_name()));
-
-  absl::StatusOr<ffi::HandlerRegistration> registration =
-      ffi::FindHandler(call_target_name, platform_name());
-
-  // At least one implementation should be available at run time.
-  bool found_custom_call = !is_ffi_custom_call && call_target != nullptr;
-  bool found_ffi_handler = is_ffi_custom_call && registration.ok();
-
-  if (!found_custom_call && !found_ffi_handler) {
-    auto& debug_options = ir_emitter_context_->debug_options();
-
-    // If true, then all custom calls that are not found in custom
-    // call or FFI registries will become no-op (we don't emit any
-    // thunks for them).
-    if (debug_options.xla_gpu_mock_custom_calls()) {
-      return absl::OkStatus();
-    }
-
-    return absl::UnimplementedError(
-        absl::StrCat("No registered implementation for custom call to ",
-                     call_target_name, " for platform ", platform_name()));
-  }
 
   using Slices = std::vector<std::optional<CustomCallThunk::Slice>>;
 
@@ -1233,61 +1203,11 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
         return absl::OkStatus();
       }));
 
-  // For legacy custom calls we convert all API versions into the
-  // latest status-returning one and pass backend config as an
-  // opaque string.
-  CustomCallThunk::CustomCallTarget custom_call_target;
-
   // For XLA FFI handlers we decode opaque backend config into
   // attributes map at IR emission time, so that we do not need to
   // parse MLIR at run time. For FFI handlers backend config must be
   // a compatible MLIR dictionary.
   CustomCallThunk::AttributesMap attributes;
-
-  // For information about this calling convention, see
-  // xla/g3doc/custom_call.md.
-  switch (instr->api_version()) {
-    case CustomCallApiVersion::API_VERSION_ORIGINAL: {
-      constexpr absl::string_view kErrorMessage =
-          "Custom call API version `API_VERSION_ORIGINAL` is "
-          "not supported "
-          "by XLA:GPU. Prefer "
-          "https://docs.jax.dev/en/latest/ffi.html. It "
-          "will be fully removed in November 2025.";
-      if constexpr (tsl::kIsOpenSource) {
-        LOG(ERROR) << kErrorMessage;
-      } else {
-        LOG(FATAL) << kErrorMessage;
-      }
-
-      custom_call_target = [call_target](stream_executor::Stream* stream,
-                                         void** buffers, const char* opaque,
-                                         size_t opaque_len,
-                                         XlaCustomCallStatus*) {
-        reinterpret_cast<CustomCallWithOpaqueStreamHandle>(call_target)(
-            stream->platform_specific_handle().stream, buffers, opaque,
-            opaque_len);
-      };
-      break;
-    }
-    case CustomCallApiVersion::API_VERSION_STATUS_RETURNING:
-    case CustomCallApiVersion::API_VERSION_STATUS_RETURNING_UNIFIED:
-      custom_call_target = [call_target](stream_executor::Stream* stream,
-                                         void** buffers, const char* opaque,
-                                         size_t opaque_len,
-                                         XlaCustomCallStatus* status) {
-        reinterpret_cast<CustomCallWithStatusAndOpaqueStreamHandle>(
-            call_target)(stream->platform_specific_handle().stream, buffers,
-                         opaque, opaque_len, status);
-      };
-      break;
-    case CustomCallApiVersion::API_VERSION_TYPED_FFI:
-      // We already checked `handler` above.
-      break;
-    default:
-      return Internal("Unknown custom-call API version enum value: %d",
-                      instr->api_version());
-  }
 
   auto backend_config = instr->backend_config<GpuBackendConfig>();
   if (!backend_config.ok()) {
@@ -1317,9 +1237,10 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
     return CustomCallThunk::Create(
         Thunk::ThunkInfo::WithProfileAnnotation(
             instr, ir_emitter_context_->GetNextThunkId()),
-        call_target_name, registration->bundle, std::move(operands),
-        std::move(results), std::move(attributes),
-        called_computations.empty() ? nullptr : called_computations[0]);
+        call_target_name, std::move(operands), std::move(results),
+        std::move(attributes),
+        called_computations.empty() ? nullptr : called_computations[0],
+        ir_emitter_context_->platform_name());
   };
 
   auto legacy_thunk =
@@ -1331,15 +1252,26 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
     return CustomCallThunk::Create(
         Thunk::ThunkInfo::WithProfileAnnotation(
             instr, ir_emitter_context_->GetNextThunkId()),
-        call_target_name, std::move(custom_call_target), std::move(operands),
-        std::move(results), std::move(opaque));
+        call_target_name, std::move(operands), std::move(results),
+        std::move(opaque), instr->api_version(),
+        ir_emitter_context_->platform_name());
   };
 
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<CustomCallThunk> custom_call_thunk,
-                      found_ffi_handler ? ffi_thunk() : legacy_thunk());
-  AddThunkToThunkSequence(std::move(custom_call_thunk));
+  absl::StatusOr<std::unique_ptr<CustomCallThunk>> custom_call_thunk =
+      is_ffi_custom_call ? ffi_thunk() : legacy_thunk();
 
-  return absl::OkStatus();
+  if (custom_call_thunk.ok()) {
+    AddThunkToThunkSequence(std::move(custom_call_thunk.value()));
+    return absl::OkStatus();
+  }
+
+  if (ir_emitter_context_->debug_options().xla_gpu_mock_custom_calls()) {
+    // xla_gpu_mock_custom_calls=true means we won't emit thunks for all custom
+    // call targets that couldn't be found.
+    return absl::OkStatus();
+  }
+
+  return custom_call_thunk.status();
 }
 
 absl::Status IrEmitterUnnested::EmitFftThunk(const HloFftInstruction* instr) {
@@ -2169,9 +2101,7 @@ absl::Status IrEmitterUnnested::EmitCollectiveThunk(
                                 /*source_buffer=*/src,
                                 /*destination_buffer=*/dst,
                                 /*source_memory_space=*/src_memory_space,
-                                /*destination_memory_space=*/dst_memory_space,
-                                /*source_value=*/nullptr,
-                                /*destination_value=*/nullptr});
+                                /*destination_memory_space=*/dst_memory_space});
   };
 
   if (kind == Thunk::Kind::kAllGatherStart) {
@@ -2559,9 +2489,7 @@ absl::Status IrEmitterUnnested::EmitNvshmemThunk(
                                 /*source_buffer=*/src,
                                 /*destination_buffer=*/dst,
                                 /*source_memory_space=*/src_memory_space,
-                                /*destination_memory_space=*/dst_memory_space,
-                                /*source_value=*/nullptr,
-                                /*destination_value=*/nullptr});
+                                /*destination_memory_space=*/dst_memory_space});
   };
 
   // For other operations simply zip operands with results.

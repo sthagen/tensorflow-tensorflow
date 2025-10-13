@@ -108,6 +108,7 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":backend_configs_cc",
+        ":ir_emission_utils",
         "//xla:xla_proto_cc",
         "//xla/hlo/analysis:hlo_alias_analysis",
         "//xla/hlo/analysis:hlo_ordering",
@@ -194,6 +195,7 @@ xla_test(
     tags = ["no-oneapi"],  # TODO(intel-tf): Remove it when macro substitutions for SYCL are available in xla/stream_executor/sycl/*.
     deps = [
         "//xla:debug_options_flags",
+        "//xla:literal",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:xla_data_proto_cc",
@@ -222,6 +224,7 @@ xla_test(
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -462,6 +465,7 @@ cc_library(
         "//xla/backends/gpu/runtime:command_buffer_cmd_emitter",
         "//xla/backends/gpu/runtime:command_buffer_thunk",
         "//xla/backends/gpu/runtime:conditional_thunk",
+        "//xla/backends/gpu/runtime:convolution_reorder_thunk",
         "//xla/backends/gpu/runtime:convolution_thunk",
         "//xla/backends/gpu/runtime:copy_thunk",
         "//xla/backends/gpu/runtime:cub_sort_thunk",
@@ -531,6 +535,7 @@ cc_library(
         "//xla/stream_executor/platform:platform_object_registry",
         "//xla/tools:hlo_decomposer_lib",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -1183,6 +1188,7 @@ cc_library(
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",
+        ":gpu_conv_runner_proto_cc",
         ":stream_executor_util",
         "//xla:shape_util",
         "//xla:util",
@@ -1201,6 +1207,30 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
         "@local_tsl//tsl/platform:ml_dtypes",
+    ],
+)
+
+tf_proto_library(
+    name = "gpu_conv_runner_proto",
+    srcs = ["gpu_conv_runner.proto"],
+    deps = [
+        ":backend_configs",
+        "//xla:xla_data_proto",
+        "//xla/tsl/protobuf:dnn_proto",
+    ],
+)
+
+xla_cc_test(
+    name = "gpu_conv_runner_test",
+    srcs = ["gpu_conv_runner_test.cc"],
+    deps = [
+        ":backend_configs_cc",
+        ":gpu_conv_runner",
+        ":gpu_conv_runner_proto_cc",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

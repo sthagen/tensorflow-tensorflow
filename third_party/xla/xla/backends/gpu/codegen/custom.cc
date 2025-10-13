@@ -941,9 +941,10 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
       TF_ASSIGN_OR_RETURN(attributes, xla::ffi::BuildAttributesMap(dict));
     }
     return CustomCallThunk::Create(
-        thunk_info, call_target_name, registration->bundle, std::move(ops),
-        std::move(res), std::move(attributes),
-        called_computations.empty() ? nullptr : called_computations[0]);
+        thunk_info, call_target_name, std::move(ops), std::move(res),
+        std::move(attributes),
+        called_computations.empty() ? nullptr : called_computations[0],
+        ir_emitter_context.platform_name());
   };
 
   auto legacy_thunk =
@@ -953,9 +954,10 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
         backend_config.ok()
             ? backend_config->custom_call_backend_config().opaque()
             : custom_call.raw_backend_config_string();
-    return CustomCallThunk::Create(
-        thunk_info, call_target_name, std::move(custom_call_target),
-        std::move(ops), std::move(res), std::move(opaque));
+    return CustomCallThunk::Create(thunk_info, call_target_name, std::move(ops),
+                                   std::move(res), std::move(opaque),
+                                   custom_call.api_version(),
+                                   ir_emitter_context.platform_name());
   };
 
   std::vector<std::unique_ptr<BufferAllocation>> fake_allocations(num_args);
@@ -1309,9 +1311,7 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
           /*source_buffer=*/src.value(),
           /*destination_buffer=*/dst.value(),
           /*source_memory_space=*/src_shape.layout().memory_space(),
-          /*destination_memory_space=*/dst_shape.layout().memory_space(),
-          /*source_value=*/nullptr,
-          /*destination_value=*/nullptr});
+          /*destination_memory_space=*/dst_shape.layout().memory_space()});
     }
     auto collective_start_thunk =
         std::make_unique<NcclThunkType>(thunk_info, instr, buffers);
