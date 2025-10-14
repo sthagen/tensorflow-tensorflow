@@ -16,11 +16,15 @@ limitations under the License.
 #ifndef XLA_BACKENDS_GPU_RUNTIME_CONVOLUTION_REORDER_THUNK_H_
 #define XLA_BACKENDS_GPU_RUNTIME_CONVOLUTION_REORDER_THUNK_H_
 
+#include <memory>
+#include <optional>
 
-#include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "xla/backends/gpu/runtime/convolution_filter_thunk.pb.h"
 #include "xla/backends/gpu/runtime/thunk.h"
+#include "xla/backends/gpu/runtime/thunk.pb.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/stream_executor/dnn.h"
 
@@ -30,21 +34,34 @@ namespace gpu {
 // Launches the kernel that reorders input data for int8x32 convolutions.
 class ConvolutionReorderThunk : public Thunk {
  public:
-  ConvolutionReorderThunk(
-      ThunkInfo thunk_info, ConvolutionFilterDimensions filter_dimensions,
-      absl::InlinedVector<BufferAllocation::Slice, 2> operand_slices,
-      absl::InlinedVector<BufferAllocation::Slice, 2> result_slices);
+  struct BiasBuffers {
+    BufferAllocation::Slice bias_input;
+    BufferAllocation::Slice bias_output;
+  };
+
+  ConvolutionReorderThunk(ThunkInfo thunk_info,
+                          ConvolutionFilterDimensions filter_dimensions,
+                          BufferAllocation::Slice filter_input,
+                          BufferAllocation::Slice filter_output,
+                          std::optional<BiasBuffers> biases);
 
   ConvolutionReorderThunk(const ConvolutionReorderThunk&) = delete;
   ConvolutionReorderThunk& operator=(const ConvolutionReorderThunk&) = delete;
 
   absl::Status ExecuteOnStream(const ExecuteParams& params) override;
 
+  static absl::StatusOr<std::unique_ptr<ConvolutionReorderThunk>> FromProto(
+      ThunkInfo thunk_info, const ConvolutionReorderThunkProto& proto,
+      absl::Span<const BufferAllocation> buffer_allocations);
+
+  absl::StatusOr<ThunkProto> ToProto() const override;
+
  private:
-  // TODO: b/431980836 - Store the filter dimensions to use for serialization.
+  const ConvolutionFilterDimensions filter_dimensions_;
   const se::dnn::FilterDescriptor filter_descriptor_;
-  absl::InlinedVector<BufferAllocation::Slice, 2> operand_buffers_;
-  absl::InlinedVector<BufferAllocation::Slice, 2> result_buffers_;
+  BufferAllocation::Slice filter_input_;
+  BufferAllocation::Slice filter_output_;
+  std::optional<BiasBuffers> biases_;
 };
 
 }  // namespace gpu

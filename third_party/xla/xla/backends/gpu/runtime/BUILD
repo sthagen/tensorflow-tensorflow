@@ -556,19 +556,40 @@ cc_library(
     deps = [
         ":convolution_filter_thunk_proto_cc",
         ":thunk",
+        ":thunk_proto_cc",
         "//xla/service:buffer_assignment",
+        "//xla/service:buffer_assignment_proto_cc",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:dnn",
         "//xla/stream_executor:stream_executor_h",
-        "@com_google_absl//absl/container:inlined_vector",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "convolution_reorder_thunk_test",
+    srcs = ["convolution_reorder_thunk_test.cc"],
+    deps = [
+        ":convolution_reorder_thunk",
+        ":thunk",
+        ":thunk_proto_cc",
+        "//xla/service:buffer_assignment",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
 tf_proto_library(
     name = "convolution_filter_thunk_proto",
     srcs = ["convolution_filter_thunk.proto"],
+    protodeps = ["//xla/service:buffer_assignment_proto"],
 )
 
 cc_library(
@@ -723,29 +744,45 @@ cc_library(
     hdrs = ["fft_thunk.h"],
     deps = [
         ":thunk",
+        ":thunk_proto_cc",
         "//xla:shape_util",
         "//xla:status_macros",
         "//xla:types",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/service:buffer_assignment",
+        "//xla/service:buffer_assignment_proto_cc",
         "//xla/stream_executor:blas",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:device_memory_allocator",
         "//xla/stream_executor:fft",
         "//xla/stream_executor:scratch_allocator",
         "//xla/stream_executor:stream_executor_h",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "fft_thunk_test",
+    srcs = ["fft_thunk_test.cc"],
+    deps = [
+        ":fft_thunk",
+        ":thunk",
+        ":thunk_proto_cc",
+        "//xla/service:buffer_assignment",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -932,6 +969,8 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
+        "@local_tsl//tsl/profiler/lib:traceme",
+        "@local_tsl//tsl/profiler/lib:traceme_encode",
     ],
 )
 
@@ -2339,6 +2378,7 @@ tf_proto_library(
     ],
     protodeps = [
         # keep sorted
+        ":convolution_filter_thunk_proto",
         ":dynamic_slice_thunk_proto",
         "//xla:xla_data_proto",
         "//xla/service:buffer_assignment_proto",
@@ -2371,9 +2411,11 @@ cc_library(
     hdrs = ["thunk_proto_deserialization.h"],
     deps = [
         ":conditional_thunk",
+        ":convolution_reorder_thunk",
         ":convolution_thunk",
         ":copy_thunk",
         ":cudnn_thunk",
+        ":fft_thunk",
         ":gemm_thunk",
         ":gpublas_lt_matmul_thunk",
         ":infeed_thunk",
@@ -2855,6 +2897,62 @@ xla_test(
         "@com_google_absl//absl/log:scoped_mock_log",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "sdc_thunk",
+    srcs = ["sdc_thunk.cc"],
+    hdrs = ["sdc_thunk.h"],
+    deps = [
+        ":sdc_buffer_id",
+        ":thunk",
+        "//xla/service:buffer_assignment",
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:launch_dim",
+        "//xla/stream_executor:stream_executor_h",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
+        "//xla/stream_executor/cuda:cuda_platform_id",
+        "//xla/stream_executor/cuda:sdc_log",
+        "//xla/stream_executor/gpu:gpu_kernel_registry",
+        "//xla/stream_executor/gpu:sdc_xor_checksum_kernel",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+xla_test(
+    name = "sdc_thunk_test",
+    srcs = ["sdc_thunk_test.cc"],
+    backends = ["gpu"],
+    tags = [
+        "cuda-only",
+        "gpu",
+    ],
+    deps = [
+        ":sdc_buffer_id",
+        ":sdc_log_structs",
+        ":sdc_thunk",
+        ":thunk",
+        ":thunk_id",
+        "//xla/service:buffer_assignment",
+        "//xla/service:executable",
+        "//xla/service/gpu:buffer_allocations",
+        "//xla/service/gpu:resource_requests",
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:platform",
+        "//xla/stream_executor:platform_manager",
+        "//xla/stream_executor:stream",
+        "//xla/stream_executor:stream_executor_memory_allocator",
+        "//xla/stream_executor/cuda:sdc_log",
+        "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:statusor",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

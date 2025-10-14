@@ -711,6 +711,7 @@ xla_test(
         "//xla/tools/hlo_opt:gpu_specs/a100_sxm_40.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/a100_sxm_80.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/a6000.txtpb",
+        "//xla/tools/hlo_opt:gpu_specs/b200.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/h100_pcie.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/h100_sxm.txtpb",
         "//xla/tools/hlo_opt:gpu_specs/mi200.txtpb",
@@ -938,5 +939,16 @@ xla_cc_test(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "sdc_xor_checksum_kernel",
+    hdrs = ["sdc_xor_checksum_kernel.h"],
+    deps = [
+        "//xla/backends/gpu/runtime:sdc_buffer_id",
+        "//xla/backends/gpu/runtime:sdc_log_structs",
+        "//xla/stream_executor:device_memory",
+        "//xla/stream_executor:kernel",
     ],
 )

@@ -762,7 +762,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
         "thunks");
   }
 
-  using Slices = std::vector<std::optional<CustomCallThunk::Slice>>;
+  using Slices = std::vector<std::optional<ShapedSlice>>;
 
   int64_t num_args = ShapeUtil::GetLeafCount(custom_call.shape());
   absl::c_for_each(custom_call.operands(), [&](auto* operand) {
@@ -830,7 +830,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
               arg_idx++, can_compute_indvar_on_host, while_op, indvar_idx,
               inlined_module));
 
-          operands.push_back(CustomCallThunk::Slice{slice, subshape});
+          operands.push_back(ShapedSlice{slice, subshape});
           arguments.push_back(slice);
           return absl::OkStatus();
         }));
@@ -858,7 +858,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
             arg_idx++, can_compute_indvar_on_host, while_op, indvar_idx,
             inlined_module));
 
-        results.push_back(CustomCallThunk::Slice{slice, subshape});
+        results.push_back(ShapedSlice{slice, subshape});
         arguments.push_back(slice);
         return absl::OkStatus();
       }));
@@ -931,7 +931,9 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
             : custom_call.raw_backend_config_string();
     if (!backend_config_str.empty()) {
       mlir::Attribute attr = mlir::parseAttribute(
-          backend_config_str, ir_emitter_context.mlir_context());
+          backend_config_str,
+          // TODO: b/451959933 - Use reference or check pointer.
+          ir_emitter_context.symbolic_expr_context()->GetMLIRContext());
       auto dict = mlir::dyn_cast_or_null<mlir::DictionaryAttr>(attr);
       if (dict == nullptr) {
         return absl::InternalError(
@@ -986,8 +988,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
                 fake_allocations[fake_arg_idx].get(), 0, operand_byte_size);
 
             fake_arg_idx++;
-            fake_operands.push_back(
-                CustomCallThunk::Slice{fake_slice, subshape});
+            fake_operands.push_back(ShapedSlice{fake_slice, subshape});
             return absl::OkStatus();
           }));
     }
@@ -1012,7 +1013,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
               fake_allocations[fake_arg_idx].get(), 0, result_byte_size);
 
           fake_arg_idx++;
-          fake_results.push_back(CustomCallThunk::Slice{fake_slice, subshape});
+          fake_results.push_back(ShapedSlice{fake_slice, subshape});
           return absl::OkStatus();
         }));
 

@@ -897,34 +897,27 @@ absl::Status IrEmitterUnnested::EmitConvolutionReorderThunk(
   filter_dimensions.set_input_filter_height(shape.dimensions(2));
   filter_dimensions.set_input_filter_width(shape.dimensions(3));
 
-  absl::InlinedVector<BufferAllocation::Slice, 2> operand_slices;
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice filter_input,
                       GetAllocationSliceForHlo(instr->operand(0)));
-  operand_slices.push_back(filter_input);
+
+  BufferAllocation::Slice filter_output;
+  std::optional<ConvolutionReorderThunk::BiasBuffers> biases;
   if (has_bias) {
+    TF_ASSIGN_OR_RETURN(filter_output, GetAllocationSliceForHlo(instr, {0}));
+
     TF_ASSIGN_OR_RETURN(BufferAllocation::Slice bias_input,
                         GetAllocationSliceForHlo(instr->operand(1)));
-    operand_slices.push_back(bias_input);
-  }
-
-  absl::InlinedVector<BufferAllocation::Slice, 2> result_slices;
-  if (has_bias) {
-    TF_ASSIGN_OR_RETURN(BufferAllocation::Slice filter_output,
-                        GetAllocationSliceForHlo(instr, {0}));
-    result_slices.push_back(filter_output);
     TF_ASSIGN_OR_RETURN(BufferAllocation::Slice bias_output,
                         GetAllocationSliceForHlo(instr, {1}));
-    result_slices.push_back(bias_output);
+    biases = {{bias_input, bias_output}};
   } else {
-    TF_ASSIGN_OR_RETURN(BufferAllocation::Slice filter_output,
-                        GetAllocationSliceForHlo(instr));
-    result_slices.push_back(filter_output);
+    TF_ASSIGN_OR_RETURN(filter_output, GetAllocationSliceForHlo(instr));
   }
 
   auto thunk = std::make_unique<ConvolutionReorderThunk>(
       Thunk::ThunkInfo::WithProfileAnnotation(
           instr, ir_emitter_context_->GetNextThunkId()),
-      std::move(filter_dimensions), operand_slices, result_slices);
+      std::move(filter_dimensions), filter_input, filter_output, biases);
   AddThunkToThunkSequence(std::move(thunk));
   return absl::OkStatus();
 }
@@ -1168,7 +1161,7 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
   bool is_ffi_custom_call =
       instr->api_version() == CustomCallApiVersion::API_VERSION_TYPED_FFI;
 
-  using Slices = std::vector<std::optional<CustomCallThunk::Slice>>;
+  using Slices = std::vector<std::optional<ShapedSlice>>;
 
   Slices operands;
   for (auto* operand : instr->operands()) {
@@ -1183,7 +1176,7 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
           }
           TF_ASSIGN_OR_RETURN(auto slice,
                               GetAllocationSliceForHlo(operand, index));
-          operands.push_back(CustomCallThunk::Slice{slice, subshape});
+          operands.push_back(ShapedSlice{slice, subshape});
           return absl::OkStatus();
         }));
   }
@@ -1199,7 +1192,7 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
           return absl::OkStatus();
         }
         TF_ASSIGN_OR_RETURN(auto slice, GetAllocationSliceForHlo(instr, index));
-        results.push_back(CustomCallThunk::Slice{slice, subshape});
+        results.push_back(ShapedSlice{slice, subshape});
         return absl::OkStatus();
       }));
 
@@ -1224,7 +1217,8 @@ absl::Status IrEmitterUnnested::EmitCustomCallThunk(
             : instr->raw_backend_config_string();
     if (!backend_config_str.empty()) {
       mlir::Attribute attr = mlir::parseAttribute(
-          backend_config_str, ir_emitter_context_->mlir_context());
+          backend_config_str,
+          ir_emitter_context_->symbolic_expr_context()->GetMLIRContext());
       auto dict = mlir::dyn_cast_or_null<mlir::DictionaryAttr>(attr);
       if (dict == nullptr) {
         return absl::InternalError(
@@ -1456,7 +1450,8 @@ absl::Status IrEmitterUnnested::EmitTopKCustomCall(
 absl::Status IrEmitterUnnested::EmitTritonCustomCall(
     const HloCustomCallInstruction* instr) {
   auto generate = [this, &instr]() -> absl::StatusOr<KernelReuseCache::Entry> {
-    mlir::MLIRContext& mlir_context = *ir_emitter_context_->mlir_context();
+    mlir::MLIRContext& mlir_context =
+        *ir_emitter_context_->symbolic_expr_context()->GetMLIRContext();
     LoadMlirDialectsForTriton(mlir_context);
     auto call =
         TritonCall::Parse(instr->raw_backend_config_string(), &mlir_context);
@@ -1633,7 +1628,7 @@ absl::Status IrEmitterUnnested::EmitFusion(const HloFusionInstruction* instr) {
           /*buffer_assignment=*/
           &ir_emitter_context_->buffer_assignment(),
           /*call_graph=*/*call_graph_),
-      ir_emitter_context_->mlir_context());
+      ir_emitter_context_->symbolic_expr_context());
   TF_ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
 
   const ExecutionStreamAssignment& stream_assignment =
