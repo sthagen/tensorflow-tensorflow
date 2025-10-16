@@ -116,6 +116,16 @@ message TriangularSolveThunkProto {
   int64 b_batch_stride = 10;
 }
 
+message CholeskyThunkProto {
+  xla.CholeskyOptions options = 1;
+  xla.buffer_assignment.BufferAllocationSliceProto a_buffer = 2;
+  xla.buffer_assignment.BufferAllocationSliceProto workspace_buffer = 3;
+  xla.buffer_assignment.BufferAllocationSliceProto info_buffer = 4;
+  xla.PrimitiveType type = 5;
+  int64 batch_size = 6;
+  int64 n = 7;
+}
+
 message ReplicaIdThunkProto {
   xla.buffer_assignment.BufferAllocationSliceProto dest_buffer = 1;
 }
@@ -149,6 +159,11 @@ message MemzeroThunkProto {
   xla.buffer_assignment.BufferAllocationSliceProto dest_buffer = 1;
 }
 
+message Memset32BitValueThunkProto {
+  xla.buffer_assignment.BufferAllocationSliceProto dest_buffer = 1;
+  uint32 value = 2;
+}
+
 message ShapedSliceProto {
   xla.buffer_assignment.BufferAllocationSliceProto slice = 1;
   xla.ShapeProto shape = 2;
@@ -163,7 +178,11 @@ message OutfeedThunkProto {
 }
 
 message SelectKThunkProto {
-  // TODO(upwind): Add fields for SelectKThunkProto.
+  repeated xla.buffer_assignment.BufferAllocationSliceProto args = 1;
+  uint32 batch_size = 3;
+  uint32 num_elements = 4;
+  uint32 k = 5;
+  xla.PrimitiveType dtype = 6;
 }
 
 message CublasLtMatmulThunkProto {
@@ -252,6 +271,8 @@ message ThunkProto {
     ConvolutionThunkProto convolution_thunk = 25;
     ConvolutionReorderThunkProto convolution_reorder_thunk = 26;
     FftThunkProto fft_thunk = 27;
+    CholeskyThunkProto cholesky_thunk = 28;
+    Memset32BitValueThunkProto memset32bit_value_thunk = 29;
   }
 }
 

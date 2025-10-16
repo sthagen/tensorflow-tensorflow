@@ -157,6 +157,7 @@ namespace arith = ::mlir::arith;
 namespace ttir = ::mlir::triton;
 namespace mtx = ::mlir::triton::xla;
 namespace stablehlo = ::mlir::stablehlo;
+namespace xgt = ::xla::gpu::triton;
 
 using ::llvm::SmallVector;
 using ::mlir::AffineMap;
@@ -333,9 +334,10 @@ ScalarOrTensor BroadcastInDims(EmitterLocOpBuilder b, ScalarOrTensor value,
   return Broadcast(b, input_tensor, output_shape);
 }
 
-ScalarOrTensor Range(EmitterLocOpBuilder b, int32_t limit) {
+ScalarOrTensor Iota(EmitterLocOpBuilder b, int32_t limit) {
   auto type = mlir::RankedTensorType::get(limit, b.getI32Type());
-  return ScalarOrTensor(b.create<ttir::MakeRangeOp>(type, 0, limit));
+  return ScalarOrTensor(
+      b.create<stablehlo::IotaOp>(type, /*iota_dimension=*/0));
 }
 
 ScalarOrTensor EmitParameterExtract(EmitterLocOpBuilder b,
@@ -397,7 +399,7 @@ absl::StatusOr<ScalarOrTensor> EmitReduce(
   int64_t input_reduction_dimension_size = input_shape[reduction_dimension];
   if (input_reduction_dimension_size !=
       source_tensor_reduction_dimension_size) {
-    ScalarOrTensor range = Range(b, input_reduction_dimension_size);
+    ScalarOrTensor range = Iota(b, input_reduction_dimension_size);
     ScalarOrTensor bcast =
         BroadcastInDims(b, range, input_shape, {reduction_dimension});
     ScalarOrTensor constant = CreateConst(
@@ -537,7 +539,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledIota(
 
   // First, stride as needed between the iota components.
   Value range = b.create<arith::MulIOp>(
-      Range(b, padded_tile_sizes[iota_dim]).UnwrapTensor(),
+      Iota(b, padded_tile_sizes[iota_dim]).UnwrapTensor(),
       Splat(b,
             CreateConst(b, b.getI32Type(), tiled_iota.tile_strides()[iota_dim]),
             padded_tile_sizes[iota_dim])
@@ -690,7 +692,7 @@ absl::StatusOr<ScalarOrTensor> EmitTiledBitcast(
                   GetPaddedTileSizes(tiled_bitcast.operand(0)->tile_sizes()),
                   output_element_type)
             : output_element_type;
-    input = b.create<ttir::BitcastOp>(output_type, input);
+    input = b.create<mlir::tensor::BitcastOp>(output_type, input);
     input_shape.set_element_type(output_shape.element_type());
   }
 
@@ -825,7 +827,7 @@ absl::StatusOr<Value> MaskDotOperand(EmitterLocOpBuilder b,
       // operand = select(broadcast(mask, operand.shape), operand, 0)
       Value tile_offset = b.create<arith::MulIOp>(
           contracting_dimension_tile_index, tile_size_value);
-      Value range = Range(b, tile_size).UnwrapTensor();
+      Value range = Iota(b, tile_size).UnwrapTensor();
       Value broadcasted_tile_offset =
           Splat(b, ScalarOrTensor(tile_offset), {tile_size}).UnwrapTensor();
       Value indices = b.create<arith::AddIOp>(range, broadcasted_tile_offset);
@@ -1007,6 +1009,14 @@ absl::StatusOr<ScalarOrTensor> EmitDot(
       /*lowerBound=*/MakeIndex(b, 0),
       /*upperBound=*/MakeIndex(b, loop_iteration_count),
       /*step=*/MakeIndex(b, 1), accumulator);
+
+  if (fusion->GetModule()
+          ->config()
+          .debug_options()
+          .xla_gpu_experimental_enable_triton_warp_specialization()) {
+    for_op->setAttr("tt.warp_specialize", b.getBoolAttr(true));
+  }
+
   {  // Loop body.
     mlir::OpBuilder::InsertionGuard g(b);
     b.setInsertionPointToStart(for_op.getBody());
@@ -1380,7 +1390,7 @@ absl::StatusOr<ScalarOrTensor> EmitPad(
     }
 
     // LHS for the compare is an iota broadcasted to the output shape.
-    ScalarOrTensor range = Range(b, pad_output_dim_size);
+    ScalarOrTensor range = Iota(b, pad_output_dim_size);
     ScalarOrTensor bcast = BroadcastInDims(b, range, padded_tile_sizes,
                                            {static_cast<int64_t>(dim_index)});
 
@@ -1892,64 +1902,6 @@ void AppendFuncArgType(absl::Span<const int64_t> dims, Type ir_type,
       static_cast<unsigned>(mlir::NVVM::NVVMMemorySpace::Global)));
 }
 
-// Legacy emitter works with tt.func. New emitter works with func.func.
-// TODO(b/393299275): Remove legacy optionality once migration is complete.
-mlir::FunctionOpInterface CreateFuncOp(EmitterLocOpBuilder b,
-                                       absl::string_view fn_name,
-                                       absl::string_view fusion_kind,
-                                       SmallVector<Type>& fn_arg_types) {
-  if (fusion_kind != kTritonGemmFusionKind) {
-    return b.create<mlir::func::FuncOp>(fn_name,
-                                        b.getFunctionType(fn_arg_types, {}));
-  }
-  auto func = b.create<ttir::FuncOp>(
-      fn_name, b.getFunctionType(fn_arg_types, mlir::TypeRange()));
-  auto divisibility_attr = b.getI32IntegerAttr(16);
-  for (int i = 0; i < func.getNumArguments(); ++i) {
-    func.setArgAttr(i, "tt.divisibility", divisibility_attr);
-  }
-  return func;
-}
-
-// Legacy emitter works with tt.return. New emitter works with func.return.
-// TODO(b/393299275): Remove legacy optionality once migration is complete.
-void EmitReturnOp(EmitterLocOpBuilder b, absl::string_view fusion_kind) {
-  if (fusion_kind == kTritonGemmFusionKind) {
-    b.create<ttir::ReturnOp>();
-  } else {
-    b.create<mlir::func::ReturnOp>();
-  }
-}
-
-absl::StatusOr<stream_executor::gpu::TmaMetadata> ExtractTmaMetadata(
-    mlir::ModuleOp triton_module, absl::string_view kernel_name) {
-  stream_executor::gpu::TmaMetadata tma_metadata;
-  SmallVector<mlir::LLVM::LLVMFuncOp> func_ops;
-  for (auto func : triton_module.getOps<mlir::LLVM::LLVMFuncOp>()) {
-    // Custom calls will also match to LLVMFuncOp, so we are only interested in
-    // the entry function.
-    if (func.getName().str() == kernel_name) {
-      func_ops.push_back(func);
-    }
-  }
-  CHECK_EQ(func_ops.size(), 1)
-      << "Expected a single LLVMFuncOp in the module for the entry function.";
-
-  for (auto [idx, arg] : llvm::enumerate(func_ops[0].getArguments())) {
-    if (auto attr = func_ops[0].getArgAttrOfType<mtx::TmaDescriptorAttr>(
-            idx, "tt.tma_descriptor")) {
-      TF_ASSIGN_OR_RETURN(
-          auto tma_desc,
-          CreateTmaDescriptor(attr.getGlobalShape(), attr.getTileShape(),
-                              attr.getTileStrides(), attr.getLayout(),
-                              attr.getElementByteSize(),
-                              attr.getSwizzleMode().getValue()));
-      tma_metadata.arg_index_to_tma_info.insert({idx, tma_desc});
-    }
-  }
-  return tma_metadata;
-}
-
 absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> CreateTritonModule(
     absl::string_view fn_name, const HloFusionInstruction* fusion,
     const se::DeviceDescription& device_info,
@@ -2171,14 +2123,8 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
     }
 
     // Integrate LLVM matmul kernel into XLA's LLVM module.
-    auto* nvvm_annotations =
-        ll_triton_module->getNamedMetadata("nvvm.annotations");
-    if (nvvm_annotations) {
-      for (auto operand : nvvm_annotations->operands()) {
-        captured_nvvm_annotations.push_back(operand);
-      }
-      ll_triton_module->eraseNamedMetadata(nvvm_annotations);
-    }
+    captured_nvvm_annotations =
+        xgt::ExtractNvvmAnnotations(ll_triton_module.get());
     ll_triton_module->setDataLayout(llvm_module->getDataLayout());
     ll_triton_module->setTargetTriple(llvm_module->getTargetTriple());
     // Use override flag because libdevice functions can be present in both.
@@ -2210,13 +2156,32 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
                  cluster_info.clusterDimZ == 1);
   }
 
-  // It's okay for tma_metadata to be empty; it's only populated when used
-  // explicitly.
-  TF_ASSIGN_OR_RETURN(stream_executor::gpu::TmaMetadata tma_metadata,
-                      ExtractTmaMetadata(triton_module, kernel_name));
+  SmallVector<mlir::LLVM::LLVMFuncOp> func_ops;
+  for (auto func : triton_module.getOps<mlir::LLVM::LLVMFuncOp>()) {
+    // Custom calls will also match to LLVMFuncOp, so we are only interested in
+    // the entry function.
+    if (func.getName().str() == kernel_name) {
+      func_ops.push_back(func);
+    }
+  }
+  CHECK_EQ(func_ops.size(), 1)
+      << "Expected a single LLVMFuncOp in the module for the entry function.";
+  mlir::LLVM::LLVMFuncOp func_op = func_ops[0];
 
-  return {
-      {shared_mem_bytes, cluster_dim, tma_metadata, captured_nvvm_annotations}};
+  TF_ASSIGN_OR_RETURN(se::ThreadDim thread_dims,
+                      xgt::ExtractThreadDims(triton_module, func_op));
+  TF_ASSIGN_OR_RETURN(stream_executor::gpu::TmaMetadata tma_metadata,
+                      xgt::ExtractTmaMetadata(func_op));
+
+  // Propagate the following extracted information from the Triton module:
+  // - TMA metadata.
+  // - Total threads per block. Computed from module attributes.
+  // - Captured NVVM annotations.
+  TritonWrapperResult result = {
+      shared_mem_bytes,          cluster_dim, tma_metadata, thread_dims,
+      captured_nvvm_annotations,
+  };
+  return result;
 }
 
 std::string GetLibdevicePath(const HloModuleConfig& hlo_config,
@@ -2282,8 +2247,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
     AppendFuncArgType(s.shape.dimensions(), triton_ty, fn_arg_types);
   }
 
-  mlir::FunctionOpInterface fn =
-      CreateFuncOp(b, fn_name, fusion_kind, fn_arg_types);
+  mlir::FunctionOpInterface fn = b.create<mlir::func::FuncOp>(
+      fn_name, b.getFunctionType(fn_arg_types, {}));
 
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
@@ -2312,7 +2277,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
     return Internal("Unsupported fusion kind: %s", fusion_kind);
   }
 
-  EmitReturnOp(b, fusion_kind);
+  b.create<mlir::func::ReturnOp>();
 
   return triton_module;
 }
@@ -2325,6 +2290,7 @@ absl::Status LowerXTileToTriton(mlir::ModuleOp xtile_dialect_module,
     // Disable verifier because the Triton code may be invalid due to the
     // unsupported types.
     pm.enableVerifier(/*enabled=*/false);
+    pm.addPass(mlir::triton::xla::CreateTensorLowerToTritonPass());
     pm.addPass(mlir::triton::xla::CreateStableHLOLowerToTritonPass());
     if (mlir::failed(pm.run(xtile_dialect_module))) {
       return CreateInternalError(

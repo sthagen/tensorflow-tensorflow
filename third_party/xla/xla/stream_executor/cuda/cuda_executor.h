@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef XLA_STREAM_EXECUTOR_CUDA_CUDA_EXECUTOR_H_
 #define XLA_STREAM_EXECUTOR_CUDA_CUDA_EXECUTOR_H_
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -154,8 +155,42 @@ class CudaExecutor : public GpuExecutor {
     uint64_t handle_;
   };
 
+  class CudaMulticastMemory : public MulticastMemory {
+   public:
+    CudaMulticastMemory()
+        : handle_(0),
+          padded_size_(0),
+          granularity_(0),
+          num_devices_(0),
+          subscribed_devices_(0) {}
+    ~CudaMulticastMemory() override;
+
+    absl::Status SubscribeDevice(int device_number) override;
+
+    absl::StatusOr<void*> MapMemory(void* device_ptr,
+                                    GpuExecutor* gpu_executor) override;
+
+   private:
+    friend class CudaExecutor;
+    absl::Status Initialize(uint64_t size, int num_devices,
+                            GpuExecutor* gpu_executor);
+    CUmemGenericAllocationHandle handle_;
+    uint64_t padded_size_;
+    uint64_t granularity_;
+    int num_devices_;
+    std::atomic<int> subscribed_devices_;
+    absl::flat_hash_map<int, CUdeviceptr> mapped_devices_
+        ABSL_GUARDED_BY(mapped_devices_mu_);
+    absl::Mutex mapped_devices_mu_;
+  };
+
+  absl::StatusOr<std::unique_ptr<MulticastMemory>> CreateMulticastMemory(
+      uint64_t size, int num_devices) override;
+
   // Returns a handle to the given memory if it was allocated with VMM API.
   absl::StatusOr<VmmMemoryHandle> RetainVmmMemoryHandle(void* ptr);
+
+  bool is_multicast_supported() const { return is_multicast_supported_; }
 
  private:
   absl::Status VmmDeallocateMemory(void* ptr);
@@ -179,6 +214,8 @@ class CudaExecutor : public GpuExecutor {
   bool is_vmm_supported_ = false;
 
   bool is_rdma_supported_ = false;
+
+  bool is_multicast_supported_ = false;
 
   // Guards the in-memory-module mapping.
   absl::Mutex in_memory_modules_mu_;

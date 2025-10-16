@@ -411,6 +411,19 @@ cc_library(
     ],
 )
 
+tf_cc_test(
+    name = "allocator_test",
+    srcs = ["allocator_test.cc"],
+    deps = [
+        ":allocator",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "@local_xla//xla:cpu_function_runtime",
+        "@local_xla//xla/backends/cpu:alignment",
+    ],
+)
+
 cc_library(
     name = "xla_compiled_cpu_function",
     srcs = ["xla_compiled_cpu_function.cc"],
@@ -481,19 +494,6 @@ cc_library(
     alwayslink = 1,
 )
 
-tf_cc_test(
-    name = "cpu_function_runtime_test",
-    srcs = ["cpu_function_runtime_test.cc"],
-    deps = [
-        ":allocator",
-        "//tensorflow/core:framework",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "@local_xla//xla:cpu_function_runtime",
-        "@local_xla//xla/backends/cpu:alignment",
-    ],
-)
-
 cc_library(
     name = "xla_jit_compiled_cpu_function",
     srcs = ["xla_jit_compiled_cpu_function.cc"],
@@ -516,6 +516,8 @@ cc_library(
         "@local_xla//xla:cpu_function_runtime",
         "@local_xla//xla:shape_util",
         "@local_xla//xla:xla_data_proto_cc",
+        "@local_xla//xla/backends/cpu:buffer_allocation_info",
+        "@local_xla//xla/backends/cpu:buffer_allocation_info_util",
         "@local_xla//xla/backends/cpu/codegen:compiled_function_library",
         "@local_xla//xla/client:client_library",
         "@local_xla//xla/client:executable_build_options",

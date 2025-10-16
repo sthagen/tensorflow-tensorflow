@@ -1423,10 +1423,11 @@ absl::Status IrEmitterUnnested::EmitTopKCustomCall(
     VLOG(3) << "EmitTopKCustomCall: dtype=" << dtype << ", n=" << n
             << ", k=" << k << ", use_raft_select_k=" << use_raft_select_k;
 
+    Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
+        instr, ir_emitter_context_->GetNextThunkId());
     if (use_raft_select_k) {
       AddThunkToThunkSequence(std::make_unique<SelectKThunk>(
-          instr, batch_size, n, k, dtype, kernel_arguments,
-          ir_emitter_context_->GetNextThunkId()));
+          std::move(thunk_info), batch_size, n, k, dtype, kernel_arguments));
       return absl::OkStatus();
     }
   }
@@ -2361,7 +2362,7 @@ absl::Status IrEmitterUnnested::EmitCollectiveGroupStartThunk(
   }
   auto thunk = std::make_unique<CollectiveGroupThunk>(
       instr, Thunk::Kind::kGroupStart, std::move(scoped_thunk_sequence_),
-      stream_kind.value_or(AsyncStreamKind::kCollective),
+      stream_kind.value_or(AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE),
       ir_emitter_context_->GetNextThunkId());
   emit_group_thunks_ = false;
 
@@ -2391,7 +2392,7 @@ absl::Status IrEmitterUnnested::EmitCollectiveAsyncDone(
     return absl::OkStatus();
   }
 
-  AsyncStreamKind stream_kind = AsyncStreamKind::kCollective;
+  AsyncStreamKind stream_kind = AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE;
   if (is_send_recv) {
     stream_kind = GetStreamKindForP2P(start);
   }
@@ -2424,7 +2425,7 @@ absl::Status IrEmitterUnnested::EmitNvshmemAsyncDone(
     return absl::OkStatus();
   }
 
-  AsyncStreamKind stream_kind = AsyncStreamKind::kCollective;
+  AsyncStreamKind stream_kind = AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE;
   if (is_send_recv) {
     stream_kind = GetStreamKindForP2P(start);
   }

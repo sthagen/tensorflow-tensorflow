@@ -192,6 +192,10 @@ xla_test(
             "multi_gpu",
             "no_oss",
         ],
+        "b200": [
+            "broken",
+            "no_oss",
+        ],
     },
     backends = ["gpu"],
     deps = [
@@ -266,6 +270,7 @@ cc_library(
         "@llvm-project//llvm:ir_headers",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:LLVMDialect",
+        "@llvm-project//mlir:TensorDialect",
     ],
 )
 

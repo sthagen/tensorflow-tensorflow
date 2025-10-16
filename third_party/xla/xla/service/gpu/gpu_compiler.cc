@@ -1046,8 +1046,7 @@ absl::Status RunCollectiveOptimizationPasses(
         /*pipelining_direction=*/
         collective_pipeliner_utils::PipeliningDirection::kForward,
         /*should_process=*/HloPredicateIsOp<HloOpcode::kAllReduce>,
-        /*acceptable_formatting=*/
-        HloPredicateIsNotOp<HloOpcode::kOptimizationBarrier>,
+        /*acceptable_formatting=*/HloPredicateTrue,
         /*reuse_pipelined_op_buffer=*/HloPredicateFalse,
         /*should_allow_loop_variant_parameter_in_chain=*/HloPredicateFalse,
         /*should_allow_control_dependencies=*/false,
@@ -1070,8 +1069,7 @@ absl::Status RunCollectiveOptimizationPasses(
         /*pipelining_direction=*/
         collective_pipeliner_utils::PipeliningDirection::kBackward,
         /*should_process=*/HloPredicateIsOp<HloOpcode::kAllGather>,
-        /*acceptable_formatting=*/
-        HloPredicateIsNotOp<HloOpcode::kOptimizationBarrier>,
+        /*acceptable_formatting=*/HloPredicateTrue,
         /*reuse_pipelined_op_buffer=*/HloPredicateFalse,
         /*should_allow_loop_variant_parameter_in_chain=*/HloPredicateFalse,
         /*should_allow_control_dependencies=*/false,
@@ -1094,8 +1092,7 @@ absl::Status RunCollectiveOptimizationPasses(
         /*pipelining_direction=*/
         collective_pipeliner_utils::PipeliningDirection::kForward,
         /*should_process=*/HloPredicateIsOp<HloOpcode::kReduceScatter>,
-        /*acceptable_formatting=*/
-        HloPredicateIsNotOp<HloOpcode::kOptimizationBarrier>,
+        /*acceptable_formatting=*/HloPredicateTrue,
         /*reuse_pipelined_op_buffer=*/HloPredicateFalse,
         /*should_allow_loop_variant_parameter_in_chain=*/HloPredicateFalse,
         /*should_allow_control_dependencies=*/false,
@@ -1107,8 +1104,6 @@ absl::Status RunCollectiveOptimizationPasses(
     };
     collectives_pipeline.AddPass<CollectivePipeliner>(config);
   }
-
-  collectives_pipeline.AddPass<ReduceScatterCreator>();
 
   DebugOptions::PipelineParallelismOptLevel pipeline_parallelism_opt_level =
       debug_options.xla_gpu_experimental_pipeline_parallelism_opt_level();
@@ -1130,6 +1125,8 @@ absl::Status RunCollectiveOptimizationPasses(
   // AllGatherBroadcastReorder pass.
   collectives_pipeline.AddPass<GpuAlgebraicSimplifier>(
       layout_insensitive_algsimp_opts, gpu_version);
+
+  collectives_pipeline.AddPass<ReduceScatterCreator>();
 
   collectives_pipeline.AddPass<AllGatherBroadcastReorder>();
   collectives_pipeline.AddPass<AllGatherRemoveDegenerateDims>();
