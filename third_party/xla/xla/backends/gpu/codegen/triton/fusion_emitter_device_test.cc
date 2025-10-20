@@ -15,13 +15,10 @@ limitations under the License.
 
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <ostream>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -47,13 +44,13 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/testlib/filecheck.h"
-#include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/primitive_util.h"
 #include "xla/service/algorithm_util.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
+#include "xla/service/gpu/model/block_level_parameters.h"
 #include "xla/service/gpu/model/experimental/symbolic_expr.h"
 #include "xla/service/gpu/tests/gpu_codegen_test.h"
 #include "xla/shape.h"
@@ -115,6 +112,17 @@ INSTANTIATE_TEST_SUITE_P(TmaParameterizedTritonEmitterTestSuite,
                          [](const ::testing::TestParamInfo<bool>& info) {
                            return info.param ? "tma_allowed" : "tma_disabled";
                          });
+
+class WarpSpecializationTritonEmitterTest : public TritonEmitterTest {
+ public:
+  DebugOptions GetDebugOptionsForTest() const override {
+    DebugOptions debug_options = TritonEmitterTest::GetDebugOptionsForTest();
+    debug_options.set_xla_gpu_experimental_enable_triton_tma(true);
+    debug_options.set_xla_gpu_experimental_enable_triton_warp_specialization(
+        true);
+    return debug_options;
+  }
+};
 
 struct TmaAndDotLayoutTestParams {
   std::vector<int64_t> lhs_layout;
@@ -876,7 +884,7 @@ ENTRY main {
       CreateXTileIrAndFileCheck(this, kHloText, "triton_reduction_computation",
                                 R"(
 CHECK:  stablehlo.iota
-CHECK-COUNT-4:  tt.expand_dims
+CHECK:  stablehlo.broadcast_in_dim
 CHECK:  "tt.reduce"(%[[SELECT:.*]]) <{axis = 2 : i32}>
           )"));
 
@@ -928,8 +936,7 @@ ENTRY main {
 ; Make sure input reduction tile is padded with a neutral value.
 CHECK:  %[[LOAD:.*]] = triton_xla.extract
 CHECK:  %[[RANGE:.*]] = stablehlo.iota
-CHECK:  %[[EXPAND:.*]] = tt.expand_dims %[[RANGE]]
-CHECK:  %[[BROADCAST:.*]] = tt.broadcast %[[EXPAND]]
+CHECK:  %[[BROADCAST:.*]] = stablehlo.broadcast_in_dim %[[RANGE]]
 CHECK:  %[[CMPI:.*]] = arith.cmpi slt, %[[BROADCAST]]
 CHECK:  %[[SELECT:.*]] = arith.select %[[CMPI]], %[[LOAD]]
 CHECK:  "tt.reduce"(%[[SELECT]]) <{axis = 0 : i32}>
@@ -1842,13 +1849,15 @@ ENTRY main {
 // CHECK: %[[PAD_VALUE:.*]] = arith.constant 1.000000e+00 : f32
 // CHECK: %[[TILE_OFFSET:.*]] = xla.apply_indexing
 // CHECK: %[[IOTA_VAL:.*]] = stablehlo.iota dim = 0 : tensor<32xi32>
-// CHECK: %[[IOTA:.*]] = tt.broadcast %[[IOTA_VAL]] : tensor<32xi32> -> tensor<32xi32>
+// CHECK: %[[IOTA:.*]] = stablehlo.broadcast_in_dim %[[IOTA_VAL]], dims = [0] : (tensor<32xi32>) -> tensor<32xi32>
 // CHECK: %[[TILE_OFFSET_I32:.*]] = arith.index_cast %[[TILE_OFFSET]]
 // CHECK: %[[C17:.*]] = arith.constant 17 : i32
 // CHECK: %[[THRESHOLD:.*]] = arith.subi %[[C17]], %[[TILE_OFFSET_I32]]
-// CHECK: %[[THRESHOLD_SPLAT:.*]] = tt.splat %[[THRESHOLD]]
+// CHECK: %[[FROM_ELEMENTS_THRESHOLD:.*]] = tensor.from_elements %[[THRESHOLD]]
+// CHECK: %[[THRESHOLD_SPLAT:.*]] = stablehlo.broadcast_in_dim %[[FROM_ELEMENTS_THRESHOLD]], dims = []
 // CHECK: %[[MASK:.*]] = arith.cmpi slt, %[[IOTA]], %[[THRESHOLD_SPLAT]]
-// CHECK: %[[PAD_SPLAT:.*]] = tt.splat %[[PAD_VALUE]] : f32 -> tensor<32xf32>
+// CHECK: %[[FROM_ELEMENTS_PAD_VALUE:.*]] = tensor.from_elements %[[PAD_VALUE]]
+// CHECK: %[[PAD_SPLAT:.*]] = stablehlo.broadcast_in_dim %[[FROM_ELEMENTS_PAD_VALUE]], dims = []
 // CHECK: %[[SELECT:.*]] = arith.select %[[MASK]], %[[EXTRACT]], %[[PAD_SPLAT]]
 
 // CHECK:   triton_xla.insert %[[SELECT]] into %[[OUT]]
@@ -1908,12 +1917,10 @@ ENTRY main {
       CreateXTileIrAndFileCheck(this, kHloText, "triton_computation", R"(
 // CHECK: triton_xla.extract {{.*}} : tensor<32x16xf32>
 // CHECK: stablehlo.iota dim = 0 : tensor<32xi32>
-// CHECK: tt.expand_dims
-// CHECK: tt.broadcast
+// CHECK: stablehlo.broadcast_in_dim
 // CHECK: arith.cmpi
 // CHECK: stablehlo.iota dim = 0 : tensor<16xi32>
-// CHECK: tt.expand_dims
-// CHECK: tt.broadcast
+// CHECK: stablehlo.broadcast_in_dim
 // CHECK: arith.cmpi slt
 // CHECK: arith.andi
 // CHECK: arith.select
@@ -2401,10 +2408,20 @@ ENTRY main {
           "num_ctas":"1",
           "num_stages":"1"}}}
 })";
-  TF_EXPECT_OK(
-      CreateTritonIrAndFileCheck(this, kHloText, "triton_computation", R"(
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto xtile_module_and_hlo_module,
+      CreateXTileIrAndFileCheck(this, kHloText, "triton_computation", R"(
+CHECK:       %[[RES_FROM_ELEMENTS:.*]] = tensor.from_elements %[[ARG:.*]] : tensor<f32>
+CHECK:       stablehlo.broadcast_in_dim %[[RES_FROM_ELEMENTS]], dims = []
+          )"));
+
+  TF_EXPECT_OK(LowerXTileIrToTritonAndFileCheck(
+      this, xtile_module_and_hlo_module.first.get(), R"(
 CHECK:       tt.splat {{.*}} f32 -> tensor<8x4xf32>
-)"));
+)",
+      GetFusionInstruction(*xtile_module_and_hlo_module.second,
+                           "triton_computation")));
 }
 
 TEST_F(TritonEmitterTest, PredOutputIsStoredCorrectly) {
@@ -2669,7 +2686,7 @@ CHECK:      %[[MUL:.*]] = arith.muli %[[RANGE]], {{.*}} : tensor<64xi32>
 CHECK:      arith.addi{{.*}} %[[MUL]]
             // Omit the data type below, since it depends on a test parameter
             // and is not abbreviated the same as in HLO.
-CHECK:      tt.broadcast {{.*}} -> tensor<1x2x64x8x
+CHECK:      stablehlo.broadcast_in_dim {{.*}}, dims = [2] : {{.*}}
           )"));
 
   TF_ASSERT_OK(LowerXTileIrToTritonAndFileCheck(
@@ -3233,6 +3250,72 @@ CHECK-COUNT-1: triton_xla.insert
 )"));
   EXPECT_TRUE(RunAndCompareNoHloPasses(
       hlo_text, ErrorSpec{/*aabs=*/1e-4, /*arel=*/1e-6}));
+}
+
+TEST_F(WarpSpecializationTritonEmitterTest,
+       DotAccumulationLoopUsesWarpSpecialization) {
+  if (!GetCudaComputeCapability().IsAtLeastBlackwell()) {
+    GTEST_SKIP() << "Currently only supported on Blackwell and newer.";
+  }
+
+  const std::string hlo_text = R"(
+flhs {
+  ROOT flhs.p0 = f16[256,256] parameter(0)
+}
+
+frhs {
+  ROOT frhs.p0 = f16[256,256] parameter(0)
+}
+
+fdot {
+  fdot.p0 = f16[256,256] parameter(0)
+  fdot.p1 = f16[256,256] parameter(1)
+  fdot.lhs = f16[256,256] fusion(fdot.p0), kind=kCustom, calls=flhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["128", "64"]}],
+        "is_tma_allowed":"1"
+      }
+    }
+  }
+  fdot.rhs = f16[256,256]{1,0} fusion(fdot.p1), kind=kCustom, calls=frhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["64", "128"]}],
+        "is_tma_allowed":"1"
+      }
+    }
+  }
+  ROOT fdot.root = f16[256,256]{1,0} dot(fdot.lhs, fdot.rhs),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0},
+    algorithm=dot_f16_f16_f32
+}
+
+ENTRY entry {
+  entry.p0 = f16[256,256] parameter(0)
+  entry.p1 = f16[256,256] parameter(1)
+  ROOT fusion = f16[256,256] fusion(entry.p0, entry.p1),
+    kind=kCustom, calls=fdot, backend_config={
+      "fusion_backend_config":{
+        "kind":"__triton_nested_gemm_fusion",
+        "block_level_fusion_config":{
+          "output_tiles":[{"sizes":["128", "128"]}],
+          "num_warps":"8",
+          "num_ctas":"1",
+          "num_stages":"1",
+          "is_tma_allowed":"1"}}}
+})";
+
+  // Check that the IR attribute is set correctly.
+  TF_EXPECT_OK(CreateTritonIrAndFileCheck(this, hlo_text, "fdot", R"(
+  // CHECK:       scf.for
+  // CHECK:       scf.yield
+  // CHECK-NEXT:  tt.warp_specialize
+  // )"));
+
+  // Make sure it runs correctly.
+  EXPECT_TRUE(RunAndCompareNoHloPasses(
+      hlo_text, ErrorSpec{/*aabs=*/1e-3, /*arel=*/1e-3}));
 }
 
 TEST_F(TritonEmitterTest, MaskedDotIsEmittedCorrectly) {
@@ -4137,6 +4220,55 @@ ENTRY entry {
 })";
   EXPECT_TRUE(RunAndCompareNoHloPasses(
       kHloText, ErrorSpec{/*aabs=*/1e-4, /*arel=*/1e-6}));
+}
+
+TEST_F(TritonEmitterTest, BF16WithSmallRHSOuterDimDoesNotCrash) {
+  const std::string kHloText = R"(
+flhs {
+  ROOT flhs.p0 = bf16[64,32] parameter(0)
+}
+
+frhs {
+  ROOT frhs.p0 = bf16[32,8] parameter(0)
+}
+
+fdot {
+  fdot.p0 = bf16[64,32] parameter(0)
+  fdot.p1 = bf16[32,8] parameter(1)
+  fdot.lhs = bf16[64,32] fusion(fdot.p0), kind=kCustom, calls=flhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["64", "32"]}]
+      }
+    }
+  }
+  fdot.rhs = bf16[32,8]{1,0} fusion(fdot.p1), kind=kCustom, calls=frhs, backend_config={
+    "fusion_backend_config":{
+      "kind":"__triton_nested_gemm_fusion", "block_level_fusion_config":{
+        "output_tiles":[{"sizes":["32", "8"]}]
+      }
+    }
+  }
+  ROOT fdot.root = bf16[64,8]{1,0} dot(fdot.lhs, fdot.rhs),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0}
+}
+
+ENTRY entry {
+  entry.p0 = bf16[64,32] parameter(0)
+  entry.p1 = bf16[32,8] parameter(1)
+  ROOT fusion = bf16[64,8] fusion(entry.p0, entry.p1),
+    kind=kCustom, calls=fdot, backend_config={
+      "fusion_backend_config":{
+        "kind":"__triton_nested_gemm_fusion",
+        "block_level_fusion_config":{
+          "output_tiles":[{"sizes":["64","8"]}],
+          "num_warps":"4",
+          "num_ctas":"1",
+          "num_stages":"1"}}}
+})";
+
+  EXPECT_TRUE(RunAndCompareNoHloPasses(
+      kHloText, ErrorSpec{/*aabs=*/1e-1, /*arel=*/1e-2}));
 }
 
 struct ScaleDotTestParams {

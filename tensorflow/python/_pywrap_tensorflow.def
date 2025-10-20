@@ -111,6 +111,7 @@ EXPORTS
   ??0SignatureDef@tensorflow@@IEAA@PEAVArena@protobuf@google@@@Z
   ??0SimpleFieldComparator@util@protobuf@google@@QEAA@XZ
   ??0SingleMachine@grappler@tensorflow@@QEAA@HHH@Z
+  ??0SourceMgr@llvm@@QEAA@XZ
   ??0SourceMgrDiagnosticHandler@mlir@@QEAA@AEAVSourceMgr@llvm@@PEAVMLIRContext@1@$$QEAV?$unique_function@$$A6A_NVLocation@mlir@@@Z@3@@Z
   ??0SparseCoreLayoutStacker@tpu@tensorflow@@QEAA@H_NH@Z
   ??0SrcBuffer@SourceMgr@llvm@@QEAA@$$QEAU012@@Z
@@ -173,6 +174,7 @@ EXPORTS
   ??1RunMetadata@tensorflow@@UEAA@XZ
   ??1SignatureDef@tensorflow@@UEAA@XZ
   ??1SimpleFieldComparator@util@protobuf@google@@UEAA@XZ
+  ??1SourceMgr@llvm@@QEAA@XZ
   ??1SourceMgrDiagnosticHandler@mlir@@QEAA@XZ
   ??1SparseCoreTableLayout@tpu@tensorflow@@UEAA@XZ
   ??1SparseCoreTableLayouts@tpu@tensorflow@@UEAA@XZ

@@ -1,4 +1,4 @@
-/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,26 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_TSL_PLATFORM_DEFAULT_INTEGRAL_TYPES_H_
-#define XLA_TSL_PLATFORM_DEFAULT_INTEGRAL_TYPES_H_
+#include <cstddef>
 
-#include <cstdint>
-
-// IWYU pragma: private, include "xla/tsl/platform/types.h"
-// IWYU pragma: friend third_party/tensorflow/compiler/xla/tsl/platform/types.h
+#include "tsl/platform/mem.h"
+#include "tsl/platform/numa.h"
 
 namespace tsl {
+namespace port {
 
-typedef signed char int8;
-typedef short int16;
-typedef int int32;
-typedef ::std::int64_t int64;
+bool NUMAEnabled() { return false; }
 
-typedef unsigned char uint8;
-typedef unsigned short uint16;
-typedef unsigned int uint32;
-typedef std::uint64_t uint64;
+int NUMANumNodes() { return 1; }
 
+void NUMASetThreadNodeAffinity(int node) {}
+
+int NUMAGetThreadNodeAffinity() { return kNUMANoAffinity; }
+
+void* NUMAMalloc(int node, size_t size, int minimum_alignment) {
+  return ::tsl::port::AlignedMalloc(size, minimum_alignment);
+}
+
+void NUMAFree(void* ptr, size_t size) { ::tsl::port::Free(ptr); }
+
+int NUMAGetMemAffinity(const void* ptr) { return kNUMANoAffinity; }
+
+}  // namespace port
 }  // namespace tsl
-
-#endif  // XLA_TSL_PLATFORM_DEFAULT_INTEGRAL_TYPES_H_

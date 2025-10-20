@@ -24,6 +24,7 @@ load(
     "if_llvm_x86_available",
 )
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
+load("//xla/tsl/xnnpack:build_defs.bzl", "if_ynnpack")
 load(":build_defs.bzl", "runtime_copts")
 
 package(
@@ -171,24 +172,11 @@ cc_library(
 )
 
 cc_library(
-    name = "buffer_info_util",
-    srcs = ["buffer_info_util.cc"],
-    hdrs = ["buffer_info_util.h"],
-    deps = [
-        "//xla:cpu_function_runtime",
-        "//xla/hlo/ir:hlo",
-        "//xla/service:buffer_assignment",
-        "@com_google_absl//absl/types:span",
-    ],
-)
-
-cc_library(
     name = "cpu_compiler_pure",
     srcs = ["cpu_compiler.cc"],
     hdrs = ["cpu_compiler.h"],
     copts = tsl_copts(),
     deps = [
-        ":buffer_info_util",
         ":conv_canonicalization",
         ":cpu_aot_compilation_result",
         ":cpu_aot_loader",
@@ -427,7 +415,6 @@ cc_library(
     srcs = ["cpu_aot_compilation_result.cc"],
     hdrs = ["cpu_aot_compilation_result.h"],
     deps = [
-        ":buffer_info_util",
         ":cpu_executable",
         ":executable_proto_cc",
         "//xla:cpu_function_runtime",
@@ -931,7 +918,7 @@ cc_library(
     srcs = ["thunk_emitter.cc"],
     hdrs = ["thunk_emitter.h"],
     copts = tsl_copts(),
-    local_defines = if_graph_api(["XLA_ONEDNN_USE_GRAPH_API=1"]),
+    local_defines = if_graph_api(["XLA_ONEDNN_USE_GRAPH_API=1"]) + if_ynnpack(["XLA_YNNPACK"]),
     deps = [
         ":backend_config_proto_cc",
         ":cpu_options",
@@ -1023,6 +1010,10 @@ cc_library(
         "@local_tsl//tsl/profiler/lib:traceme",
     ] + if_onednn([
         "//xla/backends/cpu/runtime/onednn:onednn_op_thunk",
+    ]) + if_ynnpack([
+        "//xla/backends/cpu:ynn_emitter",
+        "//xla/backends/cpu:ynn_support",
+        "//xla/backends/cpu/runtime/ynnpack:ynn_fusion_thunk",
     ]),
 )
 
