@@ -47,39 +47,89 @@ limitations under the License.
 
 namespace xla {
 namespace gpu {
+
 using hlo_query::NextChannelId;
 
-// Exchanges the metadata between the hosts and computes the intra-host
+// Corrects the offsets in the local metadata to account for the number of input
+// rows in the combined ragged tensor.
+HloInstruction* CorrectOffsets(HloRaggedAllToAllInstruction* ragged_all_to_all,
+                               HloInstruction* local_metadata,
+                               HloComputation* computation) {
+  const Shape& shape = local_metadata->shape();
+
+  HloInstruction* iota = computation->AddInstruction(
+      HloInstruction::CreateIota(/*shape=*/shape, /*iota_dimension=*/0));
+
+  int64_t num_input_rows = ragged_all_to_all->operand(0)->shape().dimensions(0);
+
+  HloInstruction* num_input_rows_constant =
+      computation->AddInstruction(HloInstruction::CreateConstant(
+          LiteralUtil::CreateR0<int64_t>(num_input_rows)));
+
+  HloInstruction* num_input_rows_constant_broadcast =
+      computation->AddInstruction(HloInstruction::CreateBroadcast(
+          /*shape=*/shape, num_input_rows_constant,
+          /*broadcast_dimensions=*/{}));
+
+  HloInstruction* input_offsets_offset =
+      computation->AddInstruction(HloInstruction::CreateBinary(
+          /*shape=*/shape, HloOpcode::kMultiply,
+          /*lhs=*/iota, /*rhs=*/num_input_rows_constant_broadcast));
+
+  return computation->AddInstruction(HloInstruction::CreateBinary(
+      /*shape=*/shape, HloOpcode::kAdd,
+      /*lhs=*/local_metadata,
+      /*rhs=*/input_offsets_offset));
+}
+
+// Exchanges the metadata operands between the hosts and computes the intra-host
 // metadata.
-//
-// If `correct_offsets` is true, the offsets are corrected to account for the
-// number of input rows in the combined ragged tensor. It's needed for
-// `input_offsets`.
-HloInstruction* GetIntraHostMetadata(
+absl::InlinedVector<HloInstruction*, 4> GetIntraHostMetadata(
     HloRaggedAllToAllInstruction* ragged_all_to_all,
-    HloInstruction* metadata_operand, HloComputation* computation,
-    absl::Span<ReplicaGroup const> replica_groups, int64_t num_hosts,
-    int64_t num_devices_in_replica, bool correct_offsets) {
+    HloComputation* computation, absl::Span<ReplicaGroup const> replica_groups,
+    int64_t num_hosts, int64_t num_devices_in_replica) {
   int64_t num_devices_in_replica_per_host = num_devices_in_replica / num_hosts;
 
+  absl::InlinedVector<HloInstruction*, 4> metadata_operands;
+  metadata_operands.reserve(4);
+  for (int i = 2; i < 6; ++i) {
+    metadata_operands.push_back(ragged_all_to_all->mutable_operand(i));
+  }
+
+  Shape metadata_operand_shape = metadata_operands[0]->shape();
+
   int64_t num_updates_per_replica =
-      metadata_operand->shape().dimensions(0) / num_devices_in_replica;
+      metadata_operand_shape.dimensions(0) / num_devices_in_replica;
 
   Shape new_metadata_shape = ShapeUtil::MakeShape(
-      metadata_operand->shape().element_type(),
+      metadata_operand_shape.element_type(),
       {num_hosts, num_devices_in_replica_per_host, num_updates_per_replica});
 
   Shape new_metadata_transposed_shape = ShapeUtil::MakeShape(
-      metadata_operand->shape().element_type(),
+      metadata_operand_shape.element_type(),
       {num_devices_in_replica_per_host, num_hosts, num_updates_per_replica});
 
-  HloInstruction* new_input_offsets = computation->AddInstruction(
-      HloInstruction::CreateReshape(new_metadata_shape, metadata_operand));
+  for (int64_t i = 0; i < metadata_operands.size(); ++i) {
+    metadata_operands[i] =
+        computation->AddInstruction(HloInstruction::CreateReshape(
+            new_metadata_shape, metadata_operands[i]));
+  }
 
-  HloInstruction* new_local_metadata =
+  Shape all_to_all_shape =
+      ShapeUtil::MakeShape(metadata_operand_shape.element_type(),
+                           {num_hosts, num_devices_in_replica_per_host,
+                            4 * num_updates_per_replica});
+
+  HloInstruction* all_to_all_input =
+      computation->AddInstruction(HloInstruction::CreateConcatenate(
+          /*shape=*/all_to_all_shape,
+          /*operands=*/metadata_operands,
+          /*dimension=*/2));
+
+  HloInstruction* all_to_all =
       computation->AddInstruction(HloInstruction::CreateAllToAll(
-          /*shape=*/new_metadata_shape,
-          /*operands=*/{new_input_offsets},
+          /*shape=*/all_to_all_shape,
+          /*operands=*/{all_to_all_input},
           /*device_list=*/CollectiveDeviceList(replica_groups),
           /*constrain_layout=*/false,
           /*channel_id=*/ragged_all_to_all->channel_id().has_value()
@@ -87,47 +137,35 @@ HloInstruction* GetIntraHostMetadata(
               : std::nullopt,
           /*split_dimension=*/0));
 
-  if (correct_offsets) {
-    HloInstruction* iota =
-        computation->AddInstruction(HloInstruction::CreateIota(
+  for (int i = 0; i < metadata_operands.size(); ++i) {
+    metadata_operands[i] =
+        computation->AddInstruction(HloInstruction::CreateSlice(
             /*shape=*/new_metadata_shape,
-            /*iota_dimension=*/0));
-
-    int64_t num_input_rows =
-        ragged_all_to_all->operand(0)->shape().dimensions(0);
-
-    HloInstruction* num_input_rows_constant =
-        computation->AddInstruction(HloInstruction::CreateConstant(
-            LiteralUtil::CreateR0<int64_t>(num_input_rows)));
-
-    HloInstruction* num_input_rows_constant_broadcast =
-        computation->AddInstruction(HloInstruction::CreateBroadcast(
-            /*shape=*/new_metadata_shape, num_input_rows_constant,
-            /*broadcast_dimensions=*/{}));
-
-    HloInstruction* input_offsets_offset =
-        computation->AddInstruction(HloInstruction::CreateBinary(
-            /*shape=*/new_metadata_shape, HloOpcode::kMultiply,
-            /*lhs=*/iota, /*rhs=*/num_input_rows_constant_broadcast));
-
-    new_local_metadata =
-        computation->AddInstruction(HloInstruction::CreateBinary(
-            /*shape=*/new_metadata_shape, HloOpcode::kAdd,
-            /*lhs=*/new_local_metadata,
-            /*rhs=*/input_offsets_offset));
+            /*operand=*/all_to_all,
+            /*start_indices=*/{0, 0, i * num_updates_per_replica},
+            /*limit_indices=*/
+            {num_hosts, num_devices_in_replica_per_host,
+             (i + 1) * num_updates_per_replica},
+            /*strides=*/{1, 1, 1}));
   }
 
-  HloInstruction* new_local_metadata_transposed =
-      computation->AddInstruction(HloInstruction::CreateTranspose(
-          /*shape=*/new_metadata_transposed_shape,
-          /*operand=*/new_local_metadata,
-          /*dimensions=*/{1, 0, 2}));
+  // Correct input offsets that need to be adjusted for the number of input
+  // rows.
+  metadata_operands[0] =
+      CorrectOffsets(ragged_all_to_all, metadata_operands[0], computation);
 
-  HloInstruction* intra_host_metadata =
-      computation->AddInstruction(HloInstruction::CreateReshape(
-          metadata_operand->shape(), new_local_metadata_transposed));
+  for (int i = 0; i < metadata_operands.size(); ++i) {
+    metadata_operands[i] =
+        computation->AddInstruction(HloInstruction::CreateTranspose(
+            /*shape=*/new_metadata_transposed_shape,
+            /*operand=*/metadata_operands[i],
+            /*dimensions=*/{1, 0, 2}));
+    metadata_operands[i] =
+        computation->AddInstruction(HloInstruction::CreateReshape(
+            metadata_operand_shape, metadata_operands[i]));
+  }
 
-  return intra_host_metadata;
+  return metadata_operands;
 }
 
 absl::StatusOr<bool> DecomposeRaggedAllToAll(
@@ -212,8 +250,6 @@ absl::StatusOr<bool> DecomposeRaggedAllToAll(
     }
   }
 
-  std::vector<HloInstruction*> intra_host_metadata;
-
   HloInstruction* input_operand = ragged_all_to_all->mutable_operand(0);
 
   Shape new_input_shape = input_operand->shape();
@@ -240,12 +276,10 @@ absl::StatusOr<bool> DecomposeRaggedAllToAll(
           /*use_global_device_ids=*/
           ragged_all_to_all->channel_id().has_value()));
 
-  for (int i = 2; i < 6; ++i) {
-    intra_host_metadata.push_back(GetIntraHostMetadata(
-        ragged_all_to_all, ragged_all_to_all->mutable_operand(i), computation,
-        inter_host_replica_groups, num_hosts, num_devices_in_replica,
-        /*correct_offsets=*/i == 2));
-  }
+  absl::InlinedVector<HloInstruction*, 4> intra_host_metadata =
+      GetIntraHostMetadata(ragged_all_to_all, computation,
+                           inter_host_replica_groups, num_hosts,
+                           num_devices_in_replica);
 
   HloInstruction* new_ragged_all_to_all =
       computation->AddInstruction(HloInstruction::CreateRaggedAllToAll(
