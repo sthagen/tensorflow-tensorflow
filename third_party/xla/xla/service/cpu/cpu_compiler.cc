@@ -257,6 +257,10 @@ limitations under the License.
 #include "xla/service/cpu/onednn_ops_rewriter.h"
 #endif  // XLA_ONEDNN
 
+#ifdef XLA_YNNPACK
+#include "xla/backends/cpu/ynn_support.h"
+#endif  // XLA_YNNPACK
+
 namespace xla {
 namespace {
 
@@ -628,15 +632,42 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
     if (!call_library_for_dot(*instr)) {
       return true;
     }
-    bool use_cost_model = module->config()
-                              .debug_options()
-                              .xla_cpu_experimental_xnn_graph_fusion_mode() !=
-                          DebugOptions::XNN_GRAPH_FUSION_MODE_BYPASS_COST_MODEL;
-    return !IsDotSupportedByXnn(instr->dot_dimension_numbers(),
-                                instr->operand(0)->shape(),
-                                instr->operand(1)->shape(), instr->shape(),
-                                target_machine_features, use_cost_model)
-                .value_or(false);
+
+#ifdef XLA_YNNPACK
+    if (absl::c_linear_search(
+            module->config()
+                .debug_options()
+                .xla_cpu_experimental_ynn_fusion_type(),
+            DebugOptions::LIBRARY_FUSION_TYPE_INDIVIDUAL_DOT)) {
+      if (IsDotSupportedByYnn(instr->dot_dimension_numbers(),
+                              instr->operand(0)->shape(),
+                              instr->operand(1)->shape(), instr->shape())
+              .value_or(false)) {
+        return false;
+      }
+    }
+#endif  // XLA_YNNPACK
+
+    auto xnn_graph_fusion_mode =
+        module->config()
+            .debug_options()
+            .xla_cpu_experimental_xnn_graph_fusion_mode();
+    if (xnn_graph_fusion_mode != DebugOptions::XNN_GRAPH_FUSION_MODE_DISABLED) {
+      bool use_cost_model =
+          module->config()
+              .debug_options()
+              .xla_cpu_experimental_xnn_graph_fusion_mode() !=
+          DebugOptions::XNN_GRAPH_FUSION_MODE_BYPASS_COST_MODEL;
+      if (IsDotSupportedByXnn(instr->dot_dimension_numbers(),
+                              instr->operand(0)->shape(),
+                              instr->operand(1)->shape(), instr->shape(),
+                              target_machine_features, use_cost_model)
+              .value_or(false)) {
+        return false;
+      }
+    }
+
+    return true;
   };
 
   // xla::cpu::GetDotImplementationStrategy (used by call_library_for_dot)
@@ -1940,13 +1971,20 @@ CpuCompiler::CompileCpuExecutable(
   TF_ASSIGN_OR_RETURN(std::vector<ConstantAllocation> constants,
                       CreateConstantAllocations(*assignment));
 
+  TargetMachineOptionsProto target_machine_options_proto;
+  target_machine_options_proto.set_triple(
+      target_machine->getTargetTriple().getTriple());
+  target_machine_options_proto.set_cpu(target_machine->getTargetCPU());
+  target_machine_options_proto.set_features(
+      target_machine->getTargetFeatureString());
+
   TF_ASSIGN_OR_RETURN(
       auto cpu_executable,
-      CpuExecutable::Create(std::move(function_library), std::move(assignment),
-                            std::move(module), std::move(thunks),
-                            std::move(constants),
-                            std::move(hlo_profile_printer_data),
-                            std::move(hlo_profile_index_map)));
+      CpuExecutable::Create(
+          std::move(function_library), std::move(assignment), std::move(module),
+          std::move(thunks), std::move(constants),
+          std::move(hlo_profile_printer_data), std::move(hlo_profile_index_map),
+          std::move(target_machine_options_proto)));
 
   // Save object files to be able to export them to AOT compilation
   // result.
@@ -2183,7 +2221,8 @@ CpuCompiler::CompileAheadOfTimeThunks(
       cpu_executable->module_name(), std::move(obj_files),
       cpu_executable->get_compiled_symbols_proto(), thunk_sequence,
       std::move(*cpu_executable).consume_function_library(),
-      std::move(executable_hlo_profile_printer_data));
+      std::move(executable_hlo_profile_printer_data),
+      cpu_executable->target_machine_options());
 }
 
 se::Platform::Id CpuCompiler::PlatformId() const {
@@ -2233,7 +2272,8 @@ absl::StatusOr<std::unique_ptr<AotCompilationResult>> CpuCompiler::Export(
       cpu_executable->module_name(), std::move(obj_files),
       std::move(compiled_symbols_proto), *thunk_sequence,
       std::move(function_library),
-      std::move(executable_hlo_profile_printer_data));
+      std::move(executable_hlo_profile_printer_data),
+      cpu_executable->target_machine_options());
 }
 
 absl::StatusOr<std::unique_ptr<AotCompilationResult>>
