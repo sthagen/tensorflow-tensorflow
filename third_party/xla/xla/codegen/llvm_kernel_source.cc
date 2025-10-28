@@ -13,16 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_CODEGEN_LLVM_KERNEL_DEFINITION_H_
-#define XLA_CODEGEN_LLVM_KERNEL_DEFINITION_H_
+#include "xla/codegen/llvm_kernel_source.h"
 
-#include "xla/codegen/kernel_definition.h"
-#include "xla/codegen/llvm_ir_kernel_source.h"
+#include <string>
+
+#include "llvm/IR/Module.h"
+#include "xla/service/llvm_ir/llvm_util.h"
 
 namespace xla {
 
-using LlvmKernelDefinition = KernelDefinition<LlvmIrKernelSource>;
+std::string LlvmKernelSource::ToString() const {
+  return module_.withModuleDo(
+      [&](llvm::Module& m) { return llvm_ir::DumpToString(&m); });
+}
 
 }  // namespace xla
-
-#endif  // XLA_CODEGEN_LLVM_KERNEL_DEFINITION_H_
