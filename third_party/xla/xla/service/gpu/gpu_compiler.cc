@@ -70,6 +70,7 @@ limitations under the License.
 #include "xla/core/host_offloading/hlo_host_device_type_call_wrapper.h"
 #include "xla/core/host_offloading/host_compute_asyncifier.h"
 #include "xla/hlo/analysis/alias_info.h"
+#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -191,7 +192,6 @@ limitations under the License.
 #include "xla/service/gpu/matmul_utils.h"
 #include "xla/service/gpu/metrics.h"
 #include "xla/service/gpu/model/collective_ptable_stats_collection.h"
-#include "xla/service/gpu/model/experimental/symbolic_expr.h"
 #include "xla/service/gpu/model/gpu_cost_model_stats_collection.h"
 #include "xla/service/gpu/model/gpu_hlo_cost_analysis.h"
 #include "xla/service/gpu/model/matmul_ptable_stats_collection.h"
@@ -563,8 +563,8 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
 
 namespace {
 // Adds the HloVerifier for GPU to the given pipeline.
-void AddHloVerifier(HloPassPipeline* pipeline,
-                    HloVerifierOpts&& opts = {}, bool debug_only = false) {
+void AddHloVerifier(HloPassPipeline* pipeline, HloVerifierOpts&& opts = {},
+                    bool debug_only = false) {
   opts.verify_no_collective_deadlocks = true;
   std::unique_ptr<TargetVerifierMetadata> verifier_metadata =
       std::make_unique<CpuGpuVerifierMetadata>(std::move(opts));
@@ -1477,6 +1477,7 @@ AlgebraicSimplifierOptions GpuCompiler::GetAlgebraicSimplifierOptions(
   }
 
   switch (mode) {
+    case AlgebraicSimplifierMode::kAfterSimplifyFPConversions:
     case AlgebraicSimplifierMode::kPostFusionSimplification:
     case AlgebraicSimplifierMode::kLayoutNormalization:
     case AlgebraicSimplifierMode::kPostLayoutAssignment:
@@ -1934,7 +1935,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
         pipeline.AddPass<HloPassPipeline>(
             "remove-no-op-reduce-precision-algebraic-simplifier");
     AlgebraicSimplifierOptions options = GetAlgebraicSimplifierOptions(
-        AlgebraicSimplifierMode::kPostFusionSimplification, debug_options,
+        AlgebraicSimplifierMode::kAfterSimplifyFPConversions, debug_options,
         gpu_target_config.platform_name == "ROCM");
     remove_no_op_reduce_precision_pipeline
         .AddPass<HloPassFix<GpuAlgebraicSimplifier>>(options, gpu_version);

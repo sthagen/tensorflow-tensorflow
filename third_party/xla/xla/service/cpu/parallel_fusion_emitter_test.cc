@@ -123,9 +123,9 @@ TEST_F(ParallelFusionEmitterTest, HappyPathSingleFusion) {
 
   TF_ASSERT_OK_AND_ASSIGN(auto kernels, fussion_emitter.ConsumeKernels());
   ASSERT_EQ(kernels.size(), 1);
-  LlvmKernelDefinition& lowered_kernel = kernels[0];
-  auto [spec, source] = std::move(lowered_kernel).ReleaseStorage();
-  EXPECT_EQ(spec.name(), expected_name);
+  KernelDefinition<LlvmKernelSource>& lowered_kernel = kernels[0];
+  EXPECT_EQ(lowered_kernel.spec().name(), expected_name);
+  auto source = std::move(lowered_kernel).TakeSource();
 
   llvm::orc::ThreadSafeModule thread_safe_llvm_module =
       std::move(source).thread_safe_module();

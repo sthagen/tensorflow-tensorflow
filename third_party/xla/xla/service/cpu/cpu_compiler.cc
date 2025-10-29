@@ -654,17 +654,30 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
   pipeline.AddPass<BatchedGatherScatterNormalizer>();
   pipeline.AddPass<ResultCaster>();
 
-  // If XNNPACK is enabled, we only need to upcast dots that XnnDotThunk does
-  // not support. `upcaster_filter` returns false if the instruction shouldn't
-  // be processed.
   auto library_supports_dot =
       LibrarySupportsDot(module, target_machine_features);
 
-  HloPredicate upcaster_filter = [&](const HloInstruction* instr) {
-    if (instr->opcode() != HloOpcode::kDot) {
-      return true;
+  auto call_library_for_dot = [&](const HloInstruction& instr) {
+    if (instr.opcode() != HloOpcode::kDot) {
+      return false;
     }
-    return !library_supports_dot(*instr);
+
+    auto dot_strategy = GetDotImplementationStrategy(
+        module->config(), instr, *target_machine_features,
+        /*allow_runtime_calls=*/true);
+    if (dot_strategy != DotImplementationStrategy::kEigen) {
+      // We aren't going to call a library for this dot.
+      return false;
+    }
+
+    return library_supports_dot(instr);
+  };
+
+  // If YNNPACK is enabled, we only need to upcast dots that YnnDotThunk does
+  // not support. `upcaster_filter` returns false if the instruction shouldn't
+  // be processed.
+  HloPredicate upcaster_filter = [&](const HloInstruction* instr) {
+    return !call_library_for_dot(*instr);
   };
 
   // xla::cpu::GetDotImplementationStrategy (used by call_library_for_dot)
@@ -728,7 +741,7 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
   // Convert BF16 and F8 operations to F32 and F16 respectively so that the CPU
   // backend can support BF16/F8 operations without directly implementing a
   // BF16/F8 lowering for most ops.
-  CpuFloatSupport bf16_support(BF16, library_supports_dot);
+  CpuFloatSupport bf16_support(BF16, call_library_for_dot);
 #ifdef XLA_ONEDNN
   OneDnnFloatSupport onednn_bf16_support(BF16);
   if (use_onednn_custom_call) {
@@ -956,14 +969,20 @@ absl::Status CpuCompiler::RunHloPassesAfterLayoutAssn(
   // XNNPACK ops availability checks depend on the layout information,
   // so until another solution is developed the passes creating XNNPACK fusions
   // have to run after layout assignment.
+  const bool use_ynnpack = absl::c_linear_search(
+      debug_options.xla_cpu_experimental_ynn_fusion_type(),
+      DebugOptions::LIBRARY_FUSION_TYPE_REDUCE);
   LibraryRewriterOptions options = {
       /*use_onednn=*/debug_options.xla_cpu_use_onednn(),
       /*use_xnnpack=*/debug_options.xla_cpu_use_xnnpack(),
+      /*use_ynnpack=*/use_ynnpack,
       /*onednn_fusion_types=*/
       &debug_options.xla_cpu_experimental_onednn_fusion_type(),
       /*xnn_fusion_types=*/
-      &debug_options.xla_cpu_experimental_xnn_fusion_type()};
-  if (options.use_onednn || options.use_xnnpack) {
+      &debug_options.xla_cpu_experimental_xnn_fusion_type(),
+      /*ynn_fusion_types=*/
+      &debug_options.xla_cpu_experimental_ynn_fusion_type()};
+  if (options.use_onednn || options.use_xnnpack || options.use_ynnpack) {
     HloPassPipeline lib_pipeline("dot-library-passes");
     lib_pipeline.AddPass<DotDecomposer>();
     lib_pipeline.AddPass<LibraryRewriter>(target_machine_features, options);

@@ -27,9 +27,8 @@ limitations under the License.
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/Support/DebugStringHelper.h"
 #include "xla/codegen/kernel_definition.h"
-#include "xla/codegen/kernel_emitter.h"
 #include "xla/codegen/kernel_source.h"
-#include "xla/service/gpu/model/experimental/symbolic_expr.h"
+#include "xla/hlo/analysis/symbolic_expr.h"
 
 namespace xla {
 
@@ -44,16 +43,15 @@ class MlirKernelSource final : public KernelSource {
  public:
   struct Storage {
     std::unique_ptr<mlir::MLIRContext> mlir_context;
-    std::unique_ptr<gpu::SymbolicExprContext> symbolic_expr_context;
+    std::unique_ptr<SymbolicExprContext> symbolic_expr_context;
     mlir::OwningOpRef<mlir::ModuleOp> module;
   };
 
   // Construct a MLIR kernel source from a module and take ownership of its MLIR
   // context.
-  MlirKernelSource(
-      std::unique_ptr<mlir::MLIRContext> mlir_context,
-      std::unique_ptr<gpu::SymbolicExprContext> symbolic_expr_context,
-      mlir::OwningOpRef<mlir::ModuleOp> module)
+  MlirKernelSource(std::unique_ptr<mlir::MLIRContext> mlir_context,
+                   std::unique_ptr<SymbolicExprContext> symbolic_expr_context,
+                   mlir::OwningOpRef<mlir::ModuleOp> module)
       : storage_{std::move(mlir_context), std::move(symbolic_expr_context),
                  std::move(module)} {}
 
@@ -69,7 +67,7 @@ class MlirKernelSource final : public KernelSource {
       absl::string_view ir, std::unique_ptr<mlir::MLIRContext> context);
 
   mlir::ModuleOp module() { return *storage_.module; }
-  gpu::SymbolicExprContext* symbolic_expr_context() {
+  SymbolicExprContext* symbolic_expr_context() {
     return storage_.symbolic_expr_context.get();
   }
 
@@ -84,7 +82,6 @@ class MlirKernelSource final : public KernelSource {
 };
 
 using MlirKernelDefinition = KernelDefinition<MlirKernelSource>;  // NOLINT
-using MlirKernelEmitter = KernelEmitter<MlirKernelDefinition>;    // NOLINT
 
 }  // namespace xla
 

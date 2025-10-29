@@ -627,7 +627,6 @@ xla_cc_test(
 xla_test(
     name = "while_test",
     srcs = ["while_test.cc"],
-    # placeholder for extra args for while_test
     deps = [
         ":client_library_test_base",
         ":hlo_test_base",
@@ -981,13 +980,16 @@ xla_test(
 xla_test(
     name = "fft_test",
     srcs = ["fft_test.cc"],
+    tags = [
+        "test_migrated_to_hlo_runner_pjrt",
+    ],
     deps = [
-        ":hlo_test_base",
+        ":hlo_pjrt_interpreter_reference_mixin",
+        ":hlo_pjrt_test_base",
         ":xla_internal_test_main",
         "//xla:error_spec",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -1002,13 +1004,15 @@ xla_test(
     },
     tags = [
         "optonly",
+        "test_migrated_to_hlo_runner_pjrt",
     ],
     deps = [
-        ":hlo_test_base",
+        ":hlo_pjrt_interpreter_reference_mixin",
+        ":hlo_pjrt_test_base",
         ":xla_internal_test_main",
         "//xla:error_spec",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -3830,7 +3834,7 @@ cc_library(
     hdrs = ["hlo_test_base_with_symbolic_expr_context.h"],
     deps = [
         ":hlo_test_base",
-        "//xla/service/gpu/model/experimental:symbolic_expr",
+        "//xla/hlo/analysis:symbolic_expr",
         "@llvm-project//mlir:IR",
     ],
 )

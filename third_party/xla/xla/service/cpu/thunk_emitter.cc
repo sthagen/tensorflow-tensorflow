@@ -234,13 +234,15 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitEntryComputation(
 absl::StatusOr<std::vector<ThunkEmitter::EmittedKernel>>
 ThunkEmitter::ConsumeKernels() {
   tsl::profiler::TraceMe trace("ThunkEmitter::ConsumeKernels");
-  TF_ASSIGN_OR_RETURN(std::vector<LlvmKernelDefinition> fusion_kernels,
-                      parallel_fusion_emitter_.ConsumeKernels());
+  TF_ASSIGN_OR_RETURN(
+      std::vector<KernelDefinition<LlvmKernelSource>> fusion_kernels,
+      parallel_fusion_emitter_.ConsumeKernels());
 
   kernels_.reserve(kernels_.size() + fusion_kernels.size());
-  for (LlvmKernelDefinition& kernel : fusion_kernels) {
-    auto [spec, source] = std::move(kernel).ReleaseStorage();
-    kernels_.push_back({spec.name(), std::move(source).thread_safe_module()});
+  for (KernelDefinition<LlvmKernelSource>& kernel : fusion_kernels) {
+    std::string name(kernel.spec().name());
+    auto source = std::move(kernel).TakeSource();
+    kernels_.push_back({name, std::move(source).thread_safe_module()});
   }
 
   return std::move(kernels_);
@@ -687,11 +689,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCallThunk(
       maybe_small_call.has_value() && *maybe_small_call == "true") {
     ComputationKernelEmitter emitter(instruction, &buffer_assignment_,
                                      &target_machine_features_);
-    TF_ASSIGN_OR_RETURN(LlvmKernelDefinition kernel_definition,
+    TF_ASSIGN_OR_RETURN(KernelDefinition kernel_definition,
                         emitter.EmitKernelDefinition());
 
-    auto [kernel_spec, kernel_source] =
-        std::move(kernel_definition).ReleaseStorage();
+    auto kernel_spec = kernel_definition.spec();
+    auto kernel_source = std::move(kernel_definition).TakeSource();
 
     kernels_.push_back(
         {kernel_spec.name(), std::move(kernel_source).thread_safe_module()});
@@ -711,11 +713,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConcatenateKernelThunk(
     const HloInstruction* instruction) {
   ConcatenateKernelEmitter emitter(instruction, &buffer_assignment_,
                                    &target_machine_features_);
-  TF_ASSIGN_OR_RETURN(LlvmKernelDefinition kernel_definition,
+  TF_ASSIGN_OR_RETURN(KernelDefinition kernel_definition,
                       emitter.EmitKernelDefinition());
 
-  auto [kernel_spec, kernel_source] =
-      std::move(kernel_definition).ReleaseStorage();
+  auto kernel_spec = kernel_definition.spec();
+  auto kernel_source = std::move(kernel_definition).TakeSource();
 
   TF_ASSIGN_OR_RETURN(auto backend_config,
                       instruction->backend_config<BackendConfig>());
@@ -817,11 +819,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitElementalKernelThunk(
     const HloInstruction* instruction) {
   ElementalKernelEmitter emitter(instruction, &buffer_assignment_,
                                  &target_machine_features_);
-  TF_ASSIGN_OR_RETURN(LlvmKernelDefinition kernel_definition,
+  TF_ASSIGN_OR_RETURN(KernelDefinition kernel_definition,
                       emitter.EmitKernelDefinition());
 
-  auto [kernel_spec, kernel_source] =
-      std::move(kernel_definition).ReleaseStorage();
+  auto kernel_spec = kernel_definition.spec();
+  auto kernel_source = std::move(kernel_definition).TakeSource();
 
   kernels_.push_back(
       {kernel_spec.name(), std::move(kernel_source).thread_safe_module()});
@@ -852,8 +854,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusionKernelThunk(
     TF_ASSIGN_OR_RETURN(MlirKernelDefinition kernel_definition,
                         kernel_emitter->EmitKernelDefinition());
 
-    auto [kernel_spec, kernel_source] =
-        std::move(kernel_definition).ReleaseStorage();
+    auto kernel_spec = kernel_definition.spec();
+    auto kernel_source = std::move(kernel_definition).TakeSource();
 
     TF_ASSIGN_OR_RETURN(LlvmKernelSource llvm_kernel_source,
                         fusion_compiler_.Compile(std::move(kernel_source)));
@@ -1061,11 +1063,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitDotThunk(
     case DotImplementationStrategy::kTiledLlvmIrGemv: {
       DotKernelEmitter emitter(instruction, &buffer_assignment_,
                                &target_machine_features_);
-      TF_ASSIGN_OR_RETURN(LlvmKernelDefinition kernel_definition,
+      TF_ASSIGN_OR_RETURN(KernelDefinition kernel_definition,
                           emitter.EmitKernelDefinition());
 
-      auto [kernel_spec, kernel_source] =
-          std::move(kernel_definition).ReleaseStorage();
+      auto kernel_spec = kernel_definition.spec();
+      auto kernel_source = std::move(kernel_definition).TakeSource();
 
       kernels_.push_back(
           {kernel_spec.name(), std::move(kernel_source).thread_safe_module()});
