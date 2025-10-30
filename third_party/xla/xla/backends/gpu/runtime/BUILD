@@ -268,6 +268,7 @@ xla_test(
         ":dynamic_slice_thunk",
         ":dynamic_slice_thunk_proto_cc",
         ":gemm_thunk",
+        ":sequential_thunk",
         ":thunk",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
@@ -700,6 +701,7 @@ cc_library(
         "//xla:executable_run_options",
         "//xla:shape_util",
         "//xla:util",
+        "//xla/ffi",
         "//xla/ffi:attribute_map",
         "//xla/ffi:call_frame",
         "//xla/ffi:execution_context",
@@ -719,6 +721,7 @@ cc_library(
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -747,6 +750,7 @@ xla_test(
         "//xla/service:executable",
         "//xla/service:platform_util",
         "//xla/service/gpu:buffer_allocations",
+        "//xla/service/gpu:resource_requests",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
         "//xla/stream_executor:stream",
@@ -2878,9 +2882,9 @@ xla_test(
 )
 
 cc_library(
-    name = "thunk_checksum_tracing_pass",
-    srcs = ["thunk_checksum_tracing_pass.cc"],
-    hdrs = ["thunk_checksum_tracing_pass.h"],
+    name = "thunk_buffer_debug_pass",
+    srcs = ["thunk_buffer_debug_pass.cc"],
+    hdrs = ["thunk_buffer_debug_pass.h"],
     deps = [
         ":buffers_checksum_thunk",
         ":custom_call_thunk",
@@ -2911,15 +2915,15 @@ cc_library(
 )
 
 xla_cc_test(
-    name = "thunk_checksum_tracing_pass_test",
-    srcs = ["thunk_checksum_tracing_pass_test.cc"],
+    name = "thunk_buffer_debug_pass_test",
+    srcs = ["thunk_buffer_debug_pass_test.cc"],
     deps = [
         ":buffers_checksum_thunk",
         ":custom_call_thunk",
         ":sequential_thunk",
         ":thunk",
+        ":thunk_buffer_debug_pass",
         ":thunk_buffer_id",
-        ":thunk_checksum_tracing_pass",
         ":thunk_id",
         ":thunk_pass_pipeline",
         "//xla:literal_util",

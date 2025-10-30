@@ -300,6 +300,52 @@ struct LowerBroadcastInDim
   }
 };
 
+struct LowerReshape : mlir::OpRewritePattern<mlir::stablehlo::ReshapeOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult matchAndRewrite(
+      mlir::stablehlo::ReshapeOp op,
+      mlir::PatternRewriter& rewriter) const override {
+    auto source_vector = CastToVector(rewriter, op.getOperand());
+    auto result_vector_type = GetVectorType(op.getType());
+
+    mlir::Value reshaped_vector = mlir::vector::ShapeCastOp::create(
+        rewriter, op->getLoc(), result_vector_type, source_vector);
+
+    rewriter.replaceOp(op, CastToTensor(rewriter, reshaped_vector));
+    return mlir::success();
+  }
+};
+
+struct LowerIota : mlir::OpRewritePattern<mlir::stablehlo::IotaOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult matchAndRewrite(
+      mlir::stablehlo::IotaOp op,
+      mlir::PatternRewriter& rewriter) const override {
+    if (op.getType().getRank() != 1) {
+      return rewriter.notifyMatchFailure(
+          op, "iota op with rank != 1 is not supported");
+    }
+
+    auto result_vector_type = GetVectorType(op.getType());
+    auto element_type = result_vector_type.getElementType();
+    int64_t iota_size = result_vector_type.getNumElements();
+
+    llvm::SmallVector<mlir::Attribute> iota_values(iota_size);
+    for (int idx = 0; idx != iota_size; ++idx) {
+      iota_values[idx] = rewriter.getIntegerAttr(element_type, idx);
+    }
+
+    mlir::Value iota_const = mlir::arith::ConstantOp::create(
+        rewriter, op->getLoc(),
+        mlir::DenseElementsAttr::get(result_vector_type, iota_values));
+
+    rewriter.replaceOp(op, CastToTensor(rewriter, iota_const));
+    return mlir::success();
+  }
+};
+
 class ShloToVectorPass : public impl::ShloToVectorPassBase<ShloToVectorPass> {
  public:
   using ShloToVectorPassBase::ShloToVectorPassBase;
@@ -307,9 +353,8 @@ class ShloToVectorPass : public impl::ShloToVectorPassBase<ShloToVectorPass> {
   void runOnOperation() override {
     mlir::MLIRContext* context = &getContext();
     mlir::RewritePatternSet patterns(context);
-    patterns
-        .add<LowerTranspose, LowerDotGeneral, LowerReduce, LowerBroadcastInDim>(
-            context);
+    patterns.add<LowerTranspose, LowerDotGeneral, LowerReduce,
+                 LowerBroadcastInDim, LowerReshape, LowerIota>(context);
     if (mlir::failed(
             mlir::applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();
