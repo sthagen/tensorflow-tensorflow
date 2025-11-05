@@ -1,4 +1,4 @@
-/* Copyright 2017 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,19 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_CPU_WINDOWS_COMPATIBILITY_H_
-#define XLA_SERVICE_CPU_WINDOWS_COMPATIBILITY_H_
+#ifndef XLA_BACKENDS_CPU_CODEGEN_BUILTIN_POW_H_
+#define XLA_BACKENDS_CPU_CODEGEN_BUILTIN_POW_H_
 
-#ifdef _MSC_VER
+#include <stdint.h>
 
-extern "C" {
+// Raises F32 value a to the power of b.
+extern "C" float __powisf2(float a, int32_t b);
 
-// MSVC does not have sincos[f].
-void sincos(double x, double *sinv, double *cosv);
-void sincosf(float x, float *sinv, float *cosv);
+// Raises F64 value a to the power of b.
+extern "C" double __powidf2(double a, int32_t b);
 
-}
-
-#endif  // _MSC_VER
-
-#endif  // XLA_SERVICE_CPU_WINDOWS_COMPATIBILITY_H_
+#endif  // XLA_BACKENDS_CPU_CODEGEN_BUILTIN_POW_H_

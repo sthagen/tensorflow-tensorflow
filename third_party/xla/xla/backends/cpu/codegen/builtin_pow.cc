@@ -1,4 +1,4 @@
-/* Copyright 2017 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,20 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/cpu/windows_compatibility.h"
+#include "xla/backends/cpu/codegen/builtin_pow.h"
 
-#ifdef _MSC_VER
+#include <cstdint>
 
-#include <math.h>
+#include "absl/base/attributes.h"
 
-void sincos(double x, double *sinv, double *cosv) {
-  *sinv = sin(x);
-  *cosv = cos(x);
+template <typename T>
+static T Powi(T a, int32_t b) {
+  const bool recip = b < 0;
+  T r = 1;
+  while (true) {
+    if (b & 1) {
+      r *= a;
+    }
+    b /= 2;
+    if (b == 0) {
+      break;
+    }
+    a *= a;
+  }
+  return recip ? 1 / r : r;
 }
 
-void sincosf(float x, float *sinv, float *cosv) {
-  *sinv = sinf(x);
-  *cosv = cosf(x);
-}
+float ABSL_ATTRIBUTE_WEAK __powisf2(float a, int32_t b) { return Powi(a, b); }
 
-#endif  // _MSC_VER
+double ABSL_ATTRIBUTE_WEAK __powidf2(double a, int32_t b) { return Powi(a, b); }
