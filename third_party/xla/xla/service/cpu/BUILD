@@ -1,10 +1,3 @@
-# Description:
-#    LLVM-based CPU backend for XLA.
-
-load(
-    "//third_party/compute_library:build_defs.bzl",
-    "acl_deps",
-)
 load(
     "//xla:xla.default.bzl",
     "xla_cc_test",
@@ -1124,46 +1117,6 @@ cc_library(
 )
 
 cc_library(
-    name = "runtime_matmul_acl",
-    srcs = ["runtime_matmul_acl.cc"],
-    hdrs = ["runtime_matmul_acl.h"],
-    copts = tsl_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        ":runtime_matmul",
-        "//xla:executable_run_options",
-        "//xla/tsl/platform:dynamic_annotations",
-        "@com_google_absl//absl/base",
-        "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:types",
-    ] + acl_deps(),
-)
-
-cc_library(
-    name = "runtime_conv2d_acl",
-    srcs = [
-        "runtime_conv2d_acl.cc",
-    ],
-    hdrs = ["runtime_conv2d_acl.h"],
-    copts = tsl_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_conv2d",
-        ":runtime_lightweight_check",
-        ":runtime_single_threaded_conv2d",
-        "//xla:executable_run_options",
-        "//xla/tsl/framework/convolution:eigen_helpers",
-        "//xla/tsl/platform:dynamic_annotations",
-        "@com_google_absl//absl/base",
-        "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:types",
-    ] + acl_deps(),
-)
-
-cc_library(
     name = "runtime_single_threaded_conv2d",
     srcs = ["runtime_single_threaded_conv2d.cc"],
     hdrs = ["runtime_single_threaded_conv2d.h"],
@@ -1268,31 +1221,6 @@ cc_library(
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:dynamic_annotations",
-    ],
-)
-
-xla_cc_test(
-    name = "cpu_runtime_test",
-    srcs = ["cpu_runtime_test.cc"],
-    shard_count = 10,
-    tags = ["optonly"],
-    deps = [
-        ":cpu_runtime",
-        ":runtime_custom_call_status",
-        ":runtime_matmul",
-        ":runtime_matmul_acl",
-        ":runtime_single_threaded_matmul",
-        "//xla:array2d",
-        "//xla:executable_run_options",
-        "//xla:types",
-        "//xla/client:local_client",
-        "//xla/service:custom_call_status_internal",
-        "//xla/tests:xla_internal_test_main",
-        "@com_google_absl//absl/strings:str_format",
-        "@eigen_archive//:eigen3",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:test",
     ],
 )
 

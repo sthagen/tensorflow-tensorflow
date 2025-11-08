@@ -19,6 +19,7 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_format.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/status.h"
@@ -99,8 +100,7 @@ absl::Status SetPragma(Sqlite* db, const char* pragma,
                        const absl::string_view& value) {
   if (value.empty()) return absl::OkStatus();
   for (auto p = value.begin(); p < value.end(); ++p) {
-    if (!(('0' <= *p && *p <= '9') || ('A' <= *p && *p <= 'Z') ||
-          ('a' <= *p && *p <= 'z') || *p == '-')) {
+    if (!(absl::ascii_isalnum(*p) || *p == '-')) {
       return errors::InvalidArgument("Illegal pragma character");
     }
   }
@@ -125,7 +125,7 @@ absl::Status EnvPragma(Sqlite* db, const char* pragma, const char* var) {
 }  // namespace
 
 /* static */
-absl::Status Sqlite::Open(const string& path, int flags, Sqlite** db) {
+absl::Status Sqlite::Open(const std::string& path, int flags, Sqlite** db) {
   flags |= SQLITE_OPEN_PRIVATECACHE;
   flags |= SQLITE_OPEN_URI;
   sqlite3* sqlite = nullptr;
