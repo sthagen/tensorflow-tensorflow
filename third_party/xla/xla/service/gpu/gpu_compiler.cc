@@ -83,6 +83,7 @@ limitations under the License.
 #include "xla/hlo/transforms/collectives/collectives_schedule_linearizer.h"
 #include "xla/hlo/transforms/convert_memory_placement_to_internal_annotations.h"
 #include "xla/hlo/transforms/expanders/bitcast_dtypes_expander.h"
+#include "xla/hlo/transforms/expanders/cholesky_expander.h"
 #include "xla/hlo/transforms/expanders/comparison_expander.h"
 #include "xla/hlo/transforms/expanders/convolution_4d_expander.h"
 #include "xla/hlo/transforms/expanders/convolution_pred_expander.h"
@@ -621,6 +622,9 @@ absl::Status RunOptimizationPasses(
 
   // Rewrite select-and-scatter as a scatter and a reduce-window.
   pipeline.AddPass<SelectAndScatterExpander>();
+
+  // Rewrite Cholesky.
+  pipeline.AddPass<CholeskyExpander>();
 
   if (RequireDeterminism(hlo_module->config())) {
     // Scatter can be indeterministic if indices are not unique or a non
@@ -2997,10 +3001,8 @@ GpuCompiler::LoadExecutableFromAotResult(
 
   IrEmitterContext ir_emitter_context(
       hlo_module.get(), buffer_assignment.get(), &execution_stream_assignment,
-      platform_name, gpu_device_info, symbolic_expr_context(),
-      llvm_module.get(),
-      /*llvm_module_constants=*/nullptr,
-      /*emit_kernels=*/false);
+      platform_name, gpu_device_info, mlir_context(), llvm_module.get(),
+      /*llvm_module_constants=*/nullptr, /*emit_kernels=*/false);
 
   absl::string_view cache_file_path =
       hlo_module->config().debug_options().xla_gpu_kernel_cache_file();

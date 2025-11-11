@@ -6,6 +6,7 @@ load("@build_bazel_apple_support//lib:repositories.bzl", "apple_support_dependen
 load("@build_bazel_rules_apple//apple:repositories.bzl", "apple_rules_dependencies")
 load("@build_bazel_rules_swift//swift:repositories.bzl", "swift_rules_dependencies")
 load("@com_github_grpc_grpc//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
+load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
 
 def _tf_bind():
     """Bind targets for some external repositories"""
@@ -130,16 +131,19 @@ def workspace():
     swift_rules_dependencies()
     apple_support_dependencies()
 
+    # We only need `benchmark_deps` to be able to have bazel query to work and not complain about missing `@libpfm`.
+    benchmark_deps()
+
     # TODO(yuriit): Remove this once the rules_ml_toolchain is added to WORKSPACE files of all ML projects.
     # Toolchains for ML projects hermetic builds.
     # Details: https://github.com/google-ml-infra/rules_ml_toolchain
     if "rules_ml_toolchain" not in native.existing_rules():
         http_archive(
             name = "rules_ml_toolchain",
-            sha256 = "38f1954af9336c3d020a3b807a3585fdaefa8e9bee725664663279cc4309b8c6",
-            strip_prefix = "rules_ml_toolchain-71d74ee1f7ad0e74c50b3c546d21872d42676e37",
+            sha256 = "fc1292463a0ae26bd4b3dc8ffda6e12dc5fc68b432005fb97d2c4cbfe2fa6cea",
+            strip_prefix = "rules_ml_toolchain-96700b0ef73efb569ecb2509d15ea3d341bd53fd",
             urls = [
-                "https://github.com/google-ml-infra/rules_ml_toolchain/archive/71d74ee1f7ad0e74c50b3c546d21872d42676e37.tar.gz",
+                "https://github.com/google-ml-infra/rules_ml_toolchain/archive/96700b0ef73efb569ecb2509d15ea3d341bd53fd.tar.gz",
             ],
         )
 

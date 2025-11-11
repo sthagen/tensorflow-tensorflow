@@ -276,6 +276,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_multiheap_size_constraint_per_heap(-1);
   opts.set_xla_detailed_logging(true);
   opts.set_xla_enable_dumping(true);
+  opts.set_xla_enable_enzyme_comms_opt(false);
 
   opts.set_xla_gpu_enable_dynamic_slice_fusion(false);
   opts.set_xla_gpu_nccl_termination_timeout_seconds(-1);
@@ -454,6 +455,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_experimental_use_autotuner_pass(false);
+  opts.set_xla_gpu_experimental_enable_fusion_autotuner(false);
   opts.set_xla_gpu_experimental_pack_dot_operands_along_k_dimension(true);
   opts.set_xla_unsupported_crash_on_hlo_pass_fix_max_iterations(false);
   opts.set_xla_hlo_pass_fix_detect_cycles(false);
@@ -1936,6 +1938,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Experimental optimizations for SPMD-based pipeline parallelism on "
       "GPU."));
   flag_list->push_back(tsl::Flag(
+      "xla_enable_enzyme_comms_opt",
+      bool_setter_for(&DebugOptions::set_xla_enable_enzyme_comms_opt),
+      debug_options->xla_enable_enzyme_comms_opt(),
+      "Enable communication optimization patterns specified in Enzyme. More "
+      "details in http://shortn/_jXJ2VFoyMN."));
+  flag_list->push_back(tsl::Flag(
       "xla_partitioning_algorithm", setter_for_xla_partitioning_algorithm,
       DebugOptions::PartitioningAlgorithm_Name(
           debug_options->xla_partitioning_algorithm()),
@@ -2686,6 +2694,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Limits the thunk buffer debug instrumentation to thunks with profile "
       "annotations matching one or more regexes passed as comma-separated "
       "string."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_enable_fusion_autotuner",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_enable_fusion_autotuner),
+      debug_options->xla_gpu_experimental_enable_fusion_autotuner(),
+      "Enable autotuning between the native & triton fusion emitters."));
 
   auto setter_for_xla_gpu_detect_nan =
       [debug_options](const std::string& value) {
