@@ -65,6 +65,7 @@ limitations under the License.
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
 #include "mlir/IR/AffineExpr.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -93,6 +94,7 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "stablehlo/dialect/StablehloOps.h"
 #include "xla/backends/gpu/codegen/emitters/ir/xla_gpu_ops.h"
+#include "xla/backends/gpu/codegen/triton/collective_emitter.h"
 #include "xla/backends/gpu/codegen/triton/compilation_pipeline.h"
 #include "xla/backends/gpu/codegen/triton/dot_algorithms.h"
 #include "xla/backends/gpu/codegen/triton/emitter_helpers.h"
@@ -1007,21 +1009,24 @@ absl::StatusOr<TensorValue> EmitConcatenate(
   // prologue of reductions.
   SmallVector<int64_t> padded_tile_sizes =
       GetPaddedTileSizes(tiled_concatenate.tile_sizes());
-  int64_t concatenate_dimension_tile_size =
-      padded_tile_sizes[concatenate_dimension];
+  int64_t concat_dim_tile_size = padded_tile_sizes[concatenate_dimension];
 
-  for (const TiledHloInstruction* operand : tiled_concatenate.operands()) {
+  int64_t num_operands = tiled_concatenate.operands().size();
+  for (const auto [index, operand] :
+       llvm::enumerate(tiled_concatenate.operands())) {
     if (operand->hlo()->opcode() != HloOpcode::kFusion) {
       // Sanity check: all operands should be nested fusions.
       return absl::FailedPreconditionError(
           "Expected concatenate operands to be nested fusions.");
     }
 
-    int64_t operand_concatenate_dimension_size =
-        tiled_concatenate.hlo()->shape().dimensions(concatenate_dimension);
+    int64_t operand_concat_dim_size =
+        operand->hlo()->shape().dimensions(concatenate_dimension);
 
-    if (operand_concatenate_dimension_size % concatenate_dimension_tile_size !=
-        0) {
+    // The last operand does not have to be a multiple of the tile size, since
+    // we can pad it.
+    if (index != num_operands - 1 &&
+        operand_concat_dim_size % concat_dim_tile_size != 0) {
       // Sanity check: concatenation dimension should be divisible by the tile
       // size for each operand. This is not a fundamental limitation, but this
       // lowering will emit incorrect code if this does not hold---so we gate
@@ -1029,8 +1034,7 @@ absl::StatusOr<TensorValue> EmitConcatenate(
       return absl::FailedPreconditionError(absl::StrCat(
           "Expected the tile size of the concatenation dimension of operand ",
           operand->ToString(), "to divide the dimension size exactly, but got",
-          operand_concatenate_dimension_size, " % ",
-          concatenate_dimension_tile_size, " != 0"));
+          operand_concat_dim_size, " % ", concat_dim_tile_size, " != 0"));
     }
   }
   TF_ASSIGN_OR_RETURN(
@@ -1243,6 +1247,11 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
 
   if (hlo->opcode() == HloOpcode::kReduce) {
     return EmitReduce(b, tiled_hlo, values);
+  }
+
+  if (hlo->opcode() == HloOpcode::kAllReduceStart) {
+    return EmitCollective(b, fusion, tiled_hlo, block_level_parameters, fn, pid,
+                          values);
   }
 
   if (hlo->IsElementwise()) {
@@ -1982,7 +1991,21 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
     fn_arg_types.push_back(GetMemRefType(shape, triton_ty));
   }
 
-  auto fn = b.create<xtile::EntryFuncOp>(fn_name, fn_arg_types);
+  // Add metadata arguments for collectives.
+  // This is done after the input and output arguments but before the tile
+  // index.
+  int32_t num_metadata_arguments = 0;
+  if (fusion_kind == kTritonCollectiveFusionKind) {
+    TF_ASSIGN_OR_RETURN(
+        num_metadata_arguments,
+        AddCollectiveMetadataArguments(fn_arg_types, b, hlo_computation));
+  }
+  // Metadata arguments are opaque to the tiling infra.
+  llvm::SmallVector<mlir::NamedAttribute> named_attributes{b.getNamedAttr(
+      "num_opaque_args", b.getI32IntegerAttr(num_metadata_arguments))};
+
+  auto fn =
+      b.create<xtile::EntryFuncOp>(fn_name, fn_arg_types, named_attributes, {});
 
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
@@ -2002,7 +2025,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
         legacy_matmul_emitter->Emit(b, fusion, fn, block_level_parameters));
   } else if (fusion_kind == kTritonFusionKind ||
              fusion_kind == kTritonNestedGemmFusionKind ||
-             fusion_kind == kTritonScaledDotFusionKind) {
+             fusion_kind == kTritonScaledDotFusionKind ||
+             fusion_kind == kTritonCollectiveFusionKind) {
     TF_RETURN_IF_ERROR(EmitGeneric(b, emitter_specific_constraints_builder,
                                    fusion, fn, block_level_parameters,
                                    &symbolic_expr_context));
@@ -2036,6 +2060,7 @@ absl::Status LowerXTileToTriton(mlir::ModuleOp xtile_dialect_module,
     }
     pm.addPass(mlir::triton::xla::CreateTensorLowerToTritonPass());
     pm.addPass(mlir::triton::xla::CreateStableHLOLowerToTritonPass());
+    pm.addPass(mlir::triton::xla::CreateXTileLowerToTritonPass());
 
     std::string libdevice_path =
         GetLibdevicePath(fusion.GetModule()->config(), device_info);

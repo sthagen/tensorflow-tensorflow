@@ -403,7 +403,7 @@ cuda_library(
         "gpu",
     ],
     deps = [
-        ":cuda_platform",
+        ":cuda_platform_id",
         "//xla/backends/gpu/runtime:buffer_debug_log_structs",
         "//xla/stream_executor:kernel_spec",
         "//xla/stream_executor/gpu:buffer_debug_xor_checksum_kernel",
@@ -456,7 +456,7 @@ cuda_library(
         "gpu",
     ],
     deps = [
-        ":cuda_platform",
+        ":cuda_platform_id",
         "//xla/backends/gpu/runtime:buffer_debug_log_structs",
         "//xla/stream_executor:kernel_spec",
         "//xla/stream_executor/gpu:buffer_debug_float_check_kernel",
@@ -2361,7 +2361,7 @@ cuda_library(
         "gpu",
     ],
     deps = [
-        ":cuda_platform",
+        ":cuda_platform_id",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:kernel",
         "//xla/stream_executor:kernel_spec",
@@ -2424,6 +2424,7 @@ cuda_library(
     deps = [
         ":cuda_platform_id",
         "//xla:types",
+        "//xla/stream_executor:kernel_symbol_registry",
         "//xla/stream_executor/gpu:gpu_kernel_registry",
         "//xla/stream_executor/gpu:topk_kernel",
         "//xla/tsl/lib/math:math_util",

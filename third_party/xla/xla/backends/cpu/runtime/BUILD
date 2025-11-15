@@ -25,6 +25,7 @@ filegroup(
         "convolution_thunk_f16.cc",
         "convolution_thunk_f32.cc",
         "rng_state_lib.cc",
+        "sort_lib.cc",
     ],
     visibility = internal_visibility([":friends"]),
 )
@@ -35,6 +36,7 @@ filegroup(
         "convolution_thunk_internal.h",
         "kernel_c_api.h",
         "rng_state_lib.h",
+        "sort_lib.h",
         "work_queue.h",
     ],
     visibility = internal_visibility([":friends"]),
@@ -371,9 +373,9 @@ cc_library(
 )
 
 cc_library(
-    name = "convolution_lib",
-    srcs = ["convolution_lib.cc"],
-    hdrs = ["convolution_lib.h"],
+    name = "convolution_dims",
+    srcs = ["convolution_dims.cc"],
+    hdrs = ["convolution_dims.h"],
     deps = [
         "//xla:shape_util",
         "//xla:status_macros",
@@ -415,7 +417,7 @@ cc_library(
     hdrs = ["convolution_thunk.h"],
     copts = runtime_copts(),
     deps = [
-        ":convolution_lib",
+        ":convolution_dims",
         ":convolution_thunk_internal",
         ":thunk",
         "//xla:executable_run_options",
@@ -710,9 +712,9 @@ cc_library(
 )
 
 cc_library(
-    name = "dot_lib",
-    srcs = ["dot_lib.cc"],
-    hdrs = ["dot_lib.h"],
+    name = "dot_dims",
+    srcs = ["dot_dims.cc"],
+    hdrs = ["dot_dims.h"],
     deps = [
         "//xla:shape_util",
         "//xla:status_macros",
@@ -742,7 +744,7 @@ cc_library(
     ],
     hdrs = ["dot_thunk.h"],
     deps = [
-        ":dot_lib",
+        ":dot_dims",
         ":thunk",
         "//xla:shape_util",
         "//xla:types",
@@ -1017,11 +1019,25 @@ cc_library(
 )
 
 cc_library(
+    name = "sort_lib",
+    srcs = ["sort_lib.cc"],
+    hdrs = ["sort_lib.h"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
     name = "sort_thunk",
     srcs = ["sort_thunk.cc"],
     hdrs = ["sort_thunk.h"],
     deps = [
         ":function_library",
+        ":sort_lib",
         ":thunk",
         "//xla:shape_util",
         "//xla:util",
@@ -1178,7 +1194,7 @@ cc_library(
         ":collective_permute_thunk",
         ":collective_thunk",
         ":conditional_thunk",
-        ":convolution_lib",
+        ":convolution_dims",
         ":convolution_thunk",
         ":copy_thunk",
         ":custom_call_thunk",
