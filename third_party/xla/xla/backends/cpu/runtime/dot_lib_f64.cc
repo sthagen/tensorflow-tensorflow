@@ -13,10 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/backends/cpu/runtime/convolution_thunk_internal.h"
+#include "xla/backends/cpu/runtime/dot_lib.h"  // IWYU pragma: keep
 
-CONV2D_INSTANTIATE_TEMPLATE(Eigen::DefaultDevice, Eigen::half);
-CONV2D_INSTANTIATE_TEMPLATE(Eigen::ThreadPoolDevice, Eigen::half);
-
-CONV3D_INSTANTIATE_TEMPLATE(Eigen::DefaultDevice, Eigen::half);
-CONV3D_INSTANTIATE_TEMPLATE(Eigen::ThreadPoolDevice, Eigen::half);
+template void ::xla::cpu::internal::TypedMatMul<double, double, double>(
+    const Eigen::ThreadPoolDevice* device, void* out, void* lhs, void* rhs,
+    int64_t m, int64_t n, int64_t k, bool transpose_lhs, bool transpose_rhs,
+    DoneCallback done);

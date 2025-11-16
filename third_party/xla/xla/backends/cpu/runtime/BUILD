@@ -22,8 +22,8 @@ package_group(
 filegroup(
     name = "runtime_srcs",
     srcs = [
-        "convolution_thunk_f16.cc",
-        "convolution_thunk_f32.cc",
+        "convolution_lib_f16.cc",
+        "convolution_lib_f32.cc",
         "rng_state_lib.cc",
         "sort_lib.cc",
     ],
@@ -33,7 +33,7 @@ filegroup(
 filegroup(
     name = "runtime_hdrs",
     srcs = [
-        "convolution_thunk_internal.h",
+        "convolution_lib.h",
         "kernel_c_api.h",
         "rng_state_lib.h",
         "sort_lib.h",
@@ -393,20 +393,22 @@ cc_library(
 )
 
 cc_library(
-    name = "convolution_thunk_internal",
+    name = "convolution_lib",
     srcs = [
-        "convolution_thunk_f16.cc",
-        "convolution_thunk_f32.cc",
+        "convolution_lib_f16.cc",
+        "convolution_lib_f32.cc",
     ],
-    hdrs = ["convolution_thunk_internal.h"],
+    hdrs = ["convolution_lib.h"],
     copts = runtime_copts(),
     visibility = internal_visibility([":friends"]),
     deps = [
-        ":work_queue",
+        "//xla/backends/cpu/runtime:work_queue",
         "//xla/tsl/concurrency:async_value",
         "//xla/tsl/framework/contraction:eigen_contraction_kernel",
         "//xla/tsl/framework/convolution:eigen_helpers",
-        "//xla/tsl/platform:logging",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@eigen_archive//:eigen3",
     ],
 )
@@ -415,10 +417,9 @@ cc_library(
     name = "convolution_thunk",
     srcs = ["convolution_thunk.cc"],
     hdrs = ["convolution_thunk.h"],
-    copts = runtime_copts(),
     deps = [
         ":convolution_dims",
-        ":convolution_thunk_internal",
+        ":convolution_lib",
         ":thunk",
         "//xla:executable_run_options",
         "//xla:shape_util",
@@ -731,20 +732,32 @@ cc_library(
 )
 
 cc_library(
-    name = "dot_thunk",
+    name = "dot_lib",
     srcs = [
-        "dot_thunk.cc",
-        "dot_thunk_c128.cc",
-        "dot_thunk_c64.cc",
-        "dot_thunk_f16.cc",
-        "dot_thunk_f32.cc",
-        "dot_thunk_f64.cc",
-        "dot_thunk_s32.cc",
-        "dot_thunk_s8.cc",
+        "dot_lib_c128.cc",
+        "dot_lib_c64.cc",
+        "dot_lib_f16.cc",
+        "dot_lib_f32.cc",
+        "dot_lib_f64.cc",
+        "dot_lib_s32.cc",
+        "dot_lib_s8.cc",
     ],
+    hdrs = ["dot_lib.h"],
+    deps = [
+        "//xla/tsl/framework/contraction:eigen_contraction_kernel",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@eigen_archive//:eigen3",
+    ],
+)
+
+cc_library(
+    name = "dot_thunk",
+    srcs = ["dot_thunk.cc"],
     hdrs = ["dot_thunk.h"],
     deps = [
         ":dot_dims",
+        ":dot_lib",
         ":thunk",
         "//xla:shape_util",
         "//xla:types",
@@ -753,7 +766,6 @@ cc_library(
         "//xla/service:buffer_assignment",
         "//xla/stream_executor:device_memory",
         "//xla/tsl/concurrency:async_value",
-        "//xla/tsl/framework/contraction:eigen_contraction_kernel",
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:core_headers",
