@@ -327,14 +327,14 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_enable_triton_gemm(true);
   opts.clear_xla_gpu_unsupported_generic_triton_emitter_features();
-  // When changing the default value of the flag, please make sure to update the
-  // default value of the command line flag in `MakeDebugOptionsFlags`.
   opts.add_xla_gpu_unsupported_generic_triton_emitter_features(
       DebugOptions::GENERIC_TRITON_EMITTER_ENABLE_NESTED_GEMM);
   opts.add_xla_gpu_unsupported_generic_triton_emitter_features(
       DebugOptions::GENERIC_TRITON_EMITTER_ALLOW_ALL_GEMM_SHAPES);
   opts.add_xla_gpu_unsupported_generic_triton_emitter_features(
       DebugOptions::GENERIC_TRITON_EMITTER_ALLOW_ALL_OPS_IN_GEMM_FUSION);
+  opts.add_xla_gpu_unsupported_generic_triton_emitter_features(
+      DebugOptions::GENERIC_TRITON_EMITTER_DISABLE_LEGACY_GEMM);
   opts.set_xla_gpu_unsupported_enable_triton_multi_output_fusion(true);
   opts.set_xla_gpu_enable_cudnn_int8x32_convolution_reordering(true);
   opts.set_xla_gpu_triton_gemm_any(true);
@@ -457,6 +457,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_experimental_use_autotuner_pass(false);
   opts.set_xla_gpu_experimental_enable_fusion_autotuner(true);
+  opts.set_xla_gpu_experimental_allow_unroll_factor_eight(true);
   opts.set_xla_gpu_experimental_pack_dot_operands_along_k_dimension(true);
   opts.set_xla_unsupported_crash_on_hlo_pass_fix_max_iterations(false);
   opts.set_xla_hlo_pass_fix_detect_cycles(false);
@@ -2642,6 +2643,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_experimental_use_autotuner_pass(),
       "If true, use the AutotunerPass to autotune fusions, instead of the "
       "gemm_fusion_autotuner."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_allow_unroll_factor_eight",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_allow_unroll_factor_eight),
+      debug_options->xla_gpu_experimental_allow_unroll_factor_eight(),
+      "If true, allows unroll factor 8 on Blackwell architectures."));
   flag_list->push_back(
       tsl::Flag("xla_detect_unstable_reductions",
                 setter_for_xla_detect_unstable_reductions,

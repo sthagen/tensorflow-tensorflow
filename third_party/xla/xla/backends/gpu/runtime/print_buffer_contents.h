@@ -1,4 +1,4 @@
-/* Copyright 2020 The OpenXLA Authors.
+/* Copyright 2025 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,18 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_SERVICE_CPU_RUNTIME_TOPK_H_
-#define XLA_SERVICE_CPU_RUNTIME_TOPK_H_
+#ifndef XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
+#define XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
 
-#include <stdint.h>
+#include "absl/types/span.h"
+#include "xla/stream_executor/kernel_args.h"
+#include "xla/stream_executor/stream.h"
 
-extern "C" {
+namespace xla::gpu {
 
-// Calculates `batch_size` topk operations with `input_size` inputs each. The
-// outputs are written to `out_values` and `out_indices`.
-extern void __xla_cpu_runtime_TopKF32(int64_t batch_size, int64_t input_size,
-                                      int64_t k, const float* values,
-                                      float* out_values, int32_t* out_indices);
-}
+// Prints the contents of the buffer arguments in `kernel_args` to LOG(INFO).
+void PrintBufferContents(
+    stream_executor::Stream* stream,
+    absl::Span<const stream_executor::KernelArgument> kernel_args);
 
-#endif  // XLA_SERVICE_CPU_RUNTIME_TOPK_H_
+}  // namespace xla::gpu
+
+#endif  // XLA_BACKENDS_GPU_RUNTIME_PRINT_BUFFER_CONTENTS_H_
