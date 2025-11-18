@@ -52,8 +52,6 @@ filegroup(
     name = "runtime_srcs",
     srcs = [
         # Single-threaded support.
-        "runtime_single_threaded_conv2d.cc",
-        "runtime_single_threaded_conv3d.cc",
         "runtime_single_threaded_matmul_c128.cc",
         "runtime_single_threaded_matmul_c64.cc",
         "runtime_single_threaded_matmul_common.h",
@@ -64,8 +62,6 @@ filegroup(
         "runtime_single_threaded_matmul_s32.cc",
         "runtime_single_threaded_matmul_u8.cc",
         # Multi-threaded support.
-        "runtime_conv2d.cc",
-        "runtime_conv3d.cc",
         "runtime_matmul_c128.cc",
         "runtime_matmul_c64.cc",
         "runtime_matmul_common.h",
@@ -82,12 +78,8 @@ filegroup(
     name = "runtime_hdrs",
     srcs = [
         # Single-threaded support.
-        "runtime_single_threaded_conv2d.h",
-        "runtime_single_threaded_conv3d.h",
         "runtime_single_threaded_matmul.h",
         # Multi-threaded support.
-        "runtime_conv2d.h",
-        "runtime_conv3d.h",
         "runtime_lightweight_check.h",
         "runtime_matmul.h",
         "//xla/backends/cpu/runtime:runtime_hdrs",
@@ -520,8 +512,10 @@ xla_test(
     deps = [
         ":cpu_aot_compilation_result",
         ":test_header_helper",
+        "//xla:debug_options_flags",
         "//xla:literal",
         "//xla:literal_util",
+        "//xla/backends/cpu/codegen:cpu_features",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
         "//xla/service:executable",
@@ -534,6 +528,7 @@ xla_test(
         "//xla/tests:xla_internal_test_main",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:TargetParser",
@@ -1043,34 +1038,10 @@ cc_library(
 
 cc_library(
     name = "runtime_conv2d",
-    srcs = ["runtime_conv2d.cc"],
-    hdrs = ["runtime_conv2d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        "//xla:executable_run_options",
-        "//xla/backends/cpu/runtime:convolution_lib",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
     name = "runtime_conv3d",
-    srcs = ["runtime_conv3d.cc"],
-    hdrs = ["runtime_conv3d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        "//xla:executable_run_options",
-        "//xla/backends/cpu/runtime:convolution_lib",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
@@ -1100,30 +1071,10 @@ cc_library(
 
 cc_library(
     name = "runtime_single_threaded_conv2d",
-    srcs = ["runtime_single_threaded_conv2d.cc"],
-    hdrs = ["runtime_single_threaded_conv2d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/backends/cpu/runtime:convolution_lib",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
     name = "runtime_single_threaded_conv3d",
-    srcs = ["runtime_single_threaded_conv3d.cc"],
-    hdrs = ["runtime_single_threaded_conv3d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/backends/cpu/runtime:convolution_lib",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
