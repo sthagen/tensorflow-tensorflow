@@ -55,6 +55,7 @@ limitations under the License.
 #include "xla/backends/cpu/runtime/thunk.h"
 #include "xla/backends/cpu/runtime/thunk_executor.h"
 #include "xla/backends/cpu/runtime/xfeed_manager.h"
+#include "xla/backends/cpu/target_machine_options.h"
 #include "xla/client/executable_build_options.h"
 #include "xla/debug_options_flags.h"
 #include "xla/executable_run_options.h"
@@ -206,7 +207,8 @@ absl::StatusOr<std::unique_ptr<PjRtClient>> GetPjRtCpuClient(
   return std::unique_ptr<PjRtClient>(new PjRtCpuClient(
       options.process_id, std::move(devices), std::move(allocator),
       std::move(options.collectives), num_threads, options.asynchronous,
-      std::move(options.customize_hlo_module_config)));
+      std::move(options.customize_hlo_module_config),
+      options.max_transpose_threads));
 }
 
 // An upper bound on the number of threads to use for intra-op parallelism. It
@@ -242,7 +244,8 @@ PjRtCpuClient::PjRtCpuClient(
     std::shared_ptr<CpuDeviceMemory::Allocator> allocator,
     std::shared_ptr<cpu::CpuCollectives> collectives, size_t num_threads,
     bool asynchronous,
-    std::function<void(HloModuleConfig&)> customize_hlo_module_config)
+    std::function<void(HloModuleConfig&)> customize_hlo_module_config,
+    int max_transpose_threads)
     : process_index_(process_index),
       owned_devices_(std::move(devices)),
       computation_placer_(std::make_unique<ComputationPlacer>()),
@@ -269,7 +272,8 @@ PjRtCpuClient::PjRtCpuClient(
           new tsl::thread::ThreadPool(tsl::Env::Default(), GetThreadOptions(),
                                       "XLAPjRtCpuClient", num_threads)),
       async_work_runner_(
-          MakeThreadPoolAsyncWorkRunner(pjrt_client_thread_pool_.get())) {
+          MakeThreadPoolAsyncWorkRunner(pjrt_client_thread_pool_.get())),
+      max_transpose_threads_(max_transpose_threads) {
   for (const std::unique_ptr<PjRtCpuDevice>& device : owned_devices_) {
     devices_.push_back(device.get());
     CHECK(
@@ -808,16 +812,14 @@ PjRtCpuClient::CompileInternal(
       compile_options.thread_pool = pjrt_client_thread_pool();
     }
 
-    cpu::TargetMachineOptionsProto target_machine_options =
-        cpu::GetDefaultHostTargetMachineOptions(
-            hlo_module->config().debug_options());
+    cpu::TargetMachineOptions target_machine_options(
+        hlo_module->config().debug_options());
     // Overwrite the features with the machine attributes from the topology.
-    target_machine_options.set_features(
-        absl::StrJoin(topology_.cpu_topology().machine_attributes(), ","));
+
+    TF_RETURN_IF_ERROR(target_machine_options.SetFeatures(
+        absl::StrJoin(topology_.cpu_topology().machine_attributes(), ",")));
 
     compile_options.cpu_target_config.emplace(target_machine_options);
-
-    cpu::AddAdditionalFeaturesIfAVX512(target_machine_options);
 
     TF_ASSIGN_OR_RETURN(cpu_executable,
                         JitCompile(std::move(hlo_module), build_options,
@@ -924,7 +926,8 @@ PjRtCpuClient::LinearizeHostBufferInto(
       ->CopyFromHostBuffer(
           data, type, dims, byte_strides, host_buffer_semantics,
           std::move(on_done_with_host_buffer), device_shape,
-          async_work_runner(), &transpose_mu_, &transpose_cache_);
+          async_work_runner(), &transpose_mu_, &transpose_cache_,
+          eigen_intraop_pool(), max_transpose_threads_);
 }
 
 absl::StatusOr<tsl::RCReference<PjRtDeviceEvent>> PjRtCpuClient::LinearizeInto(

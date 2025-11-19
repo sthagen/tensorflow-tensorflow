@@ -62,13 +62,6 @@ filegroup(
         "runtime_single_threaded_matmul_s32.cc",
         "runtime_single_threaded_matmul_u8.cc",
         # Multi-threaded support.
-        "runtime_matmul_c128.cc",
-        "runtime_matmul_c64.cc",
-        "runtime_matmul_common.h",
-        "runtime_matmul_f16.cc",
-        "runtime_matmul_f32.cc",
-        "runtime_matmul_f64.cc",
-        "runtime_matmul_s32.cc",
         "//xla/backends/cpu/runtime:runtime_srcs",
     ],
     visibility = internal_visibility([":friends"]),
@@ -81,7 +74,6 @@ filegroup(
         "runtime_single_threaded_matmul.h",
         # Multi-threaded support.
         "runtime_lightweight_check.h",
-        "runtime_matmul.h",
         "//xla/backends/cpu/runtime:runtime_hdrs",
     ],
     visibility = internal_visibility([":friends"]),
@@ -184,6 +176,7 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/backends/cpu:alignment",
         "//xla/backends/cpu:constant_allocation",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu:xnn_support",
         "//xla/backends/cpu/codegen:builtin_definition_generator",
         "//xla/backends/cpu/codegen:compiled_function_library",
@@ -398,6 +391,7 @@ cc_library(
         "//xla/backends/cpu:buffer_allocation_info",
         "//xla/backends/cpu:buffer_allocation_info_util",
         "//xla/backends/cpu:constant_allocation",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/runtime:function_library",
         "//xla/backends/cpu/runtime:thunk",
         "//xla/backends/cpu/runtime:thunk_proto_cc",
@@ -515,6 +509,7 @@ xla_test(
         "//xla:debug_options_flags",
         "//xla:literal",
         "//xla:literal_util",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/codegen:cpu_features",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -558,7 +553,6 @@ cc_library(
     srcs = ["cpu_executable.cc"],
     hdrs = ["cpu_executable.h"],
     deps = [
-        ":cpu_runtime",
         ":executable_proto_cc",
         "//xla:executable_run_options",
         "//xla:shape_tree",
@@ -567,6 +561,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/backends/cpu:constant_allocation",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/runtime:buffer_allocations",
         "//xla/backends/cpu/runtime:function_library",
         "//xla/backends/cpu/runtime:thread_pool_task_runner",
@@ -683,6 +678,7 @@ xla_cc_test(
         ":target_machine_features_stub",
         "//xla:shape_util",
         "//xla/backends/cpu:alignment",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/codegen:builtin_definition_generator",
         "//xla/backends/cpu/codegen:cpu_features",
         "//xla/backends/cpu/codegen:execution_engine",
@@ -1046,27 +1042,6 @@ cc_library(
 
 cc_library(
     name = "runtime_matmul",
-    srcs = [
-        "runtime_matmul_c128.cc",
-        "runtime_matmul_c64.cc",
-        "runtime_matmul_common.h",
-        "runtime_matmul_f16.cc",
-        "runtime_matmul_f32.cc",
-        "runtime_matmul_f64.cc",
-        "runtime_matmul_s32.cc",
-    ],
-    hdrs = ["runtime_matmul.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        "//xla:executable_run_options",
-        "//xla/tsl/framework/contraction:eigen_contraction_kernel",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/base:dynamic_annotations",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
@@ -1936,6 +1911,7 @@ cc_library(
         ":cpu_aot_compilation_result",
         ":executable_proto_cc",
         "//xla:util",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/codegen:builtin_definition_generator",
         "//xla/backends/cpu/codegen:cpu_features",
         "//xla/backends/cpu/codegen:execution_engine",
