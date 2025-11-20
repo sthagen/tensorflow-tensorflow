@@ -93,10 +93,9 @@ std::string SpmdLogger::MakeReport() {
   absl::StrAppend(&report,
                   "\n\n***** SPMD memory during transformation *****\n");
 
-  std::sort(entries_.begin(), entries_.end(),
-            [](auto const& entry0, auto const& entry1) {
-              return entry0.first > entry1.first;
-            });
+  absl::c_sort(entries_, [](auto const& entry0, auto const& entry1) {
+    return entry0.first > entry1.first;
+  });
   for (int64_t i = 0;
        i < std::min<int64_t>(report_instruction_count_, entries_.size()); ++i) {
     absl::StrAppend(&report, "\n  ",
@@ -176,22 +175,22 @@ template <typename F>
     }
   }
 
-  const auto add_report = [&](std::vector<HloInstruction*>* insts) {
-    std::sort(insts->begin(), insts->end(),
-              [](const HloInstruction* inst0, const HloInstruction* inst1) {
-                return ShapeSizeInBytes(inst0->shape()) >
-                       ShapeSizeInBytes(inst1->shape());
-              });
+  const auto add_report = [&](std::vector<HloInstruction*>& insts) {
+    absl::c_sort(insts,
+                 [](const HloInstruction* inst0, const HloInstruction* inst1) {
+                   return ShapeSizeInBytes(inst0->shape()) >
+                          ShapeSizeInBytes(inst1->shape());
+                 });
     for (int64_t i = 0;
-         i < std::min<int64_t>(report_instruction_count, insts->size()); ++i) {
+         i < std::min<int64_t>(report_instruction_count, insts.size()); ++i) {
       absl::StrAppend(&report, "  ",
                       tsl::strings::HumanReadableNumBytes(
-                          ShapeSizeInBytes((*insts)[i]->shape())),
-                      " : ", (*insts)[i]->ToString(), "\n");
+                          ShapeSizeInBytes(insts[i]->shape())),
+                      " : ", insts[i]->ToString(), "\n");
     }
   };
 
-  add_report(&instructions);
+  add_report(instructions);
   return report;
 }
 
@@ -677,7 +676,7 @@ PartitionedHlo PartitionedHlo::ReshardNoCache(
   if (target.ReplicateOnLastTileDim()) {
     std::vector<int64_t> group_dims(target.tile_assignment().num_dimensions() -
                                     1);
-    std::iota(group_dims.begin(), group_dims.end(), 0);
+    absl::c_iota(group_dims, 0);
     auto target_grouped =
         hlo_sharding_util::GroupShardingOnDims(target, group_dims);
     auto partially_sharded = PerGroupSliceFromReplicated(
@@ -1339,7 +1338,7 @@ PartitionedHlo PartitionedHlo::Replicate() const {
 
   // 'Tiled' to 'Replicated'.
   std::vector<int64_t> all_dims(shape.dimensions().size());
-  std::iota(all_dims.begin(), all_dims.end(), 0);
+  absl::c_iota(all_dims, 0);
   HloInstruction* result = ReplicatePartial(all_dims);
   result->set_sharding(HloSharding::Replicate());
   return update_cache(PartitionedHlo(result, base_shape_, state_));
@@ -1683,7 +1682,7 @@ HloSharding GetAllToAllSharding(const HloSharding& source_sharding,
     }
 
     std::vector<int> permutation(shape_1_dims.size());
-    std::iota(permutation.begin(), permutation.end(), 0);
+    absl::c_iota(permutation, 0);
     std::swap(permutation[added_source_dim], permutation[added_target_dim]);
     std::vector<int64_t> shape_2_dims(result.dimensions().begin(),
                                       result.dimensions().end());
@@ -1995,7 +1994,7 @@ PartitionedHlo PartitionedHlo::TryMultipleSourceTargetDims(
       HloInstruction::CreateReshape(transpose_0->shape(), all_to_all));
 
   std::vector<int64_t> permutation_1(base_shape_.dimensions().size());
-  std::iota(permutation_1.begin(), permutation_1.end(), num_eligible_dims);
+  absl::c_iota(permutation_1, num_eligible_dims);
   for (int64_t i = 0; i < num_eligible_dims; ++i) {
     auto it = absl::c_find(permutation_1,
                            eligible_source_dims[i] + num_eligible_dims);
@@ -2268,7 +2267,7 @@ std::optional<PartitionedHlo> PartitionedHlo::TryComplexReshardHandling(
             << sharding().ToString();
     std::vector<int64_t> transpose_dims(
         sharding().tile_assignment().num_dimensions(), 0);
-    std::iota(transpose_dims.begin(), transpose_dims.end(), 0);
+    absl::c_iota(transpose_dims, 0);
     std::swap(transpose_dims[first_different_dimension], transpose_dims.back());
     auto intermediate_sharding =
         hlo_sharding_util::TransposeSharding(sharding(), transpose_dims);
@@ -3969,31 +3968,30 @@ absl::Status SpmdPartitioningVisitor::HandleDynamicUpdateSlice(
     }
   }
 
+  // Refer to go/dus-spmd for more details.
   DynamicUpdateSliceAnalysis analysis = AnalyzeDynamicUpdateSlice(hlo);
 
-  // Method 1. Replicate the slice dimensions for all involved tensors.
-  if (analysis.method == DynamicUpdateSliceMethod::kDefault) {
-    return HandleDUSDefault(hlo, input_tensor, update_tensor, new_indices,
-                            analysis.slice_dims);
-  }
-
-  // Method 2. Keep the sharding for input and output since the update is fully
-  // contained in a single partition.
+  // Keep the sharding for input and output since the update is fully contained
+  // in a single partition.
   if (analysis.method == DynamicUpdateSliceMethod::kUpdateOnASinglePartition) {
     return HandleDUSSinglePartitionUpdate(hlo, input_tensor, update_tensor,
                                           new_indices, analysis.slice_dims,
                                           analysis.partitioned_slice_dims);
   }
 
-  // Method 3: All partitioned slice dimensions have compile-time constant
-  // indices.
+  // All partitioned slice dimensions have compile-time constant indices. It is
+  // currently enabled for enzyme only.
   if (analysis.method == DynamicUpdateSliceMethod::
                              kAllPartitionedSliceDimsHaveConstantIndices &&
       module_->config().debug_options().xla_enable_enzyme_comms_opt()) {
     return HandleDUSAllPartitionedSliceDimsHaveConstantIndices(
         hlo, input_tensor, update_tensor);
   }
-  return absl::OkStatus();
+
+  // The default method is to replicate the slice dimensions for all involved
+  // tensors.
+  return HandleDUSDefault(hlo, input_tensor, update_tensor, new_indices,
+                          analysis.slice_dims);
 }
 
 absl::Status SpmdPartitioningVisitor::HandleGetTupleElement(
@@ -4602,7 +4600,7 @@ absl::Status SpmdPartitioningVisitor::HandleRng(HloInstruction* hlo) {
   } else {
     std::vector<int64_t> group_dims(
         hlo->sharding().tile_assignment().num_dimensions() - 1);
-    std::iota(group_dims.begin(), group_dims.end(), 0);
+    absl::c_iota(group_dims, 0);
     auto sharding_grouped =
         hlo_sharding_util::GroupShardingOnDims(hlo->sharding(), group_dims);
     auto per_group_state = CreatePerGroupPartitioningState(
@@ -4956,8 +4954,8 @@ absl::Status SpmdPartitioningVisitor::HandlePartitionId(HloInstruction* hlo) {
 }
 
 absl::Status SpmdPartitioningVisitor::HandleRaggedDot(HloInstruction* hlo) {
-  VLOG(2) << "You have to use Shardy for RaggedDot. If not, the behavior "
-             "is undefined.";
+  CHECK(hlo->parent()->parent()->config().use_shardy_partitioner())
+      << "RaggedDot is only supported with Shardy.";
 
   const RaggedDotDimensionNumbers& ragged_dot_dnums =
       hlo->ragged_dot_dimension_numbers();
@@ -5611,16 +5609,28 @@ absl::StatusOr<bool> SpmdPartitioner::RunImpl(
   // parameters preserve their signatures.
   auto new_program_shape = module->entry_computation()->ComputeProgramShape();
   if (!options_.allow_module_signature_change) {
-    TF_RET_CHECK(Shape::Equal().MinorToMajorOnlyInLayout()(
-        program_shape.result(), new_program_shape.result()))
-        << "Result shape changed for the entry computation";
-    TF_RET_CHECK(program_shape.parameters_size() ==
-                 new_program_shape.parameters_size())
-        << "Parameter count changed for the entry computation";
+    if (!Shape::Equal()(program_shape.result(), new_program_shape.result())) {
+      return absl::InvalidArgumentError(
+          "Result shape changed for the entry computation from: " +
+          program_shape.result().ToString() +
+          " to: " + new_program_shape.result().ToString());
+    }
+    if (program_shape.parameters_size() !=
+        new_program_shape.parameters_size()) {
+      return absl::InvalidArgumentError(
+          "Parameter count changed for the entry computation from: " +
+          std::to_string(program_shape.parameters_size()) +
+          " to: " + std::to_string(new_program_shape.parameters_size()));
+    }
     for (int64_t i = 0; i < program_shape.parameters_size(); ++i) {
-      TF_RET_CHECK(Shape::Equal().MinorToMajorOnlyInLayout()(
-          program_shape.parameters(i), new_program_shape.parameters(i)))
-          << "Parameter shape changed for the entry computation";
+      if (!Shape::Equal()(program_shape.parameters(i),
+                          new_program_shape.parameters(i))) {
+        return absl::InvalidArgumentError(
+            "Parameter shape changed for the entry computation parameter " +
+            std::to_string(i) +
+            " from: " + program_shape.parameters(i).ToString() +
+            " to: " + new_program_shape.parameters(i).ToString());
+      }
     }
   } else {
     // Fix up some bad tiling in entry computation layout.
@@ -5713,34 +5723,6 @@ absl::Status SpmdPartitioner::PreprocessSharding(
     }
   }
 
-  // Entry computation's parameter and root sharding must be either all
-  // replicated or all on a single device.
-  if (!options_.allow_module_signature_change) {
-    const HloComputation* entry = module->entry_computation();
-    TF_RET_CHECK(entry->root_instruction()->has_sharding());
-    const HloSharding& root_sharding = entry->root_instruction()->sharding();
-    if (!root_sharding.UniqueDevice().has_value()) {
-      if (root_sharding.IsTuple()) {
-        TF_RET_CHECK(absl::c_all_of(root_sharding.tuple_elements(),
-                                    [](const HloSharding& s) {
-                                      return s.IsReplicated() || s.IsManual();
-                                    }))
-            << "Unsupported entry root sharding: " << root_sharding.ToString();
-
-      } else {
-        TF_RET_CHECK(root_sharding.IsReplicated() || root_sharding.IsManual())
-            << "Unsupported entry root sharding: " << root_sharding.ToString();
-      }
-    }
-
-    for (const HloInstruction* param : entry->parameter_instructions()) {
-      TF_RET_CHECK(param->has_sharding());
-      TF_RET_CHECK(param->sharding().IsReplicated() ||
-                   param->sharding().UniqueDevice().has_value())
-          << "Unsupported entry parameter sharding:"
-          << param->sharding().ToString();
-    }
-  }
   return absl::OkStatus();
 }
 
