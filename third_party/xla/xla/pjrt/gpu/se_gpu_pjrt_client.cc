@@ -567,7 +567,7 @@ StreamExecutorGpuClient::PrepareReceiveBuffer(PjRtDevice* device, Shape shape) {
   TF_ASSIGN_OR_RETURN(
       auto buffer,
       DefineBuffer(
-          on_device_shape, raw_buffer,
+          on_device_shape, memory_space, raw_buffer,
           {tsl::MakeRef<PjRtStreamExecutorDeviceEvent>(definition_event)},
           /*raw_buffer_is_mutable=*/true));
 
@@ -1042,7 +1042,9 @@ GetStreamExecutorGpuDeviceAllocator(
             CreateBFCAllocator(ordinal_and_device.second->executor(),
                                allocator_config.memory_fraction,
                                allocator_config.preallocate,
-                               allocator_config.gpu_system_memory_size));
+                               allocator_config.gpu_system_memory_size,
+                               allocator_config.sub_allocator_alloc_visitors,
+                               allocator_config.sub_allocator_free_visitors));
         allocators.emplace_back(
             std::move(bfc_allocator),
             ordinal_and_device.second->compute_stream(),
