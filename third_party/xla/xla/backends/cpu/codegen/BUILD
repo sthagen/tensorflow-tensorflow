@@ -257,6 +257,7 @@ cc_library(
         "@stablehlo//:linalg_passes",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:stablehlo_passes",
+        "@stablehlo//:stablehlo_passes_optimization",
     ],
 )
 
@@ -706,7 +707,6 @@ cc_library(
         "//xla:shape_util",
         "//xla:util",
         "//xla/backends/cpu:alignment",
-        "//xla/backends/cpu/codegen/tiled:tiled_fusion_emitter",
         "//xla/codegen:hlo_fusion_spec",
         "//xla/codegen:ir_emission_utils",
         "//xla/codegen:kernel_definition",

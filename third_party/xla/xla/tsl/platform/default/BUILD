@@ -123,7 +123,6 @@ cc_library(
         "@local_config_nccl//:nccl_config",
         "@local_config_tensorrt//:tensorrt_headers",
     ]) + if_rocm_is_configured([
-        "@local_config_rocm//rocm:rocm_config",
         "@local_config_rocm//rocm:rocm_headers",
     ]),
 )
@@ -168,6 +167,7 @@ cc_library(
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
@@ -399,7 +399,6 @@ cc_library(
     deps = [
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:types",
-        "@local_config_rocm//rocm:rocm_config",
         "@local_config_rocm//rocm:rocm_headers",
         "@local_tsl//tsl/platform:path",
     ],
