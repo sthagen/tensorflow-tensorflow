@@ -17,13 +17,40 @@ limitations under the License.
 
 #include <stdio.h>
 
+#include <cstdint>
+#include <iosfwd>
+#include <limits>
 #include <memory>
+#include <set>
+#include <unordered_set>
 
+#include "absl/base/attributes.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
+#include "xla/tsl/platform/cloud/auth_provider.h"
+#include "xla/tsl/platform/cloud/compute_engine_metadata_client.h"
+#include "xla/tsl/platform/cloud/compute_engine_zone_provider.h"
+#include "xla/tsl/platform/cloud/expiring_lru_cache.h"
+#include "xla/tsl/platform/cloud/gcs_dns_cache.h"
+#include "xla/tsl/platform/cloud/gcs_throttle.h"
+#include "xla/tsl/platform/cloud/http_request.h"
+#include "xla/tsl/platform/cloud/zone_provider.h"
+#include "xla/tsl/platform/file_system.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/platform/types.h"
 #include "tsl/platform/retrying_file_system.h"
 
 #ifndef _WIN32
@@ -1295,19 +1322,19 @@ absl::Status GcsFileSystem::ParseGcsPathForScheme(absl::string_view fname,
   absl::string_view parsed_scheme, bucketp, objectp;
   io::ParseURI(fname, &parsed_scheme, &bucketp, &objectp);
   if (parsed_scheme != scheme) {
-    return errors::InvalidArgument("GCS path doesn't start with 'gs://': ",
-                                   fname);
+    return absl::InvalidArgumentError(
+        absl::StrCat("GCS path doesn't start with 'gs://': ", fname));
   }
   *bucket = string(bucketp);
   if (bucket->empty() || *bucket == ".") {
-    return errors::InvalidArgument("GCS path doesn't contain a bucket name: ",
-                                   fname);
+    return absl::InvalidArgumentError(
+        absl::StrCat("GCS path doesn't contain a bucket name: ", fname));
   }
   absl::ConsumePrefix(&objectp, "/");
   *object = string(objectp);
   if (!empty_object_ok && object->empty()) {
-    return errors::InvalidArgument("GCS path doesn't contain an object name: ",
-                                   fname);
+    return absl::InvalidArgumentError(
+        absl::StrCat("GCS path doesn't contain an object name: ", fname));
   }
   return absl::OkStatus();
 }
@@ -1580,7 +1607,7 @@ absl::Status GcsFileSystem::StatForObject(const string& fname,
                                           const string& object,
                                           GcsFileStat* stat) {
   if (object.empty()) {
-    return errors::InvalidArgument(strings::Printf(
+    return absl::InvalidArgumentError(strings::Printf(
         "'object' must be a non-empty string. (File: %s)", fname.c_str()));
   }
 
@@ -1729,7 +1756,7 @@ absl::Status GcsFileSystem::FolderExists(const string& dirname, bool* result) {
       stat->base = DIRECTORY_STAT;
       return absl::OkStatus();
     } else {
-      return errors::InvalidArgument("Not a directory!");
+      return absl::InvalidArgumentError("Not a directory!");
     }
   };
   GcsFileStat stat;
@@ -1765,8 +1792,8 @@ absl::Status GcsFileSystem::GetMatchingPaths(const string& pattern,
             pattern.substr(0, pattern.find_first_of("*?[\\"));
         const string dir(this->Dirname(fixed_prefix));
         if (dir.empty()) {
-          return errors::InvalidArgument(
-              "A GCS pattern doesn't have a bucket name: ", pattern);
+          return absl::InvalidArgumentError(absl::StrCat(
+              "A GCS pattern doesn't have a bucket name: ", pattern));
         }
         std::vector<string> all_files;
         TF_RETURN_IF_ERROR(GetChildrenBounded(
@@ -1803,7 +1830,7 @@ absl::Status GcsFileSystem::GetChildrenBounded(
     const string& dirname, uint64 max_results, std::vector<string>* result,
     bool recursive, bool include_self_directory_marker) {
   if (!result) {
-    return errors::InvalidArgument("'result' cannot be null");
+    return absl::InvalidArgumentError("'result' cannot be null");
   }
   string bucket, object_prefix;
   TF_RETURN_IF_ERROR(
@@ -1986,7 +2013,7 @@ absl::Status GcsFileSystem::CreateDir(const string& dirname,
   if (FileExists(dirname_with_slash, token).ok()) {
     // Use the original name for a correct error here.
     VLOG(3) << "CreateDir: directory already exists, not uploading " << dirname;
-    return errors::AlreadyExists(dirname);
+    return absl::AlreadyExistsError(dirname);
   }
 
   std::unique_ptr<HttpRequest> request;
