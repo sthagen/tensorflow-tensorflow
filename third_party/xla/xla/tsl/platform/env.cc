@@ -32,8 +32,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_stream.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/message_lite.h"
 #include "google/protobuf/text_format.h"
@@ -134,8 +132,9 @@ absl::Status Env::GetFileSystemForFile(const std::string& fname,
       scheme = "[local]";
     }
 
-    return errors::Unimplemented("File system scheme '", scheme,
-                                 "' not implemented (file: '", fname, "')");
+    return absl::UnimplementedError(absl::StrCat("File system scheme '", scheme,
+                                                 "' not implemented (file: '",
+                                                 fname, "')"));
   }
   *result = file_system;
   return absl::OkStatus();
@@ -160,8 +159,8 @@ absl::Status Env::SetOption(const std::string& scheme, const std::string& key,
                             const std::string& value) {
   FileSystem* file_system = file_system_registry_->Lookup(scheme);
   if (!file_system) {
-    return errors::Unimplemented("File system scheme '", scheme,
-                                 "' not found to set configuration");
+    return absl::UnimplementedError(absl::StrCat(
+        "File system scheme '", scheme, "' not found to set configuration"));
   }
   return file_system->SetOption(key, value);
 }
@@ -170,8 +169,8 @@ absl::Status Env::SetOption(const std::string& scheme, const std::string& key,
                             const std::vector<std::string>& values) {
   FileSystem* file_system = file_system_registry_->Lookup(scheme);
   if (!file_system) {
-    return errors::Unimplemented("File system scheme '", scheme,
-                                 "' not found to set configuration");
+    return absl::UnimplementedError(absl::StrCat(
+        "File system scheme '", scheme, "' not found to set configuration"));
   }
   return file_system->SetOption(key, values);
 }
@@ -180,8 +179,8 @@ absl::Status Env::SetOption(const std::string& scheme, const std::string& key,
                             const std::vector<int64_t>& values) {
   FileSystem* file_system = file_system_registry_->Lookup(scheme);
   if (!file_system) {
-    return errors::Unimplemented("File system scheme '", scheme,
-                                 "' not found to set configuration");
+    return absl::UnimplementedError(absl::StrCat(
+        "File system scheme '", scheme, "' not found to set configuration"));
   }
   return file_system->SetOption(key, values);
 }
@@ -190,8 +189,8 @@ absl::Status Env::SetOption(const std::string& scheme, const std::string& key,
                             const std::vector<double>& values) {
   FileSystem* file_system = file_system_registry_->Lookup(scheme);
   if (!file_system) {
-    return errors::Unimplemented("File system scheme '", scheme,
-                                 "' not found to set configuration");
+    return absl::UnimplementedError(absl::StrCat(
+        "File system scheme '", scheme, "' not found to set configuration"));
   }
   return file_system->SetOption(key, values);
 }
@@ -261,8 +260,8 @@ bool Env::FilesExist(const std::vector<std::string>& files,
     if (!file_system) {
       fs_result = false;
       if (fs_status) {
-        absl::Status s = errors::Unimplemented("File system scheme '",
-                                               itr.first, "' not implemented");
+        absl::Status s = absl::UnimplementedError(absl::StrCat(
+            "File system scheme '", itr.first, "' not implemented"));
         local_status.resize(itr.second.size(), s);
       }
     } else {
@@ -366,8 +365,8 @@ absl::Status Env::RenameFile(const std::string& src,
   TF_RETURN_IF_ERROR(GetFileSystemForFile(src, &src_fs));
   TF_RETURN_IF_ERROR(GetFileSystemForFile(target, &target_fs));
   if (src_fs != target_fs) {
-    return errors::Unimplemented("Renaming ", src, " to ", target,
-                                 " not implemented");
+    return absl::UnimplementedError(
+        absl::StrCat("Renaming ", src, " to ", target, " not implemented"));
   }
   return src_fs->RenameFile(src, target);
 }
@@ -619,7 +618,8 @@ absl::Status ReadBinaryProto(Env* env, const std::string& fname,
   if (!proto->ParseFromCodedStream(&coded_stream) ||
       !coded_stream.ConsumedEntireMessage()) {
     TF_RETURN_IF_ERROR(stream->status());
-    return errors::DataLoss("Can't parse ", fname, " as binary proto");
+    return absl::DataLossError(
+        absl::StrCat("Can't parse ", fname, " as binary proto"));
   }
   return absl::OkStatus();
 }
@@ -641,7 +641,8 @@ absl::Status ReadTextProto(Env* env, const std::string& fname,
 
   if (!protobuf::TextFormat::Parse(stream.get(), proto)) {
     TF_RETURN_IF_ERROR(stream->status());
-    return errors::DataLoss("Can't parse ", fname, " as text proto");
+    return absl::DataLossError(
+        absl::StrCat("Can't parse ", fname, " as text proto"));
   }
   return absl::OkStatus();
 }
