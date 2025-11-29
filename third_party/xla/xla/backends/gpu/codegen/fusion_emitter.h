@@ -107,15 +107,10 @@ absl::StatusOr<llvm::Function*> BuildKernelPrototype(
     const LaunchDimensions& launch_dimensions, llvm::IRBuilderBase* builder);
 
 absl::StatusOr<llvm::Function*> RemoveUnusedTritonAbiArguments(
-    IrEmitterContext& ir_emitter_context,
+    llvm::Module* llvm_module, IrEmitterContext& ir_emitter_context,
     const std::string& sanitized_kernel_name,
     LaunchDimensions& launch_dimensions,
     const emitters::KernelArguments& arguments);
-
-// Compute the kernel name. The opcode string may contain "-" which cannot be
-// in a PTX function name, so sanitize the name before uniquifying it.
-std::string GetSanitizedUniqueName(IrEmitterContext& ir_emitter_context,
-                                   const std::string& suggested_name);
 
 absl::Status AnnotateKernelLaunchDimensions(
     const se::DeviceDescription& device_info,
