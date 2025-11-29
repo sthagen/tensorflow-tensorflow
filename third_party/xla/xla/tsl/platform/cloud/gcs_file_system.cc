@@ -700,7 +700,7 @@ class GcsWritableFile : public WritableFile {
 
   absl::Status CheckWritable() const {
     if (!outfile_.is_open()) {
-      return errors::FailedPrecondition(
+      return absl::FailedPreconditionError(
           "The internal temporary file is not writable.");
     }
     return absl::OkStatus();
@@ -1080,9 +1080,9 @@ absl::Status GcsFileSystem::NewRandomAccessFile(
                                                  &bytes_transferred));
       *result = absl::string_view(scratch, bytes_transferred);
       if (bytes_transferred < n) {
-        return errors::OutOfRange("EOF reached, ", result->size(),
-                                  " bytes were read out of ", n,
-                                  " bytes requested.");
+        return absl::OutOfRangeError(
+            absl::StrCat("EOF reached, ", result->size(),
+                         " bytes were read out of ", n, " bytes requested."));
       }
       return absl::OkStatus();
     }));
@@ -1097,9 +1097,9 @@ absl::Status GcsFileSystem::NewRandomAccessFile(
               LoadBufferFromGCS(fname, offset, n, scratch, &bytes_transferred));
           *result = absl::string_view(scratch, bytes_transferred);
           if (bytes_transferred < n) {
-            return errors::OutOfRange("EOF reached, ", result->size(),
-                                      " bytes were read out of ", n,
-                                      " bytes requested.");
+            return absl::OutOfRangeError(absl::StrCat(
+                "EOF reached, ", result->size(), " bytes were read out of ", n,
+                " bytes requested."));
           }
           return absl::OkStatus();
         }));
@@ -1652,7 +1652,7 @@ absl::Status GcsFileSystem::CheckBucketLocationConstraint(
     return absl::OkStatus();
   }
 
-  return errors::FailedPrecondition(strings::Printf(
+  return absl::FailedPreconditionError(strings::Printf(
       "Bucket '%s' is in '%s' location, allowed locations are: (%s).",
       bucket.c_str(), location.c_str(),
       absl::StrJoin(allowed_locations_, ", ").c_str()));
