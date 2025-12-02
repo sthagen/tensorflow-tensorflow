@@ -58,6 +58,7 @@ limitations under the License.
 #include "xla/status_macros.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/launch_dim.h"
+#include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 
@@ -110,16 +111,21 @@ TritonFusion::GenerateTritonKernelAndWrapper(
 absl::StatusOr<FusionEmissionResult> TritonFusion::Emit(
     IrEmitterContext& ir_emitter_context,
     const HloFusionInstruction& fusion) const {
-  return Emit(ir_emitter_context, fusion, nullptr, {});
+  TF_ASSIGN_OR_RETURN(EmitResult kernel_and_module,
+                      Emit(ir_emitter_context, fusion, nullptr, {}));
+  FusionEmissionResult result;
+  result.thunks.push_back(std::move(kernel_and_module.kernel_thunk));
+  result.module = std::move(kernel_and_module.llvm_module);
+  return result;
 }
 
-absl::StatusOr<FusionEmissionResult> TritonFusion::Emit(
+absl::StatusOr<TritonFusion::EmitResult> TritonFusion::Emit(
     IrEmitterContext& ir_emitter_context, const HloFusionInstruction& fusion,
     const HloInstruction* instr_override,
     absl::Span<const Shape> unmanaged_arguments) const {
   std::string suggested_kernel_name = std::string(fusion.name());
   auto local_module =
-      ir_emitter_context.CreateLocalLLVMModule(suggested_kernel_name);
+      ir_emitter_context.CreateLLVMModule(suggested_kernel_name);
   llvm::IRBuilder builder(local_module->getContext());
   VLOG(3) << fusion.ToString();
   TF_ASSIGN_OR_RETURN(
@@ -184,12 +190,14 @@ absl::StatusOr<FusionEmissionResult> TritonFusion::Emit(
     TF_ASSIGN_OR_RETURN(
         llvm::Function * kernel,
         RemoveUnusedTritonAbiArguments(local_module.get(), ir_emitter_context,
-                                       sanitized_kernel_name, launch_dimensions,
-                                       kernel_arguments));
+                                       sanitized_kernel_name));
 
-    PopulateNvvmAnnotations(ir_emitter_context.llvm_module(), kernel,
-                            triton_wrapper_result);
+    AnnotateAttrsIfUnset(kernel_arguments, *kernel);
+    PopulateNvvmAnnotations(local_module.get(), kernel, triton_wrapper_result);
 
+    TF_RETURN_IF_ERROR(AnnotateKernelLaunchDimensions(
+        ir_emitter_context.gpu_device_info(), launch_dimensions, kernel,
+        local_module.get()));
 
     return {{kernel->getName().str(), launch_dimensions,
              triton_wrapper_result.cluster_dim,
@@ -202,17 +210,13 @@ absl::StatusOr<FusionEmissionResult> TritonFusion::Emit(
           hlo_computation, kernel_arguments.args(),
           /*discriminator=*/"", generate);
   TF_ASSIGN_OR_RETURN(const KernelReuseCache::Entry* entry, status_or_entry);
-
-  FusionEmissionResult result;
-  result.thunks.emplace_back(std::make_unique<KernelThunk>(
-      Thunk::ThunkInfo::WithProfileAnnotation(
-          &fusion, ir_emitter_context.GetNextThunkId()),
-      entry->kernel_name, kernel_arguments, entry->launch_dimensions,
-      entry->cluster_dim, entry->shmem_bytes, entry->tma_metadata));
-  if (!was_cached) {
-    result.module = std::move(local_module);
-  }
-  return result;
+  return EmitResult{
+      std::make_unique<KernelThunk>(
+          Thunk::ThunkInfo::WithProfileAnnotation(
+              &fusion, ir_emitter_context.GetNextThunkId()),
+          entry->kernel_name, kernel_arguments, entry->launch_dimensions,
+          entry->cluster_dim, entry->shmem_bytes, entry->tma_metadata),
+      was_cached ? nullptr : std::move(local_module)};
 }
 
 namespace {

@@ -1717,6 +1717,10 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   AddGemmRewriterPasses(pipeline, debug_options, gpu_version,
                         gpu_target_config.device_description.runtime_version());
 
+  TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
+      &pipeline, gpu_version, options, hlo_module, autotune_config, thread_pool,
+      stream_exec, &gpu_target_config));
+
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
@@ -1733,10 +1737,6 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<HloVerifier>(std::move(verifier_metadata));
 
   pipeline.AddPass<HostOffloader>(alias_info);
-
-  TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
-      &pipeline, gpu_version, options, hlo_module, autotune_config, thread_pool,
-      stream_exec, &gpu_target_config));
 
   // The GEMM fusion autotuner can insert new bf16 reductions that need to be
   // normalized again.
@@ -2537,14 +2537,10 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
         gpu_device_info.memory_bandwidth());
     GpuHloCostAnalysis cost_analysis(cost_analysis_options, gpu_device_info);
     TF_RETURN_IF_ERROR(module->entry_computation()->Accept(&cost_analysis));
-    if (!options.is_autotuning_compilation) {
-      VLOG(1) << "HLO memory read+written: "
-              << tsl::strings::HumanReadableNumBytes(
-                     cost_analysis.bytes_accessed());
-    }
-    if (module->config().hlo_profiling_enabled()) {
-      LOG(ERROR) << "--xla_hlo_profile for GPU is unsupported.";
-    }
+    VLOG(1) << absl::StrFormat(
+        "#module=%s,program_id=%d# estimated memory r+w %s", module->name(),
+        module->unique_id(),
+        tsl::strings::HumanReadableNumBytes(cost_analysis.bytes_accessed()));
   }
 
   TF_ASSIGN_OR_RETURN(CompileResultWithMetadata res,
@@ -2560,6 +2556,7 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   // The module is being moved into the GpuExecutable below and we need to
   // read a few config values from the module, before it becomes invalid.
   bool embed_ir_in_executable = debug_opts.xla_embed_ir_in_executable();
+  bool embed_debug_info = debug_opts.xla_gpu_executable_embed_debug_info();
 
   tsl::profiler::ScopedAnnotation annotation([&] {
     return absl::StrFormat("XlaCreateGpuExecutable:#module=%s#",
@@ -2567,14 +2564,11 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
   });
 
   std::unique_ptr<GpuAliasInfo> alias_info = GetAliasInfo(gpu_device_info);
-  const GpuAliasInfo* alias_info_ptr = alias_info.get();
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<GpuExecutable> gpu_executable,
       GpuExecutable::Create(GpuExecutable::Params{
-          /*asm_text=*/(options.is_autotuning_compilation &&
-                        !res.backend_result.binary.empty())
-              ? std::string()
-              : std::move(res.backend_result.asm_text),
+          /*asm_text=*/embed_debug_info ? std::move(res.backend_result.asm_text)
+                                        : std::string(),
           /*binary=*/std::move(res.backend_result.binary),
           /*dnn_compiled_graphs=*/
           std::move(dnn_compiled_graphs),
@@ -2593,10 +2587,10 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
           /*alias_info=*/std::move(alias_info),
           /*debug_options=*/debug_opts,
           /*device_description=*/gpu_device_info,
-          /*debug_module=*/options.is_autotuning_compilation
-              ? std::unique_ptr<HloModule>()
-              : std::move(module),
-          /*enable_debug_info_manager=*/!options.is_autotuning_compilation}));
+          /*debug_module=*/options.embed_hlo_module
+              ? std::move(module)
+              : std::unique_ptr<HloModule>(),
+          /*enable_debug_info_manager=*/embed_debug_info}));
 
   if (embed_ir_in_executable) {
     std::string ir_module_string_before_opt =
@@ -2607,15 +2601,13 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
 
   IncrementCompiledProgramsCount();
 
-  if (!options.is_autotuning_compilation && gpu_executable->has_module()) {
+  if (embed_debug_info && gpu_executable->has_module()) {
     // Dump computation proto state and buffer assignment for
     // CompiledMemoryAnalysis.
     auto hlo_proto = std::make_unique<HloProto>();
     *hlo_proto->mutable_buffer_assignment() =
         gpu_executable->buffer_assignment()->ToProto();
     gpu_executable->set_hlo_proto(std::move(hlo_proto));
-    gpu_executable->set_debug_info(
-        gpu_executable->buffer_assignment()->StatsString(alias_info_ptr));
   }
 
   return static_cast<std::unique_ptr<Executable>>(std::move(gpu_executable));
@@ -3006,9 +2998,6 @@ GpuCompiler::LoadExecutableFromAotResult(
       stream_exec.GetDeviceDescription();
   llvm::LLVMContext llvm_context;
 
-  auto llvm_module = std::make_unique<llvm::Module>("", llvm_context);
-  llvm_module->setTargetTriple(llvm::Triple(target_triple()));
-  llvm_module->setDataLayout(data_layout());
 
   // Recreate BufferAssignment from proto.
   std::unique_ptr<GpuAliasInfo> alias_info = GetAliasInfo(gpu_device_info);
@@ -3019,8 +3008,8 @@ GpuCompiler::LoadExecutableFromAotResult(
 
   IrEmitterContext ir_emitter_context(
       hlo_module.get(), buffer_assignment.get(), &execution_stream_assignment,
-      platform_name, gpu_device_info, mlir_context(), llvm_module.get(),
-      /*llvm_module_constants=*/nullptr, /*emit_kernels=*/false);
+      platform_name, gpu_device_info, mlir_context(), &llvm_context,
+      /*emit_kernels=*/false, llvm::Triple(target_triple()), data_layout());
 
   absl::string_view cache_file_path =
       hlo_module->config().debug_options().xla_gpu_kernel_cache_file();
@@ -3031,9 +3020,9 @@ GpuCompiler::LoadExecutableFromAotResult(
     TF_RETURN_IF_ERROR(LoadCache(ir_emitter_context, cache_file_path));
   }
 
-  auto thunk_emitter = std::make_unique<ThunkEmitter>(&ir_emitter_context);
-  TF_ASSIGN_OR_RETURN(auto thunks,
-                      thunk_emitter->EmitHloEntryComputation(hlo_module.get()));
+  ThunkEmitter thunk_emitter(&ir_emitter_context);
+  TF_ASSIGN_OR_RETURN(auto sequential_thunk,
+                      thunk_emitter.EmitHloEntryComputation(hlo_module.get()));
 
   // Get all other fields required by GpuExecutable.
   std::vector<GpuExecutable::ConstantInfo> constants =
@@ -3055,9 +3044,7 @@ GpuCompiler::LoadExecutableFromAotResult(
         /*dnn_compiled_graphs=*/
         BinaryMap(proto.dnn_compiled_graphs().cbegin(),
                   proto.dnn_compiled_graphs().cend()),
-        /*executable=*/
-        std::make_unique<SequentialThunk>(Thunk::ThunkInfo{},
-                                          std::move(thunks)),
+        /*executable=*/std::move(sequential_thunk),
         /*constants=*/std::move(constants),
         /*output_info=*/std::move(output_info),
         /*module_name=*/std::move(hlo_module_name),

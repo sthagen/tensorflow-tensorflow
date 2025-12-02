@@ -12,7 +12,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
 #include "xla/backends/gpu/codegen/triton/fusion_emitter.h"
 
 #include <cstdint>
@@ -71,7 +70,6 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/triton/collective_emitter.h"
 #include "xla/backends/gpu/codegen/triton/dot_algorithms.h"
 #include "xla/backends/gpu/codegen/triton/emitter_helpers.h"
-#include "xla/backends/gpu/codegen/triton/ir/triton_xla_ops.h"
 #include "xla/codegen/emitters/elemental_hlo_to_mlir.h"
 #include "xla/codegen/emitters/ir/xla_ops.h"
 #include "xla/codegen/tiling/symbolic_tile_analysis.h"
@@ -80,6 +78,7 @@ limitations under the License.
 #include "xla/codegen/tiling/tiled_hlo_instruction.h"
 #include "xla/codegen/tiling/tiled_hlo_schedule.h"
 #include "xla/codegen/tiling/tiling_specification.h"
+#include "xla/codegen/xtile/ir/xtile_attrs.h"
 #include "xla/codegen/xtile/ir/xtile_ops.h"
 #include "xla/hlo/analysis/indexing_map.h"
 #include "xla/hlo/builder/xla_builder.h"
@@ -115,7 +114,6 @@ namespace xla {
 namespace gpu {
 
 namespace arith = ::mlir::arith;
-namespace mtx = ::mlir::triton::xla;
 namespace stablehlo = ::mlir::stablehlo;
 
 using ::llvm::SmallVector;
@@ -1125,6 +1123,7 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     TensorValue parameter =
         EmitParameterExtract(b, tile_info, fn.getArgument(arg_index));
 
+    // Workaround(i1_to_i8_workaround)
     // Some types are stored using different types, e.g. i1 is stored in memory
     // as i8. It's important to type checking that we perform a conversion after
     // loading if the type of the loaded parameter does not match what is
@@ -1348,7 +1347,7 @@ absl::Status EmitGeneric(
     const BlockLevelParameters& block_level_parameters,
     MLIRContext* mlir_context) {
   if (VLOG_IS_ON(6)) {
-    VLOG(6) << "Emitting Triton IR for fusion\n"
+    VLOG(6) << "Emitting XTile IR for fusion\n"
             << ExtractInstructionIntoNewModule(*fusion)->ToString();
   }
   const HloComputation* computation = fusion->fused_instructions_computation();
@@ -1437,6 +1436,7 @@ absl::Status EmitGeneric(
   for (auto [root, result, arg] :
        llvm::zip(tiled_hlo_computation.GetRoots(), results,
                  fn.getArguments().drop_front(computation->num_parameters()))) {
+    // Workaround(i1_to_i8_workaround)
     // Some types are stored using different types, e.g. i1 is stored in memory
     // as i8. It's important to check converted types before storing if the type
     // of the result does not match the type of the output pointer.
@@ -1473,7 +1473,7 @@ mlir::MemRefType GetMemRefType(const Shape& shape, mlir::Type element_type) {
 
   auto minor_to_major_attr =
       mlir::DenseI64ArrayAttr::get(context, shape.layout().minor_to_major());
-  auto layout = mtx::LayoutAttr::get(context, minor_to_major_attr);
+  auto layout = xtile::LayoutAttr::get(context, minor_to_major_attr);
 
   return mlir::MemRefType::get(shape.dimensions(), storage_type, layout);
 }

@@ -39,13 +39,8 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Linker/Linker.h"
-#include "llvm/TargetParser/Triple.h"
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/IR/Attributes.h"
@@ -59,10 +54,11 @@ limitations under the License.
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Export.h"
 #include "xla/backends/gpu/codegen/fusion_emitter.h"
 #include "xla/backends/gpu/codegen/fusions.h"
 #include "xla/backends/gpu/codegen/llvm/llvm_emitter.h"
+#include "xla/backends/gpu/codegen/triton/collective_emitter.h"
+#include "xla/backends/gpu/codegen/triton/fusion.h"
 #include "xla/backends/gpu/codegen/triton/xtile_compiler.h"
 #include "xla/backends/gpu/runtime/all_gather_thunk.h"
 #include "xla/backends/gpu/runtime/all_reduce_thunk.h"
@@ -150,6 +146,7 @@ limitations under the License.
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/gpu/transforms/collectives/collective_ops_utils.h"
 #include "xla/service/gpu/triton_call.h"
+#include "xla/service/hlo_creation_utils.h"
 #include "xla/service/llvm_ir/buffer_assignment_util.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
@@ -170,6 +167,11 @@ limitations under the License.
 
 namespace xla::gpu {
 namespace {
+
+struct EmitCollectiveResult {
+  std::unique_ptr<CollectiveKernelThunk> thunk;
+  std::unique_ptr<llvm::Module> llvm_module;
+};
 
 // TODO: move into a host_execute specific file.
 bool IsHostExecuteCustomCall(const HloInstruction& hlo) {
@@ -193,23 +195,53 @@ static constexpr bool kRequiresCollectiveKernelThunk =
 // As it stands now the collective kernel thunk is wrapped inside other
 // collective thunks such as AllReduceStart. So this function is only
 // responsible for emitting the collective kernel thunk and its dependencies.
-// If nullptr is returned it means that the collective kernel thunk could not be
-// emitted. This is not an error.
-absl::StatusOr<std::unique_ptr<CollectiveKernelThunk>>
-EmitCollectiveKernelThunk(IrEmitterContext* ir_emitter_context,
-                          const CallGraph* call_graph,
-                          Thunk::ThunkInfo thunk_info,
-                          std::vector<CollectiveThunk::Buffer> buffers,
-                          const HloAllReduceInstruction* instr,
-                          const AllReduceConfig& config) {
-  return std::make_unique<CollectiveKernelThunk>(
-      thunk_info, config.config, config.reduction_kind,
-      /*is_async=*/!IsGPUSyncCollective(*instr), std::move(buffers),
-      /*is_collective_kernel_enabled=*/
-      instr->GetModule()
-          ->config()
-          .debug_options()
-          .xla_gpu_unsupported_use_all_reduce_one_shot_kernel());
+absl::StatusOr<EmitCollectiveResult> EmitCollectiveKernelThunk(
+    IrEmitterContext* ir_emitter_context, const CallGraph* call_graph,
+    Thunk::ThunkInfo thunk_info, std::vector<CollectiveThunk::Buffer> buffers,
+    const HloAllReduceInstruction* instr, const AllReduceConfig& config) {
+  std::unique_ptr<HloModule> fused_module =
+      NewModuleWithFusion(instr, HloInstruction::FusionKind::kLoop);
+  HloFusionInstruction* fusion_instr = Cast<HloFusionInstruction>(
+      fused_module->entry_computation()->root_instruction());
+  const se::DeviceDescription& device_info =
+      ir_emitter_context->gpu_device_info();
+  const auto make_thunk = [&](absl::string_view kernel_name,
+                              int32_t shmem_bytes,
+                              std::unique_ptr<llvm::Module> local_module) {
+    return EmitCollectiveResult{
+        std::make_unique<CollectiveKernelThunk>(
+            thunk_info, config.config, config.reduction_kind,
+            /*is_async=*/!IsGPUSyncCollective(*instr), std::move(buffers),
+            /*is_collective_kernel_enabled=*/
+            instr->GetModule()
+                ->config()
+                .debug_options()
+                .xla_gpu_unsupported_use_all_reduce_one_shot_kernel(),
+            /*kernel_name=*/kernel_name,
+            /*shmem_bytes=*/shmem_bytes,
+            /*is_multimem_enabled=*/false),
+        std::move(local_module)};
+  };
+  TF_ASSIGN_OR_RETURN(bool did_set_config, TrySetGpuBackendConfigForCollective(
+                                               device_info, fusion_instr));
+  if (!did_set_config) {
+    return make_thunk(/*kernel_name=*/"", 0, nullptr);
+  }
+  const HloFusionAnalysis fusion_analysis =
+      HloFusionAnalysis::Create(*fusion_instr, device_info);
+  auto emitter = std::make_unique<TritonFusion>(fusion_analysis);
+  TritonFusion::EmitResult result;
+  {
+    XLA_SCOPED_LOGGING_TIMER("Emit collective kernel thunk");
+    TF_ASSIGN_OR_RETURN(std::vector<Shape> unmanaged_arguments,
+                        GetCollectiveUnmanagedKernelArguments(fusion_instr));
+    TF_ASSIGN_OR_RETURN(
+        result, emitter->Emit(*ir_emitter_context, *fusion_instr,
+                              /*instr_override=*/instr, unmanaged_arguments));
+  }
+  return make_thunk(result.kernel_thunk->kernel_name(),
+                    result.kernel_thunk->shmem_bytes(),
+                    std::move(result.llvm_module));
 }
 
 // If the fusion instruction is a dynamic-slice-fusion instruction,
@@ -341,7 +373,9 @@ ThunkEmitter::ThunkEmitter(IrEmitterContext* ir_emitter_context)
       send_recv_events_(std::make_shared<HostSendRecvAsyncEvents>()),
       copy_events_(std::make_shared<CopyThunk::AsyncEvents>()),
       nvshmem_buffer_addresses_(std::make_shared<NvshmemBufferAddresses>()),
-      call_graph_(CallGraph::Build(&ir_emitter_context->hlo_module())) {}
+      call_graph_(CallGraph::Build(&ir_emitter_context->hlo_module())),
+      constants_module_(ir_emitter_context_->CreateLLVMModule(
+          absl::StrCat(ir_emitter_context_->hlo_module().name(), "_consts"))) {}
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConstant(
     const HloConstantInstruction* instr) {
@@ -358,9 +392,9 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConstant(
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
                       GetAllocationSliceForHlo(instr, {}));
 
-  GpuExecutable::ConstantInfo info = AppendGlobalConstant(
-      ir_emitter_context_->llvm_module_constants(), num_elements, element_bytes,
-      global_name, slice.index(), std::move(content));
+  GpuExecutable::ConstantInfo info =
+      AppendGlobalConstant(constants_module_.get(), num_elements, element_bytes,
+                           global_name, slice.index(), std::move(content));
   ir_emitter_context_->constants().push_back(std::move(info));
   return ThunkSequence{};
 }
@@ -412,9 +446,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitPadToStatic(
   TF_ASSIGN_OR_RETURN(auto thunk_sequence,
                       EmitPadToStaticLLVMIR(instr, local_llvm_module.get(),
                                             ir_emitter_context_));
-  CHECK(!llvm::Linker::linkModules(*ir_emitter_context_->llvm_module(),
-                                   std::move(local_llvm_module),
-                                   llvm::Linker::Flags::OverrideFromSrc));
+  kernel_modules_.push_back(std::move(local_llvm_module));
   return thunk_sequence;
 }
 
@@ -428,9 +460,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSliceToDynamic(
   TF_ASSIGN_OR_RETURN(auto thunk_sequence,
                       EmitSliceToDynamicLLVMIR(instr, local_llvm_module.get(),
                                                ir_emitter_context_));
-  CHECK(!llvm::Linker::linkModules(*ir_emitter_context_->llvm_module(),
-                                   std::move(local_llvm_module),
-                                   llvm::Linker::Flags::OverrideFromSrc));
+  kernel_modules_.push_back(std::move(local_llvm_module));
   return thunk_sequence;
 }
 
@@ -1297,15 +1327,18 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
             ir_emitter_context_->gpu_device_info().threads_per_warp()));
 
     if (emit_kernels) {
-      TF_RETURN_IF_ERROR(RemoveUnusedTritonAbiArguments(
-                             local_module.get(), *ir_emitter_context_,
-                             kernel_name, launch_dimensions, kernel_arguments)
-                             .status());
+      TF_ASSIGN_OR_RETURN(
+          llvm::Function * kernel,
+          RemoveUnusedTritonAbiArguments(local_module.get(),
+                                         *ir_emitter_context_, kernel_name));
+
+      AnnotateAttrsIfUnset(kernel_arguments, *kernel);
+      TF_RETURN_IF_ERROR(AnnotateKernelLaunchDimensions(
+          ir_emitter_context_->gpu_device_info(), launch_dimensions, kernel,
+          local_module.get()));
     }
 
-    TF_RET_CHECK(!llvm::Linker::linkModules(
-        *ir_emitter_context_->llvm_module(), std::move(local_module),
-        llvm::Linker::Flags::OverrideFromSrc));
+    kernel_modules_.push_back(std::move(local_module));
     return {{kernel_name, launch_dimensions, result.cluster_dim,
              result.shmem_bytes}};
   };
@@ -1378,9 +1411,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusion(
 
   // Use override flag because libdevice functions can be present in both.
   if (result.module) {
-    TF_RET_CHECK(!llvm::Linker::linkModules(
-        *ir_emitter_context_->llvm_module(), std::move(result.module),
-        llvm::Linker::Flags::OverrideFromSrc));
+    kernel_modules_.push_back(std::move(result.module));
   }
 
   const ExecutionStreamAssignment& stream_assignment =
@@ -1518,9 +1549,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitRngGetAndUpdateState(
   TF_ASSIGN_OR_RETURN(auto thunk_sequence,
                       EmitRngGetAndUpdateStateLLVMIR(
                           instr, local_llvm_module.get(), ir_emitter_context_));
-  CHECK(!llvm::Linker::linkModules(*ir_emitter_context_->llvm_module(),
-                                   std::move(local_llvm_module),
-                                   llvm::Linker::Flags::OverrideFromSrc));
+  kernel_modules_.push_back(std::move(local_llvm_module));
   return thunk_sequence;
 }
 
@@ -1572,9 +1601,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSort(
                       EmitBitonicSortLLVMIR(sort, local_llvm_module.get(),
                                             ir_emitter_context_));
   AppendThunkSequence(thunks, sort_thunks);
-  llvm::Linker::linkModules(*ir_emitter_context_->llvm_module(),
-                            std::move(local_llvm_module),
-                            llvm::Linker::Flags::OverrideFromSrc);
+  kernel_modules_.push_back(std::move(local_llvm_module));
   return thunks;
 }
 
@@ -1712,28 +1739,34 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCollectiveThunk(
   const auto& hlo_config = ir_emitter_context_->hlo_module().config();
   int64_t replica_count = hlo_config.replica_count();
   int64_t partition_count = hlo_config.num_partitions();
+  int64_t operand_count = inst->operand_count();
   VLOG(2) << CollectiveThunkType::GetHloOpName()
           << "; replica count: " << replica_count
           << "; partition count: " << partition_count
-          << "; operand count: " << inst->operand_count();
+          << "; operand count: " << operand_count;
 
   // Stash relevant information in CollectiveThunk::Buffer even if
   // we may not generate an CollectiveThunk.
   std::vector<CollectiveThunk::Buffer> buffers;
-
-  int64_t operand_count = inst->operand_count();
   buffers.reserve(operand_count);
 
   // Adds a source and destination buffers pair to `buffers`.
-  auto add_buffer = [&](int64_t element_count, BufferAllocation::Slice src,
-                        int64_t src_memory_space, BufferAllocation::Slice dst,
-                        int64_t dst_memory_space) {
-    buffers.push_back(
-        CollectiveThunk::Buffer{/*element_count=*/element_count,
-                                /*source_buffer=*/src,
-                                /*destination_buffer=*/dst,
-                                /*source_memory_space=*/src_memory_space,
-                                /*destination_memory_space=*/dst_memory_space});
+  auto add_buffer = [&](const HloInstruction* src, const HloInstruction* dst,
+                        const ShapeIndex& dst_shape_index) -> absl::Status {
+    const Shape& src_shape = src->shape();
+    const Shape& dst_shape =
+        ShapeUtil::GetSubshape(dst->shape(), dst_shape_index);
+    TF_ASSIGN_OR_RETURN(auto src_slice, GetAllocationSliceForHlo(src));
+    TF_ASSIGN_OR_RETURN(auto dst_slice,
+                        GetAllocationSliceForHlo(dst, dst_shape_index));
+
+    buffers.push_back(CollectiveThunk::Buffer{
+        /*element_count=*/ShapeUtil::ElementsIn(src_shape),
+        /*source_buffer=*/src_slice,
+        /*destination_buffer=*/dst_slice,
+        /*source_memory_space=*/src_shape.layout().memory_space(),
+        /*destination_memory_space=*/dst_shape.layout().memory_space()});
+    return absl::OkStatus();
   };
 
   if (kind == Thunk::Kind::kAllGatherStart) {
@@ -1742,56 +1775,28 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCollectiveThunk(
     // multiple operands).
     for (int64_t i = 0; i < operand_count; i++) {
       ShapeIndex idx = operand_count > 1 ? ShapeIndex({1, i}) : ShapeIndex({1});
-      const Shape& src_shape = inst->operand(i)->shape();
-      const Shape& dst_shape = ShapeUtil::GetSubshape(inst->shape(), idx);
-      TF_ASSIGN_OR_RETURN(auto src, GetAllocationSliceForHlo(inst->operand(i)));
-      TF_ASSIGN_OR_RETURN(auto dst, GetAllocationSliceForHlo(inst, idx));
-      add_buffer(ShapeUtil::ElementsIn(src_shape), src,
-                 src_shape.layout().memory_space(), dst,
-                 dst_shape.layout().memory_space());
+      TF_RETURN_IF_ERROR(add_buffer(inst->operand(i), inst, idx));
     }
   } else if (kind == Thunk::Kind::kRaggedAllToAll) {
     // RaggedAllToAll operation has 6 operands: input, output,
     // input_offset, send_size, output_offset, recv_size. `output`
     // operand is aliased with the instruction result. All other
     // operands are not aliased.
-    const Shape& input_shape = inst->operand(0)->shape();
-    TF_ASSIGN_OR_RETURN(auto input_buffer,
-                        GetAllocationSliceForHlo(inst->operand(0)));
-    add_buffer(ShapeUtil::ElementsIn(input_shape), input_buffer,
-               input_shape.layout().memory_space(), input_buffer,
-               input_shape.layout().memory_space());
-
-    const Shape& output_shape = inst->operand(1)->shape();
-    const Shape& result_shape = inst->shape();
-    TF_ASSIGN_OR_RETURN(auto output_buffer,
-                        GetAllocationSliceForHlo(inst->operand(1)));
-    TF_ASSIGN_OR_RETURN(auto result_buffer, GetAllocationSliceForHlo(inst));
-
-    add_buffer(ShapeUtil::ElementsIn(result_shape), output_buffer,
-               output_shape.layout().memory_space(), result_buffer,
-               result_shape.layout().memory_space());
+    TF_RETURN_IF_ERROR(
+        add_buffer(inst->operand(0), inst->operand(0), ShapeIndex({})));
+    TF_RETURN_IF_ERROR(add_buffer(inst->operand(1), inst, ShapeIndex({})));
 
     for (int64_t i = 2; i < operand_count; i++) {
-      const Shape& shape = inst->operand(i)->shape();
-      TF_ASSIGN_OR_RETURN(auto slice,
-                          GetAllocationSliceForHlo(inst->operand(i)));
-      add_buffer(ShapeUtil::ElementsIn(shape), slice,
-                 shape.layout().memory_space(), slice,
-                 shape.layout().memory_space());
+      TF_RETURN_IF_ERROR(
+          add_buffer(inst->operand(i), inst->operand(i), ShapeIndex({})));
     }
   } else {
     // For other operations simply zip operands with results.
     for (int64_t i = 0; i < operand_count; i++) {
       ShapeIndex idx =
           inst->shape().IsTuple() ? ShapeIndex({i}) : ShapeIndex({});
-      const Shape& src_shape = inst->operand(i)->shape();
-      const Shape& dst_shape = ShapeUtil::GetSubshape(inst->shape(), idx);
-      TF_ASSIGN_OR_RETURN(auto src, GetAllocationSliceForHlo(inst->operand(i)));
-      TF_ASSIGN_OR_RETURN(auto dst, GetAllocationSliceForHlo(inst, idx));
-      add_buffer(ShapeUtil::ElementsIn(src_shape), src,
-                 src_shape.layout().memory_space(), dst,
-                 dst_shape.layout().memory_space());
+
+      TF_RETURN_IF_ERROR(add_buffer(inst->operand(i), inst, idx));
     }
   }
 
@@ -1828,13 +1833,16 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCollectiveThunk(
   // lifted out of the all reduce thunk.
   if constexpr (kRequiresCollectiveKernelThunk<CollectiveThunkType>) {
     TF_ASSIGN_OR_RETURN(
-        auto collective_kernel_thunk,
+        auto emit_result,
         EmitCollectiveKernelThunk(
             ir_emitter_context_, call_graph_.get(), thunk_info, buffers,
             Cast<HloAllReduceInstruction>(inst), GetAllReduceConfigInst(inst)));
+    if (emit_result.llvm_module != nullptr) {
+      kernel_modules_.push_back(std::move(emit_result.llvm_module));
+    }
     thunk = std::make_unique<CollectiveThunkType>(
         thunk_info, inst, /*buffers=*/std::move(buffers),
-        std::move(collective_kernel_thunk),
+        std::move(emit_result.thunk),
         ir_emitter_context_->debug_options().xla_gpu_use_memcpy_local_p2p());
   } else {
     thunk = std::make_unique<CollectiveThunkType>(
@@ -2823,9 +2831,12 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloInstruction(
   return Internal("Unhandled HLO instruction");
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloEntryComputation(
-    const HloModule* module) {
-  return EmitHloComputation(module->entry_computation());
+absl::StatusOr<std::unique_ptr<SequentialThunk>>
+ThunkEmitter::EmitHloEntryComputation(const HloModule* module) {
+  TF_ASSIGN_OR_RETURN(auto thunks,
+                      EmitHloComputation(module->entry_computation()));
+  return std::make_unique<SequentialThunk>(Thunk::ThunkInfo{},
+                                           std::move(thunks));
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitHloComputation(
