@@ -28,10 +28,10 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/TargetParser/Triple.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
 #include "xla/autotuning.pb.h"
-#include "xla/backends/gpu/codegen/triton/fusion_emitter.h"
 #include "xla/backends/gpu/codegen/triton/test_utils.h"
 #include "xla/backends/gpu/codegen/triton/xtile_compiler.h"
 #include "xla/error_spec.h"
@@ -47,7 +47,9 @@ limitations under the License.
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/model/block_level_parameters.h"
+#include "xla/service/gpu/target_constants.h"
 #include "xla/service/gpu/tests/gpu_codegen_test.h"
+#include "xla/service/gpu/transforms/hoist_fused_bitcasts.h"
 #include "xla/service/gpu/transforms/nest_gemm_fusion.h"
 #include "xla/service/pattern_matcher.h"
 #include "xla/stream_executor/cuda/cuda_compute_capability.h"
@@ -110,6 +112,7 @@ class TritonTest : public GpuCodegenTest {
   GetModuleAndNestedFusionMetadata(absl::string_view hlo_text) {
     TF_ASSIGN_OR_RETURN(std::unique_ptr<VerifiedHloModule> module,
                         ParseAndReturnVerifiedModule(hlo_text));
+    TF_RETURN_IF_ERROR(HoistFusedBitcasts().Run(module.get()).status());
     TF_ASSIGN_OR_RETURN(
         bool fusion_was_nested,
         NestGemmFusion(device_desc(), &mlir_context_).Run(module.get()));
@@ -458,7 +461,8 @@ TEST_F(TritonGemmTest, FailIfTooMuchShmem) {
   const se::DeviceDescription device_info =
       TestGpuDeviceInfo::RTXA6000DeviceInfo();
   llvm::LLVMContext llvm_ctx;
-  llvm::Module llvm_module("module", llvm_ctx);
+  llvm::Triple target_triple(nvptx::TargetTriple());
+  std::string data_layout(nvptx::DataLayout());
 
   constexpr absl::string_view kHloTextTemplate = R"(
 triton_gemm_dot {
@@ -488,7 +492,7 @@ ENTRY entry {
   EXPECT_THAT(
       TritonWrapper("test_fn", fusion1, se::GpuComputeCapability{cc},
                     device_info, module1_and_metadata.block_level_parameters,
-                    &llvm_module, mlir_context_),
+                    target_triple, data_layout, llvm_ctx, mlir_context_),
       absl_testing::StatusIs(
           tsl::error::RESOURCE_EXHAUSTED,
           ::testing::HasSubstr("Shared memory size limit exceeded")));
@@ -504,7 +508,7 @@ ENTRY entry {
       const auto result,
       TritonWrapper("test_fn", fusion2, se::GpuComputeCapability{cc},
                     device_info, module2_and_metadata.block_level_parameters,
-                    &llvm_module, mlir_context_));
+                    target_triple, data_layout, llvm_ctx, mlir_context_));
   // Use optin shared memory which is > shared_memory_per_block.
   EXPECT_GT(result.shmem_bytes, device_info.shared_memory_per_block());
 }
@@ -682,7 +686,8 @@ ENTRY e {
 
   MatchOptimizedHlo(kHloText, R"(
 ; CHECK: ENTRY
-; CHECK: transpose
+; CHECK: fusion
+; CHECK-SAME: kind=kLoop
 ; CHECK: fusion
 ; CHECK-SAME: kind=kCustom
 ; CHECK-SAME: "__triton_nested_gemm_fusion"
@@ -707,7 +712,8 @@ ENTRY e {
 
   MatchOptimizedHlo(kHloText, R"(
 ; CHECK: ENTRY
-; CHECK: transpose
+; CHECK: fusion
+; CHECK-SAME: kind=kLoop
 ; CHECK: fusion
 ; CHECK-SAME: kind=kCustom
 ; CHECK-SAME: "__triton_nested_gemm_fusion"
@@ -801,7 +807,8 @@ TEST_F(TritonGemmTest, DISABLED_FailForTooComplexTiling) {
   const se::DeviceDescription device_info =
       TestGpuDeviceInfo::RTXA6000DeviceInfo();
   llvm::LLVMContext llvm_ctx;
-  llvm::Module llvm_module("module", llvm_ctx);
+  llvm::Triple target_triple(nvptx::TargetTriple());
+  std::string data_layout(nvptx::DataLayout());
 
   constexpr absl::string_view kHloTextTemplate = R"(
 HloModule module
@@ -834,7 +841,7 @@ ENTRY entry {
   EXPECT_THAT(
       TritonWrapper("test_fn", fusion1, se::GpuComputeCapability{cc},
                     device_info, module1_and_metadata.block_level_parameters,
-                    &llvm_module, mlir_context_),
+                    target_triple, data_layout, llvm_ctx, mlir_context_),
       absl_testing::StatusIs(tsl::error::RESOURCE_EXHAUSTED,
                              "Tiling complexity heuristic exceeded"));
 
@@ -846,11 +853,11 @@ ENTRY entry {
   const HloFusionInstruction* fusion2 = Cast<HloFusionInstruction>(
       module1_and_metadata.computation->FusionInstruction());
 
-  TF_EXPECT_OK(TritonWrapper("test_fn", fusion2, se::GpuComputeCapability{cc},
-                             device_info,
-                             module2_and_metadata.block_level_parameters,
-                             &llvm_module, mlir_context_)
-                   .status());
+  TF_EXPECT_OK(
+      TritonWrapper("test_fn", fusion2, se::GpuComputeCapability{cc},
+                    device_info, module2_and_metadata.block_level_parameters,
+                    target_triple, data_layout, llvm_ctx, mlir_context_)
+          .status());
 }
 
 // TODO(b/393299275): this test may have some value while Triton tiling
@@ -1201,7 +1208,8 @@ ENTRY e {
 
   MatchOptimizedHlo(kHloText, R"(
 ; CHECK:      ENTRY
-; CHECK:      concatenate
+; CHECK:      fusion
+; CHECK-SAME:   kind=kLoop
 ; CHECK:      fusion
 ; CHECK-SAME:   kind=kCustom
 ; CHECK-SAME:   "__triton_nested_gemm_fusion"
@@ -1332,12 +1340,14 @@ ENTRY e {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           GetOptimizedModule(kHloText));
 
-  EXPECT_THAT(module->entry_computation()->root_instruction(),
-              GmockMatch(m::Add(
-                  m::Fusion(m::Parameter(), m::Parameter())
-                      .WithFusionKind(HloInstruction::FusionKind::kCustom),
-                  m::Fusion(m::Parameter(), m::Parameter())
-                      .WithFusionKind(HloInstruction::FusionKind::kCustom))));
+  EXPECT_THAT(
+      module->entry_computation()->root_instruction(),
+      GmockMatch(
+          m::Fusion(m::Fusion(m::Parameter(), m::Parameter())
+                        .WithFusionKind(HloInstruction::FusionKind::kCustom),
+                    m::Fusion(m::Parameter(), m::Parameter())
+                        .WithFusionKind(HloInstruction::FusionKind::kCustom))
+              .WithFusionKind(HloInstruction::FusionKind::kLoop)));
 
   EXPECT_TRUE(RunAndCompare(kHloText, ErrorSpec{/*aabs=*/1e-2, /*arel=*/1e-2}));
 }
@@ -1507,10 +1517,12 @@ ENTRY e {
 
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           GetOptimizedModule(kHloText));
-  EXPECT_THAT(module->entry_computation()->root_instruction(),
-              GmockMatch(m::Sin(
-                  m::Fusion(m::Parameter(), m::Parameter())
-                      .WithFusionKind(HloInstruction::FusionKind::kCustom))));
+  EXPECT_THAT(
+      module->entry_computation()->root_instruction(),
+      GmockMatch(
+          m::Fusion(m::Fusion(m::Parameter(), m::Parameter())
+                        .WithFusionKind(HloInstruction::FusionKind::kCustom))
+              .WithFusionKind(HloInstruction::FusionKind::kLoop)));
 }
 
 // TODO(b/393299275): this should just be a fusion test and does not need to be
@@ -1987,14 +1999,15 @@ ENTRY e {
   const HloFusionInstruction* triton_dot_fusion = Cast<HloFusionInstruction>(
       optin_shmem_module_and_metadata.computation->FusionInstruction());
   llvm::LLVMContext llvm_ctx;
-  llvm::Module llvm_module("module", llvm_ctx);
+  llvm::Triple target_triple(nvptx::TargetTriple());
+  std::string data_layout(nvptx::DataLayout());
 
   TF_ASSERT_OK_AND_ASSIGN(
       const auto result,
       TritonWrapper("test_fn", triton_dot_fusion, GpuComputeCapability(),
                     dev_info,
                     optin_shmem_module_and_metadata.block_level_parameters,
-                    &llvm_module, mlir_context_));
+                    target_triple, data_layout, llvm_ctx, mlir_context_));
   // The config is chosen so that the used memory size is slightly above the
   // 48 kB boundary of standard / opt-in shared memory so that any GPU that
   // has the opt-in one should be able to execute the test.
@@ -3105,6 +3118,47 @@ ENTRY e {
                           GetModuleAndNestedFusionMetadata(kHloText));
   EXPECT_TRUE(Run(std::move(module_and_metadata.module),
                   /*run_hlo_passes=*/false));
+}
+
+TEST_F(TritonGemmTest, MixedF8DotExecutesCorrectly) {
+  if (!GetCudaComputeCapability().IsAtLeastHopper()) {
+    GTEST_SKIP() << "Requires a Hopper+ GPU";
+  }
+
+  TF_ASSERT_OK_AND_ASSIGN(ModuleAndNestedFusionMetadata module_and_metadata,
+                          GetModuleAndNestedFusionMetadata(R"(
+triton_dot {
+  p0 = f8e5m2[32,32] parameter(0)
+  p1 = f8e4m3fn[32,32] parameter(1)
+  _ = f32[32,32] dot(p0, p1),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0}
+}
+
+e {
+  p0 = f8e5m2[32,32] parameter(0)
+  p1 = f8e4m3fn[32,32] parameter(1)
+  _ = f32[32,32] fusion(p0, p1), kind=kCustom, calls=triton_dot,
+    backend_config={"fusion_backend_config": {kind: "__triton_gemm",
+    triton_gemm_config: {"block_m":32,"block_n":32,"block_k":32,
+                         "split_k":1,"num_stages":2,"num_warps":4,
+                         "num_ctas":1}}}
+})"));
+
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> ref_module,
+                          ParseAndReturnVerifiedModule(R"(
+e {
+  p0 = f8e5m2[32,32] parameter(0)
+  p0c = f16[32,32] convert(p0)
+  p1 = f8e4m3fn[32,32] parameter(1)
+  p1c = f16[32,32] convert(p1)
+  _ = f32[32,32] dot(p0c, p1c),
+    lhs_contracting_dims={1}, rhs_contracting_dims={0}
+})"));
+
+  EXPECT_TRUE(RunAndCompareTwoModules(std::move(ref_module),
+                                      std::move(module_and_metadata.module),
+                                      ErrorSpec{/*aabs=*/1e-6, /*arel=*/1e-6},
+                                      /*run_hlo_passes=*/false));
 }
 
 TEST_F(TritonGemmTest, Fp8DotWithManyWarpsDoesNotCrash) {

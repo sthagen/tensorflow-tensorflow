@@ -62,6 +62,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/thunk.h"
 #include "xla/backends/gpu/runtime/while_thunk.h"
 #include "xla/core/collectives/communicator.h"
+#include "xla/core/collectives/reduction_kind.h"
 #include "xla/debug_options_flags.h"
 #include "xla/executable_run_options.h"
 #include "xla/ffi/call_frame.h"
@@ -74,7 +75,6 @@ limitations under the License.
 #include "xla/runtime/execution_graph.h"
 #include "xla/runtime/resource_use.h"
 #include "xla/service/buffer_assignment.h"
-#include "xla/service/collective_ops_utils.h"
 #include "xla/service/computation_placer.h"
 #include "xla/service/custom_call_status.h"
 #include "xla/service/custom_call_status_internal.h"
@@ -86,7 +86,7 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
 #include "xla/stream_executor/command_buffer.h"
-#include "xla/stream_executor/device_memory.h"
+#include "xla/stream_executor/device_address.h"
 #include "xla/stream_executor/dnn.h"
 #include "xla/stream_executor/gpu/tma_metadata.h"
 #include "xla/stream_executor/kernel.h"
@@ -95,6 +95,7 @@ limitations under the License.
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "xla/stream_executor/tensor_map.h"
 #include "xla/stream_executor/trace_command_buffer_factory.h"
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/errors.h"
@@ -496,10 +497,19 @@ absl::Status CommandBufferCmdExecutor::Record(
         command_buffer->mode() == se::CommandBuffer::Mode::kPrimary) {
       int64_t input_count = 0;
       int64_t output_count = 0;
+      int64_t temp_count = 0;
       int64_t input_temp_count = 0;
       int64_t output_temp_count = 0;
       int64_t input_output_count = 0;
       int64_t input_temp_output_count = 0;
+
+      absl::flat_hash_map<std::string, int64_t> input_cmds;
+      absl::flat_hash_map<std::string, int64_t> output_cmds;
+      absl::flat_hash_map<std::string, int64_t> temp_cmds;
+      absl::flat_hash_map<std::string, int64_t> input_temp_cmds;
+      absl::flat_hash_map<std::string, int64_t> output_temp_cmds;
+      absl::flat_hash_map<std::string, int64_t> input_output_cmds;
+      absl::flat_hash_map<std::string, int64_t> input_temp_output_cmds;
 
       for (const auto& cmd : commands_) {
         bool has_input = false;
@@ -507,54 +517,76 @@ absl::Status CommandBufferCmdExecutor::Record(
         bool has_temp = false;
 
         for (const auto& buffer : cmd->buffers()) {
-          if (buffer.HasDefinedContentsOnInput()) {
+          if (buffer.slice().allocation()->IsPreallocatedTempBuffer()) {
+            has_temp = true;
+          }
+          if (buffer.slice().allocation()->is_entry_computation_parameter()) {
             has_input = true;
           }
-          if (buffer.HasDefinedContentsOnOutput()) {
+          if (buffer.slice().allocation()->maybe_live_out()) {
             has_output = true;
-          }
-          if (!buffer.HasDefinedContentsOnInput() &&
-              !buffer.HasDefinedContentsOnOutput()) {
-            has_temp = true;
           }
         }
 
+        std::string cmd_name = CommandBufferCmdString(cmd->command_type());
+
         if (has_input && !has_output && !has_temp) {
           input_count++;
+          input_cmds[cmd_name]++;
         }
         if (!has_input && has_output && !has_temp) {
           output_count++;
+          output_cmds[cmd_name]++;
+        }
+        if (!has_input && !has_output && has_temp) {
+          temp_count++;
+          temp_cmds[cmd_name]++;
         }
         if (has_input && !has_output && has_temp) {
           input_temp_count++;
+          input_temp_cmds[cmd_name]++;
         }
         if (!has_input && has_output && has_temp) {
           output_temp_count++;
+          output_temp_cmds[cmd_name]++;
         }
         if (has_input && has_output && !has_temp) {
           input_output_count++;
+          input_output_cmds[cmd_name]++;
         }
         if (has_input && has_output && has_temp) {
           input_temp_output_count++;
+          input_temp_output_cmds[cmd_name]++;
         }
       }
+
+      auto print_cmds =
+          [](const absl::flat_hash_map<std::string, int64_t>& cmds) {
+            std::string s;
+            for (const auto& [name, count] : cmds) {
+              absl::StrAppend(&s, "\n    ", name, ": ", count);
+            }
+            return s;
+          };
 
       VLOG(5) << "CommandBufferCmdExecutor allocation summary:\n"
               << "  Total commands                                 : "
               << commands_.size() << "\n"
               << "  ------------------------------------------------\n"
               << "  Commands consuming input buffer                : "
-              << input_count << "\n"
+              << input_count << print_cmds(input_cmds) << "\n"
               << "  Commands consuming output buffer               : "
-              << output_count << "\n"
+              << output_count << print_cmds(output_cmds) << "\n"
+              << "  Commands consuming temp buffer                 : "
+              << temp_count << print_cmds(temp_cmds) << "\n"
               << "  Commands consuming input, temp buffers         : "
-              << input_temp_count << "\n"
+              << input_temp_count << print_cmds(input_temp_cmds) << "\n"
               << "  Commands consuming output, temp buffers        : "
-              << output_temp_count << "\n"
+              << output_temp_count << print_cmds(output_temp_cmds) << "\n"
               << "  Commands consuming input, output buffers       : "
-              << input_output_count << "\n"
+              << input_output_count << print_cmds(input_output_cmds) << "\n"
               << "  Commands consuming input, temp, output buffers : "
-              << input_temp_output_count;
+              << input_temp_output_count << print_cmds(input_temp_output_cmds);
     }
 
     TF_RETURN_IF_ERROR(RecordCreate(execute_params, record_params,
@@ -904,7 +936,7 @@ absl::StatusOr<se::CommandBuffer*> TracedCommandBuffer::GetOrTraceCommandBuffer(
     se::Stream* stream, absl::FunctionRef<absl::Status(se::Stream*)> trace,
     se::StreamPriority priority) {
   // Collect memory addresses for relevant allocations.
-  absl::InlinedVector<se::DeviceMemoryBase, 4> allocs;
+  absl::InlinedVector<se::DeviceAddressBase, 4> allocs;
   allocs.reserve(allocs_indices_.size());
   for (auto& index : allocs_indices_) {
     allocs.emplace_back(buffer_allocation->GetDeviceAddress(index));
@@ -1066,7 +1098,7 @@ absl::StatusOr<const se::CommandBuffer::Command*> ComputationIdCmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase dst =
+  se::DeviceAddressBase dst =
       execute_params.buffer_allocations->GetDeviceAddress(dest_);
 
   GlobalDeviceId global_device_id =
@@ -1162,7 +1194,7 @@ absl::StatusOr<const se::CommandBuffer::Command*> LaunchCmd::Record(
       tma_metadata_.value_or(se::gpu::TmaMetadata{});
   for (int idx = 0; idx < args_.size(); ++idx) {
     const BufferAllocation::Slice& arg = args_[idx];
-    se::DeviceMemoryBase buf =
+    se::DeviceAddressBase buf =
         execute_params.buffer_allocations->GetDeviceAddress(arg);
     VLOG(5) << "  Arg: " << arg << ": " << buf.opaque();
 
@@ -1255,9 +1287,9 @@ absl::StatusOr<const se::CommandBuffer::Command*> CustomKernelLaunchCmd::Record(
                      custom_kernel_.name()));
   }
 
-  absl::InlinedVector<se::DeviceMemoryBase, 4> buffers;
+  absl::InlinedVector<se::DeviceAddressBase, 4> buffers;
   for (const BufferAllocation::Slice& arg : args_) {
-    se::DeviceMemoryBase buf =
+    se::DeviceAddressBase buf =
         execute_params.buffer_allocations->GetDeviceAddress(arg);
     VLOG(5) << "  Arg: " << arg << ": " << buf.opaque();
     buffers.push_back(buf);
@@ -1292,23 +1324,29 @@ CommandBufferCmd::BufferUseVector CustomKernelLaunchCmd::buffers() const {
 // MemcpyDeviceToDeviceCmd
 //===----------------------------------------------------------------------===//
 
-MemcpyDeviceToDeviceCmd::MemcpyDeviceToDeviceCmd(BufferAllocation::Slice dst,
-                                                 BufferAllocation::Slice src,
+MemcpyDeviceToDeviceCmd::MemcpyDeviceToDeviceCmd(ShapedSlice dst,
+                                                 ShapedSlice src,
                                                  int64_t num_bytes)
     : CommandBufferCmd(CommandBufferCmdType::kMemcpyDeviceToDeviceCmd),
       dst_(dst),
       src_(src),
-      num_bytes_(num_bytes) {}
+      num_bytes_(num_bytes) {
+  CHECK_EQ(ShapeUtil::ByteSizeOfElements(src_.shape),
+           ShapeUtil::ByteSizeOfElements(dst_.shape));
+  CHECK_LE(num_bytes, dst_.slice.size());
+  CHECK_LE(num_bytes, src_.slice.size());
+  CHECK_GE(src_.slice.size(), ShapeUtil::ByteSizeOf(src_.shape));
+}
 
 absl::StatusOr<const se::CommandBuffer::Command*>
 MemcpyDeviceToDeviceCmd::Record(const Thunk::ExecuteParams& execute_params,
                                 const RecordParams& record_params,
                                 RecordAction record_action,
                                 se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase dst =
-      execute_params.buffer_allocations->GetDeviceAddress(dst_);
-  se::DeviceMemoryBase src =
-      execute_params.buffer_allocations->GetDeviceAddress(src_);
+  se::DeviceAddressBase dst =
+      execute_params.buffer_allocations->GetDeviceAddress(dst_.slice);
+  se::DeviceAddressBase src =
+      execute_params.buffer_allocations->GetDeviceAddress(src_.slice);
 
   VLOG(5) << "MemcpyDeviceToDeviceCmd: num_bytes = " << num_bytes_;
   VLOG(5) << "  Dst: " << dst_ << " (" << dst.opaque() << ")";
@@ -1331,27 +1369,28 @@ MemcpyDeviceToDeviceCmd::Record(const Thunk::ExecuteParams& execute_params,
 }
 
 CommandBufferCmd::BufferUseVector MemcpyDeviceToDeviceCmd::buffers() const {
-  return {BufferUse::Write(dst_), BufferUse::Read(src_)};
+  return {BufferUse::Write(dst_.slice, dst_.shape),
+          BufferUse::Read(src_.slice, src_.shape)};
 }
 
 //===----------------------------------------------------------------------===//
 // MemzeroCmd
 //===----------------------------------------------------------------------===//
 
-MemzeroCmd::MemzeroCmd(BufferAllocation::Slice dst)
+MemzeroCmd::MemzeroCmd(ShapedSlice dst)
     : CommandBufferCmd(CommandBufferCmdType::kMemzeroCmd), dst_(dst) {}
 
 absl::StatusOr<const se::CommandBuffer::Command*> MemzeroCmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase dst =
-      execute_params.buffer_allocations->GetDeviceAddress(dst_);
+  se::DeviceAddressBase dst =
+      execute_params.buffer_allocations->GetDeviceAddress(dst_.slice);
 
   VLOG(5) << "MemzeroCmd:";
   VLOG(5) << "  Dst: " << dst_ << " (" << dst.opaque() << ")";
 
-  if (dst_.size() == 0) {
+  if (dst_.slice.size() == 0) {
     VLOG(5) << "Skip recording MemzeroCmd command of 0 bytes";
     return nullptr;
   }
@@ -1360,17 +1399,17 @@ absl::StatusOr<const se::CommandBuffer::Command*> MemzeroCmd::Record(
       std::move(record_action),
       [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
         return command_buffer->CreateMemset(&dst, uint8_t{0},
-                                            /*num_elements=*/dst_.size(),
+                                            /*num_elements=*/dst_.slice.size(),
                                             dependencies);
       },
       [&](const se::CommandBuffer::Command* command) {
         return command_buffer->UpdateMemset(command, &dst, uint8_t{0},
-                                            /*num_elements=*/dst_.size());
+                                            /*num_elements=*/dst_.slice.size());
       });
 }
 
 CommandBufferCmd::BufferUseVector MemzeroCmd::buffers() const {
-  return {BufferUse::Write(dst_)};
+  return {BufferUse::Write(dst_.slice, dst_.shape)};
 }
 
 //===----------------------------------------------------------------------===//
@@ -1386,7 +1425,7 @@ absl::StatusOr<const se::CommandBuffer::Command*> Memset32Cmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase dst =
+  se::DeviceAddressBase dst =
       execute_params.buffer_allocations->GetDeviceAddress(dst_);
 
   VLOG(5) << "Memset32Cmd: bit_pattern=" << bit_pattern_;
@@ -1466,11 +1505,11 @@ absl::StatusOr<const se::CommandBuffer::Command*> ChildCmd::Record(
 // CaseCmd
 //===----------------------------------------------------------------------===//
 
-CaseCmd::CaseCmd(BufferAllocation::Slice index, bool index_is_bool,
+CaseCmd::CaseCmd(ShapedSlice index,
                  std::vector<CommandBufferCmdExecutor> branches)
     : CommandBufferCmd(CommandBufferCmdType::kCaseCmd),
       index_(index),
-      index_is_bool_(index_is_bool),
+      index_is_bool_(index.shape.element_type() == PRED),
       branches_(std::move(branches)) {}
 
 absl::Status CaseCmd::Initialize(const Thunk::InitializeParams& params,
@@ -1485,8 +1524,8 @@ absl::StatusOr<const se::CommandBuffer::Command*> CaseCmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase index =
-      execute_params.buffer_allocations->GetDeviceAddress(index_);
+  se::DeviceAddressBase index =
+      execute_params.buffer_allocations->GetDeviceAddress(index_.slice);
 
   VLOG(5) << "CaseCmd:";
   VLOG(5) << "  index: " << index_ << " (" << index.opaque() << ")";
@@ -1496,23 +1535,23 @@ absl::StatusOr<const se::CommandBuffer::Command*> CaseCmd::Record(
       [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
         if (index_is_bool_) {
           return command_buffer->CreateCase(
-              se::DeviceMemory<bool>(index),
+              se::DeviceAddress<bool>(index),
               CreateCommands(branches_, &execute_params, &record_params),
               dependencies);
         }
         return command_buffer->CreateCase(
-            se::DeviceMemory<int32_t>(index),
+            se::DeviceAddress<int32_t>(index),
             CreateCommands(branches_, &execute_params, &record_params),
             dependencies);
       },
       [&](const se::CommandBuffer::Command* command) {
         if (index_is_bool_) {
           return command_buffer->UpdateCase(
-              command, se::DeviceMemory<bool>(index),
+              command, se::DeviceAddress<bool>(index),
               UpdateCommands(branches_, &execute_params, &record_params));
         }
         return command_buffer->UpdateCase(
-            command, se::DeviceMemory<int32_t>(index),
+            command, se::DeviceAddress<int32_t>(index),
             UpdateCommands(branches_, &execute_params, &record_params));
       });
 }
@@ -1529,7 +1568,7 @@ bool CaseCmd::force_update() {
 
 CommandBufferCmd::BufferUseVector CaseCmd::buffers() const {
   absl::flat_hash_set<BufferUse> buffers;
-  buffers.emplace(BufferUse::Read(index_));
+  buffers.emplace(BufferUse::Read(index_.slice, index_.shape));
   for (auto& branch : branches_) {
     buffers.insert(branch.buffers().begin(), branch.buffers().end());
   }
@@ -1574,7 +1613,7 @@ absl::StatusOr<const se::CommandBuffer::Command*> WhileCmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase pred =
+  se::DeviceAddressBase pred =
       execute_params.buffer_allocations->GetDeviceAddress(pred_);
 
   VLOG(5) << "WhileCmd: cond_commands=" << cond_commands_.size()
@@ -1638,14 +1677,14 @@ absl::StatusOr<const se::CommandBuffer::Command*> WhileCmd::Record(
       std::move(record_action),
       [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
         return command_buffer->CreateWhile(
-            se::DeviceMemory<bool>(pred),
+            se::DeviceAddress<bool>(pred),
             CreateCommands(&cond_commands_, &execute_params, &record_params),
             CreateCommands(&body_commands_, &execute_params, &record_params),
             dependencies);
       },
       [&](const se::CommandBuffer::Command* command) {
         return command_buffer->UpdateWhile(
-            command, se::DeviceMemory<bool>(pred),
+            command, se::DeviceAddress<bool>(pred),
             UpdateCommands(&cond_commands_, &execute_params, &record_params),
             UpdateCommands(&body_commands_, &execute_params, &record_params));
       });
@@ -1662,7 +1701,7 @@ bool WhileCmd::force_update() {
 
 CommandBufferCmd::BufferUseVector WhileCmd::buffers() const {
   absl::flat_hash_set<BufferUse> buffers;
-  buffers.emplace(BufferUse::Write(pred_));
+  buffers.emplace(BufferUse::Read(pred_, ShapeUtil::MakeShape(PRED, {})));
   buffers.insert(cond_commands_.buffers().begin(),
                  cond_commands_.buffers().end());
   buffers.insert(body_commands_.buffers().begin(),
@@ -1699,14 +1738,14 @@ absl::StatusOr<const se::CommandBuffer::Command*> GemmCmd::Record(
     const Thunk::ExecuteParams& execute_params,
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase lhs =
+  se::DeviceAddressBase lhs =
       execute_params.buffer_allocations->GetDeviceAddress(lhs_buffer_);
-  se::DeviceMemoryBase rhs =
+  se::DeviceAddressBase rhs =
       execute_params.buffer_allocations->GetDeviceAddress(rhs_buffer_);
-  se::DeviceMemoryBase out =
+  se::DeviceAddressBase out =
       execute_params.buffer_allocations->GetDeviceAddress(output_buffer_);
 
-  se::DeviceMemoryBase workspace(/*opaque=*/nullptr, /*size=*/0);
+  se::DeviceAddressBase workspace(/*opaque=*/nullptr, /*size=*/0);
   if (workspace_.has_value()) {
     workspace =
         execute_params.buffer_allocations->GetDeviceAddress(workspace_.value());
@@ -1836,10 +1875,10 @@ absl::StatusOr<const se::CommandBuffer::Command*> CuDnnCmd::Record(
     const RecordParams& record_params, RecordAction record_action,
     se::CommandBuffer* command_buffer) {
   CHECK(graph_ != nullptr);
-  std::vector<se::DeviceMemoryBase> operands;
+  std::vector<se::DeviceAddressBase> operands;
   operands.reserve(args_.size());
   for (const BufferAllocation::Slice& arg : args_) {
-    se::DeviceMemoryBase buf =
+    se::DeviceAddressBase buf =
         execute_params.buffer_allocations->GetDeviceAddress(arg);
     VLOG(5) << "  Arg: " << arg << ": " << buf.opaque();
     operands.push_back(buf);
@@ -1853,19 +1892,19 @@ absl::StatusOr<const se::CommandBuffer::Command*> CuDnnCmd::Record(
         [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
           return command_buffer->CreateDnnGraphCommand(
               *graph_->get(), *execute_params.stream,
-              absl::Span<se::DeviceMemoryBase>(operands), dependencies);
+              absl::Span<se::DeviceAddressBase>(operands), dependencies);
         },
         [&](const se::CommandBuffer::Command* command) {
           return command_buffer->UpdateDnnGraphCommand(
               command, *graph_->get(), *execute_params.stream,
-              absl::Span<se::DeviceMemoryBase>(operands));
+              absl::Span<se::DeviceAddressBase>(operands));
         });
   }
   return RecordTracedCommand(
       execute_params, record_params, std::move(record_action), command_buffer,
       [&](se::Stream* stream) {
         return graph_->get()->Execute(
-            *stream, absl::Span<se::DeviceMemoryBase>(operands),
+            *stream, absl::Span<se::DeviceAddressBase>(operands),
             execute_params.collective_params->local_device_id.value());
       });
 }
@@ -1979,34 +2018,34 @@ CustomCallCmd::RecordXlaFfiCall(const Thunk::ExecuteParams& execute_params,
 
   VLOG(5) << "CustomCallCmd: target_name=" << target_name_;
 
-  absl::InlinedVector<se::DeviceMemoryBase, 4> arguments;
+  absl::InlinedVector<se::DeviceAddressBase, 4> arguments;
   arguments.reserve(operands_.size());
 
   for (int i = 0; i < operands_.size(); ++i) {
     const NullableShapedSlice& slice = operands_[i];
     if (!slice.has_value()) {
-      arguments.push_back(se::DeviceMemoryBase{});
+      arguments.push_back(se::DeviceAddressBase{});
       continue;
     }
 
-    se::DeviceMemoryBase buffer =
+    se::DeviceAddressBase buffer =
         execute_params.buffer_allocations->GetDeviceAddress(slice->slice);
     VLOG(5) << "  Operand " << i << ": " << slice->slice << " ("
             << buffer.opaque() << ")";
     arguments.push_back(buffer);
   }
 
-  absl::InlinedVector<se::DeviceMemoryBase, 4> results;
+  absl::InlinedVector<se::DeviceAddressBase, 4> results;
   results.reserve(results_.size());
 
   for (int i = 0; i < results_.size(); ++i) {
     const NullableShapedSlice& slice = results_[i];
     if (!slice.has_value()) {
-      results.push_back(se::DeviceMemoryBase{});
+      results.push_back(se::DeviceAddressBase{});
       continue;
     }
 
-    se::DeviceMemoryBase buffer =
+    se::DeviceAddressBase buffer =
         execute_params.buffer_allocations->GetDeviceAddress(slice->slice);
     VLOG(5) << "  Result " << i << ": " << slice->slice << " ("
             << buffer.opaque() << ")";
@@ -2539,7 +2578,7 @@ DynamicSliceFusionCmd::DynamicSliceFusionCmd(
     std::vector<std::optional<std::vector<DynamicSliceThunk::Offset>>> offsets,
     std::vector<std::optional<Shape>> orig_shapes,
     std::vector<std::optional<Shape>> sliced_shapes,
-    std::vector<std::optional<uint64_t>> offset_byte_sizes,
+    std::vector<std::optional<PrimitiveType>> offset_primitive_types,
     std::optional<
         const DynamicSliceThunk::OffsetAsFunctionOfIndvarModulesMetadata*>
         offset_as_function_of_indvar_metadata)
@@ -2549,15 +2588,15 @@ DynamicSliceFusionCmd::DynamicSliceFusionCmd(
       offset_as_function_of_indvar_metadata_(
           std::move(offset_as_function_of_indvar_metadata)) {
   // Zip all arguments together to create a list of SliceDef.
-  for (auto [arg, offset, orig_shape, sliced_shape, offset_byte_size] :
+  for (auto [arg, offset, orig_shape, sliced_shape, offset_primitive_type] :
        llvm::zip_equal(arguments, offsets, orig_shapes, sliced_shapes,
-                       offset_byte_sizes)) {
+                       offset_primitive_types)) {
     slices_.push_back(DynamicSliceThunk::SliceDef{
         std::move(arg),
         std::move(offset),
         std::move(orig_shape),
         std::move(sliced_shape),
-        std::move(offset_byte_size),
+        std::move(offset_primitive_type),
     });
   }
 
@@ -2618,7 +2657,7 @@ absl::Status DynamicSliceFusionCmd::Prepare(
       TF_RET_CHECK(slice.embedded_thunk_argument.has_value());
       TF_RET_CHECK(slice.orig_shape.has_value());
       TF_RET_CHECK(slice.sliced_shape.has_value());
-      TF_RET_CHECK(slice.offset_byte_size.has_value());
+      TF_RET_CHECK(slice.offset_primitive_type.has_value());
       TF_RET_CHECK(slice.orig_shape->IsArray());
       TF_RET_CHECK(slice.sliced_shape->IsArray());
       TF_RET_CHECK(slice.offsets->size() ==
@@ -2654,8 +2693,8 @@ absl::StatusOr<const se::CommandBuffer::Command*> DynamicSliceFusionCmd::Record(
 
   const BufferAllocations& orig_allocations =
       *execute_params.buffer_allocations;
-  absl::InlinedVector<se::DeviceMemoryBase, 8> slice_buffers(
-      slices_.size(), se::DeviceMemoryBase());
+  absl::InlinedVector<se::DeviceAddressBase, 8> slice_buffers(
+      slices_.size(), se::DeviceAddressBase());
 
   // Get memory allocation for copying offsets from device.
   int64_t* offsets_alloc = [&] {
@@ -2677,7 +2716,7 @@ absl::StatusOr<const se::CommandBuffer::Command*> DynamicSliceFusionCmd::Record(
 
     // `argument_buffer` will contain the original offset for slice
     // `argument_slice` within `orig_allocations`
-    se::DeviceMemoryBase argument_buffer =
+    se::DeviceAddressBase argument_buffer =
         orig_allocations.GetDeviceAddress(*slice.embedded_thunk_argument);
 
     // If argument is not sliced, just use the original buffer.
@@ -2726,14 +2765,15 @@ absl::StatusOr<const se::CommandBuffer::Command*> DynamicSliceFusionCmd::Record(
         VLOG(2) << "  - arg " << argument_idx << "[" << offset_idx
                 << "]: transfer offset from device " << alloc_slice.ToString();
 
-        se::DeviceMemoryBase offset_src =
+        se::DeviceAddressBase offset_src =
             orig_allocations.GetDeviceAddress(alloc_slice);
         int64_t* offset_dst = &offset_value(argument_idx, offset_idx);
 
         // Copy the `offset_idx`-th component of the offset for the
         // `argument_idx`-th argument from device to host.
-        TF_RETURN_IF_ERROR(
-            stream.Memcpy(offset_dst, offset_src, *slice.offset_byte_size));
+        TF_RETURN_IF_ERROR(stream.Memcpy(
+            offset_dst, offset_src,
+            ShapeUtil::ByteSizeOfPrimitiveType(*slice.offset_primitive_type)));
         ++num_transfers;
       }
     }
@@ -2864,9 +2904,9 @@ DynamicSliceCopyFusionCmd::Record(const Thunk::ExecuteParams& execute_params,
                                   const RecordParams& record_params,
                                   RecordAction record_action,
                                   se::CommandBuffer* command_buffer) {
-  se::DeviceMemoryBase src_data =
+  se::DeviceAddressBase src_data =
       execute_params.buffer_allocations->GetDeviceAddress(source_buffer_);
-  se::DeviceMemoryBase dst_data =
+  se::DeviceAddressBase dst_data =
       execute_params.buffer_allocations->GetDeviceAddress(destination_buffer_);
 
   return Handle(

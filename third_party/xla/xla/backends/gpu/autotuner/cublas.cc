@@ -29,9 +29,9 @@ limitations under the License.
 #include "xla/service/gpu/cublas_cudnn.h"
 #include "xla/service/gpu/matmul_utils.h"
 #include "xla/stream_executor/blas.h"
+#include "xla/stream_executor/device_address.h"
+#include "xla/stream_executor/device_address_allocator.h"
 #include "xla/stream_executor/device_description.h"
-#include "xla/stream_executor/device_memory.h"
-#include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/gpu/gpu_blas_lt.h"
 #include "xla/stream_executor/stream_executor_memory_allocator.h"
 #include "xla/tsl/platform/errors.h"
@@ -57,7 +57,7 @@ CublasBackend::GetSupportedConfigs(const HloInstruction& instr) {
     return configs;
   }
 
-  std::unique_ptr<se::DeviceMemoryAllocator> allocator =
+  std::unique_ptr<se::DeviceAddressAllocator> allocator =
       std::make_unique<se::StreamExecutorMemoryAllocator>(stream_executor());
   TF_ASSIGN_OR_RETURN(
       se::Stream * stream,
@@ -80,7 +80,7 @@ CublasBackend::GetSupportedConfigs(const HloInstruction& instr) {
     TF_ASSIGN_OR_RETURN(se::blas::DataType type,
                         se::gpu::AsBlasDataType(layout.dtype));
     return se::gpu::MatrixDescriptor{
-        /*data=*/se::DeviceMemoryBase(), layout.leading_dim_stride,
+        /*data=*/se::DeviceAddressBase(), layout.leading_dim_stride,
         layout.batch_stride, type,
         // BLAS is column-major by default.
         (layout.order == se::gpu::MatrixLayout::Order::kColumnMajor
@@ -104,7 +104,8 @@ CublasBackend::GetSupportedConfigs(const HloInstruction& instr) {
       out_desc.compute_type,
       se::gpu::GetBlasComputationType(
           gemm_config.precision_algorithm, gemm_config.lhs_layout.dtype,
-          gemm_config.output_layout.dtype, gemm_config.compute_precision));
+          gemm_config.output_layout.dtype, gemm_config.compute_precision,
+          target_config().device_description.gpu_compute_capability()));
 
   se::blas::BlasSupport* blas = stream_executor()->AsBlas();
   if (blas == nullptr) {
@@ -151,10 +152,15 @@ absl::Status CublasBackend::ApplyConfig(HloInstruction& instr,
     return absl::InvalidArgumentError(
         "Failed to unpack CublasBackendConfig from Any.");
   }
+  if (ShouldUseCublasLt(instr) && gemm_key.algorithm() == -1) {
+    gemm_key.set_algorithm(0);
+  }
   TF_ASSIGN_OR_RETURN(GpuBackendConfig gpu_config,
                       instr.backend_config<GpuBackendConfig>());
   GemmBackendConfig& backend_config = *gpu_config.mutable_gemm_backend_config();
   backend_config.set_selected_algorithm(gemm_key.algorithm());
+  backend_config.set_autotune_workspace_size(
+      gemm_key.autotune_workspace_size());
   TF_RETURN_IF_ERROR(instr.set_backend_config(std::move(gpu_config)));
   return absl::OkStatus();
 }

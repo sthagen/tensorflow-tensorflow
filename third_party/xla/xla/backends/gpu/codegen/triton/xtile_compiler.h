@@ -17,16 +17,18 @@ limitations under the License.
 #define XLA_BACKENDS_GPU_CODEGEN_TRITON_XTILE_COMPILER_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/span.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -34,8 +36,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "xla/autotuning.pb.h"
 #include "xla/codegen/tiling/symbolic_tile_analysis.h"
-#include "xla/codegen/xtile/ir/xtile_ops.h"
-#include "xla/hlo/analysis/symbolic_expr.h"
+#include "xla/codegen/tiling/tiling_specification.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_module.h"
@@ -47,9 +48,6 @@ limitations under the License.
 
 namespace mlir {
 namespace triton {
-namespace nvidia_gpu {
-struct ClusterInfo;
-}
 }  // namespace triton
 }  // namespace mlir
 
@@ -58,7 +56,6 @@ namespace gpu {
 
 struct TritonWrapperResult {
   int64_t shmem_bytes = 0;
-  std::optional<se::ClusterDim> cluster_dim;
   se::gpu::TmaMetadata tma_metadata;
   se::ThreadDim thread_dims;
 
@@ -66,6 +63,7 @@ struct TritonWrapperResult {
   // Triton. We need to propagate them because we later create the kernel and
   // splice the impl_fn into it.
   std::vector<llvm::Metadata*> nvvm_annotations;
+  std::unique_ptr<llvm::Module> llvm_module;
 };
 
 // Load the MLIR dialects required for Triton IR generation.
@@ -78,7 +76,8 @@ absl::StatusOr<TritonWrapperResult> TritonWrapper(
     const se::GpuComputeCapability& cc,
     const se::DeviceDescription& device_info,
     const BlockLevelParameters& block_level_parameters,
-    llvm::Module* llvm_module, mlir::MLIRContext& mlir_context);
+    const llvm::Triple& target_triple, const std::string& data_layout,
+    llvm::LLVMContext& llvm_context, mlir::MLIRContext& mlir_context);
 
 // Creates the initial Triton module for the given fusion. Visible for testing,
 // use TritonWrapper instead.
@@ -96,7 +95,8 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
     absl::string_view kernel_name, const HloModule& hlo_module,
     const se::DeviceDescription& device_info,
     const BlockLevelParameters& block_level_parameters,
-    mlir::ModuleOp triton_module, llvm::Module* llvm_module,
+    mlir::ModuleOp triton_module, const llvm::Triple& target_triple,
+    const std::string& data_layout, llvm::LLVMContext& llvm_context,
     mlir::MLIRContext& mlir_context, bool is_xla_fusion,
     bool emit_kernel = true);
 

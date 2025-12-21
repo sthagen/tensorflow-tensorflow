@@ -31,6 +31,7 @@ cc_library(
         "hlo_module_metadata.cc",
         "hlo_opcode.cc",
         "hlo_original_value.cc",
+        "hlo_original_value_util.cc",
         "hlo_schedule.cc",
         "hlo_sharding_metadata.cc",
         "replica_group.cc",
@@ -51,6 +52,7 @@ cc_library(
         "hlo_op_metadata.h",
         "hlo_opcode.h",
         "hlo_original_value.h",
+        "hlo_original_value_util.h",
         "hlo_print_options.h",
         "hlo_schedule.h",
         "hlo_sharding.h",
@@ -102,6 +104,7 @@ cc_library(
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:status",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:config",
@@ -202,14 +205,14 @@ cc_library(
 
 cc_library(
     name = "named_sharding",
+    srcs = ["named_sharding.cc"],
     hdrs = ["named_sharding.h"],
     deps = [
         ":mesh_and_axis",
         ":tile_assignment",
-        "//xla:shape_util",
-        "//xla:util",
         "//xla:xla_data_proto_cc",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
     ],
 )

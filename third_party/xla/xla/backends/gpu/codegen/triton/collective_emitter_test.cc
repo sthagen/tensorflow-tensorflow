@@ -51,6 +51,7 @@ limitations under the License.
 #include "xla/stream_executor/device_description.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/util/proto/proto_matchers.h"
+#include "xla/xla_data.pb.h"
 
 namespace xla::gpu {
 namespace {
@@ -76,10 +77,13 @@ struct ModuleWithEmitter : public ModuleWithFusion {
   std::optional<HloFusionAnalysis> analysis;
   std::unique_ptr<TritonFusion> emitter;
   llvm::LLVMContext llvm_context;
-  llvm::Module llvm_module{"test_module", llvm_context};
+  llvm::Triple target_triple;
+  std::string data_layout;
 
   explicit ModuleWithEmitter(std::unique_ptr<HloModule> module_arg)
-      : ModuleWithFusion{std::move(module_arg)} {}
+      : ModuleWithFusion{std::move(module_arg)},
+        target_triple(""),
+        data_layout("") {}
 };
 
 class CollectiveBlockLevelConfigTest : public HloHardwareIndependentTestBase {
@@ -276,7 +280,8 @@ TEST_P(CollectiveEmitterParameterizedTest,
       TritonWrapperResult triton_kernel,
       triton_fusion->GenerateTritonKernelAndWrapper(
           *result->FusionInstr(), "test-all-reduce-start", device_info_,
-          &result->llvm_module, &result->mlir_context));
+          result->target_triple, result->data_layout, &result->llvm_context,
+          &result->mlir_context));
 }
 
 INSTANTIATE_TEST_SUITE_P(

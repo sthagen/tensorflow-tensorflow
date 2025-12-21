@@ -51,6 +51,7 @@ limitations under the License.
 #include "xla/service/hlo_value.h"
 #include "xla/service/logical_buffer.h"
 #include "xla/service/memory_space_assignment/memory_space_assignment.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
 
 namespace xla {
@@ -493,6 +494,9 @@ class BufferAssignment {
   // the slice cannot be determined at compile time then an error is returned.
   absl::StatusOr<BufferAllocation::Slice> GetUniqueSlice(
       const HloInstruction* instruction, const ShapeIndex& index) const;
+  absl::StatusOr<Shape> GetShapeForUniqueSlice(
+      const HloInstruction* instruction, const ShapeIndex& index) const;
+
   // Like GetUniqueSlice but fixes the index to the top-level of the shape
   // (index = {}).
   absl::StatusOr<BufferAllocation::Slice> GetUniqueTopLevelSlice(
@@ -878,6 +882,11 @@ class BufferAssigner {
 
 // Computes the peak memory usage through the proto's heap simulator traces.
 absl::StatusOr<int64_t> ComputePeakMemory(const BufferAssignmentProto& proto);
+
+// Computes the total memory allocated by the buffer assignment for a given
+// color.
+int64_t ComputeTotalAllocationBytes(const BufferAssignmentProto& proto,
+                                    int64_t memory_color);
 
 }  // namespace xla
 

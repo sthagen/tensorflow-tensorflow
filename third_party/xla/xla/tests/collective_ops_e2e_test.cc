@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -77,6 +78,10 @@ bool IsAsync(const HloInstruction* inst) {
 
 class CollectiveOpsTestE2E : public CollectiveOpsE2ETestBase {
  public:
+  explicit CollectiveOpsTestE2E(size_t memory_size = 32 * kMB,
+                                size_t collectives_memory_size = 0)
+      : CollectiveOpsE2ETestBase(memory_size, collectives_memory_size) {}
+
   bool HasFp8Support() {
     if (Capability().IsCuda()) {
       return Capability().cuda_compute_capability()->IsAtLeast(8, 9);
@@ -119,7 +124,9 @@ class AsyncCollectiveOps : public CollectiveOpsWithFlagsBase,
  public:
   AsyncCollectiveOps()
       : CollectiveOpsWithFlagsBase(/*enable_async=*/GetParam(),
-                                   /*enable_p2p_memcpy=*/false) {}
+                                   /*enable_p2p_memcpy=*/false,
+                                   /*memory_size=*/8 * kGB,
+                                   /*collectives_memory_size=*/0) {}
 };
 
 class MemcpyCollectiveOps : public CollectiveOpsWithFlagsBase,
@@ -127,7 +134,9 @@ class MemcpyCollectiveOps : public CollectiveOpsWithFlagsBase,
  public:
   MemcpyCollectiveOps()
       : CollectiveOpsWithFlagsBase(/*enable_async=*/true,
-                                   /*enable_p2p_memcpy=*/GetParam()) {}
+                                   /*enable_p2p_memcpy=*/GetParam(),
+                                   /*memory_size=*/32 * kMB,
+                                   /*collectives_memory_size=*/0) {}
 };
 
 class AsyncMemcpyCollectiveOps
@@ -135,8 +144,11 @@ class AsyncMemcpyCollectiveOps
       public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   AsyncMemcpyCollectiveOps()
-      : CollectiveOpsWithFlagsBase(std::get<0>(GetParam()),
-                                   std::get<1>(GetParam())) {}
+      : CollectiveOpsWithFlagsBase(
+            /*enable_async=*/std::get<0>(GetParam()),
+            /*enable_p2p_memcpy=*/std::get<1>(GetParam()),
+            /*memory_size=*/32 * kMB,
+            /*collectives_memory_size=*/0) {}
 };
 
 std::string GetAsyncTestName(bool is_async) {
@@ -1264,6 +1276,10 @@ TEST_F(CollectiveOpsTestE2E, HostMemoryOffloadingWithDonation) {
 // E2E tests comparing the results of windowed einsum and non-windowed cases.
 class CollectiveOpsTestE2EWindowedNonWindowed : public CollectiveOpsTestE2E {
  public:
+  CollectiveOpsTestE2EWindowedNonWindowed()
+      : CollectiveOpsTestE2E(/*memory_size=*/4 * kGB,
+                             /*collectives_memory_size=*/0) {}
+
   void CollectiveOpsCompareWindowedNonWindowed(
       absl::string_view hlo_text, bool disable_dot_merger = false,
       bool enable_a2a_rewrite = false) {
@@ -2375,8 +2391,18 @@ class AllReduceTest
   };
 
   AllReduceTest()
-      : CollectiveOpsWithFlagsBase(std::get<0>(GetParam()),
-                                   /*enable_p2p_memcpy=*/false) {}
+      : CollectiveOpsWithFlagsBase(/*enable_async=*/std::get<0>(GetParam()),
+                                   /*enable_p2p_memcpy=*/false,
+                                   /*memory_size=*/32 * kMB,
+                                   /*collectives_memory_size=*/0) {}
+
+  void SetUp() override {
+    CollectiveOpsE2ETestBase::SetUp();
+    if (!IsAmpereAndHigher()) {
+      GTEST_SKIP() << "Test requires Ampere or newer architecture since it's "
+                      "using triton.";
+    }
+  }
 
  protected:
   DebugOptions GetDebugOptionsForTest() const override {
@@ -2863,5 +2889,96 @@ INSTANTIATE_TEST_SUITE_P(
       return absl::StrCat(GetAsyncTestName(std::get<0>(info.param)), "_",
                           std::get<1>(info.param) ? "one_shot" : "nccl");
     });
+
+TEST_F(CollectiveOpsTestE2E, MultipleModuleDifferentDeviceGroupsShouldRun) {
+  const absl::string_view kModuleStr_1 = R"(
+  HloModule test
+
+  apply_op {
+    x = f32[] parameter(0)
+    y = f32[] parameter(1)
+    ROOT apply_op = f32[] add(x, y)
+  }
+
+  ENTRY test_computation {
+    param_0 = f32[8] parameter(0)
+    ROOT all-reduce = f32[8] all-reduce(param_0), to_apply=apply_op, replica_groups={{0,1}}
+  }
+  )";
+  const absl::string_view kModuleStr_2 = R"(
+  HloModule test
+
+  apply_op {
+    x = f32[] parameter(0)
+    y = f32[] parameter(1)
+    ROOT apply_op = f32[] add(x, y)
+  }
+
+  ENTRY test_computation {
+    param_0 = f32[8] parameter(0)
+    all-reduce.1 = f32[8] all-reduce(param_0), to_apply=apply_op, replica_groups={{0,1}, {2,3}}
+    all-reduce.2 = f32[8] all-reduce(all-reduce.1), to_apply=apply_op, replica_groups={{0,1}, {2,3}}
+    all-reduce.3 = f32[8] all-reduce(all-reduce.2), to_apply=apply_op, replica_groups={{0,1}, {2,3}}
+    ROOT all-reduce.4 = f32[8] all-reduce(all-reduce.3), to_apply=apply_op, replica_groups={{0,1,2,3}}
+  }
+  )";
+
+  const int64_t kNumReplicas_1 = 2;
+  const int64_t kNumReplicas_2 = 4;
+  if (hlo_runner_->device_count() < kNumReplicas_2) {
+    GTEST_SKIP() << "Test requires at least " << kNumReplicas_2 << " devices ("
+                 << hlo_runner_->device_count() << " available)";
+  }
+
+  HloModuleConfig config_1 =
+      GetModuleConfigForTest(/*replica_count=*/kNumReplicas_1);
+  HloModuleConfig config_2 =
+      GetModuleConfigForTest(/*replica_count=*/kNumReplicas_2);
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module_1,
+                          ParseAndReturnVerifiedModule(kModuleStr_1, config_1));
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module_2,
+                          ParseAndReturnVerifiedModule(kModuleStr_2, config_2));
+
+  int64_t num_elements_1 = ShapeUtil::ElementsIn(
+      module_1->entry_computation()->parameter_instructions()[0]->shape());
+
+  int64_t num_elements_2 = ShapeUtil::ElementsIn(
+      module_2->entry_computation()->parameter_instructions()[0]->shape());
+
+  Array<float> input1_1({num_elements_1}), input1_2({num_elements_1});
+  input1_1.FillRandom(1.0f, 10.0f, /*seed=*/0);
+  input1_2.FillRandom(1.0f, 10.0f, /*seed=*/1);
+
+  Literal input_literal1_1 = LiteralUtil::CreateFromArray(input1_1);
+  Literal input_literal1_2 = LiteralUtil::CreateFromArray(input1_2);
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      ExecutionResult execution_result_1,
+      ExecuteReplicated(std::move(module_1),
+                        std::vector<std::vector<Literal*>>{
+                            {&input_literal1_1}, {&input_literal1_2}}));
+
+  Array<float> input2_1({num_elements_2}), input2_2({num_elements_2}),
+      input2_3({num_elements_2}), input2_4({num_elements_2});
+  input2_1.FillRandom(1.0f, 10.0f, /*seed=*/0);
+  input2_2.FillRandom(1.0f, 10.0f, /*seed=*/1);
+  input2_3.FillRandom(1.0f, 10.0f, /*seed=*/2);
+  input2_4.FillRandom(1.0f, 10.0f, /*seed=*/3);
+
+  Literal input_literal2_1 = LiteralUtil::CreateFromArray(input2_1);
+  Literal input_literal2_2 = LiteralUtil::CreateFromArray(input2_2);
+  Literal input_literal2_3 = LiteralUtil::CreateFromArray(input2_3);
+  Literal input_literal2_4 = LiteralUtil::CreateFromArray(input2_4);
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      ExecutionResult execution_result_2,
+      ExecuteReplicated(std::move(module_2), std::vector<std::vector<Literal*>>{
+                                                 {&input_literal2_1},
+                                                 {&input_literal2_2},
+                                                 {&input_literal2_3},
+                                                 {&input_literal2_4}}));
+}
 }  // namespace
 }  // namespace xla

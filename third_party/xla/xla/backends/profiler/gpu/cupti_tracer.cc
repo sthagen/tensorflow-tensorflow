@@ -1068,6 +1068,22 @@ class CuptiDriverApiHookWithActivityApi : public CuptiDriverApiHook {
   return absl::StrCat(tsl::port::Hostname(), ": ", error_message);
 }
 
+const char* GetCuptiErrorString(CuptiInterface* cupti_interface,
+                                CUptiResult err) {
+  const char* err_str = "ERROR-WHEN-GETTING-NAME";
+  if (cupti_interface != nullptr) {
+    cupti_interface->GetResultString(err, &err_str);
+  }
+  return err_str;
+}
+
+bool& IsCuptiHardwareEventSystemEnabled() {
+  // This flag can not flip to true once per process. Once enabled, it will stay
+  // enabled until the process is terminated.
+  static bool is_enabled = false;
+  return is_enabled;
+}
+
 }  // namespace
 
 CuptiTracer::CuptiTracer(CuptiInterface* cupti_interface)
@@ -1437,6 +1453,32 @@ absl::Status CuptiTracer::EnableActivityTracing() {
                       "overhead may be big. CUPTI ERROR CODE:"
                    << err;
     }
+    if (option_->enable_activity_hardware_tracing) {
+      if (IsCuptiHardwareEventSystemEnabled()) {
+        LOG(INFO) << "CUPTI activity HW trace already enabled.";
+      } else {
+        auto err = cupti_interface_->ActivityEnableHWTrace(true);
+        if (err == CUPTI_ERROR_NOT_SUPPORTED) {
+          LOG(INFO)
+              << "CUPTI activity HW trace not enabled due to not supported on "
+                 "this platform!";
+        } else if (err != CUPTI_SUCCESS) {
+          LOG(WARNING)
+              << "Fail to enable CUPTI activity HW trace, CUPTI ERROR CODE:"
+              << err << " (" << GetCuptiErrorString(cupti_interface_, err)
+              << ")";
+        } else {
+          LOG(INFO) << "CUPTI activity HW trace successfully enabled.";
+          IsCuptiHardwareEventSystemEnabled() = true;
+        }
+      }
+    } else {
+      if (IsCuptiHardwareEventSystemEnabled()) {
+        LOG(INFO)
+            << "CUPTI activity HW trace already enabled, continue with it.";
+      }
+    }
+
     RETURN_IF_CUPTI_ERROR(ActivityRegisterCallbacks(
         RequestCuptiActivityBuffer, ProcessCuptiActivityBuffer));
     VLOG(1) << "Enabling activity tracing for "
