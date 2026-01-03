@@ -80,7 +80,6 @@
 #include "xla/python/ifrt_proxy/server/host_buffer.h"
 #include "xla/python/ifrt_proxy/server/host_callback.h"
 #include "xla/python/ifrt_proxy/server/ifrt_backend_user_context.h"
-#include "xla/python/ifrt_proxy/server/version.h"
 #include "xla/python/pjrt_ifrt/xla_compiler.h"
 #include "xla/status_macros.h"
 #include "xla/tsl/concurrency/future.h"
@@ -474,12 +473,12 @@ absl::StatusOr<std::unique_ptr<IfrtBackend>> IfrtBackend::Create(
   if (ifrt_client == nullptr) {
     return absl::InvalidArgumentError("ifrt_client cannot be a nullptr.");
   }
-  if (version.protocol_version() < kServerMinVersion ||
-      version.protocol_version() > kServerMaxVersion) {
+  if (version.protocol_version() < protocol_version::kServerMin ||
+      version.protocol_version() > protocol_version::kServerMax) {
     return absl::FailedPreconditionError(absl::StrCat(
         "Protocol version ", version.protocol_version(),
         " is unsupported by IFRT Proxy server; supported versions: [",
-        kServerMinVersion, ",", kServerMaxVersion, "]"));
+        protocol_version::kServerMin, ",", protocol_version::kServerMax, "]"));
   }
   const SerDesVersionNumber ifrt_serdes_version_number(
       SerDesVersion::current().version_number());
@@ -871,6 +870,10 @@ IfrtBackend::HandleMakeArrayFromHostBufferRequest(
   CHECK(request->has_make_array_from_host_buffer_request());
   auto* make_array_request =
       request->mutable_make_array_from_host_buffer_request();
+  const uint64_t host_buffer_handle = make_array_request->host_buffer_handle();
+  absl::Cleanup cleanup = [&] {
+    host_buffer_store_->Delete(host_buffer_handle).IgnoreError();
+  };
 
   TF_ASSIGN_OR_RETURN(
       auto sharding,
@@ -886,11 +889,6 @@ IfrtBackend::HandleMakeArrayFromHostBufferRequest(
                       Shape::FromProto(make_array_request->shape()));
   TF_ASSIGN_OR_RETURN(const auto dtype,
                       DType::FromProto(make_array_request->dtype()));
-
-  const uint64_t host_buffer_handle = make_array_request->host_buffer_handle();
-  absl::Cleanup cleanup = [&] {
-    host_buffer_store_->Delete(host_buffer_handle).IgnoreError();
-  };
   TF_ASSIGN_OR_RETURN(
       HostBufferStore::MemRegion host_buffer,
       host_buffer_store_->Lookup(host_buffer_handle,

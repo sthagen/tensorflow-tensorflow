@@ -26,7 +26,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "llvm/Support/Casting.h"
 #include "google/protobuf/text_format.h"
 #include "xla/layout_util.h"
 #include "xla/pjrt/pjrt_layout.h"
@@ -46,9 +45,9 @@
 #include "xla/python/ifrt_proxy/client/mock_client_session.h"
 #include "xla/python/ifrt_proxy/client/mock_host_buffer.h"
 #include "xla/python/ifrt_proxy/client/rpc_helper.h"
-#include "xla/python/ifrt_proxy/client/version.h"
 #include "xla/python/ifrt_proxy/common/ifrt_service.pb.h"
 #include "xla/python/ifrt_proxy/common/types.h"
+#include "xla/python/ifrt_proxy/common/versions.h"
 #include "xla/service/computation_placer.h"
 #include "xla/tsl/concurrency/future.h"
 #include "xla/tsl/concurrency/ref_count.h"
@@ -98,101 +97,6 @@ class ClientTest : public ::testing::TestWithParam</*protocol_version=*/int> {
     rpc_helper_->set_host_buffer_store(host_buffer_store_);
 
     InitResponse response;
-    if (rpc_helper_->protocol_version() <= 3) {
-      ASSERT_TRUE(tsl::protobuf::TextFormat::ParseFromString(
-          R"pb(
-            platform_name: "ifrt-service"
-            platform_version: "n/a"
-            platform_id: 42
-            process_index: 1
-            runtime_type: "ifrt-service"
-            all_devices {
-              id: 0
-              local_hardware_id: 1234
-              device_kind: "mock"
-              default_memory_id: 0
-              memory_ids: [ 0 ]
-              deprecated_attributes {
-                key: "name"
-                value { string_value: "device0" }
-              }
-            }
-            all_devices {
-              id: 1
-              local_hardware_id: 1234
-              device_kind: "mock"
-              default_memory_id: 1
-              memory_ids: [ 1 ]
-              deprecated_attributes {
-                key: "name"
-                value { string_value: "device1" }
-              }
-            }
-            addressable_device_ids: 1
-            memories {
-              id: 0
-              memory_space_kind: "mock"
-              kind_id: 0
-              device_ids: [ 0 ]
-            }
-            memories {
-              id: 1
-              memory_space_kind: "mock"
-              kind_id: 1
-              device_ids: [ 1 ]
-            }
-          )pb",
-          &response));
-    } else if (rpc_helper_->protocol_version() < 7) {
-      ASSERT_TRUE(tsl::protobuf::TextFormat::ParseFromString(
-          R"pb(
-            platform_name: "ifrt-service"
-            platform_version: "n/a"
-            platform_id: 42
-            process_index: 1
-            runtime_type: "ifrt-service"
-            all_devices {
-              id: 0
-              local_hardware_id: 1234
-              device_kind: "mock"
-              default_memory_id: 0
-              memory_ids: [ 0 ]
-              attributes {
-                attributes {
-                  key: "name"
-                  value { string_value: "device0" }
-                }
-              }
-            }
-            all_devices {
-              id: 1
-              local_hardware_id: 1234
-              device_kind: "mock"
-              default_memory_id: 1
-              memory_ids: [ 1 ]
-              attributes {
-                attributes {
-                  key: "name"
-                  value { string_value: "device1" }
-                }
-              }
-            }
-            addressable_device_ids: 1
-            memories {
-              id: 0
-              memory_space_kind: "mock"
-              kind_id: 0
-              device_ids: [ 0 ]
-            }
-            memories {
-              id: 1
-              memory_space_kind: "mock"
-              kind_id: 1
-              device_ids: [ 1 ]
-            }
-          )pb",
-          &response));
-    } else {
       ASSERT_TRUE(tsl::protobuf::TextFormat::ParseFromString(
           R"pb(
             platform_name: "ifrt-service"
@@ -242,7 +146,6 @@ class ClientTest : public ::testing::TestWithParam</*protocol_version=*/int> {
             }
           )pb",
           &response));
-    }
 
     AttributeMap::Map client_attributes(
         {{"test_key", AttributeMap::StringValue("test_value")}});
@@ -499,7 +402,8 @@ TEST_P(ClientTest, ReshardArraysSuccess) {
 
 INSTANTIATE_TEST_SUITE_P(
     ClientTestWithAllVersions, ClientTest,
-    testing::Range(kClientMinVersion, kClientMaxVersion + 1),
+    testing::Range(protocol_version::kClientMin,
+                   protocol_version::kClientMax + 1),
     [](const testing::TestParamInfo<ClientTest::ParamType>& info) {
       return absl::StrCat(info.param);
     });

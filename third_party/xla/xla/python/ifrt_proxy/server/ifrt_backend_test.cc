@@ -74,7 +74,6 @@
 #include "xla/python/ifrt_proxy/common/versions.h"
 #include "xla/python/ifrt_proxy/server/host_buffer.h"
 #include "xla/python/ifrt_proxy/server/host_callback.h"
-#include "xla/python/ifrt_proxy/server/version.h"
 #include "xla/python/pjrt_ifrt/xla_compiler.h"
 #include "xla/service/computation_placer.h"
 #include "xla/shape_util.h"
@@ -184,7 +183,8 @@ TEST_P(IfrtBackendTest, ProcessFailsWithNoRequestSet) {
 
 INSTANTIATE_TEST_SUITE_P(
     IfrtBackendTestWithAllVersions, IfrtBackendTest,
-    testing::Range(kServerMinVersion, kServerMaxVersion + 1),
+    testing::Range(protocol_version::kServerMin,
+                   protocol_version::kServerMax + 1),
     [](const testing::TestParamInfo<IfrtBackendTest::ParamType>& info) {
       return absl::StrCat(info.param);
     });
@@ -565,16 +565,11 @@ TEST_P(IfrtBackendHandlerTest, DisassembleIntoSingleDeviceArraysSucceeds) {
       disassemble_request
           ->mutable_disassemble_into_single_device_arrays_request();
   disassemble_into_single_device_arrays->set_array_handle(array_handle);
-  if (Version().protocol_version() >= 8) {
-    disassemble_into_single_device_arrays->set_single_device_shard_semantics(
-        proto::SingleDeviceShardSemantics::
-            SINGLE_DEVICE_SHARD_SEMANTICS_ALL_SHARDS);
-  }
-  if (Version().protocol_version() >=
-      protocol_version::kClientHandlesOptimization2) {
-    disassemble_into_single_device_arrays->add_result_handles(1);
-    disassemble_into_single_device_arrays->add_result_handles(2);
-  }
+  disassemble_into_single_device_arrays->set_single_device_shard_semantics(
+      proto::SingleDeviceShardSemantics::
+          SINGLE_DEVICE_SHARD_SEMANTICS_ALL_SHARDS);
+  disassemble_into_single_device_arrays->add_result_handles(1);
+  disassemble_into_single_device_arrays->add_result_handles(2);
   TF_ASSERT_OK_AND_ASSIGN(auto disassemble_response,
                           CallBackend(std::move(disassemble_request)));
 
@@ -689,10 +684,7 @@ TEST_P(IfrtBackendHandlerTest, AssembleArrayFromSingleDeviceArrays) {
       req->set_single_device_shard_semantics(
           proto::SINGLE_DEVICE_SHARD_SEMANTICS_ALL_SHARDS);
     }
-    if (Version().protocol_version() >=
-        protocol_version::kClientHandlesOptimization2) {
-      req->set_result_handle(1);
-    }
+    req->set_result_handle(1);
     if (Version().protocol_version() >=
         protocol_version::kAssembleArrayFromSingleDeviceArraysWithDType) {
       dtype.ToProto(*req->mutable_dtype(), ifrt_serdes_version());
@@ -935,10 +927,7 @@ TEST_P(IfrtBackendHandlerTest, CopyArrays) {
   copy_arrays_request->set_memory_kind(std::string(*memory_kind.memory_kind()));
   copy_arrays_request->set_copy_semantics(
       proto::ARRAY_COPY_SEMANTICS_ALWAYS_COPY);
-  if (Version().protocol_version() >=
-      protocol_version::kClientHandlesOptimization2) {
-    copy_arrays_request->add_result_handles(1);
-  }
+  copy_arrays_request->add_result_handles(1);
 
   TF_ASSERT_OK_AND_ASSIGN(auto response, CallBackend(std::move(ifrt_request)));
 
@@ -990,10 +979,7 @@ TEST_P(IfrtBackendHandlerTest, ReshardArrays) {
   }
   reshard_arrays_request->set_copy_semantics(
       proto::ARRAY_COPY_SEMANTICS_ALWAYS_COPY);
-  if (Version().protocol_version() >=
-      protocol_version::kClientHandlesOptimization2) {
-    reshard_arrays_request->add_result_handles(1);
-  }
+  reshard_arrays_request->add_result_handles(1);
 
   TF_ASSERT_OK_AND_ASSIGN(auto response, CallBackend(std::move(ifrt_request)));
 
@@ -1017,10 +1003,7 @@ TEST_P(IfrtBackendHandlerTest, FullyReplicatedShardSuccess) {
       ifrt_request->mutable_fully_replicated_shard_request();
   fully_replicated_shard_request->set_array_handle(
       fully_replicated_array_handle);
-  if (Version().protocol_version() >=
-      protocol_version::kClientHandlesOptimization2) {
-    fully_replicated_shard_request->set_result_handle(1234);
-  }
+  fully_replicated_shard_request->set_result_handle(1234);
   fully_replicated_shard_request->set_copy_semantics(
       proto::ARRAY_COPY_SEMANTICS_ALWAYS_COPY);
 
@@ -2054,7 +2037,8 @@ TEST_P(IfrtBackendHandlerTest, CompileSuccessWithMpmdAddressableDevices) {
 
 INSTANTIATE_TEST_SUITE_P(
     IfrtBackendHandlerTestWithAllVersions, IfrtBackendHandlerTest,
-    testing::Range(kServerMinVersion, kServerMaxVersion + 1),
+    testing::Range(protocol_version::kServerMin,
+                   protocol_version::kServerMax + 1),
     [](const testing::TestParamInfo<IfrtBackendHandlerTest::ParamType>& info) {
       return absl::StrCat(info.param);
     });
