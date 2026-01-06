@@ -406,19 +406,14 @@ Future<> TfrtGpuBuffer::ToLiteralHelper(
         }
       }
 
-      const bool use_staging =
-          should_unpack || transpose != nullptr ||
-          (client->should_stage_host_to_device_transfers() &&
-           !client->IsDmaMapped(literal->untyped_data(), byte_size));
-
       HostMemoryAllocator::OwnedPtr staging_buffer;
       void* buffer_ptr;
       if (on_device_shape.IsArray()) {
-        if (use_staging) {
+        buffer_ptr = literal->untyped_data();
+        if (should_unpack || transpose != nullptr ||
+            client->ShouldStageHostToDeviceTransfers(buffer_ptr, byte_size)) {
           staging_buffer = client->host_memory_allocator()->Allocate(byte_size);
           buffer_ptr = staging_buffer.get();
-        } else {
-          buffer_ptr = literal->untyped_data();
         }
       } else {
         CHECK_EQ(byte_size, 0);
@@ -589,8 +584,8 @@ Future<> TfrtGpuBuffer::CopyRawToHostFuture(Future<void*> dst_future,
     }
 
     HostMemoryAllocator::OwnedPtr staging_buffer;
-    const bool use_staging = client->should_stage_host_to_device_transfers() &&
-                             !client->IsDmaMapped(dst, transfer_size);
+    const bool use_staging =
+        client->ShouldStageHostToDeviceTransfers(dst, transfer_size);
 
     if (use_staging) {
       staging_buffer = client->host_memory_allocator()->Allocate(transfer_size);
