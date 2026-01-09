@@ -58,6 +58,29 @@ cc_library(
 #===-------------------------------------------------------------------------------------------===//
 
 cc_library(
+    name = "command_state",
+    srcs = ["command_state.cc"],
+    hdrs = ["command_state.h"],
+    deps = [
+        "//xla/tsl/lib/gtl:int_type",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/functional:function_ref",
+    ],
+)
+
+xla_cc_test(
+    name = "command_state_test",
+    srcs = ["command_state_test.cc"],
+    deps = [
+        ":command_state",
+        "//xla/tsl/platform:test",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "command_buffer_cmd",
     srcs = ["command_buffer_cmd.cc"],
     hdrs = ["command_buffer_cmd.h"],
@@ -70,6 +93,7 @@ cc_library(
         ":collective_execution",
         ":collective_permute_thunk",
         ":collective_thunk",
+        ":command_state",
         ":copy_thunk",
         ":custom_call_thunk",
         ":dynamic_slice_thunk",
@@ -122,13 +146,11 @@ cc_library(
         "//xla/stream_executor:tensor_map",
         "//xla/stream_executor:trace_command_buffer_factory",
         "//xla/stream_executor/gpu:tma_metadata",
-        "//xla/tsl/lib/gtl:int_type",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -153,6 +175,7 @@ xla_test(
     backends = ["gpu"],
     deps = [
         ":command_buffer_cmd",
+        ":command_state",
         ":copy_thunk",
         ":shaped_slice",
         ":thunk",
@@ -199,6 +222,7 @@ cc_library(
         ":collective_permute_thunk",
         ":collective_thunk",
         ":command_buffer_cmd",
+        ":command_state",
         ":conditional_thunk",
         ":copy_thunk",
         ":cudnn_thunk",
@@ -331,6 +355,7 @@ cc_library(
     hdrs = ["command_buffer_thunk.h"],
     deps = [
         ":command_buffer_cmd",
+        ":command_state",
         ":sequential_thunk",  # build_cleaner: keep
         ":thunk",
         "//xla/service:buffer_assignment",  # build_cleaner: keep
@@ -595,8 +620,10 @@ xla_cc_test(
 tf_proto_library(
     name = "convolution_filter_thunk_proto",
     srcs = ["convolution_filter_thunk.proto"],
-    protodeps = ["//xla/service:buffer_assignment_proto"],
-    deps = [":shaped_slice_proto"],
+    deps = [
+        ":shaped_slice_proto",
+        "//xla/service:buffer_assignment_proto",
+    ],
 )
 
 tf_proto_library(
@@ -868,6 +895,7 @@ cc_library(
     deps = [
         ":thunk",
         ":thunk_proto_cc",
+        "//xla:shape_util",
         "//xla/runtime:buffer_use",
         "//xla/service:buffer_assignment",
         "//xla/service/gpu:buffer_allocations",
@@ -927,6 +955,8 @@ xla_test(
     name = "gpublas_lt_matmul_thunk_test",
     srcs = ["gpublas_lt_matmul_thunk_test.cc"],
     backends = ["gpu"],
+    tags = ["pjrt_migration_candidate"],
+    use_legacy_runtime = True,
     deps = [
         ":gpublas_lt_matmul_thunk",
         ":thunk",
@@ -1589,13 +1619,14 @@ cc_library(
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
         "//xla/hlo/ir:hlo",
+        "//xla/service:buffer_assignment",
         "//xla/service/gpu/transforms/collectives:collective_ops_utils",
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:stream",
-        "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:casts",
     ],
@@ -1605,6 +1636,8 @@ xla_test(
     name = "collective_broadcast_thunk_test",
     srcs = ["collective_broadcast_thunk_test.cc"],
     backends = ["gpu"],
+    tags = ["pjrt_migration_candidate"],
+    use_legacy_runtime = True,
     deps = [
         ":collective_broadcast_thunk",
         ":collective_thunk",
@@ -1630,6 +1663,8 @@ xla_test(
         "//xla/tests:hlo_test_base",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
+        "//xla/tsl/util/proto:parse_text_proto",
+        "//xla/tsl/util/proto:proto_matchers",
         "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:casts",
     ],
@@ -1687,6 +1722,8 @@ xla_test(
     name = "collective_permute_thunk_test",
     srcs = ["collective_permute_thunk_test.cc"],
     backends = ["gpu"],
+    tags = ["pjrt_migration_candidate"],
+    use_legacy_runtime = True,
     deps = [
         ":collective_permute_thunk",
         ":collective_thunk",
@@ -2066,20 +2103,18 @@ cc_library(
     deps = [
         ":collective_thunk",
         ":thunk",
-        ":thunk_id",
         "//xla:future",
-        "//xla:util",
         "//xla/backends/gpu/collectives:gpu_communicator",
         "//xla/core/collectives:communicator",
-        "//xla/hlo/ir:hlo",
+        "//xla/service:buffer_assignment",
         "//xla/stream_executor:event",
         "//xla/stream_executor:stream",
-        "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:casts",
     ],
 )
@@ -2373,8 +2408,7 @@ xla_cc_test(
 tf_proto_library(
     name = "shaped_slice_proto",
     srcs = ["shaped_slice.proto"],
-    protodeps = [
-        # keep sorted
+    deps = [
         "//xla:xla_data_proto",
         "//xla/service:buffer_assignment_proto",
     ],
@@ -2730,6 +2764,7 @@ xla_test(
     name = "make_batch_pointers_test",
     srcs = ["make_batch_pointers_test.cc"],
     backends = ["gpu"],
+    use_legacy_runtime = True,
     deps = [
         ":make_batch_pointers",
         "//xla/service:platform_util",
@@ -2783,6 +2818,7 @@ xla_test(
     },
     backends = ["gpu"],
     disabled_backends = [],
+    use_legacy_runtime = True,
     deps = [
         ":all_reduce",
         "//xla:array",
@@ -2889,7 +2925,7 @@ cc_library(
         "//xla:types",
         "//xla:xla_data_proto_cc",
         "//xla/service/gpu/kernels:custom_kernel",
-        "//xla/stream_executor:kernel_argument_packing_spec",
+        "//xla/stream_executor:kernel_args_packing_spec",
         "//xla/stream_executor:kernel_spec",
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:platform",
@@ -2937,8 +2973,7 @@ tf_proto_library(
     srcs = [
         "thunk.proto",
     ],
-    protodeps = [
-        # keep sorted
+    deps = [
         ":convolution_filter_thunk_proto",
         ":copy_thunk_proto",
         ":dynamic_slice_thunk_proto",
@@ -2949,7 +2984,6 @@ tf_proto_library(
         "//xla/ffi:execution_state_proto",
         "//xla/service:buffer_assignment_proto",
         "//xla/service:hlo_proto",
-        "//xla/service/gpu:backend_configs",
         "//xla/service/gpu:gpu_conv_runner_proto",
         "//xla/service/gpu:gpu_norm_runner_proto",
         "//xla/service/gpu:launch_dimensions_proto",
@@ -2970,8 +3004,7 @@ tf_proto_library(
     srcs = [
         "dynamic_slice_thunk.proto",
     ],
-    protodeps = [
-        # keep sorted
+    deps = [
         "//xla:xla_data_proto",
         "//xla:xla_proto",
         "//xla/service:buffer_assignment_proto",
@@ -2986,6 +3019,8 @@ cc_library(
         ":all_gather_thunk",
         ":all_reduce_thunk",
         ":all_to_all_thunk",
+        ":collective_broadcast_thunk",
+        ":collective_group_thunk",
         ":collective_permute_thunk",
         ":collective_thunk",
         ":conditional_thunk",
@@ -3489,7 +3524,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_googlesource_code_re2//:re2",
-        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -3565,6 +3599,8 @@ xla_test(
     name = "runtime_intrinsics_test",
     srcs = ["runtime_intrinsics_test.cc"],
     backends = ["gpu"],
+    tags = ["pjrt_migration_candidate"],
+    use_legacy_runtime = True,
     deps = [
         ":runtime_intrinsics",
         "//xla:literal",

@@ -41,6 +41,7 @@ limitations under the License.
 #include "xla/pjrt/utils.h"
 #include "xla/service/compiler.h"
 #include "xla/service/dump.h"
+#include "xla/service/gpu_topology.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/service/hlo_module_util.h"
@@ -90,7 +91,7 @@ absl::StatusOr<std::unique_ptr<xla::Compiler>>
 GetCompilerForDefaultGpuPlatform() {
   TF_ASSIGN_OR_RETURN(stream_executor::Platform * platform,
                       PlatformUtil::GetPlatform("gpu"));
-  return Compiler::GetForPlatform(platform);
+  return Compiler::GetForPlatform(platform->id());
 }
 
 absl::StatusOr<std::unique_ptr<xla::Compiler>> GetCompilerForPlatform(
@@ -102,7 +103,7 @@ absl::StatusOr<std::unique_ptr<xla::Compiler>> GetCompilerForPlatform(
   TF_ASSIGN_OR_RETURN(
       stream_executor::Platform * platform,
       stream_executor::PlatformManager::PlatformWithId(platform_id.value()));
-  return Compiler::GetForPlatform(platform);
+  return Compiler::GetForPlatform(platform->id());
 }
 
 }  // namespace
@@ -179,7 +180,9 @@ StreamExecutorGpuCompiler::Compile(CompileOptions options,
   DumpHloModuleIfEnabled(*hlo_module, kBeforeOptimizationsDumpName);
 
   AotCompilationOptions aot_options(gpu_compiler->PlatformId());
-  aot_options.set_gpu_target_config(*options.gpu_target_config);
+  GpuTopology xla_gpu_topology = GetSingleDeviceGpuTopology(
+      /*platform_version=*/"", *options.gpu_target_config);
+  aot_options.set_gpu_topology(xla_gpu_topology);
   aot_options.set_run_backend_only(
       options.executable_build_options.run_backend_only());
 

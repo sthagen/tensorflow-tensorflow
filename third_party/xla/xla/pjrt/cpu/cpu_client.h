@@ -474,11 +474,15 @@ class PjRtCpuExecutable final : public PjRtLoadedExecutable {
 
   std::shared_ptr<Executable> cpu_executable_;
 
+  std::vector<Shape> parameter_device_shapes_;
+
   // Caching `result_buffer_indices_` to avoid lookup
   // HLO dataflow analysis data structures in program execution critical path.
 
   // Buffer allocation indices corresponding to each result buffer leaf buffer.
   absl::InlinedVector<BufferAllocation::Index, 4> result_buffer_indices_;
+  // Reverse mapping of result_buffer_indices_.
+  std::vector<int64_t> output_indices_;
 
   // Size on device of each leaf buffer of the compiled program, cached here
   // for performance reasons.

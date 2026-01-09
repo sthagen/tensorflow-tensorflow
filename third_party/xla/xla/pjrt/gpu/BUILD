@@ -79,6 +79,7 @@ cc_library(
         "//xla/core/collectives:rank_id",
         "//xla/hlo/builder:xla_computation",
         "//xla/pjrt:abstract_tracked_device_buffer",
+        "//xla/pjrt:async_work_runner",
         "//xla/pjrt:common_pjrt_client",
         "//xla/pjrt:device_event",
         "//xla/pjrt:event_pool",
@@ -202,6 +203,7 @@ xla_test(
     },
     backends = ["gpu"],
     tags = ["nofixdeps"],
+    use_legacy_runtime = True,
     deps = [
         ":se_gpu_pjrt_client",
         ":se_gpu_topology_description",
@@ -450,6 +452,7 @@ cc_library(
         "//xla/pjrt:utils",
         "//xla/service:compiler",
         "//xla/service:dump",
+        "//xla/service:gpu_topology",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_module_util",
         "//xla/service:hlo_proto_cc",

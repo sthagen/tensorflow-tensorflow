@@ -142,6 +142,7 @@ cc_library(
         ":acceleration_test_util",
         ":kernel_util",
         ":test_delegate_providers_lib",
+        "//tensorflow/compiler/mlir/lite:allocation",
         "//tensorflow/lite:framework_stable",
         "//tensorflow/lite:schema_fbs_version",
         "//tensorflow/lite:simple_planner",
@@ -2199,6 +2200,7 @@ cc_test(
         "//tensorflow/lite/core:framework_stable",
         "//tensorflow/lite/kernels/internal:tensor",
         "//tensorflow/lite/schema:schema_fbs",
+        "//tensorflow/lite/types:half",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -2574,6 +2576,7 @@ cc_test(
         ":test_main",
         ":test_util",
         "//tensorflow/lite/schema:schema_fbs",
+        "//tensorflow/lite/types:half",
         "@com_google_googletest//:gtest",
         "@flatbuffers",
     ],
