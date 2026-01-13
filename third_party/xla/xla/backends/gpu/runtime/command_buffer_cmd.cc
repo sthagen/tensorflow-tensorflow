@@ -19,6 +19,7 @@ limitations under the License.
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -58,6 +59,8 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/dynamic_slice_thunk.h"
 #include "xla/backends/gpu/runtime/gpublas_lt_matmul_thunk.h"
 #include "xla/backends/gpu/runtime/p2p_thunk_common.h"
+#include "xla/backends/gpu/runtime/recv_thunk.h"
+#include "xla/backends/gpu/runtime/send_thunk.h"
 #include "xla/backends/gpu/runtime/shaped_slice.h"
 #include "xla/backends/gpu/runtime/thunk.h"
 #include "xla/backends/gpu/runtime/while_thunk.h"
@@ -295,26 +298,25 @@ static std::vector<CommandOperation> CreateCommandOperations(
     }
 
     auto is_async_start = [](const CommandOperation& op) -> bool {
-      auto* collective_cmd = dynamic_cast<const CollectiveCmd*>(op.cmd());
-      return (collective_cmd && collective_cmd->IsAsync());
+      auto* async_start = dynamic_cast<const AsyncStartCommand*>(op.cmd());
+      return (async_start && async_start->IsAsync());
     };
 
     auto is_async_done = [](const CommandOperation& op) -> bool {
-      auto* async_done_cmd = dynamic_cast<const AsyncDoneCmd*>(op.cmd());
-      return (async_done_cmd && async_done_cmd->IsAsync());
+      auto* async_done = dynamic_cast<const AsyncDoneCommand*>(op.cmd());
+      return (async_done && async_done->IsAsync());
     };
 
     auto find_async_start_cmd_id = [&](int64_t async_done_cmd_id) -> int64_t {
-      auto* async_done_cmd = dynamic_cast<const AsyncDoneCmd*>(
+      auto* async_done = dynamic_cast<const AsyncDoneCommand*>(
           operations[async_done_cmd_id].cmd());
-      CHECK(async_done_cmd);
+      CHECK(async_done);
       for (int64_t j = async_done_cmd_id - 1; j >= 0; --j) {
         if (is_async_start(operations[j])) {
-          auto* async_start_cmd =
+          auto* async_start =
               dynamic_cast<const CollectiveCmd*>(operations[j].cmd());
-          if (async_start_cmd->IsAsync() &&
-              async_start_cmd->async_events() ==
-                  async_done_cmd->async_events()) {
+          if (async_start->IsAsync() &&
+              async_done->async_start() == async_start) {
             return j;
           }
         }
@@ -957,29 +959,6 @@ absl::StatusOr<const se::CommandBuffer::Command*> EmptyCmd::Record(
       },
       [&](const se::CommandBuffer::Command* command) {
         // Empty command is not updatable.
-        return absl::OkStatus();
-      });
-}
-
-//===----------------------------------------------------------------------===//
-// AsyncDoneCmd
-//===----------------------------------------------------------------------===//
-
-AsyncDoneCmd::AsyncDoneCmd(
-    std::shared_ptr<CollectiveThunk::AsyncEvents> async_events)
-    : Command(CommandType::kAsyncDone),
-      async_events_(std::move(async_events)) {}
-
-absl::StatusOr<const se::CommandBuffer::Command*> AsyncDoneCmd::Record(
-    const Thunk::ExecuteParams& execute_params,
-    const RecordParams& record_params, RecordAction record_action,
-    se::CommandBuffer* command_buffer) {
-  return Handle(
-      std::move(record_action),
-      [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
-        return command_buffer->CreateEmptyCmd(dependencies, priority());
-      },
-      [&](const se::CommandBuffer::Command* command) {
         return absl::OkStatus();
       });
 }
@@ -2023,7 +2002,7 @@ Command::BufferUseVector CustomCallCmd::buffers() const {
 CollectiveCmd::CollectiveCmd(
     CommandType cmd_type, CollectiveConfig config,
     std::shared_ptr<CollectiveThunk::AsyncEvents> async_events)
-    : Command(cmd_type, se::StreamPriority::Highest),
+    : AsyncStartCommand(cmd_type, se::StreamPriority::Highest),
       config_(std::move(config)),
       async_events_(std::move(async_events)) {}
 
@@ -2059,6 +2038,29 @@ CollectiveCmd::RecordTracedCommand(
       },
       [&](const se::CommandBuffer::Command* command) {
         return command_buffer->UpdateChildCommand(command, *nested_cmd);
+      });
+}
+
+//===----------------------------------------------------------------------===//
+// CollectiveDoneCmd
+//===----------------------------------------------------------------------===//
+
+CollectiveDoneCmd::CollectiveDoneCmd(
+    const AsyncStartCommand* async_start,
+    std::shared_ptr<CollectiveThunk::AsyncEvents> async_events)
+    : AsyncDoneCommand(async_start), async_events_(std::move(async_events)) {}
+
+absl::StatusOr<const se::CommandBuffer::Command*> CollectiveDoneCmd::Record(
+    const Thunk::ExecuteParams& execute_params,
+    const RecordParams& record_params, RecordAction record_action,
+    se::CommandBuffer* command_buffer) {
+  return Handle(
+      std::move(record_action),
+      [&](absl::Span<const se::CommandBuffer::Command* const> dependencies) {
+        return command_buffer->CreateEmptyCmd(dependencies, priority());
+      },
+      [&](const se::CommandBuffer::Command* command) {
+        return absl::OkStatus();
       });
 }
 
@@ -2394,6 +2396,218 @@ Command::BufferUseVector CollectiveBroadcastCmd::buffers() const {
     buffer_usage.emplace_back(BufferUse::Read(buffer.source_buffer));
     buffer_usage.emplace_back(BufferUse::Write(buffer.destination_buffer));
   }
+  return buffer_usage;
+}
+
+//===----------------------------------------------------------------------===//
+// RecvCmd
+//===----------------------------------------------------------------------===//
+
+RecvCmd::RecvCmd(CollectiveConfig config, P2PConfig p2p_config,
+                 const CollectiveThunk::Buffer& buffer,
+                 std::shared_ptr<CollectiveThunk::AsyncEvents> async_events)
+    : CollectiveCmd(CommandType::kRecvCmd, std::move(config),
+                    std::move(async_events)),
+      p2p_config_(std::move(p2p_config)),
+      buffer_(buffer) {}
+
+absl::StatusOr<const se::CommandBuffer::Command*> RecvCmd::Record(
+    const Thunk::ExecuteParams& execute_params,
+    const RecordParams& record_params, RecordAction record_action,
+    se::CommandBuffer* command_buffer) {
+  DeviceBufferPair device_buffer_pair{
+      config().operand_element_type[0],
+      buffer_.element_count,
+      execute_params.buffer_allocations->GetDeviceAddress(
+          buffer_.source_buffer),
+      execute_params.buffer_allocations->GetDeviceAddress(
+          buffer_.destination_buffer),
+      buffer_.source_memory_space,
+      buffer_.destination_memory_space};
+
+  int device_ordinal = execute_params.stream->parent()->device_ordinal();
+  XLA_VLOG_DEVICE(5, device_ordinal) << "RecvCmd:";
+
+  XLA_VLOG_DEVICE(5, device_ordinal)
+      << "  Src: " << buffer_.source_buffer << " ("
+      << device_buffer_pair.source_buffer.opaque() << ")";
+  XLA_VLOG_DEVICE(5, device_ordinal)
+      << "  Dst: " << buffer_.destination_buffer << " ("
+      << device_buffer_pair.destination_buffer.opaque() << ")";
+
+  if (!execute_params.collective_params || !execute_params.collective_cliques) {
+    return absl::InvalidArgumentError(
+        "RecvCmd requires collective parameters and cliques");
+  }
+
+  TF_ASSIGN_OR_RETURN(
+      GpuCliqueKey clique_key,
+      GetGpuCliqueKey(*execute_params.collective_params,
+                      config().replica_groups, config().group_mode,
+                      AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE));
+
+  TF_ASSIGN_OR_RETURN(
+      Communicator * comm,
+      execute_params.collective_cliques->GetComm(
+          clique_key, execute_params.collective_params->global_device_id));
+
+  GlobalDeviceId global_device_id =
+      execute_params.collective_params->global_device_id;
+
+  TF_ASSIGN_OR_RETURN(
+      const DeviceAssignment::LogicalID current_logical_id,
+      execute_params.collective_params->device_assn->LogicalIdForDevice(
+          global_device_id));
+
+  const int64_t current_id =
+      config().group_mode ==
+              CollectiveOpGroupMode::COLLECTIVE_OP_GROUP_MODE_CROSS_REPLICA
+          ? current_logical_id.replica_id
+          : current_logical_id.computation_id;
+  std::string device_string =
+      CollectiveThunk::GetDeviceString(*execute_params.collective_params);
+
+  P2PConfig::SourceTargetMapEntry source_target =
+      P2PConfig::GetSourceTarget(p2p_config_.id_to_source_target, current_id);
+
+  bool should_run = false;
+  switch (p2p_config_.validation_kind) {
+    case P2PConfig::ValidationKind::kValid:
+      should_run = true;
+      break;
+    case P2PConfig::ValidationKind::kInvalid:
+      should_run = false;
+      break;
+    case P2PConfig::ValidationKind::kConditional:
+      return absl::UnimplementedError(
+          "Conditional validation is not supported in RecvCmd CommandBuffer");
+  }
+
+  if (!should_run) {
+    VLOG(3) << "[" << device_ordinal << "] Skipping Recv";
+    return nullptr;
+  }
+
+  const std::optional<int64_t> source_id = source_target.source;
+  std::function<absl::Status(se::Stream*)> trace = [&](se::Stream* stream) {
+    return RunRecv(device_buffer_pair, *stream, *comm, current_id, source_id,
+                   device_string);
+  };
+
+  return RecordTracedCommand(execute_params, record_params,
+                             std::move(record_action), command_buffer, trace);
+}
+
+Command::BufferUseVector RecvCmd::buffers() const {
+  BufferUseVector buffer_usage;
+  buffer_usage.emplace_back(BufferUse::Read(buffer_.source_buffer));
+  buffer_usage.emplace_back(BufferUse::Write(buffer_.destination_buffer));
+  return buffer_usage;
+}
+
+//===----------------------------------------------------------------------===//
+// SendCmd
+//===----------------------------------------------------------------------===//
+
+SendCmd::SendCmd(CollectiveConfig config, P2PConfig p2p_config,
+                 const CollectiveThunk::Buffer& buffer,
+                 std::shared_ptr<CollectiveThunk::AsyncEvents> async_events)
+    : CollectiveCmd(CommandType::kSendCmd, std::move(config),
+                    std::move(async_events)),
+      p2p_config_(std::move(p2p_config)),
+      buffer_(buffer) {}
+
+absl::StatusOr<const se::CommandBuffer::Command*> SendCmd::Record(
+    const Thunk::ExecuteParams& execute_params,
+    const RecordParams& record_params, RecordAction record_action,
+    se::CommandBuffer* command_buffer) {
+  DeviceBufferPair device_buffer_pair{
+      config().operand_element_type[0],
+      buffer_.element_count,
+      execute_params.buffer_allocations->GetDeviceAddress(
+          buffer_.source_buffer),
+      execute_params.buffer_allocations->GetDeviceAddress(
+          buffer_.destination_buffer),
+      buffer_.source_memory_space,
+      buffer_.destination_memory_space};
+
+  int device_ordinal = execute_params.stream->parent()->device_ordinal();
+  XLA_VLOG_DEVICE(5, device_ordinal) << "SendCmd:";
+
+  XLA_VLOG_DEVICE(5, device_ordinal)
+      << "  Src: " << buffer_.source_buffer << " ("
+      << device_buffer_pair.source_buffer.opaque() << ")";
+  XLA_VLOG_DEVICE(5, device_ordinal)
+      << "  Dst: " << buffer_.destination_buffer << " ("
+      << device_buffer_pair.destination_buffer.opaque() << ")";
+
+  if (!execute_params.collective_params || !execute_params.collective_cliques) {
+    return absl::InvalidArgumentError(
+        "SendCmd requires collective parameters and cliques");
+  }
+
+  TF_ASSIGN_OR_RETURN(
+      GpuCliqueKey clique_key,
+      GetGpuCliqueKey(*execute_params.collective_params,
+                      config().replica_groups, config().group_mode,
+                      AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE));
+
+  TF_ASSIGN_OR_RETURN(
+      Communicator * comm,
+      execute_params.collective_cliques->GetComm(
+          clique_key, execute_params.collective_params->global_device_id));
+
+  GlobalDeviceId global_device_id =
+      execute_params.collective_params->global_device_id;
+
+  TF_ASSIGN_OR_RETURN(
+      const DeviceAssignment::LogicalID current_logical_id,
+      execute_params.collective_params->device_assn->LogicalIdForDevice(
+          global_device_id));
+
+  const int64_t current_id =
+      config().group_mode ==
+              CollectiveOpGroupMode::COLLECTIVE_OP_GROUP_MODE_CROSS_REPLICA
+          ? current_logical_id.replica_id
+          : current_logical_id.computation_id;
+  std::string device_string =
+      CollectiveThunk::GetDeviceString(*execute_params.collective_params);
+
+  P2PConfig::SourceTargetMapEntry source_target =
+      P2PConfig::GetSourceTarget(p2p_config_.id_to_source_target, current_id);
+
+  bool should_run = false;
+  switch (p2p_config_.validation_kind) {
+    case P2PConfig::ValidationKind::kValid:
+      should_run = true;
+      break;
+    case P2PConfig::ValidationKind::kInvalid:
+      should_run = false;
+      break;
+    case P2PConfig::ValidationKind::kConditional:
+      return absl::UnimplementedError(
+          "Conditional validation is not supported in SendCmd CommandBuffer");
+  }
+
+  std::optional<int64_t> target_id = source_target.target;
+  if (!target_id || !should_run) {
+    VLOG(3) << "[" << device_ordinal << "] Skipping Send";
+    return nullptr;
+  }
+
+  std::function<absl::Status(se::Stream*)> trace = [&](se::Stream* stream) {
+    return RunSend(device_buffer_pair, *stream, *comm, current_id, *target_id,
+                   device_string);
+  };
+
+  return RecordTracedCommand(execute_params, record_params,
+                             std::move(record_action), command_buffer, trace);
+}
+
+Command::BufferUseVector SendCmd::buffers() const {
+  BufferUseVector buffer_usage;
+  buffer_usage.emplace_back(BufferUse::Read(buffer_.source_buffer));
+  buffer_usage.emplace_back(BufferUse::Write(buffer_.destination_buffer));
   return buffer_usage;
 }
 

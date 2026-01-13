@@ -47,7 +47,9 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/gpublas_lt_matmul_thunk.h"
 #include "xla/backends/gpu/runtime/kernel_thunk.h"
 #include "xla/backends/gpu/runtime/memset_thunk.h"
+#include "xla/backends/gpu/runtime/recv_thunk.h"
 #include "xla/backends/gpu/runtime/replica_id_thunk.h"
+#include "xla/backends/gpu/runtime/send_thunk.h"
 #include "xla/backends/gpu/runtime/sequential_thunk.h"
 #include "xla/backends/gpu/runtime/thunk.h"
 #include "xla/backends/gpu/runtime/while_thunk.h"
@@ -60,8 +62,19 @@ limitations under the License.
 
 namespace xla::gpu {
 
+namespace {
+// A context for tracking thunks to commands conversion details.
+struct ConversionContext {
+  // A mapping from collective thunk async events to the corresponding
+  // collective command.
+  absl::flat_hash_map<CollectiveThunk::AsyncEvents*, const AsyncStartCommand*>
+      async_start;
+};
+}  // namespace
+
 // Appends command(s) converted from `sequence` to `cmd_sequence`.
-static absl::Status AppendCommands(CommandSequence& cmd_sequence,
+static absl::Status AppendCommands(ConversionContext& ctx,
+                                   CommandSequence& cmd_sequence,
                                    const ThunkSequence& sequence,
                                    const ConvertToCommandsOptions& options);
 
@@ -209,6 +222,18 @@ static absl::StatusOr<std::unique_ptr<Command>> Convert(
 }
 
 static absl::StatusOr<std::unique_ptr<Command>> Convert(
+    const RecvThunk& thunk) {
+  return std::make_unique<RecvCmd>(thunk.config(), thunk.p2p_config(),
+                                   thunk.buffer(), thunk.async_events());
+}
+
+static absl::StatusOr<std::unique_ptr<Command>> Convert(
+    const SendThunk& thunk) {
+  return std::make_unique<SendCmd>(thunk.config(), thunk.p2p_config(),
+                                   thunk.buffer(), thunk.async_events());
+}
+
+static absl::StatusOr<std::unique_ptr<Command>> Convert(
     const DynamicSliceThunk& thunk, const ConvertToCommandsOptions& options) {
   TF_ASSIGN_OR_RETURN(
       CommandBufferCmdExecutor embedded_cmds,
@@ -275,16 +300,23 @@ static absl::StatusOr<std::unique_ptr<Command>> Convert(const Thunk& thunk,
                       thunk);
 }
 
-static absl::Status AppendCommands(CommandSequence& cmd_sequence,
+static absl::Status AppendCommands(ConversionContext& ctx,
+                                   CommandSequence& cmd_sequence,
                                    const Thunk& thunk,
                                    const ConvertToCommandsOptions& options) {
   auto append =
       [&](absl::StatusOr<std::unique_ptr<Command>> command) -> absl::Status {
-    if (command.ok()) {
-      cmd_sequence.push_back(std::move(*command));
-      return absl::OkStatus();
+    if (!command.ok()) {
+      return command.status();
     }
-    return command.status();
+
+    // Keep track of async start commands for converting to CollectiveDoneCmd.
+    if (auto* collective = dynamic_cast<CollectiveCmd*>(command->get())) {
+      ctx.async_start[collective->async_events().get()] = collective;
+    }
+
+    cmd_sequence.push_back(std::move(*command));
+    return absl::OkStatus();
   };
 
   switch (thunk.kind()) {
@@ -322,6 +354,10 @@ static absl::Status AppendCommands(CommandSequence& cmd_sequence,
       return append(Convert<CollectiveBroadcastStartThunk>(thunk));
     case Thunk::Kind::kCollectivePermuteStart:
       return append(Convert<CollectivePermuteStartThunk>(thunk));
+    case Thunk::Kind::kRecv:
+      return append(Convert<RecvThunk>(thunk));
+    case Thunk::Kind::kSend:
+      return append(Convert<SendThunk>(thunk));
     case Thunk::Kind::kPartitionId:
       return append(Convert<PartitionIdThunk>(thunk));
     case Thunk::Kind::kReplicaId:
@@ -336,7 +372,7 @@ static absl::Status AppendCommands(CommandSequence& cmd_sequence,
     // Sequential thunk does not have any special semantics and we simply inline
     // all nested thunks into command buffer.
     case Thunk::Kind::kSequential:
-      return AppendCommands(cmd_sequence,
+      return AppendCommands(ctx, cmd_sequence,
                             static_cast<const SequentialThunk&>(thunk).thunks(),
                             options);
 
@@ -345,13 +381,18 @@ static absl::Status AppendCommands(CommandSequence& cmd_sequence,
     case Thunk::Kind::kAllToAllDone:
     case Thunk::Kind::kCollectiveBroadcastDone:
     case Thunk::Kind::kCollectivePermuteDone:
+    case Thunk::Kind::kRecvDone:
+    case Thunk::Kind::kSendDone:
     case Thunk::Kind::kReduceScatterDone:
       if (options.synchronization_mode ==
           CommandBufferCmdExecutor::SynchronizationMode::kLHS) {
+        auto async_events =
+            static_cast<const CollectiveDoneThunk&>(thunk).async_events();
+        TF_RET_CHECK(ctx.async_start.contains(async_events.get()))
+            << "Couldn't find a start command corresponding to a done thunk";
         return append(absl::StatusOr<std::unique_ptr<Command>>(
-            std::make_unique<AsyncDoneCmd>(
-                static_cast<const CollectiveDoneThunk&>(thunk)
-                    .async_events())));
+            std::make_unique<CollectiveDoneCmd>(
+                ctx.async_start.at(async_events.get()), async_events)));
       } else {
         if (thunk.control_predecessors().empty()) {
           return absl::OkStatus();
@@ -384,12 +425,13 @@ static absl::Status AppendCommands(CommandSequence& cmd_sequence,
   }
 }
 
-static absl::Status AppendCommands(CommandSequence& cmd_sequence,
+static absl::Status AppendCommands(ConversionContext& ctx,
+                                   CommandSequence& cmd_sequence,
                                    const ThunkSequence& sequence,
                                    const ConvertToCommandsOptions& options) {
   absl::flat_hash_map<const Thunk*, int64_t> thunk_to_index;
   for (const std::unique_ptr<Thunk>& thunk : sequence) {
-    TF_RETURN_IF_ERROR(AppendCommands(cmd_sequence, *thunk, options));
+    TF_RETURN_IF_ERROR(AppendCommands(ctx, cmd_sequence, *thunk, options));
     thunk_to_index[thunk.get()] = cmd_sequence.size() - 1;
   }
 
@@ -411,8 +453,9 @@ absl::StatusOr<CommandBufferCmdExecutor> ConvertToCommands(
   VLOG(3) << absl::StreamFormat(
       "Convert thunk sequence to command executor: synchronization_mode=%v",
       options.synchronization_mode);
+  ConversionContext ctx;
   CommandSequence cmd_sequence;
-  TF_RETURN_IF_ERROR(AppendCommands(cmd_sequence, sequence, options));
+  TF_RETURN_IF_ERROR(AppendCommands(ctx, cmd_sequence, sequence, options));
   return CommandBufferCmdExecutor::Create(std::move(cmd_sequence),
                                           options.synchronization_mode);
 }
