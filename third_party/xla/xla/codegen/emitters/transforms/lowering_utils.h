@@ -13,7 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/backends/cpu/runtime/convolution_lib.h"
+#ifndef XLA_CODEGEN_EMITTERS_TRANSFORMS_LOWERING_UTILS_H_
+#define XLA_CODEGEN_EMITTERS_TRANSFORMS_LOWERING_UTILS_H_
 
-XLA_CPU_DEFINE_CONV2D(Eigen::half);
-XLA_CPU_DEFINE_CONV3D(Eigen::half);
+#include "mlir/IR/Operation.h"
+
+namespace xla {
+namespace emitters {
+
+// Ensure AMDGPU allocas use address space 5 (private).
+// AMDGPU requires allocas in AS5, but MLIR lowering creates them in AS0.
+void EnsureAMDGPUAllocasUseAS5(mlir::Operation* operation);
+
+}  // namespace emitters
+}  // namespace xla
+
+#endif  // XLA_CODEGEN_EMITTERS_TRANSFORMS_LOWERING_UTILS_H_
