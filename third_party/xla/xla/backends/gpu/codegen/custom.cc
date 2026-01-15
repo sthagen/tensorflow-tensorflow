@@ -44,8 +44,6 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/custom_kernel_thunk.h"
 #include "xla/backends/gpu/runtime/dynamic_slice_thunk.h"
 #include "xla/backends/gpu/runtime/gemm_thunk.h"
-#include "xla/backends/gpu/runtime/kernel_thunk.h"
-#include "xla/backends/gpu/runtime/shaped_slice.h"
 #include "xla/backends/gpu/runtime/thunk.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
 #include "xla/ffi/attribute_map.h"
@@ -77,6 +75,7 @@ limitations under the License.
 #include "xla/service/gpu/matmul_utils.h"
 #include "xla/service/gpu/stream_executor_util.h"
 #include "xla/service/hlo.pb.h"
+#include "xla/service/shaped_slice.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
@@ -220,7 +219,8 @@ std::unique_ptr<HloModule> ExtractOffsetModule(
     const HloInstruction* offset_value, int64_t indvar_idx) {
   // Extract offset as a function of parameter to while body.
   std::unique_ptr<HloModule> extracted_offset = ExtractModule(
-      /*instruction=*/offset_value, /*height=*/-1,
+      /*instruction=*/
+      offset_value, /*height=*/-1,
       /*extract_selector=*/
       [](const HloInstruction* instr) -> bool {
         return instr->opcode() != HloOpcode::kParameter;
@@ -1309,8 +1309,8 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
           << "Expected destination to be present for non-degenerate collective";
       buffers.push_back(CollectiveThunk::Buffer{
           /*element_count=*/ShapeUtil::ElementsIn(src_shape),
-          /*source_buffer=*/src.value(),
-          /*destination_buffer=*/dst.value(),
+          /*source_buffer=*/{src.value(), src_shape},
+          /*destination_buffer=*/{dst.value(), dst_shape},
           /*source_memory_space=*/src_shape.layout().memory_space(),
           /*destination_memory_space=*/dst_shape.layout().memory_space()});
     }
@@ -1332,8 +1332,7 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
           /*thunk_info=*/
           Thunk::ThunkInfo::WithProfileAnnotation(
               instr, ir_emitter_context.GetNextThunkId()),
-          /*async_events=*/async_events,
-          /*async_stream_kind=*/AsyncStreamKind::ASYNC_STREAM_KIND_COLLECTIVE);
+          /*async_events=*/async_events);
       seq.emplace_back(std::move(collective_done_thunk));
     }
   } else {
