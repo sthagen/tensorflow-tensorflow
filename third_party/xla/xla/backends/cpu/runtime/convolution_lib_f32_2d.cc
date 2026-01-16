@@ -1,4 +1,4 @@
-/* Copyright 2015 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,14 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/stream_executor/cuda/cuda_platform_id.h"
+#include "xla/backends/cpu/runtime/convolution_lib.h"
 
-#include "xla/stream_executor/platform.h"
+#if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
+#include "xla/tsl/framework/contraction/eigen_contraction_kernel.h"  // IWYU pragma: keep
+#endif
 
-namespace stream_executor {
-namespace cuda {
-
-PLATFORM_DEFINE_ID(kCudaPlatformId, CUDA);
-
-}  // namespace cuda
-}  // namespace stream_executor
+XLA_CPU_DEFINE_CONV2D(float);
