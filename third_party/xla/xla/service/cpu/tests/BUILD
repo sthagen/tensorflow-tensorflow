@@ -48,7 +48,6 @@ xla_cc_test(
     tags = ["pjrt_migration_candidate"],
     deps = [
         "//xla/hlo/ir:hlo",
-        "//xla/hlo/ir:hlo_module_group",
         "//xla/service:compiler",
         "//xla/service:cpu_plugin",
         "//xla/service:executable",
@@ -287,8 +286,8 @@ xla_cc_test(
         "@llvm-project//llvm:ARMCodeGen",  # fixdeps: keep
         "@llvm-project//llvm:Target",
         "@llvm-project//llvm:X86CodeGen",  # fixdeps: keep
-        "@local_tsl//tsl/platform",
-        "@local_tsl//tsl/platform:platform_port",
+        "@tsl//tsl/platform",
+        "@tsl//tsl/platform:platform_port",
     ],
 )
 
@@ -357,7 +356,7 @@ onednn_cc_test(
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:platform_port",
+        "@tsl//tsl/platform:platform_port",
     ],
 )
 
@@ -444,7 +443,7 @@ xla_cc_test(
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:platform_port",
+        "@tsl//tsl/platform:platform_port",
     ],
 )
 
