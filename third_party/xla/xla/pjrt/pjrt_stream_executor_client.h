@@ -80,13 +80,6 @@ limitations under the License.
 
 namespace xla {
 
-struct PjRtStreamExecutorExecutionInput {
-  // Donation is not complete until ReleaseDeviceMemory() is called on the
-  // TrackedDeviceBuffer that provides buf.
-  bool is_donated;
-  tsl::AsyncValueRef<RawSEDeviceMemory> buf;
-};
-
 struct PjRtStreamExecutorExecutionOutput {
   // Donated inputs which must be freed.
   std::vector<tsl::AsyncValueRef<RawSEDeviceMemory>> to_be_released;
@@ -360,7 +353,7 @@ class PjRtStreamExecutorClient : public CommonPjRtClient {
 
   virtual absl::StatusOr<PjRtStreamExecutorExecutionOutput> RunAsync(
       LocalExecutable& exec, PjRtDevice* device,
-      std::vector<PjRtStreamExecutorExecutionInput> flat_arguments,
+      absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> flat_arguments,
       absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> results,
       ExecutableRunOptions run_options, bool parameter_is_tupled_arguments,
       absl::Span<const Shape> executable_parameter_shapes);
@@ -537,6 +530,43 @@ class PjRtStreamExecutorClient : public CommonPjRtClient {
 absl::StatusOr<DeviceAssignment> DevicesToDeviceAssignment(
     absl::Span<const std::vector<PjRtDevice*>> devices);
 
+class PjRtStreamExecutorRawLoadedExecutable {
+ public:
+  PjRtStreamExecutorRawLoadedExecutable(
+      int replica, int partition, RunId run_id, PjRtDevice* device,
+      std::shared_ptr<DeviceAssignment> device_assignment,
+      std::shared_ptr<LocalExecutable> executable,
+      PjRtStreamExecutorClient* client, bool parameter_is_tupled_arguments,
+      std::shared_ptr<std::vector<Shape>> on_device_executable_parameter_shapes)
+      : replica_(replica),
+        partition_(partition),
+        run_id_(run_id),
+        device_(device),
+        device_assignment_(std::move(device_assignment)),
+        executable_(std::move(executable)),
+        client_(client),
+        parameter_is_tupled_arguments_(parameter_is_tupled_arguments),
+        on_device_executable_parameter_shapes_(
+            std::move(on_device_executable_parameter_shapes)) {}
+  absl::StatusOr<PjRtRawLoadedExecutable::RawExecuteResult> Execute(
+      const ExecuteOptions& options,
+      absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> inputs,
+      absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> results,
+      PjRtDeviceEventSet& extra_deps, PjRtDeviceEventSet& control_deps,
+      bool is_predetermined_error, bool fill_future) &&;
+
+ private:
+  int replica_;
+  int partition_;
+  RunId run_id_;
+  PjRtDevice* device_;
+  std::shared_ptr<DeviceAssignment> device_assignment_;
+  std::shared_ptr<LocalExecutable> executable_;
+  PjRtStreamExecutorClient* client_;
+  bool parameter_is_tupled_arguments_;
+  std::shared_ptr<std::vector<Shape>> on_device_executable_parameter_shapes_;
+};
+
 // Wraps one or more XLA LocalExecutables (one per partition, as specified by
 // the build options).
 class PjRtStreamExecutorLoadedExecutable : public PjRtLoadedExecutable {
@@ -663,30 +693,6 @@ class PjRtStreamExecutorLoadedExecutable : public PjRtLoadedExecutable {
   // donated due to aliases that were specified by the computation.
   absl::Status SetUpDonation(bool tuple_inputs);
 
-  virtual absl::StatusOr<std::vector<PjRtStreamExecutorExecutionInput>>
-  MakeExecutionInputs(
-      int device_ordinal, const ExecuteOptions& options,
-      absl::Span<const Shape> executable_parameter_shapes,
-      absl::Span<PjRtBuffer* const> argument_handles,
-      absl::Span<const CommonPjRtBuffer::ScopedHold> device_buffers) const;
-
-  absl::StatusOr<absl::InlinedVector<tsl::RCReference<CommonPjRtRawBuffer>, 4>>
-  EnqueueExecution(
-      absl::Span<PjRtBuffer* const> argument_handles, int replica,
-      int partition, const RunId& run_id, const ExecuteOptions& options,
-      PjRtDevice* device,
-      std::vector<CommonPjRtBuffer::ScopedHold>* device_buffers,
-      std::shared_ptr<DeviceAssignment> device_assignment,
-      std::vector<absl::AnyInvocable<void() &&>>& compute_callbacks) const;
-
-  virtual absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
-  MakeOutputBuffers(
-      int device_ordinal, const ExecuteOptions& options,
-      const xla::Shape& output_device_shape,
-      absl::InlinedVector<tsl::RCReference<CommonPjRtRawBuffer>, 4>& results,
-      BufferSequencingEventRef definition_event, PjRtDevice* device,
-      std::vector<absl::AnyInvocable<void() &&>>& compute_callbacks) const;
-
   absl::StatusOr<Result> ExecuteHelper(
       absl::Span<PjRtBuffer* const> argument_handles, int replica,
       int partition, const RunId& run_id, const ExecuteOptions& options,
@@ -701,7 +707,7 @@ class PjRtStreamExecutorLoadedExecutable : public PjRtLoadedExecutable {
   // One executable per partition.
   std::shared_ptr<LocalExecutable> executable_;
   // On device shapes of the executable parameters.
-  std::vector<Shape> on_device_executable_parameter_shapes_;
+  std::shared_ptr<std::vector<Shape>> on_device_executable_parameter_shapes_;
   // Per-executable sorted vector of parameters that have any aliased buffers
   // and thus must be donated when executing the computation.
   std::vector<int> parameters_that_must_be_donated_;

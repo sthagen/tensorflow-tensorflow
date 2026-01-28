@@ -249,6 +249,7 @@ cc_library(
     name = "gpu_asm_opts",
     hdrs = ["gpu_asm_opts.h"],
     visibility = internal_visibility([
+        "//third_party/py/jax/jaxlib/cuda:__subpackages__",
         "//xla/service/gpu:__subpackages__",
         "//xla/stream_executor:__subpackages__",
         "//tensorflow/core/kernels:__subpackages__",
@@ -782,6 +783,7 @@ cc_library(
 
 exports_files([
     "buffer_comparator_kernel_lib.cu.h",
+    "collective_signal.cu.h",
     "all_reduce_kernel_lib.cu.h",
     "ragged_all_to_all_kernel_lib.cu.h",
     "repeat_buffer_kernel.cu.h",
