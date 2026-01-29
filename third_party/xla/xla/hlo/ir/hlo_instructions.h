@@ -2022,7 +2022,7 @@ class HloConvolutionInstruction : public HloInstruction {
   // used to produce results. See the documentation on precision_config().
   PrecisionConfig precision_config_;
   // Conv type (fprop, dgrad, wgrad)
-  ConvKind conv_kind_;
+  ConvKind conv_kind_ = ConvKind::UNSET;
 };
 
 class HloReduceWindowInstruction : public HloInstruction {
