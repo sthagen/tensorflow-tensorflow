@@ -870,7 +870,6 @@ xla_test(
         "cpu",
         "gpu",
     ],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         "//xla:error_spec",
         "//xla:literal",
@@ -1687,6 +1686,7 @@ cc_library(
     visibility = internal_visibility([
         "//xla/internal:hwi_internal",
         "//xla/backends/gpu/runtime:__subpackages__",
+        "//xla/service/gpu/tests:__pkg__",
         "//third_party/pathways/configuration:__subpackages__",
     ]),
     deps = [
@@ -2384,7 +2384,6 @@ xla_test(
         "cpu",
         "gpu",
     ],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":scatter_determinism_expander",
         "//xla:literal",
@@ -2429,9 +2428,6 @@ xla_test(
     srcs = ["triangular_solve_expander_test.cc"],
     backends = ["cpu"],
     shard_count = 12,
-    tags = [
-        "test_migrated_to_hlo_runner_pjrt",
-    ],
     deps = [
         ":triangular_solve_expander",
         "//xla:array2d",
@@ -2455,7 +2451,6 @@ xla_test(
         "cpu",
         "gpu",
     ],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":batchnorm_expander",
         "//xla:error_spec",
@@ -2474,7 +2469,6 @@ xla_test(
 xla_test(
     name = "algebraic_simplifier_overflow_test",
     srcs = ["algebraic_simplifier_overflow_test.cc"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         "//xla:error_spec",
         "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
@@ -2893,7 +2887,6 @@ xla_test(
     name = "scan_loop_accumulator_input_unification_test",
     srcs = ["scan_loop_accumulator_input_unification_test.cc"],
     backends = ["interpreter"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":copy_insertion",
         ":scan_loop_accumulator_input_unification",
@@ -2954,7 +2947,6 @@ xla_test(
     name = "while_loop_unroller_test",
     srcs = ["while_loop_unroller_test.cc"],
     backends = ["interpreter"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":scheduling_annotations_util",
         ":while_loop_unroller",
@@ -4085,7 +4077,6 @@ xla_test(
     name = "hlo_cse_test",
     srcs = ["hlo_cse_test.cc"],
     backends = ["interpreter"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":hlo_cse",
         ":pattern_matcher",
@@ -4327,7 +4318,6 @@ xla_test(
     ],
     tags = [
         "no_windows",  # TODO(b/152037541)
-        "test_migrated_to_hlo_runner_pjrt",
     ],
     deps = [
         ":elemental_ir_emitter",
@@ -5206,7 +5196,6 @@ xla_test(
     name = "map_inliner_test",
     srcs = ["map_inliner_test.cc"],
     backends = ["interpreter"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":map_inliner",
         "//xla:literal",
@@ -5489,7 +5478,6 @@ xla_test(
     name = "topk_rewriter_test",
     srcs = ["topk_rewriter_test.cc"],
     backends = ["interpreter"],
-    tags = ["test_migrated_to_hlo_runner_pjrt"],
     deps = [
         ":pattern_matcher",
         ":topk_rewriter",

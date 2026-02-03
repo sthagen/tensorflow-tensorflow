@@ -82,7 +82,7 @@ struct UnaryClipFunc {
   UnaryClipFunc(const T& value_min, const T& value_max)
       : value_min(value_min), value_max(value_max) {}
   T operator()(const T& value) const {
-    return std::max(std::min(value, value_max), value_min);
+    return (std::max)((std::min)(value, value_max), value_min);
   }
   T value_min;
   T value_max;
@@ -95,12 +95,12 @@ struct UnaryClipFunc<T, /*is_complex=*/true> {
   T operator()(const T& value) const {
     // Clip real and imaginary component separately, as if the clipping bounds
     // form a box in the imaginary plane.
-    return T{std::max(std::min(Eigen::numext::real(value),
-                               Eigen::numext::real(value_max)),
-                      Eigen::numext::real(value_min)),
-             std::max(std::min(Eigen::numext::imag(value),
-                               Eigen::numext::imag(value_max)),
-                      Eigen::numext::imag(value_min))};
+    return T{(std::max)((std::min)(Eigen::numext::real(value),
+                                   Eigen::numext::real(value_max)),
+                        Eigen::numext::real(value_min)),
+             (std::max)((std::min)(Eigen::numext::imag(value),
+                                   Eigen::numext::imag(value_max)),
+                        Eigen::numext::imag(value_min))};
   }
   T value_min;
   T value_max;
@@ -121,7 +121,7 @@ template <typename T, bool is_complex = Eigen::NumTraits<T>::IsComplex>
 struct BinaryRightClipFunc {
   explicit BinaryRightClipFunc(const T& value_min) : value_min(value_min) {}
   T operator()(const T& value, const T& value_max) const {
-    return std::max(std::min(value, value_max), value_min);
+    return (std::max)((std::min)(value, value_max), value_min);
   }
   T value_min;
 };
@@ -131,12 +131,12 @@ struct BinaryRightClipFunc<T, /*is_complex=*/true> {
   T operator()(const T& value, const T& value_max) const {
     // Clip real and imaginary component separately, as if the clipping bounds
     // form a box in the imaginary plane.
-    return T{std::max(std::min(Eigen::numext::real(value),
-                               Eigen::numext::real(value_max)),
-                      Eigen::numext::real(value_min)),
-             std::max(std::min(Eigen::numext::imag(value),
-                               Eigen::numext::imag(value_max)),
-                      Eigen::numext::imag(value_min))};
+    return T{(std::max)((std::min)(Eigen::numext::real(value),
+                                   Eigen::numext::real(value_max)),
+                        Eigen::numext::real(value_min)),
+             (std::max)((std::min)(Eigen::numext::imag(value),
+                                   Eigen::numext::imag(value_max)),
+                        Eigen::numext::imag(value_min))};
   }
   T value_min;
 };
@@ -156,7 +156,7 @@ template <typename T, bool is_complex = Eigen::NumTraits<T>::IsComplex>
 struct BinaryLeftClipFunc {
   explicit BinaryLeftClipFunc(const T& value_max) : value_max(value_max) {}
   T operator()(const T& value, const T& value_min) const {
-    return std::max(std::min(value, value_max), value_min);
+    return (std::max)((std::min)(value, value_max), value_min);
   }
   T value_max;
 };
@@ -166,12 +166,12 @@ struct BinaryLeftClipFunc<T, /*is_complex=*/true> {
   T operator()(const T& value, const T& value_min) const {
     // Clip real and imaginary component separately, as if the clipping bounds
     // form a box in the imaginary plane.
-    return T{std::max(std::min(Eigen::numext::real(value),
-                               Eigen::numext::real(value_max)),
-                      Eigen::numext::real(value_min)),
-             std::max(std::min(Eigen::numext::imag(value),
-                               Eigen::numext::imag(value_max)),
-                      Eigen::numext::imag(value_min))};
+    return T{(std::max)((std::min)(Eigen::numext::real(value),
+                                   Eigen::numext::real(value_max)),
+                        Eigen::numext::real(value_min)),
+             (std::max)((std::min)(Eigen::numext::imag(value),
+                                   Eigen::numext::imag(value_max)),
+                        Eigen::numext::imag(value_min))};
   }
   T value_max;
 };
@@ -191,7 +191,7 @@ template <typename T, bool is_complex = Eigen::NumTraits<T>::IsComplex>
 struct BinaryClipAboveFunc {
   explicit BinaryClipAboveFunc() = default;
   T operator()(const T& value, const T& value_max) const {
-    return std::min(value, value_max);
+    return (std::min)(value, value_max);
   }
 };
 template <typename T>
@@ -201,15 +201,15 @@ struct BinaryClipAboveFunc<T, /*is_complex=*/true> {
     // Clip real and imaginary component separately, as if the clipping bounds
     // form a box in the imaginary plane.
     return T{
-        std::min(Eigen::numext::real(value), Eigen::numext::real(value_max)),
-        std::min(Eigen::numext::imag(value), Eigen::numext::imag(value_max))};
+        (std::min)(Eigen::numext::real(value), Eigen::numext::real(value_max)),
+        (std::min)(Eigen::numext::imag(value), Eigen::numext::imag(value_max))};
   }
 };
 template <typename T, bool is_complex = Eigen::NumTraits<T>::IsComplex>
 struct BinaryClipBelowFunc {
   explicit BinaryClipBelowFunc() = default;
   T operator()(const T& value, const T& value_min) const {
-    return std::max(value, value_min);
+    return (std::max)(value, value_min);
   }
 };
 template <typename T>
@@ -219,8 +219,8 @@ struct BinaryClipBelowFunc<T, /*is_complex=*/true> {
     // Clip real and imaginary component separately, as if the clipping bounds
     // form a box in the imaginary plane.
     return T{
-        std::max(Eigen::numext::real(value), Eigen::numext::real(value_min)),
-        std::max(Eigen::numext::imag(value), Eigen::numext::imag(value_min))};
+        (std::max)(Eigen::numext::real(value), Eigen::numext::real(value_min)),
+        (std::max)(Eigen::numext::imag(value), Eigen::numext::imag(value_min))};
   }
 };
 

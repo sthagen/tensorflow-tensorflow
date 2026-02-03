@@ -7868,7 +7868,7 @@ TEST_F(AlgebraicSimplifierTest, BatchDotTransposeBatchDimsAndOperands) {
             PrecisionConfig::HIGH);
 }
 
-TEST_F(AlgebraicSimplifierTest, DotHasOneShardingConstraintUser) {
+TEST_F(AlgebraicSimplifierTest, DotIsAnnotatedWithUnreducedSharding) {
   constexpr absl::string_view hlo_string = R"(
     HloModule module
 
@@ -7877,11 +7877,8 @@ TEST_F(AlgebraicSimplifierTest, DotHasOneShardingConstraintUser) {
       rhs = f32[10,20,50,30] parameter(1)
       lhs_t = transpose(lhs), dimensions={1,0,3,2}
       rhs_t = transpose(rhs), dimensions={1,0,3,2}
-      dot = dot(lhs_t, rhs_t),
-                  lhs_batch_dims={0,1}, rhs_batch_dims={0,1},
-                  lhs_contracting_dims={3}, rhs_contracting_dims={2},
-                  operand_precision={high, default}
-      ROOT root = f32[20,10,40,50] custom-call(dot), custom_call_target="Sharding", sharding={replicated}
+      dot = dot(lhs_t, rhs_t), lhs_batch_dims={0,1}, rhs_batch_dims={0,1}, lhs_contracting_dims={3}, rhs_contracting_dims={2}
+      ROOT root = f32[20,10,40,50] custom-call(dot), custom_call_target="Sharding", sharding={unreduced}, frontend_attributes={xla.sdy.sharding="#sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={\"x\"}>]>"}
     }
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
