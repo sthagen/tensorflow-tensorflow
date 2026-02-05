@@ -145,6 +145,7 @@ package_group(
         "//perftools/accelerators/xprof/...",
         "//quality/webanswers/brain/tokenization/custom_tf_ops/kernels/...",
         "//smartass/brain/server/...",
+        "//third_party/neptune/...",
         "//waymo/ml/deploy/benchmark/...",
     ],
 )

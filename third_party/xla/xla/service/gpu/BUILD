@@ -552,6 +552,7 @@ cc_library(
         "//xla/service:buffer_assignment",
         "//xla/service:call_graph",
         "//xla/service:collective_ops_utils",
+        "//xla/service:collective_opt_utils",
         "//xla/service:custom_call_status",
         "//xla/service:custom_call_target_registry",
         "//xla/service:hlo_creation_utils",
@@ -1798,6 +1799,7 @@ cc_library(
         "//xla/service/gpu/transforms:algorithm_checker",
         "//xla/service/gpu/transforms:async_wrapper",
         "//xla/service/gpu/transforms:composite_rewriter",
+        "//xla/service/gpu/transforms:conv_kind_assignment",
         "//xla/service/gpu/transforms:conv_rewriter",
         "//xla/service/gpu/transforms:convert_triton_gemm_config",
         "//xla/service/gpu/transforms:cudnn_custom_call_converter",
@@ -3225,6 +3227,33 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "conv_utils",
+    srcs = ["conv_utils.cc"],
+    hdrs = ["conv_utils.h"],
+    deps = [
+        ":backend_configs_cc",
+        "//xla/hlo/ir:hlo",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+xla_cc_test(
+    name = "conv_utils_test",
+    srcs = ["conv_utils_test.cc"],
+    deps = [
+        ":conv_utils",
+        "//xla:shape_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/service:shape_inference",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/log:check",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
     name = "conv_layout_normalization",
     srcs = ["conv_layout_normalization.cc"],
     hdrs = ["conv_layout_normalization.h"],
@@ -3364,14 +3393,14 @@ cc_library(
         "//xla:side_effect_util",
         "//xla/backends/gpu/runtime:thunk",
         "//xla/hlo/ir:hlo",
-        "//xla/service:call_graph",
-        "//xla/service:collective_ops_utils",
+        "//xla/service:collective_opt_utils",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
