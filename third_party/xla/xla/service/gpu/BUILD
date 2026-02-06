@@ -691,12 +691,8 @@ bool_flag(
 
 cc_library(
     name = "gpu_executable",
-    srcs = [
-        "gpu_executable.cc",
-    ],
-    hdrs = [
-        "gpu_executable.h",
-    ],
+    srcs = ["gpu_executable.cc"],
+    hdrs = ["gpu_executable.h"],
     deps = [
         ":alias_info",
         ":backend_configs_cc",
@@ -717,6 +713,7 @@ cc_library(
         "//xla/backends/gpu/runtime:annotation",
         "//xla/backends/gpu/runtime:collective_clique_requests",
         "//xla/backends/gpu/runtime:collective_cliques",
+        "//xla/backends/gpu/runtime:collective_memory",
         "//xla/backends/gpu/runtime:collective_memory_requests",
         "//xla/backends/gpu/runtime:collective_multimem_registry",
         "//xla/backends/gpu/runtime:collective_params",
@@ -740,6 +737,7 @@ cc_library(
         "//xla/service:executable",
         "//xla/service:hlo_proto_cc",
         "//xla/service:hlo_value",
+        "//xla/service:logical_buffer",
         "//xla/service:maybe_owning_device_address",
         "//xla/service:rendezvous",
         "//xla/service:riegeli_dump_writer",
@@ -2026,6 +2024,7 @@ xla_test(
         "b200": ["broken"],
     },
     backends = ["gpu"],
+    use_legacy_runtime = True,
     deps = [
         ":gpu_compiler",
         "//xla:literal",
@@ -2042,7 +2041,7 @@ xla_test(
         "//xla/service:hlo_runner",
         "//xla/service:hlo_runner_interface",
         "//xla/service:platform_util",
-        "//xla/service/gpu/tests:hlo_pjrt_gpu_test_base",
+        "//xla/service/gpu/tests:hlo_legacy_gpu_test_base",
         "//xla/service/llvm_ir:llvm_command_line_options",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",

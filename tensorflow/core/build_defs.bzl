@@ -1,6 +1,6 @@
 """Defines the build rules to disable non-core TF libraries."""
 
-load("//third_party/bazel_rules/rules_python/python:py_binary.bzl", "py_binary")
+load("@xla//third_party/rules_python/python:py_binary.bzl", "py_binary")
 
 def _tf_core_transition_impl(settings, attr):
     _ignore = (settings, attr)  # @unused

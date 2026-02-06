@@ -4,7 +4,7 @@ load("@rules_cc//cc:cc_library.bzl", _cc_library = "cc_library")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_java//java:defs.bzl", "java_test")
 load(
-    "//tensorflow:py.default.bzl",
+    "@xla//third_party/rules_python/python:defs.bzl",
     _plain_py_binary = "py_binary",
     _plain_py_library = "py_library",
     _plain_py_test = "py_test",

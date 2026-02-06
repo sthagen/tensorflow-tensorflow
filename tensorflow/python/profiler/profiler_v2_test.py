@@ -15,6 +15,7 @@
 """Tests for tf 2.x profiler."""
 
 import os
+import socket
 
 from tensorflow.python.eager import test
 from tensorflow.python.framework import constant_op
@@ -64,10 +65,9 @@ class ProfilerTest(test_util.TensorFlowTestCase):
         self.assertEqual(file_name, 'plugins')
     profile_dir = os.path.join(logdir, 'plugins', 'profile')
     run = gfile.ListDirectory(profile_dir)[0]
-    run_dir = os.path.join(profile_dir, run)
-    xplanes = gfile.Glob(os.path.join(run_dir, '*.xplane.pb'))
-    self.assertLen(xplanes, 1)
-    self.assertTrue(gfile.Exists(xplanes[0]))
+    hostname = socket.gethostname()
+    xplane = os.path.join(profile_dir, run, hostname + '.xplane.pb')
+    self.assertTrue(gfile.Exists(xplane))
 
   def test_profile_with_options(self):
     logdir = self.get_temp_dir()

@@ -1,6 +1,6 @@
 """Targets for generating TensorFlow Python API __init__.py files."""
 
-load("//tensorflow:py.default.bzl", "py_binary")
+load("@xla//third_party/rules_python/python:defs.bzl", "py_binary")
 load("//tensorflow:tensorflow.bzl", "if_oss")
 load("//tensorflow:tensorflow.default.bzl", "if_indexing_source_code")
 load("//tensorflow/python/tools/api/generator:api_init_files.bzl", "TENSORFLOW_API_INIT_FILES")
