@@ -330,7 +330,8 @@ void FallbackBatchResource::ProcessFuncBatchImpl(
   results.resize(bef_func_->result_types().size());
   assert(results.size() > 1);
   assert(bef_func_->result_types().front().GetName() == "!tfrt.chain");
-  auto& exec_ctx = down_cast<const FallbackBatchTask&>(last_task).tfrt_exec_ctx;
+  auto& exec_ctx =
+      absl::down_cast<const FallbackBatchTask&>(last_task).tfrt_exec_ctx;
 
   auto statusor =
       SetUpRequestContext(host_ctx_, resource_context_, runner_table_,
