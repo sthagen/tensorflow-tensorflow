@@ -22,6 +22,7 @@ cc_library(
     hdrs = ["gpu_codegen_backend.h"],
     deps = [
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -56,6 +57,7 @@ cc_library(
         "//xla:autotuning_proto_cc",
         "//xla:shape_util",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/codegen/triton:support",
         "//xla/backends/gpu/codegen/triton:tma_utils",
@@ -70,7 +72,6 @@ cc_library(
         "//xla/service/gpu/model:fusion_analysis_cache",
         "//xla/service/gpu/model:gpu_indexing_performance_model",
         "//xla/stream_executor:device_description",
-        "//xla/stream_executor:stream_executor_h",
         "//xla/stream_executor/gpu:tma_metadata",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
@@ -136,6 +137,7 @@ cc_library(
         "//xla:autotuning_proto_cc",
         "//xla:shape_util",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/transforms:dot_algorithm_rewriter",
         "//xla/backends/gpu/transforms:gemm_rewriter",
@@ -220,6 +222,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:util",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -236,7 +239,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -293,6 +295,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/transforms:cudnn_fusion_compiler",
         "//xla/hlo/ir:hlo",
@@ -319,7 +322,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -369,6 +371,7 @@ cc_library(
         "//xla:autotune_results_proto_cc",
         "//xla:autotuning_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/codegen/kernels:custom_kernel",
         "//xla/backends/gpu/codegen/kernels:custom_kernel_fusion",
@@ -435,6 +438,7 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/transforms:convert_triton_gemm_config",
         "//xla/backends/gpu/transforms:fusion_wrapper",
@@ -555,6 +559,7 @@ cc_library(
         ":gpu_codegen_backend",
         "//xla:autotuning_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -654,6 +659,7 @@ cc_library(
         "//xla:shape_layout",
         "//xla:shape_util",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -673,7 +679,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -692,6 +697,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:util",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
@@ -709,7 +715,6 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -889,6 +894,7 @@ cc_library(
     deps = [
         ":gpu_codegen_backend",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/transforms:priority_fusion",
         "//xla/hlo/analysis:alias_info",
@@ -931,6 +937,7 @@ xla_test(
         "//xla:autotune_results_proto_cc",
         "//xla:autotuning_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/backends/gpu/transforms:custom_kernel_fusion_rewriter",
         "//xla/backends/gpu/transforms:dot_algorithm_rewriter",
@@ -971,6 +978,7 @@ cc_library(
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
+        "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
         "//xla/hlo/ir:hlo",
         "//xla/service:compiler",
