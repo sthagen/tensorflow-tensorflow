@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "tensorflow/core/framework/op_kernel.h"
 
-#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -49,7 +48,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/notification.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
-#include "tensorflow/core/lib/hash/hash.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
@@ -68,26 +66,6 @@ const char* kJitKernelLabel = "JITCompiledKernel";
 const char* kDisableJitKernelsEnvVar = "TF_DISABLE_JIT_KERNELS";
 
 namespace {
-
-#ifdef TF_ENABLE_KERNEL_REGISTRATION_TIMING
-std::atomic<int64_t> find_kernel_registration_calls_count = {0};
-std::atomic<int64_t> find_kernel_registration_total_time_ns = {0};
-
-class FindKernelRegistrationStats {
- public:
-  FindKernelRegistrationStats() {
-    find_kernel_registration_calls_count++;
-    start_ = Env::Default()->NowNanos();
-  }
-  ~FindKernelRegistrationStats() {
-    int64_t stop = Env::Default()->NowNanos();
-    find_kernel_registration_total_time_ns += (stop - start_);
-  }
-
- private:
-  int64_t start_;
-};
-#endif
 
 absl::Status MatchSignatureHelper(const DataTypeSlice expected_inputs,
                                   const DataTypeSlice expected_outputs,
@@ -147,29 +125,6 @@ bool ShouldLogNodeDef(OpKernel* op_kernel) {
 }
 
 }  // namespace
-
-void ResetFindKernelRegistrationStats() {
-#ifdef TF_ENABLE_KERNEL_REGISTRATION_TIMING
-  find_kernel_registration_calls_count = 0;
-  find_kernel_registration_total_time_ns = 0;
-#endif
-}
-
-int64_t GetFindKernelRegistrationCalls() {
-#ifdef TF_ENABLE_KERNEL_REGISTRATION_TIMING
-  return find_kernel_registration_calls_count;
-#else
-  return 0;
-#endif
-}
-
-int64_t GetFindKernelRegistrationTimeNs() {
-#ifdef TF_ENABLE_KERNEL_REGISTRATION_TIMING
-  return find_kernel_registration_total_time_ns;
-#else
-  return 0;
-#endif
-}
 
 // OpKernel ------------------------------------------------------------------
 
@@ -1435,72 +1390,6 @@ const std::string& GetKernelLabelAttr(const AttrSlice& node_attrs) {
     return attr_value->s();
 }
 
-// Cache for FindKernelRegistration.
-struct KernelCacheKey {
-  std::string op_name;
-  std::string device_type;
-  std::string label;
-  // Use vector of pairs to store attributes as AttrSlice is not owning.
-  // Sorted by attribute name.
-  std::vector<std::pair<std::string, AttrValue>> attrs;
-  uint64_t hash;
-
-  KernelCacheKey(absl::string_view op, absl::string_view device,
-                 absl::string_view lbl, AttrSlice node_attrs)
-      : op_name(op), device_type(device), label(lbl) {
-    attrs.reserve(node_attrs.size());
-    for (const auto& p : node_attrs) {
-      attrs.emplace_back(p.first, p.second);
-    }
-    // Calculate hash.
-    hash = Hash64(op_name);
-    hash = Hash64Combine(hash, Hash64(device_type));
-    hash = Hash64Combine(hash, Hash64(label));
-    for (const auto& p : attrs) {
-      hash = Hash64Combine(hash, Hash64(p.first));
-      hash = Hash64Combine(hash, FastAttrValueHash(p.second));
-    }
-  }
-};
-
-struct KernelCacheKeyHash {
-  std::size_t operator()(const KernelCacheKey& k) const { return k.hash; }
-};
-
-struct KernelCacheKeyEq {
-  bool operator()(const KernelCacheKey& a, const KernelCacheKey& b) const {
-    if (a.hash != b.hash) return false;
-    if (a.op_name != b.op_name) return false;
-    if (a.device_type != b.device_type) return false;
-    if (a.label != b.label) return false;
-    if (a.attrs.size() != b.attrs.size()) return false;
-    for (size_t i = 0; i < a.attrs.size(); ++i) {
-      if (a.attrs[i].first != b.attrs[i].first) return false;
-      if (!AreAttrValuesEqual(a.attrs[i].second, b.attrs[i].second))
-        return false;
-    }
-    return true;
-  }
-};
-
-struct CachedKernelResult {
-  const KernelRegistration* reg;
-  bool was_attr_mismatch;
-};
-
-using KernelCache = absl::flat_hash_map<KernelCacheKey, CachedKernelResult,
-                                        KernelCacheKeyHash, KernelCacheKeyEq>;
-
-KernelCache* GetGlobalKernelCache() {
-  static KernelCache* cache = new KernelCache();
-  return cache;
-}
-
-mutex* GetGlobalKernelCacheLock() {
-  static mutex* mu = new mutex();
-  return mu;
-}
-
 // TODO(irving): Replace with const Node& version below.
 absl::Status FindKernelRegistration(
     const DeviceType& device_type, absl::string_view node_name,
@@ -1508,36 +1397,10 @@ absl::Status FindKernelRegistration(
     const NodeDef_ExperimentalDebugInfo& experimental_debug_info,
     absl::string_view node_op, AttrSlice node_attrs,
     const KernelRegistration** reg, bool* was_attr_mismatch) {
-#ifdef TF_ENABLE_KERNEL_REGISTRATION_TIMING
-  FindKernelRegistrationStats stats;
-#endif
   *reg = nullptr;
   *was_attr_mismatch = false;
 
   const std::string& label = GetKernelLabelAttr(node_attrs);
-
-  // Check if we should cache.
-  // Large attributes (e.g. Const op) should not be cached to avoid excessive
-  // memory usage.
-  bool should_cache = true;
-  for (const auto& attr : node_attrs) {
-    if (attr.second.ByteSizeLong() > 1024) {
-      should_cache = false;
-      break;
-    }
-  }
-
-  if (should_cache) {
-    mutex_lock l(*GetGlobalKernelCacheLock());
-    KernelCache* cache = GetGlobalKernelCache();
-    KernelCacheKey key(node_op, device_type.type_string(), label, node_attrs);
-    auto it = cache->find(key);
-    if (it != cache->end()) {
-      *reg = it->second.reg;
-      *was_attr_mismatch = it->second.was_attr_mismatch;
-      return absl::OkStatus();
-    }
-  }
 
   const std::string key = Key(node_op, device_type, label);
   auto typed_registry = GlobalKernelRegistryTyped();
@@ -1602,14 +1465,6 @@ absl::Status FindKernelRegistration(
               << "'"
               << "Will fall back to a default kernel." << std::endl;
     }
-  }
-
-  if (should_cache) {
-    mutex_lock l(*GetGlobalKernelCacheLock());
-    KernelCache* cache = GetGlobalKernelCache();
-    KernelCacheKey key(node_op, device_type.type_string(), label, node_attrs);
-    cache->emplace(std::move(key),
-                   CachedKernelResult{*reg, *was_attr_mismatch});
   }
 
   return absl::OkStatus();

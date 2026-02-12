@@ -543,6 +543,24 @@ absl::Status CommonPjRtClient::PrepareArguments(
             i, replica, tfrt_buffer->device()->DebugString(),
             device->DebugString());
       }
+
+      const Shape& expected_shape = parameter_device_shapes[i];
+      const Shape& on_device_shape = tfrt_buffer->on_device_shape();
+
+      if (options.strict_shape_checking &&
+          // Skip shape check for non-array shapes (e.g. tuples).
+          expected_shape.IsArray() && on_device_shape.IsArray() &&
+          // Dynamic shapes cannot be compared directly.
+          expected_shape.is_static() && on_device_shape.is_static() &&
+          !xla::Shape::Equal().IgnoreMemorySpaceInLayout()(expected_shape,
+                                                           on_device_shape)) {
+        return InvalidArgument(
+            "Buffer passed to Execute() as argument %d to replica %d has "
+            "unexpected shape: %s (expected %s).",
+            i, replica, on_device_shape.ToString(/*print_layout=*/true),
+            expected_shape.ToString(/*print_layout=*/true));
+      }
+
       const bool donated_param =
           donate_it != donated_params.end() && *donate_it == i;
       if (donated_param) {
@@ -551,9 +569,8 @@ absl::Status CommonPjRtClient::PrepareArguments(
       const bool donation_denied_at_runtime =
           options.non_donatable_input_indices.contains(i);
       if (donated_param && donation_denied_at_runtime &&
-          tfrt_buffer->on_device_shape().has_layout() &&
-          tfrt_buffer->on_device_shape().layout().memory_space() ==
-              Layout::kHostMemorySpace) {
+          on_device_shape.has_layout() &&
+          on_device_shape.layout().memory_space() == Layout::kHostMemorySpace) {
         return absl::UnimplementedError(
             "pinned_host buffers do not support donation denial at runtime via "
             "`ExecuteOptions::non_donatable_input_indices`");
@@ -590,14 +607,10 @@ absl::Status CommonPjRtClient::PrepareArguments(
       }
       auto* device_buffer = hold.buffer();
 
-      const bool is_handle_dynamic_shape =
-          handle->on_device_shape().is_dynamic();
-
-      const Shape& expected_shape = parameter_device_shapes[i];
       if (device_buffer->raw_buffer()) {
         tsl::RCReference<CommonPjRtRawBuffer> actual_buffer =
             device_buffer->raw_buffer();
-        if (is_handle_dynamic_shape && !expected_shape.is_dynamic()) {
+        if (on_device_shape.is_dynamic() && !expected_shape.is_dynamic()) {
           TF_ASSIGN_OR_RETURN(auto handle_logical_device_shape,
                               handle->logical_on_device_shape());
           auto status_or_buffer =
@@ -883,7 +896,8 @@ absl::Status CommonPjRtLoadedExecutable::ExecutePrepare(
       options, argument_handles, ParametersThatMustBeDonated(),
       *launch_args.extra_deps, *launch_args.control_deps,
       launch_args.input_buffers, launch_args.device_buffers, device, replica,
-      partition, parameter_device_shapes_, is_error));
+      partition, parameter_device_shapes_, is_error,
+      client()->allow_fallback_for_donation()));
 
   absl::InlinedVector<tsl::RCReference<CommonPjRtRawBuffer>, 4>
       output_leaf_buffers;
@@ -941,8 +955,9 @@ absl::Status CommonPjRtLoadedExecutable::CheckBufferCompatibilities(
   return absl::OkStatus();
 }
 
-PjRtLoadedExecutable::Result CommonPjRtLoadedExecutable::ExecuteLaunch(
-    ExecuteLaunchArgs& launch_args, bool fill_future) const {
+absl::StatusOr<PjRtLoadedExecutable::Result>
+CommonPjRtLoadedExecutable::ExecuteLaunch(ExecuteLaunchArgs& launch_args,
+                                          bool fill_future) const {
   CHECK(launch_args.extra_deps.get()) << "extra_deps is nullptr";
   CHECK(launch_args.control_deps.get()) << "control_deps is nullptr";
   auto results =
@@ -963,6 +978,9 @@ PjRtLoadedExecutable::Result CommonPjRtLoadedExecutable::ExecuteLaunch(
       }
     }
   }
+
+  TF_RETURN_IF_ERROR(results.inline_status);
+
   return PjRtLoadedExecutable::Result(
       {/*future=*/std::move(results.future),
        /*buffers=*/client()->CreateOutputs(

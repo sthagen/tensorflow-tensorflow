@@ -41,10 +41,10 @@ load("//third_party/py:python_configure.bzl", "python_configure")
 load("//third_party/py/ml_dtypes:workspace.bzl", ml_dtypes = "repo")
 load("//third_party/pybind11_abseil:workspace.bzl", pybind11_abseil = "repo")
 load("//third_party/pybind11_bazel:workspace.bzl", pybind11_bazel = "repo")
-load("//third_party/raft:workspace.bzl", raft = "repo")
-load("//third_party/rapids_logger:workspace.bzl", rapids_logger = "repo")
+load("//third_party/raft:workspace.bzl", raft = "xla_repo")
+load("//third_party/rapids_logger:workspace.bzl", rapids_logger = "xla_repo")
 load("//third_party/riegeli:workspace.bzl", riegeli = "repo")
-load("//third_party/rmm:workspace.bzl", rmm = "repo")
+load("//third_party/rmm:workspace.bzl", rmm = "xla_repo")
 load("//third_party/robin_map:workspace.bzl", robin_map = "repo")
 load("//third_party/rocm_device_libs:workspace.bzl", rocm_device_libs = "repo")
 load("//third_party/shardy:workspace.bzl", shardy = "repo")
@@ -167,9 +167,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "KleidiAI",
-        sha256 = "5e922c9afb7a0c881fc4359b58488f3faa840e8435de1a2207a6525935ed83c2",
-        strip_prefix = "kleidiai-63205aa90afa6803d8f58bc3081b69288e9f1906",
-        urls = tf_mirror_urls("https://github.com/ARM-software/kleidiai/archive/63205aa90afa6803d8f58bc3081b69288e9f1906.zip"),
+        sha256 = "be1d6fb524b2a5e3772b38472a24d660e22b210f6b53b73bd8a5437ac2d882a7",
+        strip_prefix = "kleidiai-d41219d3db13758074a6440d7b55a87487334c8b",
+        urls = tf_mirror_urls("https://github.com/ARM-software/kleidiai/archive/d41219d3db13758074a6440d7b55a87487334c8b.zip"),
     )
 
     tf_http_archive(
@@ -370,10 +370,10 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "com_github_grpc_grpc",
-        sha256 = "e2ace790a5f2d0f83259d1390a816a33b013ea34df2e86084d927e58daa4c5d9",
-        strip_prefix = "grpc-1.78.0",
+        sha256 = "dd6a2fa311ba8441bbefd2764c55b99136ff10f7ea42954be96006a2723d33fc",
+        strip_prefix = "grpc-1.74.0",
         patch_file = ["//third_party/grpc:grpc.patch"],
-        urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/refs/tags/v1.78.0.tar.gz"),
+        urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/refs/tags/v1.74.0.tar.gz"),
     )
 
     # Load the raw llvm-project.  llvm does not have build rules set up by default,

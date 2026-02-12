@@ -1,5 +1,6 @@
 # Description:
 # Contains script to generate tensorflow/python/platform/build_info.py
+load("@rules_python//python:defs.bzl", "py_binary")
 
 package(
     default_visibility = ["//tensorflow:internal"],

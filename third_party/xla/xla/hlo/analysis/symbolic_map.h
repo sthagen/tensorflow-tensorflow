@@ -97,6 +97,12 @@ class SymbolicMap {
   // Returns true if all result expressions are constant.
   bool IsConstant() const;
 
+  // Returns true if any result expression depends on the given dimension.
+  bool IsFunctionOfDim(int64_t dim_id) const;
+
+  // Returns true if any result expression depends on the given symbol.
+  bool IsFunctionOfSymbol(int64_t symbol_id) const;
+
   // Returns a vector containing the values of all the results. CHECK-fails if
   // any result expression is not a constant.
   llvm::SmallVector<int64_t> GetConstantResults() const;
@@ -178,10 +184,6 @@ SymbolicMap CompressDims(const SymbolicMap& map,
 // Expressions are updated to use the new symbol indices.
 SymbolicMap CompressSymbols(const SymbolicMap& map,
                             const llvm::SmallBitVector& unused_symbols);
-
-// Parses a SymbolicMap from its string representation.
-SymbolicMap ParseSymbolicMap(absl::string_view serialized_symbolic_map,
-                             mlir::MLIRContext* mlir_context);
 
 template <typename H>
 H AbslHashValue(H h, const llvm::SmallVector<SymbolicExpr>& vec) {

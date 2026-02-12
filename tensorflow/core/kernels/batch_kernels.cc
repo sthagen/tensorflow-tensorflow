@@ -179,6 +179,7 @@ class BatchResource : public serving::BatchResourceBase {
                   serving::MixedPriorityBatchingPolicy::
                       kLowPriorityPaddingWithMaxBatchSize,
                   enable_large_batch_splitting,
+                  /*enable_priority_aware_batch_scheduler=*/false,
                   /*batch_padding_policy=*/"PAD_UP", resource);
   }
 
@@ -192,7 +193,9 @@ class BatchResource : public serving::BatchResourceBase {
       int32_t low_priority_max_enqueued_batches,
       const std::vector<int32>& low_priority_allowed_batch_sizes,
       serving::MixedPriorityBatchingPolicy mixed_priority_batching_policy,
-      bool enable_large_batch_splitting, absl::string_view batch_padding_policy,
+      bool enable_large_batch_splitting,
+      bool enable_priority_aware_batch_scheduler,
+      absl::string_view batch_padding_policy,
       std::unique_ptr<BatchResource>* resource) {
     BatcherT::Options batcher_options;
     batcher_options.num_batch_threads = num_batch_threads;
@@ -201,6 +204,15 @@ class BatchResource : public serving::BatchResourceBase {
       batcher_options.use_global_scheduler = true;
       batcher_options.rank_queues = true;
     }
+    if (enable_priority_aware_batch_scheduler) {
+      batcher_options.use_global_scheduler = true;
+      batcher_options.rank_queues = true;
+    }
+    LOG(INFO) << "Batcher options: "
+              << "num_batch_threads=" << batcher_options.num_batch_threads
+              << ", use_global_scheduler="
+              << batcher_options.use_global_scheduler
+              << ", rank_queues=" << batcher_options.rank_queues;
     std::shared_ptr<BatcherT> batcher;
     TF_RETURN_IF_ERROR(BatcherT::Create(batcher_options, &batcher));
 
@@ -213,7 +225,8 @@ class BatchResource : public serving::BatchResourceBase {
             /*disable_padding=*/false, batch_padding_policy,
             low_priority_max_batch_size, low_priority_batch_timeout_micros,
             low_priority_max_enqueued_batches, low_priority_allowed_batch_sizes,
-            mixed_priority_batching_policy),
+            mixed_priority_batching_policy,
+            enable_priority_aware_batch_scheduler),
         allowed_batch_sizes));
     return absl::OkStatus();
   }
@@ -320,6 +333,11 @@ BatchFunctionKernel::BatchFunctionKernel(OpKernelConstruction* c)
     OP_REQUIRES_OK(c, c->GetAttr("enable_large_batch_splitting",
                                  &enable_large_batch_splitting_));
     has_attribute_enable_large_batch_splitting_ = true;
+  }
+
+  if (c->HasAttr("enable_priority_aware_batch_scheduler")) {
+    OP_REQUIRES_OK(c, c->GetAttr("enable_priority_aware_batch_scheduler",
+                                 &enable_priority_aware_batch_scheduler_));
   }
 
   // Helper function `SetAdaptiveBatchSchedulerOptions` calls
@@ -446,7 +464,8 @@ void BatchFunctionKernel::ComputeAsync(OpKernelContext* c, DoneCallback done) {
           low_priority_batch_timeout_micros_,
           low_priority_max_enqueued_batches_, low_priority_allowed_batch_sizes_,
           mixed_priority_batching_policy, enable_large_batch_splitting_,
-          batch_padding_policy_, &new_resource));
+          enable_priority_aware_batch_scheduler_, batch_padding_policy_,
+          &new_resource));
       if (session_metadata) {
         new_resource->set_session_metadata(*session_metadata);
       }

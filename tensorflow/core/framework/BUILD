@@ -1461,19 +1461,6 @@ cc_library(
     visibility = ["//visibility:private"],
 )
 
-cc_library(
-    name = "kernel_def_util",
-    srcs = ["kernel_def_util.cc"],
-    hdrs = ["kernel_def_util.h"],
-    deps = [
-        ":attr_value_proto_cc",
-        ":attr_value_util",
-        ":kernel_def_proto_cc",
-        ":node_def_util",
-        "//tensorflow/core:framework_types_hdr",
-    ],
-)
-
 # All framework protos are self-contained, i.e. they only import other
 # protos from the same package, so we can build the protos here and then
 # link them from core:protos_all without circular dependencies.

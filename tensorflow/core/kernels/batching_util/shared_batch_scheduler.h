@@ -199,7 +199,7 @@ class SharedBatchScheduler
     // Must be positive, or else invalid argument error will be returned at
     // queue creation time.
     //
-    // If `enable_priority_aware_scheduler` is true, this field is not
+    // If `enable_priority_aware_batch_scheduler` is true, this field is not
     // enforced, since batches are only constructed by batch threads; queue size
     // is controlled by `PriorityAwareSchedulerOptions` instead.
     size_t max_enqueued_batches = 10;
@@ -242,17 +242,17 @@ class SharedBatchScheduler
     std::vector<int32_t> allowed_batch_sizes;
 
     // If true, the padding will not be appended.
-    // When `enable_priority_aware_scheduler` is true, this option is ignored
-    // by SharedBatchScheduler -- batches are formed with as many requests as
-    // possible up to `max_execution_batch_size`.
+    // When `enable_priority_aware_batch_scheduler` is true, this option is
+    // ignored by SharedBatchScheduler -- batches are formed with as many
+    // requests as possible up to `max_execution_batch_size`.
     bool disable_padding = false;
 
     // The padding policy to use.
     //
     // See the documentation for kPadUpPolicy for details.
-    // When `enable_priority_aware_scheduler` is true, `batch_padding_policy`
-    // must be kPadUpPolicy. Batches are formed with as many requests as
-    // possible up to `max_execution_batch_size`.
+    // When `enable_priority_aware_batch_scheduler` is true,
+    // `batch_padding_policy` must be kPadUpPolicy. Batches are formed with as
+    // many requests as possible up to `max_execution_batch_size`.
     std::string batch_padding_policy = std::string(kPadUpPolicy);
 
     // A pointer to a ModelBatchStats instance for this model. To be used for
@@ -289,7 +289,8 @@ class SharedBatchScheduler
 
     // A policy that determines the mixed priority batching behavior. It is
     // effective only when enable_priority_queue is true.
-    // When `enable_priority_aware_scheduler` is true, this option is ignored
+    // When `enable_priority_aware_batch_scheduler` is true, this option is
+    // ignored
     // -- batches are formed with as many requests as possible up to
     // `max_execution_batch_size`, with tasks of any priority, based on
     // criticality.
@@ -303,12 +304,12 @@ class SharedBatchScheduler
     // `enable_priority_queue`, which only supports two levels of priority (high
     // and low) and defines policies for mixing tasks of different priorities in
     // batches.
-    bool enable_priority_aware_scheduler = false;
+    bool enable_priority_aware_batch_scheduler = false;
 
     // Options for priority aware scheduler.
-    // Used iff `enable_priority_aware_scheduler` is true.
-    // If `enable_priority_aware_scheduler` is true, this struct controls the
-    // size of the queue.
+    // Used iff `enable_priority_aware_batch_scheduler` is true.
+    // If `enable_priority_aware_batch_scheduler` is true, this struct controls
+    // the size of the queue.
     struct PriorityAwareSchedulerOptions {
       std::map<tsl::criticality::Criticality, size_t>
           per_criticality_queue_size;
@@ -376,7 +377,7 @@ class SharedBatchScheduler
 
 namespace internal {
 // A priority queue of tasks, designed to be used with
-// SharedBatchScheduler when `enable_priority_aware_scheduler` is true.
+// SharedBatchScheduler when `enable_priority_aware_batch_scheduler` is true.
 // Tasks are organized into sub-queues based on criticality.
 // When forming a batch, tasks are drawn from higher-criticality queues before
 // lower-criticality queues. Within each queue, tasks are processed in
@@ -991,22 +992,23 @@ absl::Status SharedBatchScheduler<TaskType>::AddQueueAfterRewritingOptions(
         options.max_execution_batch_size);
   }
 
-  if (options.enable_priority_aware_scheduler) {
+  if (options.enable_priority_aware_batch_scheduler) {
     if (options.disable_padding) {
       return absl::InvalidArgumentError(
-          "If enable_priority_aware_scheduler is true, disable_padding "
+          "If enable_priority_aware_batch_scheduler is true, disable_padding "
           "must be false.");
     }
     if (options.batch_padding_policy != kPadUpPolicy) {
       return absl::InvalidArgumentError(absl::StrFormat(
-          "If enable_priority_aware_scheduler is true, batch_padding_policy "
+          "If enable_priority_aware_batch_scheduler is true, "
+          "batch_padding_policy "
           "must be kPadUpPolicy. The batch_padding_policy is %s.",
           options.batch_padding_policy));
     }
     if (options.mixed_priority_batching_policy !=
         MixedPriorityBatchingPolicy::kLowPriorityPaddingWithMaxBatchSize) {
       return absl::InvalidArgumentError(
-          absl::StrFormat("If enable_priority_aware_scheduler is true, "
+          absl::StrFormat("If enable_priority_aware_batch_scheduler is true, "
                           "mixed_priority_batching_policy must be "
                           "kLowPriorityPaddingWithMaxBatchSize. The "
                           "mixed_priority_batching_policy is %d.",
@@ -1015,14 +1017,15 @@ absl::Status SharedBatchScheduler<TaskType>::AddQueueAfterRewritingOptions(
     if (options.priority_aware_scheduler_options.per_criticality_queue_size
             .empty()) {
       return absl::InvalidArgumentError(
-          "If enable_priority_aware_scheduler is true, "
+          "If enable_priority_aware_batch_scheduler is true, "
           "per_criticality_queue_size must be non-empty.");
     }
     for (const auto& pair :
          options.priority_aware_scheduler_options.per_criticality_queue_size) {
       if (pair.second < 0) {
         return absl::InvalidArgumentError(absl::StrFormat(
-            "If enable_priority_aware_scheduler is true, queue sizes must be "
+            "If enable_priority_aware_batch_scheduler is true, queue sizes "
+            "must be "
             "positive. The queue size for criticality %d is %d.",
             pair.first, pair.second));
       }
@@ -1348,7 +1351,7 @@ absl::Status Queue<TaskType>::Schedule(std::unique_ptr<TaskType>* task) {
 
     DCHECK(!closed_);
 
-    if (options_.enable_priority_aware_scheduler) {
+    if (options_.enable_priority_aware_batch_scheduler) {
       if ((*task)->size() > options_.input_batch_size_limit) {
         return absl::InvalidArgumentError(absl::StrFormat(
             "Task size %d is larger than maximum input batch size %d",
@@ -1392,7 +1395,7 @@ template <typename TaskType>
 size_t Queue<TaskType>::NumEnqueuedTasks() const {
   size_t num_enqueued_tasks = 0;
   mutex_lock l(mu_);
-  if (options_.enable_priority_aware_scheduler) {
+  if (options_.enable_priority_aware_batch_scheduler) {
     return tasks_priority_queue_.num_tasks();
   }
   for (const auto& batch : GetBatches()) {
@@ -1409,7 +1412,7 @@ size_t Queue<TaskType>::SchedulingCapacity() const {
 
 template <typename TaskType>
 size_t Queue<TaskType>::SchedulingCapacityInternal() const {
-  if (options_.enable_priority_aware_scheduler) {
+  if (options_.enable_priority_aware_batch_scheduler) {
     size_t total_limit = tasks_priority_queue_.GetMaxSize();
     int size = tasks_priority_queue_.size();
     if (size >= total_limit) return 0;
@@ -1514,7 +1517,7 @@ Queue<TaskType>::ScheduleBatch() {
   {
     mutex_lock l(mu_);
 
-    if (options_.enable_priority_aware_scheduler) {
+    if (options_.enable_priority_aware_batch_scheduler) {
       batch_to_schedule = tasks_priority_queue_.ScheduleBatch();
     } else {
       std::deque<std::unique_ptr<Batch<TaskType>>>& batches = GetBatches();
@@ -1690,7 +1693,7 @@ void Queue<TaskType>::CloseAndWaitUntilEmpty() {
 
 template <typename TaskType>
 bool Queue<TaskType>::IsEmptyInternal() const {
-  if (options_.enable_priority_aware_scheduler) {
+  if (options_.enable_priority_aware_batch_scheduler) {
     return num_batches_being_processed_ == 0 && tasks_priority_queue_.empty();
   }
   const std::deque<std::unique_ptr<Batch<TaskType>>>& batches = GetBatches();
@@ -1733,7 +1736,7 @@ Queue<TaskType>::PeekBatchPriority() const {
 template <typename TaskType>
 std::optional<typename Queue<TaskType>::BatchPriorityKey>
 Queue<TaskType>::PeekBatchPriorityImpl() const {
-  if (options_.enable_priority_aware_scheduler) {
+  if (options_.enable_priority_aware_batch_scheduler) {
     if (tasks_priority_queue_.empty()) {
       return std::nullopt;
     }

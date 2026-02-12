@@ -854,7 +854,7 @@ class DecodeImageV2Op : public OpKernel {
 
     OP_REQUIRES(context,
                 jxl::DecodeImage(input, channels, output->flat<uint8>().data(),
-                                 output->flat<uint8>().size()),
+                                 output->flat<uint8_t>().size()),
                 absl::InvalidArgumentError("Failed to decode JXL image"));
   }
 
