@@ -56,6 +56,7 @@ limitations under the License.
 #include "xla/service/pattern_matcher.h"
 #include "xla/service/shape_inference.h"
 #include "xla/service/spmd/spmd_partitioner.h"
+#include "xla/service/spmd/spmd_partitioner_util_internal.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/util.h"
@@ -2987,7 +2988,7 @@ std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsForReplication(
       GetListOfListsPartitionGroupsForReplication(sharding, replication_dims));
 }
 
-CollectiveDeviceList GetPartitionGroupsAcrossTargetDims(
+CollectiveDeviceList GetListOfListsPartitionGroupsAcrossTargetDims(
     const HloSharding& sharding, std::vector<int64_t> target_dims,
     std::vector<int64_t> group_sizes) {
   CHECK(target_dims.size() == group_sizes.size());
@@ -3130,6 +3131,24 @@ GetMeshAxesPartitionGroupsAcrossTargetDims(const HloSharding& sharding,
         AxisRef(target_dim, {axis_size / group_size, group_size}));
   }
   return MeshAxesReplicaGroupList(mesh.value(), axis_refs);
+}
+
+std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsAcrossTargetDims(
+    const HloSharding& sharding, std::vector<int64_t> target_dims,
+    std::vector<int64_t> group_sizes) {
+  if (std::optional<MeshAxesReplicaGroupList> mesh_axes_groups =
+          GetMeshAxesPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                     group_sizes)) {
+    return std::make_unique<MeshAxesReplicaGroupList>(*mesh_axes_groups);
+  }
+  if (std::optional<IotaReplicaGroupList> iota_groups =
+          GetIotaPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                 group_sizes)) {
+    return std::make_unique<IotaReplicaGroupList>(*iota_groups);
+  }
+  return std::make_unique<CollectiveDeviceList>(
+      GetListOfListsPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                    group_sizes));
 }
 
 // Expands partition group list across all replicas. Expects that provided

@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "xla/backends/gpu/runtime/buffer_debug_log_entry_metadata_store.h"
 #include "xla/backends/gpu/runtime/buffer_debug_log_structs.h"
+#include "xla/backends/gpu/runtime/buffer_debug_log_structs_test_matchers.h"
 #include "xla/backends/gpu/runtime/collective_clique_requests.h"
 #include "xla/backends/gpu/runtime/collective_memory_requests.h"
 #include "xla/backends/gpu/runtime/collective_multimem_registry.h"
@@ -46,7 +47,6 @@ limitations under the License.
 #include "xla/stream_executor/platform_manager.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor_address_allocator.h"
-#include "xla/stream_executor/stream_executor_memory_allocator.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/types.h"
@@ -80,18 +80,6 @@ MATCHER_P2(IsEntryWithMetadata, store, metadata, "") {
             Field(&Metadata::execution_id, metadata.execution_id),
             Field(&Metadata::is_input, metadata.is_input)),
       *actual_metadata, result_listener);
-}
-
-MATCHER_P(NanCountIs, value, "nan_count") {
-  return ExplainMatchResult(value, arg.nan_count, result_listener);
-}
-
-MATCHER_P(InfCountIs, value, "inf_count") {
-  return ExplainMatchResult(value, arg.inf_count, result_listener);
-}
-
-MATCHER_P(ZeroCountIs, value, "zero_count") {
-  return ExplainMatchResult(value, arg.zero_count, result_listener);
 }
 
 class BuffersDebugFloatCheckThunkTest : public ::testing::Test {
@@ -554,6 +542,8 @@ TEST_F(BuffersDebugFloatCheckThunkTest,
       entries,
       UnorderedElementsAre(
           AllOf(NanCountIs(1), InfCountIs(2), ZeroCountIs(3),
+                MinValueIs(Eigen::bfloat16(0.0f)),
+                MaxValueIs(Eigen::bfloat16(1.0f)),
                 IsEntryWithMetadata(
                     metadata_store,
                     Metadata{
@@ -563,7 +553,8 @@ TEST_F(BuffersDebugFloatCheckThunkTest,
                         /*is_input=*/false,
                         BufferDebugLogEntryProto::CHECK_TYPE_FLOAT_CHECKS,
                     })),
-          AllOf(NanCountIs(3), InfCountIs(2), ZeroCountIs(1),
+          AllOf(NanCountIs(3), InfCountIs(2), ZeroCountIs(1), MinValueIs(0.0f),
+                MaxValueIs(1.0f),
                 IsEntryWithMetadata(
                     metadata_store,
                     Metadata{
@@ -784,6 +775,8 @@ TEST_F(BuffersDebugFloatCheckThunkTest,
       entries,
       UnorderedElementsAre(
           AllOf(NanCountIs(1), InfCountIs(2), ZeroCountIs(3),
+                MinValueIs(Eigen::bfloat16(0.0f)),
+                MaxValueIs(Eigen::bfloat16(1.0f)),
                 IsEntryWithMetadata(
                     metadata_store,
                     Metadata{
@@ -793,7 +786,8 @@ TEST_F(BuffersDebugFloatCheckThunkTest,
                         /*is_input=*/false,
                         BufferDebugLogEntryProto::CHECK_TYPE_FLOAT_CHECKS,
                     })),
-          AllOf(NanCountIs(3), InfCountIs(2), ZeroCountIs(1),
+          AllOf(NanCountIs(3), InfCountIs(2), ZeroCountIs(1), MinValueIs(0.0f),
+                MaxValueIs(1.0f),
                 IsEntryWithMetadata(
                     metadata_store,
                     Metadata{

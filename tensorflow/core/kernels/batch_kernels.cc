@@ -115,7 +115,8 @@ absl::string_view GetModelName(OpKernelContext* ctx) {
 using ::tensorflow::concat_split_util::Concat;
 using ::tensorflow::concat_split_util::Split;
 
-int32 NumBatchThreadsFromEnvironmentWithDefault(int default_num_batch_threads) {
+int32_t NumBatchThreadsFromEnvironmentWithDefault(
+    int default_num_batch_threads) {
   int32_t num;
   const char* val = std::getenv("TF_NUM_BATCH_THREADS");
 
@@ -165,7 +166,7 @@ class BatchResource : public serving::BatchResourceBase {
                              int32_t max_execution_batch_size,
                              int32_t batch_timeout_micros,
                              int32_t max_enqueued_batches,
-                             const std::vector<int32>& allowed_batch_sizes,
+                             const std::vector<int32_t>& allowed_batch_sizes,
                              bool enable_large_batch_splitting,
                              std::unique_ptr<BatchResource>* resource) {
     return Create(has_process_batch_function, num_batch_threads,
@@ -187,11 +188,11 @@ class BatchResource : public serving::BatchResourceBase {
       bool has_process_batch_function, int32_t num_batch_threads,
       int32_t max_execution_batch_size, int32_t batch_timeout_micros,
       int32_t max_enqueued_batches,
-      const std::vector<int32>& allowed_batch_sizes,
+      const std::vector<int32_t>& allowed_batch_sizes,
       int32_t low_priority_max_batch_size,
       int32_t low_priority_batch_timeout_micros,
       int32_t low_priority_max_enqueued_batches,
-      const std::vector<int32>& low_priority_allowed_batch_sizes,
+      const std::vector<int32_t>& low_priority_allowed_batch_sizes,
       serving::MixedPriorityBatchingPolicy mixed_priority_batching_policy,
       bool enable_large_batch_splitting,
       bool enable_priority_aware_batch_scheduler,
@@ -236,7 +237,7 @@ class BatchResource : public serving::BatchResourceBase {
       AdaptiveBatcherT::Options adaptive_shared_batch_scheduler_options,
       int32_t max_batch_size, int32_t batch_timeout_micros,
       int32_t max_enqueued_batches,
-      const std::vector<int32>& allowed_batch_sizes,
+      const std::vector<int32_t>& allowed_batch_sizes,
       std::unique_ptr<BatchResource>* resource) {
     std::shared_ptr<AdaptiveBatcherT> batcher;
     TF_RETURN_IF_ERROR(AdaptiveBatcherT::Create(
@@ -252,13 +253,13 @@ class BatchResource : public serving::BatchResourceBase {
     return absl::OkStatus();
   }
 
-  string DebugString() const final { return "BatchResource"; }
+  std::string DebugString() const final { return "BatchResource"; }
 
  private:
   BatchResource(bool has_process_batch_function,
                 std::shared_ptr<BatcherT> batcher,
                 const BatcherT::QueueOptions& batcher_queue_options,
-                std::vector<int32> allowed_batch_sizes)
+                std::vector<int32_t> allowed_batch_sizes)
       : BatchResourceBase(has_process_batch_function, std::move(batcher),
                           batcher_queue_options,
                           std::move(allowed_batch_sizes)) {}
@@ -266,7 +267,7 @@ class BatchResource : public serving::BatchResourceBase {
   BatchResource(bool has_process_batch_function,
                 std::shared_ptr<AdaptiveBatcherT> batcher,
                 const AdaptiveBatcherT::QueueOptions& batcher_queue_options,
-                std::vector<int32> allowed_batch_sizes)
+                std::vector<int32_t> allowed_batch_sizes)
       : BatchResourceBase(has_process_batch_function, std::move(batcher),
                           batcher_queue_options,
                           std::move(allowed_batch_sizes)) {}
@@ -752,14 +753,14 @@ class BatchKernel : public AsyncOpKernel {
   }
 
  private:
-  string container_;
-  string shared_name_;
-  string batcher_queue_;
-  int32 num_batch_threads_;
-  int32 max_batch_size_;
-  int32 batch_timeout_micros_;
-  int32 max_enqueued_batches_;
-  std::vector<int32> allowed_batch_sizes_;
+  std::string container_;
+  std::string shared_name_;
+  std::string batcher_queue_;
+  int32_t num_batch_threads_;
+  int32_t max_batch_size_;
+  int32_t batch_timeout_micros_;
+  int32_t max_enqueued_batches_;
+  std::vector<int32_t> allowed_batch_sizes_;
 };
 
 REGISTER_KERNEL_BUILDER(Name("Batch").Device(DEVICE_CPU), BatchKernel);
@@ -785,7 +786,7 @@ class UnbatchResource : public ResourceBase {
     timeout_enforcer_ = nullptr;
   }
 
-  string DebugString() const final { return "UnbatchResource"; }
+  std::string DebugString() const final { return "UnbatchResource"; }
 
   absl::Status Compute(OpKernelContext* context,
                        AsyncOpKernel::DoneCallback done) {
@@ -846,7 +847,7 @@ class UnbatchResource : public ResourceBase {
         return absl::OkStatus();
       }
 
-      const uint64 deadline_micros =
+      const uint64_t deadline_micros =
           Env::Default()->NowMicros() + timeout_micros_;
 
       // Add ourselves to the waitlist for tensors.
@@ -896,7 +897,7 @@ class UnbatchResource : public ResourceBase {
  private:
   // Evicts waiting tensors and callbacks that have exceeded their deadline.
   void EnforceTimeout() {
-    const uint64 now = Env::Default()->NowMicros();
+    const uint64_t now = Env::Default()->NowMicros();
     std::vector<WaitingCallback> evicted_callbacks;
 
     {
@@ -931,17 +932,17 @@ class UnbatchResource : public ResourceBase {
   }
 
   struct WaitingTensor {
-    uint64 deadline_micros;
+    uint64_t deadline_micros;
     Tensor tensor;
   };
 
   struct WaitingCallback {
-    uint64 deadline_micros;
+    uint64_t deadline_micros;
     OpKernelContext* context;
     AsyncOpKernel::DoneCallback done;
   };
 
-  const int32 timeout_micros_;
+  const int32_t timeout_micros_;
 
   mutex mu_;
 
@@ -988,9 +989,9 @@ class UnbatchKernel : public AsyncOpKernel {
   }
 
  private:
-  string container_;
-  string shared_name_;
-  int32 timeout_micros_;
+  std::string container_;
+  std::string shared_name_;
+  int32_t timeout_micros_;
 };
 REGISTER_KERNEL_BUILDER(Name("Unbatch").Device(DEVICE_CPU), UnbatchKernel);
 
@@ -1000,7 +1001,7 @@ class UnbatchGradResource : public ResourceBase {
  public:
   UnbatchGradResource() {}
 
-  string DebugString() const final { return "UnbatchGradResource"; }
+  std::string DebugString() const final { return "UnbatchGradResource"; }
 
   // Flushes the information for one batch, given its context and done
   // callback. Clears all information about it from the available_tensors_.
@@ -1184,8 +1185,8 @@ class UnbatchGradKernel : public AsyncOpKernel {
   }
 
  private:
-  string container_;
-  string shared_name_;
+  std::string container_;
+  std::string shared_name_;
 };
 REGISTER_KERNEL_BUILDER(Name("UnbatchGrad").Device(DEVICE_CPU),
                         UnbatchGradKernel);
