@@ -354,9 +354,10 @@ tsl_cc_test(
         "//xla/tsl/platform/testdata:test_echo",
         "//xla/tsl/platform/testdata:test_echo_argv_1",
         "//xla/tsl/platform/testdata:test_noop",
+        "//xla/tsl/platform/testdata:test_pwd",
         "//xla/tsl/platform/testdata:test_stderr",
     ],
-    tags = ["no_oss"],  # TODO(b/327036247): revisit after this moves to XLA
+    tags = ["no_windows"],
     deps = [
         ":env",
         ":subprocess",
@@ -423,6 +424,8 @@ tsl_cc_test(
         ":env",
         "//xla/tsl/testing:temporary_directory",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",

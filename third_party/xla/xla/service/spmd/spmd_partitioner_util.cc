@@ -748,7 +748,7 @@ std::optional<HloSharding> PartialReplicateReshardCompatibleSharding(
 std::optional<HloInstruction*> TileToPartialReplicateHaloExchange(
     HloInstruction* hlo, const Shape& base_shape,
     const HloSharding& src_sharding, const HloSharding& dst_sharding,
-    const std::vector<int64_t>& replicate_dims,
+    absl::Span<const int64_t> replicate_dims,
     const SPMDCollectiveOpsCreator& collective_ops_creator,
     int64_t* next_channel_id, HloInstruction* partition_id, SpmdBuilder* b) {
   // Source is tile sharding.
@@ -818,7 +818,7 @@ std::optional<HloInstruction*> TileToPartialReplicateHaloExchange(
 std::optional<HloInstruction*> PadFromPartialReplicateShape(
     HloInstruction* hlo, const Shape& base_shape,
     const HloSharding& src_sharding, const HloSharding& dst_sharding,
-    const std::vector<int64_t>& expand_tile_dims,
+    absl::Span<const int64_t> expand_tile_dims,
     const SPMDCollectiveOpsCreator& collective_ops_creator,
     int64_t* next_channel_id, HloInstruction* partition_id, SpmdBuilder* b) {
   auto padded_src_shape =
@@ -2686,17 +2686,17 @@ std::optional<PadWithWrapPattern> FindPadWithWrapPattern(
       }
       inst = inst->operand(0);
     }
-    return std::make_pair(modifiers, inst);
+    return std::pair{modifiers, inst};
   };
 
   PadWithWrapPattern pad_pattern;
-  auto skip_result = skip_elementwise_ops(lhs);
-  pad_pattern.lhs_modifiers = std::move(skip_result.first);
-  lhs = skip_result.second;
+  auto [lhs_modifiers, lhs_inst] = skip_elementwise_ops(lhs);
+  pad_pattern.lhs_modifiers = std::move(lhs_modifiers);
+  lhs = lhs_inst;
 
-  skip_result = skip_elementwise_ops(rhs);
-  pad_pattern.rhs_modifiers = std::move(skip_result.first);
-  rhs = skip_result.second;
+  auto [rhs_modifiers, rhs_inst] = skip_elementwise_ops(rhs);
+  pad_pattern.rhs_modifiers = std::move(rhs_modifiers);
+  rhs = rhs_inst;
 
   const int64_t dim = concat->concatenate_dimension();
   if (lhs->opcode() != HloOpcode::kSlice ||
@@ -2989,8 +2989,8 @@ std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsForReplication(
 }
 
 CollectiveDeviceList GetListOfListsPartitionGroupsAcrossTargetDims(
-    const HloSharding& sharding, std::vector<int64_t> target_dims,
-    std::vector<int64_t> group_sizes) {
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK(target_dims.size() == group_sizes.size());
   int64_t total_group_size = std::accumulate(
       group_sizes.begin(), group_sizes.end(), 1, std::multiplies<int64_t>());
@@ -3015,8 +3015,8 @@ CollectiveDeviceList GetListOfListsPartitionGroupsAcrossTargetDims(
 }
 
 std::optional<IotaReplicaGroupList> GetIotaPartitionGroupsAcrossTargetDims(
-    const HloSharding& sharding, std::vector<int64_t> target_dims,
-    std::vector<int64_t> group_sizes) {
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK(target_dims.size() == group_sizes.size());
   // If provided sharding is not HloShardingV2, we cannot generate partition
   // groups in an iota format.
@@ -3100,9 +3100,9 @@ std::optional<IotaReplicaGroupList> GetIotaPartitionGroupsAcrossTargetDims(
 }
 
 std::optional<MeshAxesReplicaGroupList>
-GetMeshAxesPartitionGroupsAcrossTargetDims(const HloSharding& sharding,
-                                           std::vector<int64_t> target_dims,
-                                           std::vector<int64_t> group_sizes) {
+GetMeshAxesPartitionGroupsAcrossTargetDims(
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK_EQ(target_dims.size(), group_sizes.size())
       << "target_dims and group_sizes must have the same size.";
   if (target_dims.empty()) {
@@ -3134,8 +3134,8 @@ GetMeshAxesPartitionGroupsAcrossTargetDims(const HloSharding& sharding,
 }
 
 std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsAcrossTargetDims(
-    const HloSharding& sharding, std::vector<int64_t> target_dims,
-    std::vector<int64_t> group_sizes) {
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   if (std::optional<MeshAxesReplicaGroupList> mesh_axes_groups =
           GetMeshAxesPartitionGroupsAcrossTargetDims(sharding, target_dims,
                                                      group_sizes)) {

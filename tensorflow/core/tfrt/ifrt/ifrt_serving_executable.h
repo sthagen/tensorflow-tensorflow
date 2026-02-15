@@ -200,7 +200,9 @@ class IfrtServingExecutable {
     tensorflow::tpu::TPUCompileMetadataProto compile_metadata;
     std::vector<std::unique_ptr<TfHostCallback>> host_callbacks;
     absl::flat_hash_map<IfrtLoadedVariableRegistry::Key,
-                        IfrtLoadedVariableRegistry::LoadedVariable>
+                        IfrtLoadedVariableRegistry::LoadedVariable,
+                        IfrtLoadedVariableRegistry::KeyHash,
+                        IfrtLoadedVariableRegistry::KeyEq>
         variable_arrays;
     std::vector<xla::HloSharding> arg_hlo_shardings;
     std::vector<xla::HloSharding> retval_hlo_shardings;

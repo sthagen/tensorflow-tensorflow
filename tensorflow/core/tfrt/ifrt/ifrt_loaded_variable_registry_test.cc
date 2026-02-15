@@ -110,6 +110,85 @@ TEST(IfrtLoadedVariableRegistryTest, KeyToString) {
               ::testing::HasSubstr("input:0,1:{replicated}:f32[2,2]"));
 }
 
+TEST(IfrtLoadedVariableRegistryTest, KeyViewAndKeyEquality) {
+  xla::Shape shape = xla::ShapeUtil::MakeShape(xla::F32, {2, 2});
+  auto shape_ptr1 = std::make_shared<xla::Shape>(shape);
+  auto shape_ptr2 = std::make_shared<xla::Shape>(shape);
+  // shape_ptr3 points to a different shape value.
+  xla::Shape different_shape = xla::ShapeUtil::MakeShape(xla::F32, {3, 3});
+  auto shape_ptr3 = std::make_shared<xla::Shape>(different_shape);
+
+  IfrtLoadedVariableRegistry::Key key1{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr1,
+  };
+
+  IfrtLoadedVariableRegistry::Key key2{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr2,
+  };
+
+  IfrtLoadedVariableRegistry::Key key3{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr3,
+  };
+
+  IfrtLoadedVariableRegistry::KeyView key_view1(key1);
+  IfrtLoadedVariableRegistry::KeyView key_view2(key2);
+  IfrtLoadedVariableRegistry::KeyView key_view3(key3);
+
+  EXPECT_EQ(key_view1, key_view2);
+  EXPECT_NE(key_view1, key_view3);
+  EXPECT_EQ(key1, key_view1);
+  EXPECT_EQ(key_view1, key1);
+  EXPECT_NE(key1, key_view3);
+  EXPECT_NE(key_view3, key1);
+}
+
+TEST(IfrtLoadedVariableRegistryTest, KeyViewAndKeyHash) {
+  xla::Shape shape = xla::ShapeUtil::MakeShape(xla::F32, {2, 2});
+  auto shape_ptr1 = std::make_shared<xla::Shape>(shape);
+  auto shape_ptr2 = std::make_shared<xla::Shape>(shape);
+  xla::Shape different_shape = xla::ShapeUtil::MakeShape(xla::F32, {3, 3});
+  auto shape_ptr3 = std::make_shared<xla::Shape>(different_shape);
+
+  IfrtLoadedVariableRegistry::Key key1{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr1,
+  };
+
+  IfrtLoadedVariableRegistry::Key key2{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr2,
+  };
+  IfrtLoadedVariableRegistry::Key key3{
+      .device_ids = {0, 1},
+      .input_name = "input",
+      .hlo_sharding = xla::HloSharding::Replicate(),
+      .shape_on_device = shape_ptr3,
+  };
+  IfrtLoadedVariableRegistry::KeyView key_view1(key1);
+  IfrtLoadedVariableRegistry::KeyView key_view2(key2);
+  IfrtLoadedVariableRegistry::KeyView key_view3(key3);
+
+  EXPECT_TRUE(absl::VerifyTypeImplementsAbslHashCorrectly(
+      {key_view1, key_view2, key_view3}));
+  EXPECT_EQ(absl::Hash<IfrtLoadedVariableRegistry::KeyView>()(key_view1),
+            absl::Hash<IfrtLoadedVariableRegistry::KeyView>()(key_view2));
+  EXPECT_EQ(absl::Hash<IfrtLoadedVariableRegistry::Key>()(key1),
+            absl::Hash<IfrtLoadedVariableRegistry::KeyView>()(key_view1));
+}
+
 }  // namespace
 }  // namespace ifrt_serving
 }  // namespace tensorflow

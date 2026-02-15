@@ -108,10 +108,7 @@ cc_library(
     name = "abstract_tracked_device_buffer",
     srcs = ["abstract_tracked_device_buffer.cc"],
     hdrs = ["abstract_tracked_device_buffer.h"],
-    visibility = [
-        "//third_party/py/torch_tpu/pjrt:__pkg__",
-        "//xla:internal",
-    ],
+    visibility = ["//xla:internal"],
     deps = [
         ":device_event",
         ":pjrt_client",
@@ -305,6 +302,7 @@ cc_library(
     hdrs = ["pjrt_client.h"],
     visibility = internal_visibility(["//xla:friends"]),
     deps = [
+        ":host_memory_allocator",
         ":pjrt_abi_version",
         ":pjrt_common",
         ":pjrt_compiler",
@@ -508,10 +506,11 @@ cc_library(
         "//xla/hlo/builder:xla_computation",
         "//xla/pjrt/proto:pjrt_partial_program_proto_cc",
         "//xla/pjrt/proto:topology_description_proto_cc",
+        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -529,6 +528,7 @@ xla_cc_test(
     srcs = ["pjrt_compiler_test.cc"],
     deps = [
         ":pjrt_client",
+        ":pjrt_common",
         ":pjrt_compiler",
         ":pjrt_device_description",
         ":pjrt_executable",
@@ -537,6 +537,7 @@ xla_cc_test(
         "//xla/hlo/builder:xla_computation",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
@@ -1545,6 +1546,7 @@ cc_library(
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@tsl//tsl/platform:platform_port",
     ],
 )
 

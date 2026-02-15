@@ -885,16 +885,13 @@ absl::StatusOr<std::vector<tensorflow::Tensor>> IfrtServingExecutable::Execute(
       if (executable_bundle->xla_input_shapes.has_value()) {
         shape_ptr = (*executable_bundle->xla_input_shapes)[i];
       }
-      IfrtLoadedVariableRegistry::Key key{
-          .device_ids = device_ids,
-          .input_name = inputs[i].scalar<tsl::tstring>()(),
-          .hlo_sharding = executable_bundle->arg_hlo_shardings[i],
-          .shape_on_device = std::move(shape_ptr),
-      };
-      auto it = executable_bundle->variable_arrays.find(key);
+      IfrtLoadedVariableRegistry::KeyView key_view(
+          device_ids, inputs[i].scalar<tsl::tstring>()(), hlo_sharding,
+          std::move(shape_ptr));
+      auto it = executable_bundle->variable_arrays.find(key_view);
       if (it == executable_bundle->variable_arrays.end()) {
-        return absl::InternalError(
-            absl::StrCat("Variable array not found for key: ", key.input_name));
+        return absl::InternalError(absl::StrCat(
+            "Variable array not found for key: ", key_view.input_name));
       }
       args.push_back((*it).second.array);
       variable_arg_index++;

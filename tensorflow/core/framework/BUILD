@@ -1971,3 +1971,17 @@ tf_cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+tf_cc_test(
+    name = "op_kernel_benchmark",
+    srcs = ["op_kernel_benchmark.cc"],
+    tags = ["benchmark"],
+    deps = [
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_lite",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/platform:test_benchmark",
+        "@com_google_absl//absl/log:check",
+        "@com_google_benchmark//:benchmark",
+    ],
+)

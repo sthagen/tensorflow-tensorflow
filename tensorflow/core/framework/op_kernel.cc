@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/framework/op_kernel.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -1155,12 +1156,12 @@ const std::string& OpKernelContext::executor_type() const {
 
 struct KernelRegistration {
   KernelRegistration(const KernelDef& d, absl::string_view c,
-                     std::unique_ptr<kernel_factory::OpKernelFactory> f)
+                     std::shared_ptr<kernel_factory::OpKernelFactory> f)
       : def(d), kernel_class_name(c), factory(std::move(f)) {}
 
-  const KernelDef def;
-  const std::string kernel_class_name;
-  std::unique_ptr<kernel_factory::OpKernelFactory> factory;
+  KernelDef def;
+  std::string kernel_class_name;
+  std::shared_ptr<kernel_factory::OpKernelFactory> factory;
 };
 
 // This maps from 'op_type' + DeviceType to the set of KernelDefs and
@@ -1170,6 +1171,7 @@ struct KernelRegistry {
   mutex mu;
   std::unordered_multimap<std::string, KernelRegistration> registry
       TF_GUARDED_BY(mu);
+  std::atomic<uint64_t> version{0};
 };
 
 #if defined(_WIN32)
@@ -1328,7 +1330,7 @@ void* GlobalKernelRegistry() {
   return global_kernel_registry;
 }
 
-static KernelRegistry* GlobalKernelRegistryTyped() {
+static KernelRegistry* GlobalKernelRegistryTypedMutable() {
 #ifdef AUTOLOAD_DYNAMIC_KERNELS
   LoadDynamicKernels();
 #endif  // AUTOLOAD_DYNAMIC_KERNELS
@@ -1338,6 +1340,46 @@ static KernelRegistry* GlobalKernelRegistryTyped() {
   static absl::once_flag setup_or_disable_jit;
   absl::call_once(setup_or_disable_jit, SetupOrDisableJit, registry);
   return registry;
+}
+
+static const KernelRegistry* GlobalKernelRegistryTyped() {
+  // We use a thread_local cache of the shared_ptr to the registry.
+  // This avoids atomic refcounting on the shared_ptr during the fast path.
+  // The global source of truth is protected by mutable_registry->mu.
+  static std::shared_ptr<const KernelRegistry>* global_registry_ptr =
+      new std::shared_ptr<const KernelRegistry>();
+  static thread_local std::shared_ptr<const KernelRegistry> local_registry;
+
+  KernelRegistry* mutable_registry = GlobalKernelRegistryTypedMutable();
+  // Acquire load to see updates from other threads.
+  uint64_t current_version =
+      mutable_registry->version.load(std::memory_order_acquire);
+
+  if (TF_PREDICT_TRUE(local_registry != nullptr &&
+                      local_registry->version.load(std::memory_order_relaxed) ==
+                          current_version)) {
+    return local_registry.get();
+  }
+
+  mutex_lock l(mutable_registry->mu);
+  // Re-check version under lock
+  current_version = mutable_registry->version.load(std::memory_order_relaxed);
+
+  // Update the global snapshot if it is stale.
+  if (*global_registry_ptr == nullptr ||
+      (*global_registry_ptr)->version.load(std::memory_order_relaxed) !=
+          current_version) {
+    std::shared_ptr<KernelRegistry> new_registry =
+        std::make_shared<KernelRegistry>();
+    new_registry->registry = mutable_registry->registry;
+    new_registry->version.store(current_version, std::memory_order_relaxed);
+    *global_registry_ptr = std::move(new_registry);
+  }
+
+  // Update local cache.
+  local_registry = *global_registry_ptr;
+
+  return local_registry.get();
 }
 
 namespace kernel_factory {
@@ -1362,6 +1404,7 @@ void OpKernelRegistrar::InitInternal(const KernelDef* kernel_def,
   global_registry->registry.emplace(
       key,
       KernelRegistration(*kernel_def, kernel_class_name, std::move(factory)));
+  global_registry->version.fetch_add(1);
   delete kernel_def;
 }
 
@@ -1396,15 +1439,15 @@ absl::Status FindKernelRegistration(
     bool has_experimental_debug_info,
     const NodeDef_ExperimentalDebugInfo& experimental_debug_info,
     absl::string_view node_op, AttrSlice node_attrs,
-    const KernelRegistration** reg, bool* was_attr_mismatch) {
+    const KernelRegistration** reg,
+    bool* was_attr_mismatch) TF_NO_THREAD_SAFETY_ANALYSIS {
   *reg = nullptr;
   *was_attr_mismatch = false;
 
   const std::string& label = GetKernelLabelAttr(node_attrs);
 
   const std::string key = Key(node_op, device_type, label);
-  auto typed_registry = GlobalKernelRegistryTyped();
-  tf_shared_lock lock(typed_registry->mu);
+  const KernelRegistry* typed_registry = GlobalKernelRegistryTyped();
   auto regs = typed_registry->registry.equal_range(key);
   for (auto iter = regs.first; iter != regs.second; ++iter) {
     // If there is a kernel registered for the op and device_type,
@@ -1627,10 +1670,10 @@ KernelList GetAllRegisteredKernels() {
 }
 
 KernelList GetFilteredRegisteredKernels(
-    const std::function<bool(const KernelDef&)>& predicate) {
-  KernelRegistry* const typed_registry = GlobalKernelRegistryTyped();
+    const std::function<bool(const KernelDef&)>& predicate)
+    TF_NO_THREAD_SAFETY_ANALYSIS {
+  const KernelRegistry* const typed_registry = GlobalKernelRegistryTyped();
   KernelList kernel_list;
-  tf_shared_lock lock(typed_registry->mu);
   kernel_list.mutable_kernel()->Reserve(typed_registry->registry.size());
   for (const auto& p : typed_registry->registry) {
     const KernelDef& kernel_def = p.second.def;
@@ -1775,10 +1818,9 @@ bool FindArgInOp(absl::string_view arg_name,
 
 }  // namespace
 
-absl::Status ValidateKernelRegistrations(
-    const OpRegistryInterface& op_registry) {
+absl::Status ValidateKernelRegistrations(const OpRegistryInterface& op_registry)
+    TF_NO_THREAD_SAFETY_ANALYSIS {
   auto typed_registry = GlobalKernelRegistryTyped();
-  tf_shared_lock lock(typed_registry->mu);
   for (const auto& key_registration : typed_registry->registry) {
     const KernelDef& kernel_def(key_registration.second.def);
     const OpRegistrationData* op_reg_data;

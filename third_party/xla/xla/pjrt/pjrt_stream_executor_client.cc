@@ -274,7 +274,8 @@ class CpuAllocator : public tsl::Allocator {
   std::string Name() override { return "cpu"; }
 
   void* AllocateRaw(size_t alignment, size_t num_bytes) override {
-    return tsl::port::AlignedMalloc(num_bytes, alignment);
+    return tsl::port::AlignedMalloc(num_bytes,
+                                    static_cast<std::align_val_t>(alignment));
   }
   void DeallocateRaw(void* ptr) override { return tsl::port::AlignedFree(ptr); }
 };
@@ -690,7 +691,7 @@ PjRtStreamExecutorClient::LinearizeHostBufferInto(
   if (must_use_staging_buffer ||
       ShouldStageHostToDeviceTransfers(data, packed_size)) {
     staging_buffer =
-        host_memory_allocator()->Allocate(transpose ? size : packed_size);
+        GetHostMemoryAllocator()->Allocate(transpose ? size : packed_size);
   }
 
   // Copy the buffer into a staging buffer before returning control to the
