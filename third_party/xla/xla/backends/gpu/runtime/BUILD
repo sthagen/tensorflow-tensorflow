@@ -2680,9 +2680,11 @@ cc_library(
         "//xla/stream_executor/gpu:multi_gpu_barrier_kernel",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
     ],
 )
 
@@ -4171,6 +4173,7 @@ xla_test(
         ":thunk_id",
         "//xla:types",
         "//xla:util",
+        "//xla:xla_data_proto_cc",
         "//xla/runtime:device_id",
         "//xla/service:buffer_assignment",
         "//xla/service:executable",
