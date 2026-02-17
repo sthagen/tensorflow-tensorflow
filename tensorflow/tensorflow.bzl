@@ -1365,6 +1365,7 @@ def _generate_op_reg_offsets_impl(ctx):
     args.add_all(op_reg_srcs)
 
     ctx.actions.run(
+        mnemonic = "GenerateOpRegOffsets",
         outputs = [ctx.outputs.out],
         inputs = op_reg_srcs + ctx.files.tf_binary_additional_srcs,
         tools = [ctx.executable._offset_counter],
@@ -2992,6 +2993,7 @@ _local_exec_transition = transition(
 
 def _local_genrule_impl(ctx):
     ctx.actions.run_shell(
+        mnemonic = "TensorflowLocalGenrule",
         outputs = [ctx.outputs.out],
         inputs = [f for t in ctx.attr.srcs for f in t.files.to_list()],
         tools = [ctx.executable.exec_tool],
