@@ -585,13 +585,14 @@ IfrtServingExecutable::CreateExecutableSynchronously(
                 .Await();
           }));
   if (!tf2hlo_result.xla_input_shapes.empty()) {
+    std::vector<std::shared_ptr<xla::Shape>> xla_input_shapes;
+    xla_input_shapes.reserve(tf2hlo_result.xla_input_shapes.size());
     std::vector<xla::ifrt::LayoutRef> xla_input_layouts;
     xla_input_layouts.reserve(tf2hlo_result.xla_input_shapes.size());
     for (const auto& shape : tf2hlo_result.xla_input_shapes) {
       // Make a copy the xla::Shape and store it in the executable bundle as a
       // shared_ptr.
-      executable_bundle->xla_input_shapes->push_back(
-          std::make_shared<xla::Shape>(shape));
+      xla_input_shapes.push_back(std::make_shared<xla::Shape>(shape));
       if (!shape.has_layout()) {
         xla_input_layouts.push_back(nullptr);
       } else {
@@ -600,6 +601,7 @@ IfrtServingExecutable::CreateExecutableSynchronously(
       }
     }
     executable_bundle->xla_input_layouts = std::move(xla_input_layouts);
+    executable_bundle->xla_input_shapes = std::move(xla_input_shapes);
   }
 
   executable_bundle->ifrt_executable = std::move(ifrt_executable);

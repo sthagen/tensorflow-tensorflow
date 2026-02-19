@@ -119,6 +119,7 @@ limitations under the License.
 #include "xla/backends/gpu/transforms/layout_assignment.h"
 #include "xla/backends/gpu/transforms/move_copy_to_users.h"
 #include "xla/backends/gpu/transforms/nest_gemm_fusion.h"
+#include "xla/backends/gpu/transforms/onehot_rewriter.h"
 #include "xla/backends/gpu/transforms/ragged_all_to_all_canonicalizer.h"
 #include "xla/backends/gpu/transforms/ragged_all_to_all_decomposer.h"
 #include "xla/backends/gpu/transforms/ragged_all_to_all_multi_host_decomposer.h"
@@ -467,7 +468,7 @@ namespace {
 void AddHloVerifier(HloPassPipeline* pipeline, HloVerifierOpts&& opts = {},
                     bool debug_only = false) {
   opts.verify_no_collective_deadlocks = true;
-  std::unique_ptr<TargetVerifierMetadata> verifier_metadata =
+  auto verifier_metadata =
       std::make_unique<CpuGpuVerifierMetadata>(std::move(opts));
   if (debug_only) {
     pipeline->AddInvariantCheckerDebug<HloVerifier>(
@@ -637,6 +638,7 @@ absl::Status RunOptimizationPasses(
       DebugOptions::DETECTION_MODE_NONE) {
     pipeline.AddPass<UnstableReductionDetector>();
   }
+  pipeline.AddPass<OneHotGatherRewriter>();
   pipeline.AddPass<RaggedDotRewriter>();
   if (!debug_options.xla_gpu_experimental_scaled_dot_with_triton()) {
     pipeline.AddPass<ScaledDotRewriter>();
@@ -1921,9 +1923,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<ScatterSimplifier>();
 
   // Verify the host memory space before the host offloader pass
-  std::unique_ptr<TargetVerifierMetadata> verifier_metadata =
-      std::make_unique<CpuGpuVerifierMetadata>(
-          HloVerifierOpts{}.VerifyNoHostMemorySpace());
+  auto verifier_metadata = std::make_unique<CpuGpuVerifierMetadata>(
+      HloVerifierOpts{}.VerifyNoHostMemorySpace());
   pipeline.AddPass<HloVerifier>(std::move(verifier_metadata));
 
   pipeline.AddPass<HostOffloader>(alias_info);
