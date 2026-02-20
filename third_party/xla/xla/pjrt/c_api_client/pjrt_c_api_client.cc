@@ -1553,34 +1553,27 @@ int PjRtCApiDeviceDescription::process_index() const {
   return args.process_index;
 }
 
-void PjRtCApiDeviceDescription::InitAttributes() {
-  attributes_ = {};
-  PJRT_DeviceDescription_Attributes_Args args;
-  args.struct_size = PJRT_DeviceDescription_Attributes_Args_STRUCT_SIZE;
-  args.extension_start = nullptr;
-  args.device_description = device_description_;
-  pjrt::LogFatalIfPjrtError(c_api_->PJRT_DeviceDescription_Attributes(&args),
-                            c_api_);
-
-  for (int i = 0; i < args.num_attributes; ++i) {
-    const auto& attribute = args.attributes[i];
+absl::flat_hash_map<std::string, xla::PjRtDeviceAttribute>
+DeviceAttributesFromPjRtValues(
+    absl::Span<const PJRT_NamedValue> pjrt_attributes) {
+  absl::flat_hash_map<std::string, xla::PjRtDeviceAttribute> attributes;
+  for (const PJRT_NamedValue& attribute : pjrt_attributes) {
     std::string attribute_name(attribute.name, attribute.name_size);
     switch (attribute.type) {
       case PJRT_NamedValue_Type::PJRT_NamedValue_kString: {
         std::string string_value(attribute.string_value, attribute.value_size);
-        attributes_[attribute_name] = PjRtDeviceAttribute(string_value);
+        attributes[attribute_name] = PjRtDeviceAttribute(string_value);
         break;
       }
       case PJRT_NamedValue_Type::PJRT_NamedValue_kInt64: {
-        attributes_[attribute_name] =
-            PjRtDeviceAttribute(attribute.int64_value);
+        attributes[attribute_name] = PjRtDeviceAttribute(attribute.int64_value);
         break;
       }
       case PJRT_NamedValue_Type::PJRT_NamedValue_kInt64List: {
         const int64_t* array_ptr(attribute.int64_array_value);
         std::vector<int64_t> int64_array(array_ptr,
                                          array_ptr + attribute.value_size);
-        attributes_[attribute_name] = PjRtDeviceAttribute(int64_array);
+        attributes[attribute_name] = PjRtDeviceAttribute(int64_array);
         break;
       }
       // Do not allow other types (such as
@@ -1590,14 +1583,26 @@ void PjRtCApiDeviceDescription::InitAttributes() {
       // PJRT library is a newer version that returns types not supported by
       // this client). Failing here to prevent undefined behavior.
       default: {
-        LOG(FATAL) << "PJRT_DeviceDescription_Attributes() returned attribute '"
-                   << attribute_name << "' with unsupported type "
-                   << attribute.type
-                   << " to PjRtCApiDeviceDescription::InitAttributes()";
+        LOG(FATAL) << "Attribute '" << attribute_name
+                   << "' has unsupported type " << attribute.type;
         break;
       }
     }
   }
+  return attributes;
+}
+
+void PjRtCApiDeviceDescription::InitAttributes() {
+  attributes_ = {};
+  PJRT_DeviceDescription_Attributes_Args args;
+  args.struct_size = PJRT_DeviceDescription_Attributes_Args_STRUCT_SIZE;
+  args.extension_start = nullptr;
+  args.device_description = device_description_;
+  pjrt::LogFatalIfPjrtError(c_api_->PJRT_DeviceDescription_Attributes(&args),
+                            c_api_);
+
+  attributes_ = DeviceAttributesFromPjRtValues(
+      absl::MakeSpan(args.attributes, args.num_attributes));
 }
 
 const absl::flat_hash_map<std::string, PjRtDeviceAttribute>&
@@ -1677,7 +1682,14 @@ PjRtCApiDevice::PjRtCApiDevice(PJRT_Device* device, PjRtCApiClient* client)
     : client_(client),
       device_(device),
       description_(client->pjrt_c_api(),
-                   pjrt::GetDeviceDescription(client->pjrt_c_api(), device)) {}
+                   pjrt::GetDeviceDescription(client->pjrt_c_api(), device)) {
+  if (client_->pjrt_c_api()->pjrt_api_version.minor_version >= 92 &&
+      client_->pjrt_c_api()->PJRT_Device_GetAttributes != nullptr) {
+    InitAttributes();
+  } else {
+    attributes_ = description_.Attributes();
+  }
+}
 
 PjRtClient* PjRtCApiDevice::client() const { return client_; }
 
@@ -1798,6 +1810,26 @@ absl::StatusOr<std::intptr_t> PjRtCApiDevice::GetStreamForExternalReadyEvents()
   args.device = device_;
   RETURN_STATUS_IF_PJRT_ERROR(extension->get_stream(&args), c_api);
   return args.stream;
+}
+
+void PjRtCApiDevice::InitAttributes() {
+  PJRT_Device_GetAttributes_Args args;
+  args.struct_size = PJRT_Device_GetAttributes_Args_STRUCT_SIZE;
+  args.extension_start = nullptr;
+  args.device = device_;
+  args.attributes = nullptr;
+  args.num_attributes = 0;
+  args.device_attributes = nullptr;
+  args.attributes_deleter = nullptr;
+
+  pjrt::LogFatalIfPjrtError(
+      client_->pjrt_c_api()->PJRT_Device_GetAttributes(&args),
+      client_->pjrt_c_api());
+
+  attributes_ = DeviceAttributesFromPjRtValues(
+      absl::MakeSpan(args.attributes, args.num_attributes));
+  CHECK(args.attributes_deleter != nullptr);
+  args.attributes_deleter(args.device_attributes);
 }
 
 absl::StatusOr<bool> PjRtCApiDevice::PoisonExecution(int32_t launch_id,
@@ -2219,6 +2251,62 @@ std::optional<std::vector<OpSharding>> PjRtCApiExecutable::GetOutputShardings()
   }
   return shardings;
 }
+absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>
+PjRtCApiExecutable::GetParameterLayouts() const {
+  const PJRT_Api* c_api = pjrt_c_api();
+  if (c_api->pjrt_api_version.major_version == 0 &&
+      c_api->pjrt_api_version.minor_version < 93) {
+    // If the PJRT C API version is too old, fall back to the default
+    // implementation.
+    return this->PjRtExecutable::GetParameterLayouts();
+  }
+  PJRT_Layouts_Extension* extension =
+      pjrt::FindExtension<PJRT_Layouts_Extension>(
+          c_api, PJRT_Extension_Type::PJRT_Extension_Type_Layouts);
+  if (extension == nullptr ||
+      extension->PJRT_Layouts_MemoryLayout_Serialize == nullptr ||
+      extension->PJRT_Layouts_PJRT_Executable_GetParameterLayouts == nullptr) {
+    // If we can't find PJRT_Layouts_PJRT_Executable_GetParameterLayouts
+    // support, fall back to the default implementation.
+    return this->PjRtExecutable::GetParameterLayouts();
+  }
+
+  PJRT_Layouts_PJRT_Executable_GetParameterLayouts_Args args;
+  args.struct_size =
+      PJRT_Layouts_PJRT_Executable_GetParameterLayouts_Args_STRUCT_SIZE;
+  args.extension_start = nullptr;
+  args.executable = c_executable();
+  RETURN_STATUS_IF_PJRT_ERROR(
+      extension->PJRT_Layouts_PJRT_Executable_GetParameterLayouts(&args),
+      c_api);
+
+  std::vector<std::shared_ptr<const PjRtLayout>> layouts;
+  layouts.reserve(args.num_parameters);
+  for (int i = 0; i < args.num_parameters; ++i) {
+    // TODO(b/343274093): returns a PjRtLayout that wraps a C API layout
+    // directly instead of de/serializing into an xla::Layout.
+    PJRT_Layouts_MemoryLayout_Serialize_Args serialize_args;
+    serialize_args.struct_size =
+        PJRT_Layouts_MemoryLayout_Serialize_Args_STRUCT_SIZE;
+    serialize_args.extension_start = nullptr;
+    serialize_args.layout = args.layouts[i];
+    pjrt::LogFatalIfPjrtError(
+        extension->PJRT_Layouts_MemoryLayout_Serialize(&serialize_args), c_api);
+
+    // Clean up `PJRT_Layouts_SerializedLayout`.
+    absl::Cleanup cleanup = [&serialize_args] {
+      serialize_args.serialized_layout_deleter(
+          serialize_args.serialized_layout);
+    };
+
+    std::string serialized_layout(serialize_args.serialized_bytes,
+                                  serialize_args.serialized_bytes_size);
+    TF_ASSIGN_OR_RETURN(std::shared_ptr<const PjRtLayout> pjrt_layout,
+                        PjRtLayout::Deserialize(serialized_layout));
+    layouts.push_back(std::move(pjrt_layout));
+  }
+  return layouts;
+}
 
 absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>
 PjRtCApiExecutable::GetOutputLayouts() const {
@@ -2269,10 +2357,9 @@ PjRtCApiExecutable::GetOutputLayouts() const {
 
     std::string serialized_layout(serialize_args.serialized_bytes,
                                   serialize_args.serialized_bytes_size);
-    absl::StatusOr<std::shared_ptr<const PjRtLayout>> pjrt_layout =
-        PjRtLayout::Deserialize(serialized_layout);
-    CHECK_OK(pjrt_layout.status());
-    layouts.push_back(*std::move(pjrt_layout));
+    TF_ASSIGN_OR_RETURN(std::shared_ptr<const PjRtLayout> pjrt_layout,
+                        PjRtLayout::Deserialize(serialized_layout));
+    layouts.push_back(std::move(pjrt_layout));
   }
   return layouts;
 }
