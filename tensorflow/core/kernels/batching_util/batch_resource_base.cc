@@ -645,33 +645,8 @@ BatchResourceBase::GetBatcherQueueOptions(
     int64_t total_allowed_enqueued_entries =
         effective_max_execution_batch_size * max_enqueued_batches;
 
-    // TODO(b/483419412): Add testing coverage for this logic.
-
-    // The total enqueued batch size is split across criticality bands to
-    // provide isolation and prioritize higher-criticality requests.
-    // CRITICAL_PLUS traffic is allocated 1/2 of total capacity, CRITICAL 1/4,
-    // SHEDDABLE_PLUS 1/8, and SHEDDABLE 1/16. This split ensures higher
-    // priority traffic can be buffered more than lower priority traffic,
-    // preventing starvation of lower priority requests.
-    std::map<tsl::criticality::Criticality, size_t> per_criticality_queue_size;
-    per_criticality_queue_size[tsl::criticality::Criticality::kCriticalPlus] =
-        std::max(
-            total_allowed_enqueued_entries / kCriticalPlusCapacityFractionDenom,
-            static_cast<int64_t>(1));
-    per_criticality_queue_size[tsl::criticality::Criticality::kCritical] =
-        std::max(
-            total_allowed_enqueued_entries / kCriticalCapacityFractionDenom,
-            static_cast<int64_t>(1));
-    per_criticality_queue_size[tsl::criticality::Criticality::kSheddablePlus] =
-        std::max(total_allowed_enqueued_entries /
-                     kSheddablePlusCapacityFractionDenom,
-                 static_cast<int64_t>(1));
-    per_criticality_queue_size[tsl::criticality::Criticality::kSheddable] =
-        std::max(
-            total_allowed_enqueued_entries / kSheddableCapacityFractionDenom,
-            static_cast<int64_t>(1));
-    batcher_queue_options.priority_aware_scheduler_options
-        .per_criticality_queue_size = per_criticality_queue_size;
+    batcher_queue_options.priority_aware_scheduler_options.max_queue_depth =
+        std::max(total_allowed_enqueued_entries, static_cast<int64_t>(1));
   }
   batcher_queue_options.high_priority_queue_options.input_batch_size_limit =
       max_batch_size;
