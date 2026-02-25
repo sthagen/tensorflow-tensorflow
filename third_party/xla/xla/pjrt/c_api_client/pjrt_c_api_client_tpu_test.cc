@@ -26,6 +26,9 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OwningOpRef.h"
 #include "xla/hlo/builder/xla_builder.h"
 #include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/parser/hlo_parser.h"
@@ -34,6 +37,7 @@ limitations under the License.
 #include "xla/pjrt/c/pjrt_c_api_callback_extension.h"
 #include "xla/pjrt/c/pjrt_c_api_helpers.h"
 #include "xla/pjrt/c_api_client/pjrt_c_api_client.h"
+#include "xla/pjrt/mlir_to_hlo.h"
 #include "xla/pjrt/pjrt_abi_version.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -43,6 +47,9 @@ limitations under the License.
 #include "xla/pjrt/pjrt_layout.h"
 #include "xla/pjrt/plugin/xla_tpu/xla_tpu_pjrt_client.h"
 #include "xla/pjrt/proto/topology_description.pb.h"
+#include "xla/runtime/chip_id.h"
+#include "xla/runtime/device_id.h"
+#include "xla/runtime/process_id.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/tsl/platform/statusor.h"
@@ -151,10 +158,10 @@ TEST(PjRtCApiTopologyDescriptionTpuTest, CoreCountOfDefaultTypePerProcess) {
 TEST(PjRtCApiTopologyDescriptionTpuTest, ProcessIds) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
-  TF_ASSERT_OK_AND_ASSIGN(PjRtIdContainer<PjRtProcessId> process_ids,
+  TF_ASSERT_OK_AND_ASSIGN(PjRtIdContainer<ProcessId> process_ids,
                           topology->ProcessIds());
-  EXPECT_THAT(process_ids, ElementsAre(PjRtProcessId(0), PjRtProcessId(1),
-                                       PjRtProcessId(2), PjRtProcessId(3)));
+  EXPECT_THAT(process_ids, ElementsAre(ProcessId(0), ProcessId(1), ProcessId(2),
+                                       ProcessId(3)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest,
@@ -162,20 +169,19 @@ TEST(PjRtCApiTopologyDescriptionTpuTest,
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
   TF_ASSERT_OK_AND_ASSIGN(
-      PjRtIdContainer<PjRtGlobalDeviceId> device_ids,
-      topology->LogicalDeviceOfDefaultTypeIdsOnProcess(PjRtProcessId(0)));
-  EXPECT_THAT(device_ids,
-              ElementsAre(PjRtGlobalDeviceId(0), PjRtGlobalDeviceId(1),
-                          PjRtGlobalDeviceId(2), PjRtGlobalDeviceId(3),
-                          PjRtGlobalDeviceId(8), PjRtGlobalDeviceId(9),
-                          PjRtGlobalDeviceId(10), PjRtGlobalDeviceId(11)));
+      PjRtIdContainer<GlobalDeviceId> device_ids,
+      topology->LogicalDeviceOfDefaultTypeIdsOnProcess(ProcessId(0)));
+  EXPECT_THAT(device_ids, ElementsAre(GlobalDeviceId(0), GlobalDeviceId(1),
+                                      GlobalDeviceId(2), GlobalDeviceId(3),
+                                      GlobalDeviceId(8), GlobalDeviceId(9),
+                                      GlobalDeviceId(10), GlobalDeviceId(11)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest, ProcessIdAndIndexOnProcessForChip) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
-  EXPECT_THAT(topology->ProcessIdAndIndexOnProcessForChip(PjRtGlobalChipId(2)),
-              IsOkAndHolds(Pair(PjRtProcessId(1), 0)));
+  EXPECT_THAT(topology->ProcessIdAndIndexOnProcessForChip(GlobalChipId(2)),
+              IsOkAndHolds(Pair(ProcessId(1), 0)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest,
@@ -183,15 +189,15 @@ TEST(PjRtCApiTopologyDescriptionTpuTest,
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
   EXPECT_THAT(topology->ProcessIdAndIndexOnProcessForLogicalDeviceOfDefaultType(
-                  PjRtGlobalDeviceId(3)),
-              IsOkAndHolds(Pair(PjRtProcessId(0), 3)));
+                  GlobalDeviceId(3)),
+              IsOkAndHolds(Pair(ProcessId(0), 3)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest, ProcessCoordFromId) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
   TF_ASSERT_OK_AND_ASSIGN(PjRtDeviceDimensions coords,
-                          topology->ProcessCoordFromId(PjRtProcessId(2)));
+                          topology->ProcessCoordFromId(ProcessId(2)));
   EXPECT_THAT(coords, (PjRtDeviceDimensions{0, 1, 0}));
 }
 
@@ -199,7 +205,7 @@ TEST(PjRtCApiTopologyDescriptionTpuTest, ChipIdFromCoord) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtTopologyDescription> topology,
                           GetTpuTopology());
   EXPECT_THAT(topology->ChipIdFromCoord({1, 0, 0}),
-              IsOkAndHolds(PjRtGlobalChipId(1)));
+              IsOkAndHolds(GlobalChipId(1)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest,
@@ -208,7 +214,7 @@ TEST(PjRtCApiTopologyDescriptionTpuTest,
                           GetTpuTopology());
   EXPECT_THAT(topology->LogicalDeviceOfDefaultTypeIdFromChipCoordAndCoreIndex(
                   {1, 1, 0}, 0),
-              IsOkAndHolds(PjRtGlobalDeviceId(10)));
+              IsOkAndHolds(GlobalDeviceId(10)));
 }
 
 TEST(PjRtCApiTopologyDescriptionTpuTest,
@@ -218,7 +224,7 @@ TEST(PjRtCApiTopologyDescriptionTpuTest,
   TF_ASSERT_OK_AND_ASSIGN(
       const PjRtDeviceDimensionsAndInt& result,
       topology->ChipCoordAndCoreIndexForLogicalDeviceOfDefaultType(
-          PjRtGlobalDeviceId(10)));
+          GlobalDeviceId(10)));
   EXPECT_THAT(absl::MakeConstSpan(result.first.data(), result.first.size()),
               ElementsAre(1, 1, 0));
   EXPECT_EQ(result.second, 0);
@@ -372,6 +378,19 @@ TEST(PjRtCApiClientTpuTest, GetParameterAndOutputLayouts) {
        output_layouts) {
     EXPECT_EQ(output_layout->xla_layout(), expected_layout);
   }
+}
+
+TEST(PjRtCApiClientTpuTest, CompileMlirModule) {
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtClient> client,
+                          GetXlaPjrtTpuClient());
+  constexpr char kProgram[] = "func.func @main() {return}";
+  mlir::MLIRContext context;
+  TF_ASSERT_OK_AND_ASSIGN(mlir::OwningOpRef<mlir::ModuleOp> module,
+                          ParseMlirModuleString(kProgram, context));
+  CompileOptions options;
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<PjRtExecutable> executable,
+                          client->Compile(*module, options));
+  EXPECT_NE(executable.get(), nullptr);
 }
 
 }  // namespace

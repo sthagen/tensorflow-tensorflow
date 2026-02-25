@@ -1127,7 +1127,7 @@ bool IsAllZeros(const DeviceAssignment& assignment) {
 
 PjRtStreamExecutorLoadedExecutable::PjRtStreamExecutorLoadedExecutable(
     std::unique_ptr<LocalExecutable> executable,
-    bool parameter_is_tupled_arguments,
+    std::optional<std::string> fingerprint, bool parameter_is_tupled_arguments,
     std::shared_ptr<DeviceAssignment> device_assignment,
     CompileOptions compile_options,
     std::vector<LogicalDeviceIds> addressable_device_logical_ids,
@@ -1156,14 +1156,13 @@ PjRtStreamExecutorLoadedExecutable::PjRtStreamExecutorLoadedExecutable(
       device_assignment_(std::move(device_assignment)),
       compile_options_(std::move(compile_options)),
       parameter_is_tupled_arguments_(parameter_is_tupled_arguments) {
-  tsl::Fprint128 fingerprint = tsl::Fingerprint128(fingerprint_);
   on_device_executable_parameter_shapes_ =
       std::make_shared<std::vector<Shape>>(std::move(parameter_shapes));
-  fingerprint = tsl::FingerprintCat128(
-      fingerprint,
-      tsl::Fingerprint128(executable_->executable()->module().ToString(
-          HloPrintOptions::ModuleFingerprint())));
-  fingerprint_ = absl::StrCat(fingerprint.low64, fingerprint.high64);
+  if (fingerprint.has_value()) {
+    fingerprint_ = *std::move(fingerprint);
+  } else {
+    fingerprint_ = executable_->executable()->module().GetFingerprint128();
+  }
 
   int num_partitions;
   if (device_assignment_ == nullptr) {
@@ -1685,9 +1684,14 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
                            ->local_device_id()
                            .value();
   LocalDeviceState* device_state = &(client_->device_state(device_ordinal));
-  tsl::profiler::TraceMeConsumer activity(
-      "PjRtStreamExecutorLoadedExecutable::EnqueueExecution",
-      tsl::profiler::ContextType::kPjRt, run_id_.ToInt());
+
+  tsl::profiler::TraceMe trace([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrFormat("[%d] PjRtStreamExecutorRawLoadedExecutable::Execute",
+                        device_ordinal),
+        {{"replica", replica_}, {"partition", partition_}});
+  });
+
   VLOG(3) << "Replica " << replica_ << ", partition " << partition_
           << " mapped to device ordinal for execution: " << device_ordinal;
 
@@ -1762,9 +1766,14 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
     // launch is delayed.
     std::shared_ptr<Semaphore::ScopedReservation> compute_reservation;
     {
-      tsl::profiler::TraceMe traceme("ComputeSemaphoreAcquire");
+      Semaphore& compute_semaphore = device_state->compute_semaphore();
+      tsl::profiler::TraceMe traceme([&] {
+        return absl::StrFormat(
+            "ComputeSemaphoreAcquire [capacity=%d, value=%d]",
+            compute_semaphore.capacity(), compute_semaphore.value());
+      });
       compute_reservation = std::make_shared<Semaphore::ScopedReservation>(
-          device_state->compute_semaphore().ScopedAcquire(1));
+          compute_semaphore.ScopedAcquire(1));
     }
 
     absl::Status predetermined_error;
@@ -2606,7 +2615,8 @@ absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
 PjRtStreamExecutorClient::LoadInternal(
     std::optional<HloModuleProto> unoptimized_hlo_module_proto,
     std::unique_ptr<LocalExecutable> local_executable,
-    CompileOptions compile_options, bool dump) {
+    CompileOptions compile_options, bool dump,
+    std::optional<std::string> fingerprint) {
   auto input_options = compile_options;
 
   TF_RETURN_IF_ERROR(compile_options.ApplyAllOptionOverrides());
@@ -2694,7 +2704,7 @@ PjRtStreamExecutorClient::LoadInternal(
         computation_layout.parameter_shape(i)));
   }
   auto executable = std::make_unique<PjRtStreamExecutorLoadedExecutable>(
-      std::move(local_executable),
+      std::move(local_executable), std::move(fingerprint),
       compile_options.parameter_is_tupled_arguments,
       std::move(device_assignment), std::move(input_options),
       std::move(addressable_device_logical_ids), std::move(addressable_devices),
@@ -2723,9 +2733,15 @@ PjRtStreamExecutorClient::Load(std::unique_ptr<PjRtExecutable> executable,
 
   TF_ASSIGN_OR_RETURN(auto local_executable, se_executable->ConsumeExecutable(
                                                  client(), compile_options));
+  std::optional<std::string> fingerprint = std::nullopt;
+  absl::StatusOr<std::string> maybe_fingerprint =
+      se_executable->FingerprintExecutable();
+  if (maybe_fingerprint.ok() && !maybe_fingerprint->empty()) {
+    fingerprint = *std::move(maybe_fingerprint);
+  }
   return LoadInternal(se_executable->unoptimized_hlo_module_proto(),
                       std::move(local_executable), compile_options,
-                      /*dump=*/false);
+                      /*dump=*/false, fingerprint);
 }
 
 bool PjRtStreamExecutorClient::IsDmaMapped(const void* data_start,

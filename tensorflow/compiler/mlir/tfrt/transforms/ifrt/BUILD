@@ -18,7 +18,6 @@ package_group(
         "//tensorflow/compiler/mlir/tfrt/...",
         "//tensorflow/core/tfrt/ifrt/...",
         "//tensorflow/core/tfrt/saved_model/tests/...",
-        "//third_party/neptune/serving/sidecar/...",
     ] + if_google([
         "//learning/brain/tfrt/cpp_tests/...",
         "//learning/serving/servables/tfrt/...",
@@ -26,8 +25,6 @@ package_group(
         "//learning/brain/tfrt/tfrt_session/...",
         # Allow visibility from the mlir language server.
         "//learning/brain/mlir/mlir_lsp_server/...",
-        # TODO(b/476497239): Remove the old JSV codebase once the migration is done.
-        "//learning/infra/mira/experimental/orbax_model/serving/sidecar/...",
         "//smartass/brain/util/...",
     ]),
 )
