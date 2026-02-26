@@ -154,7 +154,6 @@ class CollectiveThunk : public Thunk {
   }
 
   bool IsP2PCollective() const { return is_p2p_; }
-  absl::StatusOr<CollectiveThunkProto> ToCollectiveThunkProto() const;
 
  protected:
   // Run collective operation on a given stream and return if the first call
