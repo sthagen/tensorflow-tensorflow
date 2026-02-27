@@ -270,6 +270,7 @@ tf_cc_test(
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_googletest//:gtest_main",
         "@xla//xla:shape_util",
+        "@xla//xla:xla_data_proto_cc",
         "@xla//xla/hlo/ir:hlo",
     ],
 )
@@ -420,6 +421,7 @@ cc_library(
         "//tensorflow/core/common_runtime/eager:tensor_handle",
         "//tensorflow/core/framework:function_proto_cc",
         "//tensorflow/core/protobuf:for_core_protos_cc",
+        "@com_google_absl//absl/base",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:fixed_array",
         "@com_google_absl//absl/log:check",
@@ -635,6 +637,7 @@ tf_cc_test(
         "@tf_runtime//backends/cpu:tf_ops_alwayslink",
         "@tsl//tsl/platform:tstring",
         "@xla//xla:shape_util",
+        "@xla//xla:xla_data_proto_cc",
         "@xla//xla/python/ifrt:test_util",
         "@xla//xla/python/pjrt_ifrt:tfrt_cpu_client_test_lib",
         "@xla//xla/tsl/concurrency:future",

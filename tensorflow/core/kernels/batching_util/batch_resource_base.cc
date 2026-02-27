@@ -878,8 +878,17 @@ absl::Status BatchResourceBase::ConcatInputTensors(
   // complete.
   std::function<void()> split_task_done_callback = [input_task]() mutable {
     OpKernelContext* context = input_task->context;
-    auto& output = input_task->output;
 
+    // Check if any split task has already failed (e.g. due to eviction from
+    // the priority queue). If so, skip the output concatenation — the output
+    // TensorMatrix may contain uninitialized entries that would cause a crash
+    // in Concat/memcpy.
+    if (!input_task->status->status().ok()) {
+      input_task->FinishTask(input_task->status->status());
+      return;
+    }
+
+    auto& output = input_task->output;
     absl::Status final_status = absl::OkStatus();
     const int num_output = context->num_outputs();
 

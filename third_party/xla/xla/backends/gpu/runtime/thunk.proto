@@ -311,6 +311,7 @@ message AllReduceStartThunkProto {
   string kernel_name = 7;
   bool collective_kernel_enabled = 8;
   bool is_async = 9;
+  LaunchDimensionsProto launch_dimensions = 10;
 }
 
 message ReduceScatterStartThunkProto {
@@ -445,6 +446,8 @@ message ThunkProto {
     DynamicMemcpyThunkProto dynamic_memcpy_thunk = 48;
     CopyDoneThunkProto copy_done_thunk = 49;
     NvshmemCollectiveDoneThunkProto nvshmem_collective_done_thunk = 50;
+    NvshmemCollectivePermuteDoneThunkProto
+        nvshmem_collective_permute_done_thunk = 51;
   }
 }
 

@@ -3772,6 +3772,54 @@ TEST_P(SharedBatchSchedulerPriorityAwareTest,
   TF_EXPECT_OK(*high_pri_status);
 }
 
+// Regression test for b/466418871: When large batch splitting is enabled with
+// the priority-aware scheduler, RemoveTask() can split a task and re-queue the
+// remaining subtasks. If a higher-priority task then causes those subtasks to
+// be evicted, the scheduler must not crash.
+TEST_P(SharedBatchSchedulerPriorityAwareTest,
+       SplitSubtaskEvictionDoesNotCrash) {
+  if (!enable_input_batch_split()) {
+    GTEST_SKIP() << "Test only applies when large batch splitting is enabled.";
+  }
+
+  auto scheduler = CreateSharedBatchScheduler(/*num_batch_threads=*/1);
+
+  // Small queue depth so eviction is easy to trigger.
+  // max_execution_batch_size=5, input_batch_size_limit=50 (10x),
+  // max_queue_depth=10.
+  QueueOptions options = CreatePriorityAwareQueueOptions(
+      /*max_execution_batch_size=*/5,
+      /*batch_timeout_micros=*/1000 * 1000, /*max_queue_depth=*/10);
+
+  absl::Notification batch_processed;
+  auto callback = [&](std::unique_ptr<Batch<FakeTask>> batch) {
+    for (int i = 0; i < batch->num_tasks(); ++i) {
+      batch->mutable_task(i)->FinishTask(absl::OkStatus());
+    }
+    if (!batch_processed.HasBeenNotified()) {
+      batch_processed.Notify();
+    }
+  };
+
+  auto queue = CreateQueue(scheduler, options, callback);
+
+  // Schedule a large low-priority task (size 9 > max_execution_batch_size=5).
+  // It sits in the priority queue as a single entry of size 9.
+  TF_ASSERT_OK(
+      ScheduleTask(9, queue.get(), tsl::criticality::Criticality::kSheddable));
+
+  // Schedule a high-priority task (size 5). Queue capacity is 10, currently
+  // holds 9 (low-pri). New total would be 14 > 10, so AddTask evicts the
+  // low-priority task to make room. The evicted task's FinishTask is called
+  // with UnavailableError. This must not crash.
+  TF_ASSERT_OK(ScheduleTask(5, queue.get(),
+                            tsl::criticality::Criticality::kCriticalPlus));
+
+  // Only the high-priority batch should be processed (the low-pri was evicted).
+  EXPECT_TRUE(
+      batch_processed.WaitForNotificationWithTimeout(absl::Seconds(10)));
+}
+
 INSTANTIATE_TEST_SUITE_P(Parameter, SharedBatchSchedulerPriorityAwareTest,
                          ::testing::Bool());
 

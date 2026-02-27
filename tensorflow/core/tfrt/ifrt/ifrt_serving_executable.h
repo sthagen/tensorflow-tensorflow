@@ -207,6 +207,9 @@ class IfrtServingExecutable {
     std::vector<xla::HloSharding> arg_hlo_shardings;
     std::vector<xla::HloSharding> retval_hlo_shardings;
 
+    // Input tensor shapes that matches the Tf2Hlo compiled shapes.
+    std::vector<tensorflow::TensorShape> reshaped_input_tensors;
+
     CachedExecutableBundle() = default;
     // Move only
     CachedExecutableBundle(CachedExecutableBundle&& other) = default;
