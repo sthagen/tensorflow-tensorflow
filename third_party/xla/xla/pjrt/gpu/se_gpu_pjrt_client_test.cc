@@ -74,6 +74,7 @@ limitations under the License.
 #include "xla/pjrt/gpu/se_gpu_topology_description.h"
 #include "xla/pjrt/host_memory_spaces.h"
 #include "xla/pjrt/local_device_state.h"
+#include "xla/pjrt/maybe_owning_mlir_module.h"
 #include "xla/pjrt/mlir_to_hlo.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -1456,7 +1457,7 @@ TEST(StreamExecutorGpuClientTest, ShouldStageHostToDeviceTransfersSetToTrue) {
   Shape shape = ShapeUtil::MakeShape(F32, {1024});
 
   auto* staging_client =
-      tensorflow::down_cast<StreamExecutorGpuClient*>(client_staging.get());
+      absl::down_cast<StreamExecutorGpuClient*>(client_staging.get());
 
   EXPECT_TRUE(staging_client->ShouldStageHostToDeviceTransfers(
       data.data(), sizeof(float) * data.size()));
@@ -1486,7 +1487,7 @@ TEST(StreamExecutorGpuClientTest, ShouldStageHostToDeviceTransfersSetToFalse) {
   Shape shape = ShapeUtil::MakeShape(F32, {1024});
 
   auto* no_staging_client =
-      tensorflow::down_cast<StreamExecutorGpuClient*>(client_no_staging.get());
+      absl::down_cast<StreamExecutorGpuClient*>(client_no_staging.get());
 
   EXPECT_FALSE(no_staging_client->ShouldStageHostToDeviceTransfers(
       data.data(), sizeof(float) * data.size()));
@@ -1519,8 +1520,7 @@ TEST(StreamExecutorGpuClientTest, MockNcclClientWithGpuTopologyTest) {
   TF_ASSERT_OK_AND_ASSIGN(const xla::PjRtTopologyDescription* topology,
                           client->GetTopologyDescription());
   const StreamExecutorGpuTopologyDescription& gpu_topology =
-      tensorflow::down_cast<const xla::StreamExecutorGpuTopologyDescription&>(
-          *topology);
+      absl::down_cast<const StreamExecutorGpuTopologyDescription&>(*topology);
 
   EXPECT_EQ(gpu_topology.gpu_topology().num_partitions(), 2);
   EXPECT_EQ(gpu_topology.gpu_topology().num_hosts_per_partition(), 4);
@@ -1554,16 +1554,19 @@ TEST(StreamExecutorGpuClientTest, MockNcclClientWithGpuTopologyExecuteTest) {
   auto devices_per_host = client->addressable_device_count();
   EXPECT_EQ(devices_per_host, 2) << "This test requires 2 local GPUs.";
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(
-      auto module, xla::ParseMlirModuleString(kMlirDistributedSum, context));
+      auto module, xla::ParseMlirModuleString(kMlirDistributedSum, *context));
 
   xla::CompileOptions options;
   options.executable_build_options.set_num_partitions(8)
       .set_use_spmd_partitioning(true)
       .set_allow_spmd_sharding_propagation_to_output({true});
-  TF_ASSERT_OK_AND_ASSIGN(auto executable,
-                          client->CompileAndLoad(*module, options));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)),
+          options));
 
   Shape shape = ShapeUtil::MakeShapeWithDenseLayout(S32, {1}, {0});
   std::vector<std::unique_ptr<PjRtBuffer>> inputs;
@@ -2223,11 +2226,14 @@ TEST(StreamExecutorGpuClientTest, MlirParameterHostMemorySpaceIsSetInHlo) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          xla::ParseMlirModuleString(kMlirH2D, context));
+                          xla::ParseMlirModuleString(kMlirH2D, *context));
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->CompileAndLoad(*module, {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)), {}));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2262,11 +2268,14 @@ TEST(StreamExecutorGpuClientTest, MlirResultHostMemorySpaceIsSetInHlo) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          xla::ParseMlirModuleString(kMlirD2H, context));
+                          xla::ParseMlirModuleString(kMlirD2H, *context));
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->CompileAndLoad(*module, {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)), {}));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2316,11 +2325,14 @@ TEST(StreamExecutorGpuClientTest, MlirAutoResultLayoutIsSet) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module, xla::ParseMlirModuleString(
-                                           kMlirWithParameterLayout, context));
+                                           kMlirWithParameterLayout, *context));
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->CompileAndLoad(*module, {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)), {}));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2346,11 +2358,14 @@ TEST(StreamExecutorGpuClientTest, MlirAutoParameterLayoutIsSet) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module, xla::ParseMlirModuleString(
-                                           kMlirWithParameterLayout, context));
+                                           kMlirWithParameterLayout, *context));
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->CompileAndLoad(*module, {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)), {}));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2417,11 +2432,14 @@ TEST(StreamExecutorGpuClientTest, MlirParameterLayoutIsSetInHlo) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module, xla::ParseMlirModuleString(
-                                           kMlirWithParameterLayout, context));
+                                           kMlirWithParameterLayout, *context));
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->CompileAndLoad(*module, {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)), {}));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2445,14 +2463,17 @@ TEST(StreamExecutorGpuClientTest, MlirParameterLayoutFromOptionsIsSetInHlo) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          xla::ParseMlirModuleString(kMlirCopy, context));
+                          xla::ParseMlirModuleString(kMlirCopy, *context));
 
   xla::CompileOptions options;
   options.argument_layouts = {
       {ShapeUtil::MakeShapeWithDenseLayout(S32, {2, 2, 2}, {0, 2, 1})}};
-  TF_ASSERT_OK_AND_ASSIGN(auto executable, client->Compile(*module, options));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable, client->Compile(MaybeOwningMlirModule(std::move(context),
+                                                             std::move(module)),
+                                       options));
   TF_ASSERT_OK_AND_ASSIGN(auto modules, executable->GetHloModules());
 
   auto first_param_layout =
@@ -2494,10 +2515,10 @@ TEST(StreamExecutorGpuClientTest,
     }
   })mlir";
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(
       auto module, xla::ParseMlirModuleString(
-                       mlir_mul_explicit_sharding_layout_and_memory, context));
+                       mlir_mul_explicit_sharding_layout_and_memory, *context));
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
 
@@ -2506,8 +2527,11 @@ TEST(StreamExecutorGpuClientTest,
       .set_use_spmd_partitioning(true)
       .set_allow_spmd_sharding_propagation_to_output({true});
 
-  TF_ASSERT_OK_AND_ASSIGN(auto executable,
-                          client->CompileAndLoad(*module, options));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)),
+          options));
   TF_ASSERT_OK_AND_ASSIGN(auto modules,
                           executable->GetExecutable()->GetHloModules());
 
@@ -2660,16 +2684,19 @@ TEST(StreamExecutorGpuClientTest, NonZeroGPUDeviceTimeMeasurementMultiGPU) {
   auto devices_per_host = client->addressable_device_count();
   EXPECT_EQ(devices_per_host, 2) << "This test requires 2 local GPUs.";
 
-  mlir::MLIRContext context;
+  auto context = std::make_unique<mlir::MLIRContext>();
   TF_ASSERT_OK_AND_ASSIGN(
-      auto module, xla::ParseMlirModuleString(kMlirDistributedSum, context));
+      auto module, xla::ParseMlirModuleString(kMlirDistributedSum, *context));
 
   xla::CompileOptions options;
   options.executable_build_options.set_num_partitions(8)
       .set_use_spmd_partitioning(true)
       .set_allow_spmd_sharding_propagation_to_output({true});
-  TF_ASSERT_OK_AND_ASSIGN(auto executable,
-                          client->CompileAndLoad(*module, options));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto executable,
+      client->CompileAndLoad(
+          MaybeOwningMlirModule(std::move(context), std::move(module)),
+          options));
 
   Shape shape = ShapeUtil::MakeShapeWithDenseLayout(S32, {1}, {0});
   std::vector<std::unique_ptr<PjRtBuffer>> inputs;
@@ -2707,8 +2734,7 @@ TEST(StreamExecutorGpuClientTest, NonZeroGPUDeviceTimeMeasurementMultiGPU) {
 TEST(StreamExecutorGpuClientTest, DmaMapUnmap) {
   TF_ASSERT_OK_AND_ASSIGN(auto gpu_client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
-  auto client =
-      tensorflow::down_cast<PjRtStreamExecutorClient*>(gpu_client.get());
+  auto client = absl::down_cast<PjRtStreamExecutorClient*>(gpu_client.get());
   size_t dma_size = 1024;
   size_t alignment = 4096;
   auto host_dma_ptr = tsl::port::AlignedMalloc(
@@ -2891,9 +2917,8 @@ ENTRY main.5 {
         auto raw_buffer,
         xla::PjRtRawBuffer::CreateRawAliasOfBuffer(buffer.get()));
 
-    auto* opaque_ptr =
-        tensorflow::down_cast<xla::CommonPjRtRawBuffer*>(raw_buffer.get())
-            ->OpaqueDeviceMemoryDataPointer();
+    auto* opaque_ptr = absl::down_cast<CommonPjRtRawBuffer*>(raw_buffer.get())
+                           ->OpaqueDeviceMemoryDataPointer();
     if (opaque_ptr == last_opaque_ptr) {
       clobbered = true;
     }
@@ -2936,11 +2961,11 @@ TEST(StreamExecutorGpuClientTest, EventCaching) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
   auto* async_work_runner =
-      tensorflow::down_cast<PjRtStreamExecutorClient*>(client.get())
+      absl::down_cast<PjRtStreamExecutorClient*>(client.get())
           ->async_work_runner();
   const auto& device = client->addressable_devices()[0];
   LocalDeviceState* local_device_state =
-      tensorflow::down_cast<const PjRtStreamExecutorDevice*>(device)
+      absl::down_cast<const PjRtStreamExecutorDevice*>(device)
           ->local_device_state();
   ASSERT_TRUE(local_device_state != nullptr);
   size_t sync_point0 = local_device_state->GetNextComputeStreamSyncPoint();
@@ -2969,8 +2994,7 @@ TEST(StreamExecutorGpuClientTest, EventCaching) {
 TEST(StreamExecutorGpuClientTest, LinkedEventPromise) {
   TF_ASSERT_OK_AND_ASSIGN(auto pjrt_client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
-  auto* client =
-      tensorflow::down_cast<PjRtStreamExecutorClient*>(pjrt_client.get());
+  auto* client = absl::down_cast<PjRtStreamExecutorClient*>(pjrt_client.get());
   auto* memory_space = client->memory_spaces()[0];
   auto literal = LiteralUtil::CreateR1<float>({41.0f, 42.0f, 43.0f, 44.0f});
   TF_ASSERT_OK_AND_ASSIGN(
