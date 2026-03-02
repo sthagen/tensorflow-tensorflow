@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_CODEGEN_TILING_EXPERIMENTAL_SYMBOLIC_TILE_H_
-#define XLA_CODEGEN_TILING_EXPERIMENTAL_SYMBOLIC_TILE_H_
+#ifndef XLA_CODEGEN_TILING_EXPERIMENTAL_TILE_H_
+#define XLA_CODEGEN_TILING_EXPERIMENTAL_TILE_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +25,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/Support/LLVM.h"
 
 namespace xla::gpu::experimental {
 
@@ -66,7 +67,7 @@ struct DimTile {
   //
   // output = s32[2, 17] reshape (s32[34] input)
   //
-  // If we propagate the `output` SymbolicTile with the tile size of first
+  // If we propagate the `output` Tile with the tile size of first
   // dimension equal to 1
   //
   // (tid0, tid1)[ts1] -> offsets [tid0, tid1 * ts1]
@@ -90,19 +91,18 @@ H AbslHashValue(H h, const DimTile& dim_tile) {
   return H::combine(std::move(h), static_cast<size_t>(dim_tile_hash));
 }
 
-// SymbolicTile is a collection of tilings for every dimension of output tensor
-// of an HLO instruction. SymbolicTiledHloInstruction associates a SymbolicTile
+// Tile is a collection of tilings for every dimension of output tensor
+// of an HLO instruction. TiledHloInstruction associates a Tile
 // with an HLO instruction.
-class SymbolicTile {
+class Tile {
  public:
-  SymbolicTile(const TilingSpace& tiling_space,
-               llvm::SmallVector<DimTile> dim_tiles);
+  Tile(const TilingSpace& tiling_space, llvm::SmallVector<DimTile> dim_tiles);
 
-  SymbolicTile(const TilingSpace& tiling_space,
-               llvm::ArrayRef<mlir::AffineExpr> offsets,
-               llvm::ArrayRef<mlir::AffineExpr> sizes,
-               llvm::ArrayRef<mlir::AffineExpr> strides,
-               llvm::ArrayRef<mlir::AffineExpr> upper_bounds);
+  Tile(const TilingSpace& tiling_space,
+       llvm::ArrayRef<mlir::AffineExpr> offsets,
+       llvm::ArrayRef<mlir::AffineExpr> sizes,
+       llvm::ArrayRef<mlir::AffineExpr> strides,
+       llvm::ArrayRef<mlir::AffineExpr> upper_bounds);
 
   std::string ToString(bool print_variables = true) const;
 
@@ -116,11 +116,14 @@ class SymbolicTile {
   const TilingSpace& tiling_space() const { return *tiling_space_; }
   mlir::MLIRContext* mlir_context() const;
 
-  bool operator==(const SymbolicTile& other) const;
+  // Replace tiling expressions with the given map.
+  void Replace(const mlir::DenseMap<mlir::AffineExpr, mlir::AffineExpr>& map);
+
+  bool operator==(const Tile& other) const;
 
   // This allows GUnit to print the tile.
   template <typename Sink>
-  friend void AbslStringify(Sink& sink, const SymbolicTile& tile) {
+  friend void AbslStringify(Sink& sink, const Tile& tile) {
     sink.Append(tile.ToString());
   }
 
@@ -130,9 +133,9 @@ class SymbolicTile {
 };
 
 template <typename H>
-H AbslHashValue(H h, const SymbolicTile& symbolic_tile) {
-  h = H::combine(std::move(h), &symbolic_tile.tiling_space());
-  for (const DimTile& dim_tile : symbolic_tile.dim_tiles()) {
+H AbslHashValue(H h, const Tile& tile) {
+  h = H::combine(std::move(h), &tile.tiling_space());
+  for (const DimTile& dim_tile : tile.dim_tiles()) {
     h = H::combine(std::move(h), dim_tile);
   }
   return h;
@@ -146,8 +149,9 @@ DimTile GetFullDimTile(int64_t dim_size, mlir::MLIRContext* ctx);
 // Returns a DimTile that covers the entire dimension, i.e.
 //  offset = AffineDimExpr(id) * AffineSymbolExpr(id),
 //  size = AffineSymbolExpr(id), stride 1, upper_bound = dim_size.
-DimTile GetDefaultDimTile(int64_t id, int64_t dim_size, mlir::MLIRContext* ctx);
+DimTile GetDefaultDimTile(int64_t id, mlir::AffineExpr tile_size,
+                          int64_t dim_size);
 
 }  // namespace xla::gpu::experimental
 
-#endif  // XLA_CODEGEN_TILING_EXPERIMENTAL_SYMBOLIC_TILE_H_
+#endif  // XLA_CODEGEN_TILING_EXPERIMENTAL_TILE_H_
