@@ -375,7 +375,7 @@ class PjRtCApiClient : public PjRtClient {
       LocalDeviceId local_device_id) const override;
 
   void UpdateGlobalProcessInfo(
-      absl::Span<xla::coordination::CoordinatedTaskStateInfo> infos) override;
+      absl::Span<xla::coordination::TaskInfo> infos) override;
 
   absl::Span<PjRtMemorySpace* const> memory_spaces() const override;
 
@@ -556,7 +556,7 @@ class PjRtCApiClient : public PjRtClient {
       const Layout* device_layout);
 
   absl::StatusOr<std::string> SerializeMlirModule(
-      mlir::ModuleOp module, const CompileOptions& options);
+      MaybeOwningMlirModule module, const CompileOptions& options);
 
   const PJRT_Api* c_api_;
   std::unique_ptr<PJRT_Client, ::pjrt::PJRT_ClientDeleter> c_client_;
