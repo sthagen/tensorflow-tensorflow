@@ -55,7 +55,6 @@ limitations under the License.
 #include "xla/pjrt/c/pjrt_c_api_memory_descriptions_extension.h"
 #include "xla/pjrt/c/pjrt_c_api_multi_slice_internal_types.h"
 #include "xla/pjrt/c/pjrt_c_api_shardings_extension.h"
-#include "xla/pjrt/distributed/coordination/coordination_service.pb.h"
 #include "xla/pjrt/distributed/key_value_store_interface.h"
 #include "xla/pjrt/maybe_owning_mlir_module.h"
 #include "xla/pjrt/mlir_to_hlo.h"
@@ -79,6 +78,7 @@ limitations under the License.
 #include "xla/tsl/framework/allocator.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+#include "xla/tsl/protobuf/coordination_service.pb.h"
 #include "xla/util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
@@ -665,24 +665,24 @@ PJRT_Error* PJRT_Client_UpdateGlobalProcessInfo(
   auto translate_state = [](PJRT_ProcessState state) {
     switch (state) {
       case PJRT_ProcessState_kUnspecified:
-        return xla::coordination::TaskState::UNSPECIFIED;
+        return tensorflow::CoordinatedTaskState::TASKSTATE_UNSPECIFIED;
       case PJRT_ProcessState_kUninitialized:
-        return xla::coordination::TaskState::UNINITIALIZED;
+        return tensorflow::CoordinatedTaskState::TASKSTATE_UNINITIALIZED;
       case PJRT_ProcessState_kDisconnected:
-        return xla::coordination::TaskState::DISCONNECTED;
+        return tensorflow::CoordinatedTaskState::TASKSTATE_DISCONNECTED;
       case PJRT_ProcessState_kConnected:
-        return xla::coordination::TaskState::CONNECTED;
+        return tensorflow::CoordinatedTaskState::TASKSTATE_CONNECTED;
       case PJRT_ProcessState_kError:
-        return xla::coordination::TaskState::ERROR;
+        return tensorflow::CoordinatedTaskState::TASKSTATE_ERROR;
     }
     LOG(FATAL) << "Unexpected PJRT_ProcessState " << state;
   };
 
-  std::vector<xla::coordination::TaskInfo> infos;
+  std::vector<tensorflow::CoordinatedTaskStateInfo> infos;
   for (int i = 0; i < args->num_process_infos; ++i) {
     PJRT_ProcessInfo* p = &args->process_infos[i];
-    xla::coordination::TaskInfo info;
-    info.set_task_id(p->task_id);
+    tensorflow::CoordinatedTaskStateInfo info;
+    info.mutable_task()->set_task_id(p->task_id);
     info.set_incarnation(p->incarnation_id);
     info.set_state(translate_state(p->state));
     info.set_error_code(p->error_code);

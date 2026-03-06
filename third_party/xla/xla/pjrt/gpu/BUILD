@@ -108,7 +108,6 @@ cc_library(
         "//xla/pjrt/distributed:key_value_store_interface",
         "//xla/pjrt/distributed:protocol_proto_cc",
         "//xla/pjrt/distributed:topology_util",
-        "//xla/pjrt/distributed/coordination:coordination_service_proto_cc",
         "//xla/pjrt/plugin/xla_gpu:xla_gpu_allocator_config",
         "//xla/pjrt/plugin/xla_gpu:xla_gpu_client_options",
         "//xla/pjrt/proto:compile_options_proto_cc",
@@ -694,6 +693,39 @@ xla_cc_test(
         "//xla/runtime:process_id",
         "//xla/service:gpu_topology",
         "//xla/tsl/platform:statusor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "se_gpu_pjrt_runtime_abi_version",
+    srcs = ["se_gpu_pjrt_runtime_abi_version.cc"],
+    hdrs = ["se_gpu_pjrt_runtime_abi_version.h"],
+    deps = [
+        "//xla/pjrt:pjrt_abi_version",
+        "//xla/pjrt:pjrt_common",
+        "//xla/pjrt:stream_executor_pjrt_abi_version",
+        "//xla/stream_executor/abi:runtime_abi_version",
+        "//xla/stream_executor/abi:runtime_abi_version_resolver",
+        "//xla/tsl/platform:status_macros",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+xla_cc_test(
+    name = "se_gpu_pjrt_runtime_abi_version_test",
+    srcs = ["se_gpu_pjrt_runtime_abi_version_test.cc"],
+    deps = [
+        ":se_gpu_pjrt_runtime_abi_version",
+        "//xla/pjrt:pjrt_common",
+        "//xla/pjrt:stream_executor_pjrt_abi_version",
+        "//xla/stream_executor/abi:executable_abi_version",
+        "//xla/stream_executor/abi:mock_runtime_abi_version",
+        "//xla/tsl/util/proto:proto_matchers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",
     ],
 )

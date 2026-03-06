@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/container/inlined_vector.h"
@@ -26,11 +27,13 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_sharding.h"
+#include "xla/pjrt/pjrt_layout.h"
 #include "xla/python/ifrt/array.h"
 #include "xla/python/ifrt/client.h"
 #include "xla/python/ifrt/device.h"
 #include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/layout.h"
+#include "xla/python/ifrt/sharding.h"
 #include "xla/shape.h"
 #include "xla/tsl/concurrency/future.h"
 #include "xla/tsl/platform/threadpool.h"
@@ -47,6 +50,10 @@ namespace ifrt_serving {
 struct InputHandle {
   // The input tensor to be transferred.
   tensorflow::Tensor tensor;
+  // The IFRT dtype of the input tensor.
+  xla::ifrt::DType ifrt_dtype;
+  // The IFRT shape of the input tensor.
+  std::shared_ptr<const xla::ifrt::Shape> ifrt_shape;
   // The XLA shape of the input tensor.
   const xla::Shape* input_xla_shape;
   // The devices to transfer the tensor to.
@@ -68,17 +75,6 @@ class H2DTransferExecutor {
   // H2DTransferExecutorFactory is plumbed through the stack.
   explicit H2DTransferExecutor(xla::ifrt::Client& ifrt_client);
   virtual ~H2DTransferExecutor() = default;
-
-  ABSL_DEPRECATED("Use ScheduledH2DTransfers instead.")
-  // Registers a tensor to be transferred to devices. The H2D transfer can be
-  // started in this call or in a later call of `RunH2DTransfers`.
-  virtual absl::StatusOr<tsl::Future<xla::ifrt::ArrayRef>> ScheduledH2DTransfer(
-      const tensorflow::Tensor& tensor,
-      // `input_xla_shape` is not used in this implementation.
-      const xla::Shape* /*input_xla_shape*/,
-      const xla::ifrt::DeviceListRef& device_list,
-      xla::ifrt::ShardingRef sharding, tsl::thread::ThreadPool& thread_pool,
-      xla::ifrt::LayoutRef xla_input_layout);
 
   // Registers a list of tensors to be transferred to devices.
   // This should be called only before `RunH2DTransfers` once.
