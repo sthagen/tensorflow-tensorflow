@@ -83,7 +83,7 @@ absl::StatusOr<se::DeviceAddressHandle> AllocateMemory(
   se::DeviceAddressHandle local_buffer_alloc(
       executor,
       executor->Allocate(
-          size, static_cast<int64_t>(stream_executor::MemoryType::kP2P)));
+          size, static_cast<int64_t>(stream_executor::MemorySpace::kP2P)));
   if (local_buffer_alloc.address().is_null()) {
     return absl::InternalError(absl::StrFormat(
         "Failed to allocate %s for all-reduce.", debug_buffer_name));
@@ -227,9 +227,10 @@ absl::Status CollectiveKernelThunk::Prepare(const PrepareParams& params) {
     // Allocate scratch buffers.
     const AllReduceStrategy strategy =
         GetAllReduceStrategy(GetInputSizeBytes(), is_multimem_enabled_);
-    const LaunchDimensions launch_dimensions = AllReduceLaunchDimensions(
-        buffers_[0].element_count, clique_key.num_local_participants(),
-        strategy);
+    const LaunchDimensions launch_dimensions =
+        launch_dimensions_.value_or(AllReduceLaunchDimensions(
+            buffers_[0].element_count, clique_key.num_local_participants(),
+            strategy));
     const int64_t kNumSignalFlags =
         clique_key.num_local_participants() * launch_dimensions.num_blocks();
     const int64_t kSignalBufferSize = xla::RoundUpTo<uint64_t>(

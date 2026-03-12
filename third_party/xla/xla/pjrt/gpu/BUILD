@@ -497,7 +497,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
-        "@llvm-project//mlir:IR",
         "@tsl//tsl/platform:casts",
     ],
 )
@@ -671,7 +670,6 @@ cc_library(
         "//xla/pjrt:pjrt_device_dimensions",
         "//xla/pjrt:pjrt_stream_executor_device_description",
         "//xla/pjrt/proto:topology_description_proto_cc",
-        "//xla/runtime:process_id",
         "//xla/service:gpu_topology",
         "//xla/service:gpu_topology_proto_cc",
         "//xla/stream_executor:device_description_proto_cc",
@@ -710,6 +708,7 @@ cc_library(
     name = "se_gpu_pjrt_runtime_abi_version",
     srcs = ["se_gpu_pjrt_runtime_abi_version.cc"],
     hdrs = ["se_gpu_pjrt_runtime_abi_version.h"],
+    visibility = internal_visibility(["//xla:internal"]),
     deps = [
         "//xla/pjrt:pjrt_abi_version",
         "//xla/pjrt:pjrt_common",
@@ -736,5 +735,22 @@ xla_cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "abi_helpers",
+    srcs = ["abi_helpers.cc"],
+    hdrs = ["abi_helpers.h"],
+    visibility = internal_visibility(["//xla/python/pjrt_ifrt:__subpackages__"]),
+    deps = [
+        "//xla/pjrt:pjrt_abi_version",
+        "//xla/pjrt:pjrt_api",
+        "//xla/pjrt/c:pjrt_c_api_abi_version_helpers",
+        "//xla/pjrt/c:pjrt_c_api_hdrs",
+        "//xla/pjrt/plugin:plugin_names",
+        "//xla/pjrt/proto:pjrt_abi_version_proto_cc",
+        "//xla/tsl/platform:status_macros",
+        "@com_google_absl//absl/status:statusor",
     ],
 )

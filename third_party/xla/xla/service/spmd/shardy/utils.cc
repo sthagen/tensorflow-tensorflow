@@ -71,6 +71,7 @@ using ::mlir::StringAttr;
 using ::mlir::StringRef;
 using xla::sdy::kFrontendAttributesAttr;
 
+using ::mlir::func::CallOp;
 using ::mlir::func::FuncOp;
 using ::mlir::sdy::AxisRefAttr;
 using ::mlir::sdy::AxisRefListAttr;
@@ -501,10 +502,21 @@ mlir::sdy::TensorShardingAttr convertToSdyShardingAttr(
     const HloSharding& hloSharding, mlir::Type type,
     mlir::MLIRContext* context) {
   CHECK(!hloSharding.IsTuple());
-  CHECK(hloSharding.UseNamedShardingLeaf());
+
+  // Replicated HloShardingV1/V2 are treated as placeholder shardings, allowing
+  // modification. Since these are often added post JAX -> HLO lowering without
+  // frontend attributes, they are simply ignored by Shardy import. To match
+  // this behavior we handle them explicity in HloShardingV3 case.
+  if (!hloSharding.UseNamedShardingLeaf()) {
+    CHECK(hloSharding.IsReplicated())
+        << "Only V2 replicated sharding is supported for non-named sharding.";
+    return mlir::sdy::TensorShardingAttr::getFullyOpen(
+        context, mlir::sdy::getTensorRank(type),
+        mlir::sdy::MeshAttr::get(context, {}, {}));
+  }
 
   const NamedSharding& namedSharding = hloSharding.named_sharding();
-  if (namedSharding.IsMaximal()) {
+  if (namedSharding.IsSingleDevice()) {
     return mlir::sdy::TensorShardingAttr::getFullyClosed(
         context, /*rank=*/0,
         mlir::sdy::MeshAttr::getMaximal(context,
@@ -512,13 +524,6 @@ mlir::sdy::TensorShardingAttr convertToSdyShardingAttr(
   }
 
   mlir::sdy::MeshAttr meshAttr = toSdyMeshAttr(namedSharding.mesh(), context);
-
-  int64_t rank = mlir::sdy::getTensorRank(type);
-  if (namedSharding.IsReplicated()) {
-    return mlir::sdy::TensorShardingAttr::getFullyReplicated(context, rank,
-                                                             meshAttr,
-                                                             /*isClosed=*/true);
-  }
 
   SmallVector<mlir::sdy::DimensionShardingAttr> dimShardings;
   for (const auto& dimSharding : namedSharding.dim_shardings()) {
@@ -584,6 +589,40 @@ mlir::sdy::TensorShardingPerValueAttr convertToSdySharding(
   CHECK_EQ(types.size(), 1);
   return TensorShardingPerValueAttr::get(
       context, convertToSdyShardingAttr(hloSharding, types[0], context));
+}
+
+bool isManualComputation(CallOp callOp) {
+  return callOp.getCallee().contains(kManualComputationFuncName);
+}
+
+bool isManualComputation(FuncOp funcOp) {
+  return funcOp.getName().contains(kManualComputationFuncName);
+}
+
+StringAttr getOriginalFuncName(FuncOp funcOp) {
+  if (auto originalFuncName =
+          funcOp->getAttrOfType<StringAttr>(kOriginalFuncName);
+      originalFuncName) {
+    return originalFuncName;
+  }
+  return funcOp.getSymNameAttr();
+}
+
+FuncOp cloneFuncRecursively(FuncOp funcOp, mlir::SymbolTable& symbolTable) {
+  StringAttr originalFuncName = getOriginalFuncName(funcOp);
+  FuncOp clonedFuncOp =
+      symbolTable.lookup<FuncOp>(originalFuncName.getValue()).clone();
+  // TODO(enver): Have a MLIR native error handling, instead of CHECK.
+  CHECK(clonedFuncOp) << "Failed to lookup function: "
+                      << originalFuncName.str();
+  clonedFuncOp->setAttr(kOriginalFuncName, originalFuncName);
+  clonedFuncOp->walk([&](CallOp callOp) {
+    FuncOp funcOp = symbolTable.lookup<FuncOp>(callOp.getCallee());
+    CHECK(funcOp) << "Failed to lookup function: " << callOp.getCallee().str();
+    callOp.setCallee(
+        symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
+  });
+  return clonedFuncOp;
 }
 
 }  // namespace sdy
