@@ -389,17 +389,6 @@ MaybeOwningThreadPool CreateMaybeOwningThreadPool(
   }
 }
 
-DeviceOrDevicelessConfig GetDeviceConfig(
-    se::StreamExecutor* stream_exec, const GpuCompiler::CompileOptions& options,
-    const GpuTargetConfig& gpu_target_config) {
-  if (stream_exec) {
-    return DeviceOrDevicelessConfig{
-        DeviceConfig{stream_exec, options.device_allocator}};
-  }
-  return DeviceOrDevicelessConfig{
-      DevicelessConfig{gpu_target_config.device_description}};
-}
-
 absl::StatusOr<int> GetNumVisibleDevices(
     const Compiler::CompileOptions& options,
     const se::StreamExecutor* stream_exec, se::Platform::Id platform_id) {
@@ -1252,7 +1241,6 @@ void AddDoubleBufferingPasses(const HloModule& module,
   }
 }
 
-constexpr int kCombineThresholdCount = 256;
 
 void AddCollectiveCombinerPasses(
     HloPassPipeline& pipeline, const HloModule& module,
@@ -1270,21 +1258,22 @@ void AddCollectiveCombinerPasses(
 
   pipeline.AddPass<GpuAllGatherCombiner>(
       kDefaultAllGatherCombineThreshold,
-      opts.xla_gpu_all_gather_combine_threshold_bytes(), kCombineThresholdCount,
+      opts.xla_gpu_all_gather_combine_threshold_bytes(),
+      opts.xla_gpu_collective_combine_threshold_count(),
       opts.xla_gpu_enable_all_gather_combine_by_dim(),
       /*combine_different_dtypes=*/true);
   pipeline.AddPass<GpuAllReduceCombiner>(
       kDefaultAllReduceCombineThreshold,
       opts.xla_gpu_all_reduce_combine_threshold_bytes(),
-      kCombineThresholdCount);
+      opts.xla_gpu_collective_combine_threshold_count());
   pipeline.AddPass<GpuReduceScatterCombiner>(
       kDefaultReduceScatterCombineThreshold,
       opts.xla_gpu_reduce_scatter_combine_threshold_bytes(),
-      kCombineThresholdCount,
+      opts.xla_gpu_collective_combine_threshold_count(),
       opts.xla_gpu_enable_reduce_scatter_combine_by_dim());
   pipeline.AddPass<CollectivePermuteCombiner>(
       opts.xla_gpu_collective_permute_combine_threshold_bytes(),
-      kCombineThresholdCount);
+      opts.xla_gpu_collective_combine_threshold_count());
 }
 
 absl::Status RunPostFusionPasses(
@@ -1356,11 +1345,9 @@ absl::Status RunPostFusionVerificationPasses(
   if (hlo_module->config()
           .debug_options()
           .xla_gpu_verify_triton_fusion_numerics()) {
-    DeviceOrDevicelessConfig device_config =
-        GetDeviceConfig(stream_exec, options, gpu_target_config);
-    if (!device_config.IsDeviceless()) {
-      pipeline.AddPass<TritonFusionNumericsVerifier>(device_config, alias_info,
-                                                     mlir_context);
+    if (stream_exec != nullptr) {
+      pipeline.AddPass<TritonFusionNumericsVerifier>(
+          *stream_exec, options.device_allocator, alias_info, mlir_context);
     }
   }
 
@@ -1425,7 +1412,7 @@ absl::Status RunDynamicSliceFusionPasses(HloModule* hlo_module,
     pipeline.AddPass<GpuReduceScatterCombiner>(
         kDefaultReduceScatterCombineThreshold,
         opts.xla_gpu_reduce_scatter_combine_threshold_bytes(),
-        kCombineThresholdCount,
+        opts.xla_gpu_collective_combine_threshold_count(),
         opts.xla_gpu_enable_reduce_scatter_combine_by_dim());
     pipeline.AddPass<DynamicSliceFusionRewriter>(platform_id);
     pipeline.AddPass<AsyncWrapper>([](const HloInstruction* instr) {
@@ -3305,16 +3292,24 @@ GpuCompiler::GetAutotunerBackends(
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS);
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT);
     disabled_autotune_backends.push_back(autotuner::Backend::CUDNN);
+    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS);
+    disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT);
+    disabled_autotune_backends.push_back(autotuner::Backend::MIOPEN);
+    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
+    disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT_FISSION);
   }
 
   if (!debug_options.xla_gpu_enable_cublaslt()) {
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT);
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT_FISSION);
+    disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT);
+    disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT_FISSION);
   } else {
     // Breaks xla/backends/gpu/transforms:gemm_rewriter_test_b200, it requires
     // CUBLAS and CUBLASLT both to be available. TODO: fix tests and uncomment.
     // disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS);
     disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS_FISSION);
+    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
   }
 
   autotune_backends.erase(

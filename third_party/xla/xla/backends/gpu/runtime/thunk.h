@@ -144,6 +144,8 @@ class Thunk {
     kAllToAll,
     kAllToAllDone,
     kAllToAllStart,
+    kAsyncDone,
+    kAsyncStart,
     kBuffersDebugChecksum,
     kBuffersDebugFloatCheck,
     kCollectiveBroadcast,
@@ -161,7 +163,6 @@ class Thunk {
     kCopy,
     kCopyDone,
     kCuDnn,
-    kCubSort,
     kCublasLtMatmul,
     kCustomCall,
     kCustomKernel,
@@ -360,6 +361,9 @@ class Thunk {
     static ExecuteParams CloneWithNewAllocations(
         const ExecuteParams& params,
         const BufferAllocations& buffer_allocations);
+
+    // Creates a clone of *this parameters with a new compute stream.
+    ExecuteParams WithComputeStream(se::Stream* stream) const;
 
     const BufferAllocations* buffer_allocations;  // never null
 

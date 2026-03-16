@@ -161,10 +161,9 @@ bool hasGspmdAttrsOrOps(mlir::ModuleOp module);
 bool hasShardyMesh(mlir::ModuleOp module);
 
 // Returns the func result shardings of `funcOp`, with fully-replicated
-// shardings for empty shardings on `funcOp`, by using the ranks from `callOp`.
+// shardings for empty shardings on `funcOp`.
 mlir::sdy::TensorShardingPerValueAttr getFuncResultShardings(
-    mlir::func::CallOp callOp, mlir::func::FuncOp funcOp,
-    const mlir::SymbolTable& symbolTable);
+    mlir::func::FuncOp funcOp, const mlir::SymbolTable& symbolTable);
 
 // Converts an XLA Mesh to an SDY MeshAttr.
 mlir::sdy::MeshAttr toSdyMeshAttr(const Mesh& mesh, mlir::MLIRContext* context);
@@ -203,6 +202,10 @@ mlir::func::FuncOp cloneFuncRecursively(
     mlir::func::FuncOp funcOp,
     mlir::sdy::TensorShardingPerValueAttr callOpResultShardings,
     mlir::SymbolTable& symbolTable);
+
+// Returns the argument shardings for the given `funcOp`.
+mlir::sdy::TensorShardingPerValueAttr getFuncArgShardings(
+    mlir::func::FuncOp funcOp, const mlir::SymbolTable& symbolTable);
 
 }  // namespace sdy
 }  // namespace xla
