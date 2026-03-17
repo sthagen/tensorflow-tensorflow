@@ -48,5 +48,42 @@ TEST(ThunkSerDesDynamicTest, DotThunkFailsWhenNotLinked) {
                       std::string(from_proto_fn_or.status().message()));
 }
 
+TEST(ThunkSerDesDynamicTest, YnnFusionThunkFailsWhenNotLinked) {
+  auto from_proto_fn_or =
+      ThunkSerDesRegistry::Get().GetFromProtoFn(Thunk::Kind::kYnnFusion);
+
+  EXPECT_FALSE(from_proto_fn_or.ok());
+  EXPECT_EQ(from_proto_fn_or.status().code(), absl::StatusCode::kNotFound);
+  EXPECT_PRED_FORMAT2(
+      testing::IsSubstring,
+      "No FromProto function registered for thunk kind: ynn-fusion",
+      std::string(from_proto_fn_or.status().message()));
+}
+
+TEST(ThunkSerDesDynamicTest, CollectiveThunkFailsWhenNotLinked) {
+  ThunkProto proto;
+  proto.mutable_collective_thunk();
+
+  auto from_proto_fn_or =
+      ThunkSerDesRegistry::Get().GetFromProtoFn(Thunk::Kind::kCollective);
+
+  EXPECT_EQ(from_proto_fn_or.status().code(), absl::StatusCode::kNotFound);
+  EXPECT_PRED_FORMAT2(
+      testing::IsSubstring,
+      "No FromProto function registered for thunk kind: collective",
+      std::string(from_proto_fn_or.status().message()));
+}
+
+TEST(ThunkSerDesDynamicTest, FftThunkFailsWhenNotLinked) {
+  auto from_proto_fn_or =
+      ThunkSerDesRegistry::Get().GetFromProtoFn(Thunk::Kind::kFft);
+
+  EXPECT_FALSE(from_proto_fn_or.ok());
+  EXPECT_EQ(from_proto_fn_or.status().code(), absl::StatusCode::kNotFound);
+  EXPECT_PRED_FORMAT2(testing::IsSubstring,
+                      "No FromProto function registered for thunk kind: fft",
+                      std::string(from_proto_fn_or.status().message()));
+}
+
 }  // namespace
 }  // namespace xla::cpu
