@@ -13,30 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/pjrt/async_work_runner.h"
+#ifndef XLA_BACKENDS_CPU_RUNTIME_THUNK_SERDES_CUSTOM_CALL_THUNK_SERDES_H_
+#define XLA_BACKENDS_CPU_RUNTIME_THUNK_SERDES_CUSTOM_CALL_THUNK_SERDES_H_
 
-#include <memory>
-#include <utility>
+namespace xla::cpu {
 
-#include "xla/tsl/concurrency/executor.h"
+// Registers the CustomCallThunk serialization/deserialization logic with the
+// ThunkSerDesRegistry.
+void RegisterCustomCallThunkSerDes();
 
-namespace xla {
+}  // namespace xla::cpu
 
-namespace {
-
-class AsyncWorkRunnerExecutor : public tsl::Executor {
- public:
-  explicit AsyncWorkRunnerExecutor(AsyncWorkRunner* runner) : runner_(runner) {}
-
-  void Execute(Task task) override { runner_->Schedule(std::move(task)); }
-
- private:
-  AsyncWorkRunner* const runner_;
-};
-
-}  // namespace
-
-AsyncWorkRunner::AsyncWorkRunner()
-    : executor_(std::make_unique<AsyncWorkRunnerExecutor>(this)) {}
-
-}  // namespace xla
+#endif  // XLA_BACKENDS_CPU_RUNTIME_THUNK_SERDES_CUSTOM_CALL_THUNK_SERDES_H_
