@@ -137,6 +137,25 @@ llvm::SmallVector<int64_t> SymbolicMap::GetConstantResults() const {
   return constants;
 }
 
+llvm::SmallVector<int64_t> SymbolicMap::Evaluate(
+    absl::Span<int64_t const> dim_values,
+    absl::Span<int64_t const> symbol_values) const {
+  CHECK_EQ(GetNumDims(), dim_values.size());
+  CHECK_EQ(GetNumSymbols(), symbol_values.size());
+
+  llvm::SmallVector<int64_t> variable_values;
+  variable_values.reserve(dim_values.size() + symbol_values.size());
+  variable_values.append(dim_values.begin(), dim_values.end());
+  variable_values.append(symbol_values.begin(), symbol_values.end());
+
+  llvm::SmallVector<int64_t> results;
+  results.reserve(GetNumResults());
+  for (SymbolicExpr expr : exprs_) {
+    results.push_back(expr.Evaluate(variable_values));
+  }
+  return results;
+}
+
 SymbolicMap SymbolicMap::ReplaceDimsAndSymbols(
     absl::Span<const SymbolicExpr> dim_replacements,
     absl::Span<const SymbolicExpr> sym_replacements, int64_t num_result_dims,
@@ -206,6 +225,14 @@ SymbolicMap SymbolicMap::GetSubMap(
     CHECK_LT(index, exprs_.size()) << "Result index out of bounds";
     sub_exprs.push_back(exprs_[index]);
   }
+  return SymbolicMap(ctx_, num_dimensions_, num_symbols_, std::move(sub_exprs));
+}
+
+SymbolicMap SymbolicMap::GetSliceMap(size_t start, size_t length) const {
+  CHECK_LE(start, exprs_.size()) << "Slice start out of bounds";
+  CHECK_LE(length, exprs_.size() - start) << "Slice length out of bounds";
+  llvm::SmallVector<SymbolicExpr> sub_exprs(exprs_.begin() + start,
+                                            exprs_.begin() + start + length);
   return SymbolicMap(ctx_, num_dimensions_, num_symbols_, std::move(sub_exprs));
 }
 

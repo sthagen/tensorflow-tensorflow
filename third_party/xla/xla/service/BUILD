@@ -506,6 +506,7 @@ xla_cc_test(
         ":scheduling_annotations_util",
         "//xla:literal_util",
         "//xla:util",
+        "//xla/hlo/analysis:hlo_reachability",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",
         "//xla/hlo/pass:hlo_pass",
@@ -516,6 +517,7 @@ xla_cc_test(
         "//xla/hlo/transforms/simplifiers:hlo_dce",
         "//xla/hlo/utils:hlo_matchers",
         "//xla/hlo/utils:hlo_query",
+        "//xla/tsl/platform:logging",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -2736,6 +2738,7 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_query",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -6559,7 +6562,7 @@ cc_library(
         "//tensorflow/core/common_runtime/eager:__subpackages__",
         ":__subpackages__",
         "//xla/tools:__subpackages__",
-        "//xla/backends/gpu/autotuner:__subpackages__",
+        "//xla/backends/gpu:__subpackages__",
     ]),
     deps = [
         ":gpu_topology_proto_cc",
@@ -6603,6 +6606,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ],
 )

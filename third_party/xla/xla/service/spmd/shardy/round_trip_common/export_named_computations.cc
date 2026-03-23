@@ -226,30 +226,16 @@ void exportNamedComputations(ModuleOp moduleOp, SymbolTable& symbolTable,
         namedComputationOp, namedComputationOp.getResultTypes(), funcSymName,
         namedComputationOp.getOperands());
     callOp->setAttrs(callOpAttrs);
-
-    // Copy the func output shardings to the call op.
-    FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
-    if (TensorShardingPerValueAttr funcResultShardings =
-            getFuncResultShardings(funcOp, symbolTable);
-        funcResultShardings) {
-      mlir::sdy::setShardings(callOp, funcResultShardings);
-      if (outShardings.has_value()) {
-        for (auto [funcResultSharding, outSharding, result] : llvm::zip_equal(
-                 funcResultShardings.getShardings(),
-                 outShardings->getShardings(), callOp.getResults())) {
-          if (!funcResultSharding.isEquivalent(outSharding)) {
-            rewriter.setInsertionPointAfterValue(result);
-            auto copyOp =
-                mlir::mhlo::CopyOp::create(rewriter, result.getLoc(), result);
-            mlir::sdy::setShardings(copyOp, outSharding);
-            rewriter.replaceAllUsesExcept(result, copyOp, copyOp);
-          }
-        }
-      }
-      if (manualAxesAttr) {
-        callOp->setAttr(kManualAxes, manualAxesAttr);
-      }
+    if (manualAxesAttr) {
+      callOp->setAttr(kManualAxes, manualAxesAttr);
     }
+    if (outShardings.has_value()) {
+      mlir::sdy::setShardings(callOp, *outShardings);
+    }
+
+    FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
+    maybeInsertReshardsOnFuncArguments(funcOp, callOp, symbolTable, rewriter);
+    maybeInsertReshardsOnFuncResults(funcOp, callOp, symbolTable, rewriter);
   });
 }
 

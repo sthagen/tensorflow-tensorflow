@@ -1778,6 +1778,8 @@ xla_test(
         "gpu",
         "interpreter",
     ],
+    # TODO(intel-tf): Enable on oneAPI once int4 support is added to oneAPI.
+    tags = ["no-oneapi"],
     deps = [
         ":hlo_pjrt_interpreter_reference_mixin",
         ":hlo_pjrt_test_base",
@@ -1979,8 +1981,9 @@ cc_library(
     # `cc_library` definition that is used in this file.
     compatible_with = [],
     deps = [
-        ":client_library_test_base",
-        ":hlo_test_base",
+        ":client_library_test_runner_mixin",
+        ":hlo_pjrt_interpreter_reference_mixin",
+        ":hlo_pjrt_test_base",
         "//xla:array2d",
         "//xla:array3d",
         "//xla:array4d",
@@ -1999,10 +2002,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest",
-        "@tsl//tsl/platform:errors",
-        "@tsl//tsl/platform:statusor",
-        "@tsl//tsl/platform:test",
+        "@com_google_googletest//:gtest_for_library",
     ],
     alwayslink = True,  # This library registers test cases at static initialization time.
 )
@@ -2012,11 +2012,7 @@ xla_test(
     timeout = "long",
     srcs = [],
     shard_count = 50,
-    tags = [
-        "optonly",
-        "pjrt_migration_candidate",
-    ],
-    use_legacy_runtime = True,
+    tags = ["optonly"],
     deps = [
         ":reduce_window_test_library",
         ":xla_internal_test_main",
@@ -2025,7 +2021,6 @@ xla_test(
 
 xla_test(
     name = "select_and_scatter_test",
-    timeout = "long",
     srcs = ["select_and_scatter_test.cc"],
     shard_count = 25,
     tags = [
@@ -2363,7 +2358,6 @@ xla_test(
 
 xla_test(
     name = "matrix_ops_simple_test",
-    timeout = "long",
     srcs = ["matrix_ops_simple_test.cc"],
     deps = [
         ":client_library_test_runner_mixin",
@@ -3587,11 +3581,7 @@ xla_test(
 
 xla_test(
     name = "iota_test",
-    timeout = "long",
     srcs = ["iota_test.cc"],
-    backend_tags = {
-        "cpu": ["optonly"],
-    },
     shard_count = 50,
     deps = [
         ":client_library_test_runner_mixin",
