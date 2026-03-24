@@ -2036,8 +2036,17 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       return absl::OkStatus();
     }
 
-    // There are four users of the gemm output within the GELU calculation.
-    bool has_aux = gemm->user_count() > 4;
+    // There are four users of the gemm output within the GELU calculation. We
+    // need to check if there are users of the gemm output which do not belong
+    // to the GELU calculation. Those need the original dot output (available as
+    // auxiliary output with GELU_AUX). If we have a slice or bitcast of the
+    // dot, this makes the check more complicated: one of the users of the dot
+    // would be the slice or bitcast, and the slice or bitcast would have 4
+    // users. If the dot or the slice or bitcast has more users than that, we
+    // need the auxiliary output.
+    bool has_aux = slice_or_bitcast ? (slice_or_bitcast->user_count() > 4 ||
+                                       gemm->user_count() > 1)
+                                    : gemm->user_count() > 4;
 
     TF_ASSIGN_OR_RETURN(auto gpu_config,
                         gemm->backend_config<GpuBackendConfig>());
@@ -2059,18 +2068,33 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
     TF_RETURN_IF_ERROR(SetName(multiply->GetModule(), output.get()));
 
-    if (slice_or_bitcast) {
-      output = slice_or_bitcast->CloneWithNewOperands(
-          slice_or_bitcast->shape(),
-          {gemm->parent()->AddInstruction(std::move(output))});
-    }
-
     if (has_aux) {
-      HloInstruction* tuple_output =
-          gemm->parent()->AddInstruction(std::move(output));
-      TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
-          gemm, HloInstruction::CreateGetTupleElement(tuple_output, 1)));
-      output = HloInstruction::CreateGetTupleElement(tuple_output, 0);
+      HloInstruction* tuple_output = gemm->AddInstruction(std::move(output));
+      std::unique_ptr<HloInstruction> gelu_output =
+          HloInstruction::CreateGetTupleElement(tuple_output, 0);
+      HloInstruction* new_dot_output = gemm->AddInstruction(
+          HloInstruction::CreateGetTupleElement(tuple_output, 1));
+      if (slice_or_bitcast) {
+        gelu_output = slice_or_bitcast->CloneWithNewOperands(
+            slice_or_bitcast->shape(),
+            {gemm->AddInstruction(std::move(gelu_output))});
+        if (slice_or_bitcast->user_count() > 4) {
+          std::unique_ptr<HloInstruction> new_dot_slice =
+              slice_or_bitcast->CloneWithNewOperands(slice_or_bitcast->shape(),
+                                                     {new_dot_output});
+          TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
+              slice_or_bitcast, std::move(new_dot_slice)));
+        }
+      }
+      if (!gemm->IsDead()) {
+        // `gemm` may already be dead if we replaced `slice_or_bitcast` with the
+        // new dot slice (as we would also delete unused operands).
+        TF_RETURN_IF_ERROR(ReplaceInstruction(gemm, new_dot_output));
+      }
+      output = std::move(gelu_output);
+    } else if (slice_or_bitcast) {
+      output = slice_or_bitcast->CloneWithNewOperands(
+          slice_or_bitcast->shape(), {gemm->AddInstruction(std::move(output))});
     }
 
     return ReplaceWithNewInstruction(multiply, std::move(output));

@@ -68,7 +68,6 @@ limitations under the License.
 #include "xla/service/spmd/shardy/round_trip_common/open_while_free_vars_sharding.h"
 #include "xla/service/spmd/shardy/round_trip_common/pipeline_passes.h"
 #include "xla/service/spmd/shardy/sdy_round_trip/pipelines.h"
-#include "xla/service/spmd/shardy/stablehlo_round_trip/shard_map_import.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/util.h"
@@ -431,13 +430,6 @@ bool shouldOpenDims(ArrayRef<bool> allowPropagationToTensors, int64_t index) {
   return allowPropagationToTensors[index];
 }
 
-// TODO(bixia): Use the function getTensorRank() from sdy/utils/utils.h.
-int64_t getRank(mlir::Type type) {
-  if (auto tensorType = llvm::dyn_cast<mlir::ShapedType>(type)) {
-    return tensorType.getRank();
-  }
-  return 0;
-}
 
 // Convert the shardings in `funcOp` from kXlaShardingAttr into kShardingAttr.
 LogicalResult importShardings(
@@ -450,10 +442,10 @@ LogicalResult importShardings(
             funcOp.getArgAttrOfType<StringAttr>(argNum, kXlaShardingAttr)) {
       funcOp.setArgAttr(
           argNum, kShardingAttr,
-          convertToSdySharding(parseShardingFromString(oldSharding), globalMesh,
-                               deviceIdToMaximalMeshName, getRank(argType),
-                               shouldOpenDims(allowPropagationToArgs, argNum),
-                               inlineMesh));
+          convertToSdySharding(
+              parseShardingFromString(oldSharding), globalMesh,
+              deviceIdToMaximalMeshName, mlir::sdy::getTensorRank(argType),
+              shouldOpenDims(allowPropagationToArgs, argNum), inlineMesh));
       funcOp.removeArgAttr(argNum, kXlaShardingAttr);
     }
   }
@@ -465,7 +457,7 @@ LogicalResult importShardings(
           resNum, kShardingAttr,
           convertToSdySharding(
               parseShardingFromString(oldSharding), globalMesh,
-              deviceIdToMaximalMeshName, getRank(resType),
+              deviceIdToMaximalMeshName, mlir::sdy::getTensorRank(resType),
               shouldOpenDims(allowPropagationToResults, resNum), inlineMesh));
       funcOp.removeResultAttr(
           resNum, StringAttr::get(funcOp.getContext(), kXlaShardingAttr));
@@ -483,10 +475,10 @@ LogicalResult importShardings(
       newShardings.reserve(op->getNumResults());
       for (const auto& [resHloSharding, resType] :
            llvm::zip_equal(flatHloSharding, op->getResultTypes())) {
-        newShardings.push_back(
-            convertToSdySharding(resHloSharding, globalMesh,
-                                 deviceIdToMaximalMeshName, getRank(resType),
-                                 /*openDims=*/false, inlineMesh));
+        newShardings.push_back(convertToSdySharding(
+            resHloSharding, globalMesh, deviceIdToMaximalMeshName,
+            mlir::sdy::getTensorRank(resType),
+            /*openDims=*/false, inlineMesh));
       }
       mlir::sdy::setShardings(op, newShardings);
       op->removeAttr(kXlaShardingAttr);
@@ -590,25 +582,10 @@ void registerStablehloImportShardingsPass() {
 // This way Shardy XLA Pass tests run the logic that actually runs in prod.
 void addStablehloImportPipeline(mlir::OpPassManager& pm,
                                 ArrayRef<bool> allowPropagationToArgs,
-                                ArrayRef<bool> allowPropagationToResults,
-                                bool enableStablehloCanonicalizeFromHloImport,
-                                bool use_stablehlo_shard_map_import) {
-  // TODO(enver): Drop this branch. It is currently only used for auto_sharding
-  // which is an experimental tool.
-  if (use_stablehlo_shard_map_import) {
-    addCommonPreImportPasses(pm, /*enableConstantImport=*/true,
-                             enableStablehloCanonicalizeFromHloImport);
-    pm.addPass(createImportShardingsPass(allowPropagationToArgs,
-                                         allowPropagationToResults));
-    pm.addPass(createStablehloRoundTripShardMapImportPass());
-    pm.addPass(createImportSdyCustomCallsPass());
-    pm.addNestedPass<FuncOp>(createOpenWhileFreeVarsShardingPass());
-    pm.addPass(createImportFuncCallsPass());
-  } else {
-    pm.addPass(createImportShardingsPass(allowPropagationToArgs,
-                                         allowPropagationToResults));
-    addSdyRoundTripImportPipeline(pm);
-  }
+                                ArrayRef<bool> allowPropagationToResults) {
+  pm.addPass(createImportShardingsPass(allowPropagationToArgs,
+                                       allowPropagationToResults));
+  addSdyRoundTripImportPipeline(pm);
 }
 
 void registerStablehloImportPipeline() {
@@ -617,9 +594,7 @@ void registerStablehloImportPipeline() {
       "Run passes to import a StableHLO module with `mhlo.shardings` into the "
       "SDY (Shardy) dialect.",
       [](mlir::OpPassManager& pm) {
-        addStablehloImportPipeline(
-            pm, ArrayRef<bool>(), ArrayRef<bool>(),
-            /*enableStablehloCanonicalizeFromHloImport=*/true);
+        addStablehloImportPipeline(pm, ArrayRef<bool>(), ArrayRef<bool>());
       });
 }
 

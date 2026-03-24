@@ -2779,6 +2779,7 @@ cuda_library(
     ],
     deps = [
         ":cuda_platform_id",
+        "//xla/stream_executor:device_address",
         "//xla/stream_executor/gpu:gpu_kernel_registry",
         "//xla/stream_executor/gpu:ragged_all_to_all_kernel",
         "@com_google_absl//absl/base",
@@ -2844,6 +2845,8 @@ xla_test(
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:kernel",
         "//xla/stream_executor:launch_dim",
+        "//xla/stream_executor:memory_allocation",
+        "//xla/stream_executor:memory_allocator",
         "//xla/stream_executor:memory_space",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:platform_manager",
@@ -2854,6 +2857,7 @@ xla_test(
         "//xla/tsl/concurrency:future",
         "//xla/tsl/cuda:nccl",
         "//xla/tsl/platform:env",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -3164,6 +3168,8 @@ cc_library(
     hdrs = ["host_callback_registry.h"],
     deps = [
         "//xla/tsl/platform:env",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",

@@ -340,6 +340,20 @@ PjRtStreamExecutorClient::PjRtStreamExecutorClient(
   }
 }
 
+PjRtStreamExecutorClient::~PjRtStreamExecutorClient() {
+  // Properly quiesce async_dispatch_thread.
+  for (auto& device : owned_devices_) {
+    if (device->local_device_state()) {
+      if (device->local_device_state()->async_dispatch_thread()) {
+        absl::Notification done;
+        device->local_device_state()->async_dispatch_thread()->Schedule(
+            [&]() { done.Notify(); });
+        done.WaitForNotification();
+      }
+    }
+  }
+}
+
 std::optional<PjRtPluginAttributes>
 PjRtStreamExecutorClient::plugin_attributes() const {
   PjRtPluginAttributes attributes =
@@ -1146,14 +1160,11 @@ PjRtStreamExecutorLoadedExecutable::PjRtStreamExecutorLoadedExecutable(
     PjRtStreamExecutorClient* client, std::vector<Shape> parameter_shapes,
     xla::Shape result_shape, std::vector<int> output_memory_space_kind_ids)
     : CommonPjRtLoadedExecutable(
-          [&parameter_shapes, client]() -> std::vector<Shape> {
-            TransferManager* transfer_manager =
-                client->client()->backend().transfer_manager();
+          [&parameter_shapes]() -> std::vector<Shape> {
             if (parameter_shapes.size() == 1 && parameter_shapes[0].IsTuple()) {
               std::vector<Shape> flat_parameter_shapes;
               for (const Shape& shape : parameter_shapes[0].tuple_shapes()) {
-                flat_parameter_shapes.push_back(
-                    transfer_manager->HostShapeToDeviceShape(shape));
+                flat_parameter_shapes.push_back(shape);
               }
               return flat_parameter_shapes;
             }
@@ -2672,14 +2683,12 @@ PjRtStreamExecutorClient::LoadInternal(
     }
   }
 
-  TransferManager* transfer_manager = client()->backend().transfer_manager();
   ComputationLayout computation_layout =
       local_executable->executable()->compute_computation_layout();
   std::vector<Shape> parameter_shapes;
   parameter_shapes.reserve(computation_layout.parameter_count());
   for (int i = 0; i < computation_layout.parameter_count(); ++i) {
-    parameter_shapes.push_back(transfer_manager->HostShapeToDeviceShape(
-        computation_layout.parameter_shape(i)));
+    parameter_shapes.push_back(computation_layout.parameter_shape(i));
   }
   auto loaded_executable = std::make_unique<PjRtStreamExecutorLoadedExecutable>(
       std::move(local_executable), std::move(executable),
