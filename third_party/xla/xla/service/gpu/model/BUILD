@@ -162,12 +162,12 @@ xla_test(
     deps = [
         ":analytical_latency_estimator",
         "//xla:shape_util",
+        "//xla/backends/gpu/tests:gpu_codegen_test",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_cost_analysis",
         "//xla/service:latency_hiding_scheduler",
         "//xla/service/gpu:alias_info",
         "//xla/service/gpu:gpu_compiler",
-        "//xla/service/gpu/tests:gpu_codegen_test",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/tests:xla_internal_test_main",
@@ -640,6 +640,46 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "tiling_from_block_parameters",
+    srcs = ["tiling_from_block_parameters.cc"],
+    hdrs = [
+        "tiling_from_block_parameters.h",
+    ],
+    deps = [
+        ":block_level_parameters",
+        "//xla/codegen/tiling:symbolic_tile_analysis",
+        "//xla/codegen/tiling:tiling_specification",
+        "//xla/hlo/ir:hlo",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "tiling_from_block_parameters_test",
+    srcs = ["tiling_from_block_parameters_test.cc"],
+    deps = [
+        ":block_level_parameters",
+        ":tiling_from_block_parameters",
+        "//xla/codegen/tiling:symbolic_tile_analysis",
+        "//xla/codegen/tiling:tiling_specification",
+        "//xla/hlo/analysis:symbolic_map",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
+        "//xla/hlo/testlib:verified_hlo_module",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
+    ],
+)
+
+cc_library(
     name = "triton_emitter_constraints",
     srcs = ["triton_emitter_constraints.cc"],
     hdrs = ["triton_emitter_constraints.h"],
@@ -903,8 +943,8 @@ xla_test(
     deps = [
         ":hlo_op_profiler_lib",
         "//xla:xla_data_proto_cc",
+        "//xla/backends/gpu/tests:hlo_pjrt_gpu_test_base",
         "//xla/hlo/ir:hlo",
-        "//xla/service/gpu/tests:hlo_pjrt_gpu_test_base",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:errors",
         "@com_google_absl//absl/container:flat_hash_set",
