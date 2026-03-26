@@ -55,7 +55,6 @@ using ::testing::NotNull;
 enum class RaggedAllToAllImplType {
   kNccl,
   kDecomposer,
-  kOneShot,
   kOneShotWithMultiGpuBarrier,
   kOneShotWithMultiGpuBarrierWithNccl,
 };
@@ -230,15 +229,20 @@ class RaggedAllToAllTestBase : public CollectiveOpsWithFlagsBase {
     DebugOptions opts = CollectiveOpsWithFlagsBase::GetDebugOptionsForTest();
     opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(
         impl_type_ == RaggedAllToAllImplType::kDecomposer);
-    opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(
-        impl_type_ == RaggedAllToAllImplType::kOneShot);
     if (impl_type_ == RaggedAllToAllImplType::kOneShotWithMultiGpuBarrier) {
       opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
-      opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier(true);
+      opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier_with_nccl(
+          false);
     }
     if (impl_type_ ==
-        RaggedAllToAllImplType::kOneShotWithMultiGpuBarrierWithNccl) {
+            RaggedAllToAllImplType::kOneShotWithMultiGpuBarrierWithNccl &&
+        // Disable for pre-Hopper architectures for now, until we can check if
+        // devices are actually connected via fast interconnect.
+        // TODO: b/493935137 - Enable for all architectures once we get
+        // NCCL 2.29 integrated with host API to check LSA connectivity.
+        Capability().cuda_compute_capability()->IsAtLeastHopper()) {
       opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
+      opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier(false);
       opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier_with_nccl(
           true);
     }
@@ -904,8 +908,6 @@ std::string RaggedAllToAllImplTypeName(
       return "nccl";
     case RaggedAllToAllImplType::kDecomposer:
       return "decomposer";
-    case RaggedAllToAllImplType::kOneShot:
-      return "one_shot";
     case RaggedAllToAllImplType::kOneShotWithMultiGpuBarrier:
       return "one_shot_with_multi_gpu_barrier";
     case RaggedAllToAllImplType::kOneShotWithMultiGpuBarrierWithNccl:
@@ -921,7 +923,6 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Bool(),
         ::testing::Values(
             RaggedAllToAllImplType::kNccl, RaggedAllToAllImplType::kDecomposer,
-            RaggedAllToAllImplType::kOneShot,
             RaggedAllToAllImplType::kOneShotWithMultiGpuBarrier,
             RaggedAllToAllImplType::kOneShotWithMultiGpuBarrierWithNccl)),
     [](const ::testing::TestParamInfo<std::tuple<bool, RaggedAllToAllImplType>>&
@@ -935,8 +936,9 @@ class RaggedAllToAllMultiHostDecomposerTest
       public ::testing::WithParamInterface<std::tuple<int64_t, int64_t>> {
  public:
   RaggedAllToAllMultiHostDecomposerTest()
-      : RaggedAllToAllTestBase(/*enable_async=*/false,
-                               /*impl_type=*/RaggedAllToAllImplType::kOneShot) {
+      : RaggedAllToAllTestBase(
+            /*enable_async=*/false,
+            /*impl_type=*/RaggedAllToAllImplType::kOneShotWithMultiGpuBarrier) {
   }
 
  protected:
