@@ -386,6 +386,7 @@ cc_library(
         "//xla/service:computation_placer_hdr",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_module_util",
+        "//xla/service:hlo_runner_interface",
         "//xla/tsl/lib/core:bitmap",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:errors",
@@ -1986,17 +1987,16 @@ xla_test(
     ],
 )
 
-cc_library(
-    name = "reduce_window_test_library",
-    testonly = True,
+xla_test(
+    name = "reduce_window_test",
     srcs = ["reduce_window_test.cc"],
-    # This is set intentionally as to avoid the default behavior of the TSL
-    # `cc_library` definition that is used in this file.
-    compatible_with = [],
+    shard_count = 50,
+    tags = ["optonly"],
     deps = [
         ":client_library_test_runner_mixin",
         ":hlo_pjrt_interpreter_reference_mixin",
         ":hlo_pjrt_test_base",
+        ":xla_internal_test_main",
         "//xla:array2d",
         "//xla:array3d",
         "//xla:array4d",
@@ -2016,19 +2016,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_for_library",
-    ],
-    alwayslink = True,  # This library registers test cases at static initialization time.
-)
-
-xla_test(
-    name = "reduce_window_test",
-    timeout = "long",
-    srcs = [],
-    shard_count = 50,
-    tags = ["optonly"],
-    deps = [
-        ":reduce_window_test_library",
-        ":xla_internal_test_main",
     ],
 )
 
@@ -2884,10 +2871,8 @@ xla_test(
 xla_test(
     name = "round_trip_packed_literal_test",
     srcs = ["round_trip_packed_literal_test.cc"],
-    tags = ["pjrt_migration_candidate"],
     use_legacy_runtime = True,
     deps = [
-        ":client_library_test_base",
         ":literal_test_util",
         ":local_client_test_base",
         ":xla_internal_test_main",
