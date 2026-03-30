@@ -127,6 +127,7 @@ limitations under the License.
 #include "xla/backends/gpu/transforms/scalar_constant_sinker.h"
 #include "xla/backends/gpu/transforms/scaled_dot_rewriter.h"
 #include "xla/backends/gpu/transforms/scan_rewriter.h"
+#include "xla/backends/gpu/transforms/scatter_determinism_expander.h"
 #include "xla/backends/gpu/transforms/scatter_expander.h"
 #include "xla/backends/gpu/transforms/scatter_slice_simplifier.h"
 #include "xla/backends/gpu/transforms/softmax_rewriter_triton.h"
@@ -292,7 +293,6 @@ limitations under the License.
 #include "xla/service/memory_annotations.h"
 #include "xla/service/reduce_scatter_reassociate.h"
 #include "xla/service/scan_expander.h"
-#include "xla/service/scatter_determinism_expander.h"
 #include "xla/service/scatter_expander.h"
 #include "xla/service/scatter_simplifier.h"
 #include "xla/service/select_and_scatter_expander.h"
@@ -1900,8 +1900,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
       pipeline.AddPass<SplitkRewriter>(gpu_target_config.device_description,
                                        /*normalize_dots=*/true);
       pipeline.AddPass<GemmFusion>(gpu_version);
-      pipeline.AddPass<GemmFusionSwapOperands>();
       pipeline.AddPass<HoistFusedBitcasts>();
+      pipeline.AddPass<GemmFusionSwapOperands>();
     } else if (cuda_cc != nullptr &&
                cuda_cc->major == se::CudaComputeCapability::kVolta) {
       // Greedy pattern matching for custom kernel fusions.
