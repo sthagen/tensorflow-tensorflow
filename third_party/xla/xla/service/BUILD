@@ -1757,6 +1757,7 @@ cc_library(
         "//xla/internal:hwi_internal",
         "//xla/backends/gpu/runtime:__subpackages__",
         "//xla/backends/gpu/tests:__pkg__",
+        "//xla/backends/gpu/transforms:__subpackages__",
         "//third_party/pathways/configuration:__subpackages__",
     ]),
     deps = [
@@ -2510,7 +2511,9 @@ xla_test(
         "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
         "//xla/tests:hlo_pjrt_test_base",
         "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status:status_matchers",
     ],
 )
 
@@ -6161,9 +6164,10 @@ xla_cc_test(
     ],
 )
 
-xla_cc_test(
+xla_test(
     name = "xla_aot_compile_gpu_test",
     srcs = ["xla_aot_compile_gpu_test.cc"],
+    backends = ["h100"],
     data = [
         ":xla_aot_compile_test_gpu_executable",
         ":xla_aot_compile_test_gpu_executable_constant",
@@ -6175,30 +6179,23 @@ xla_cc_test(
         "cuda-only",
         "gpu",
         "no_oss",
-        "requires-gpu-sm90-only",
     ],
     deps = [
-        ":gpu_plugin_impl",
-        ":platform_util",
-        ":shaped_buffer",
-        "//xla:executable_run_options",
+        ":hlo_runner_interface",
+        ":hlo_runner_pjrt",
         "//xla:literal",
         "//xla:literal_util",
-        "//xla/client:client_library",
-        "//xla/client:executable_build_options",
-        "//xla/client:local_client",
-        "//xla/hlo/ir:hlo",
-        "//xla/pjrt/proto:compile_options_proto_cc",
-        "//xla/service/cpu:cpu_compiler",
-        "//xla/service/gpu:backend_configs_cc",
+        "//xla/tests:hlo_pjrt_test_base",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:env",
+        "@tsl//tsl/platform:casts",
         "@tsl//tsl/platform:path",
         "@tsl//tsl/platform:statusor",
-        "@tsl//tsl/platform:test",
     ],
 )
 

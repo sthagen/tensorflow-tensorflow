@@ -399,11 +399,14 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCommandBufferThunk(
 
   bool enable_loop_unroll = ir_emitter_context_->debug_options()
                                 .xla_gpu_command_buffer_unroll_loops();
+  bool enable_va_remapping = ir_emitter_context_->debug_options()
+                                 .xla_gpu_enable_command_buffer_va_remapping();
   TF_ASSIGN_OR_RETURN(
       CommandExecutor cmd_executor,
       ConvertToCommands(
           thunk_sequence,
-          ConvertToCommandsOptions{synchronization_mode, enable_loop_unroll}));
+          ConvertToCommandsOptions{synchronization_mode, enable_loop_unroll,
+                                   enable_va_remapping}));
 
   return GetThunkSequence(std::make_unique<CommandBufferThunk>(
       std::move(cmd_executor),
@@ -412,7 +415,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCommandBufferThunk(
       std::make_unique<SequentialThunk>(Thunk::ThunkInfo{},
                                         std::move(thunk_sequence)),
       ir_emitter_context_->debug_options()
-          .xla_enable_command_buffers_during_profiling()));
+          .xla_enable_command_buffers_during_profiling(),
+      enable_va_remapping));
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConvolutionThunk(
@@ -1506,13 +1510,9 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSort(
     }
   }
 
-  auto local_llvm_module = ir_emitter_context_->CreateLLVMModule(op_name);
-
-  TF_ASSIGN_OR_RETURN(ThunkSequence sort_thunks,
-                      EmitBitonicSortLLVMIR(sort, local_llvm_module.get(),
-                                            ir_emitter_context_));
+  ASSIGN_OR_RETURN(ThunkSequence sort_thunks,
+                   EmitBitonicSortLLVMIR(sort, ir_emitter_context_));
   AppendThunkSequence(thunks, sort_thunks);
-  kernel_modules_.push_back(std::move(local_llvm_module));
   return thunks;
 }
 
@@ -1583,8 +1583,6 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCollectivePermute(
           /*destination_buffer=*/
           ShapedSlice{result_slice, result_buffer_shape},
           /*mem_size=*/ShapeUtil::ByteSizeOf(operand_shape)));
-      // Signal that start thunk not created (degenerate) with nullptr.
-      hlo_async_executions_.try_emplace(instr, nullptr);
     } else {
       const CollectiveThunk::Buffer buffer = {
           /*element_count=*/ShapeUtil::ElementsIn(operand_shape),

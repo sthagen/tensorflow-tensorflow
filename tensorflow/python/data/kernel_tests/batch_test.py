@@ -113,6 +113,15 @@ class BatchTest(test_base.DatasetTestBase, parameterized.TestCase):
       self.evaluate(dataset._variant_tensor)
 
   @combinations.generate(test_base.default_test_combinations())
+  def testLargeBatchSize(self):
+    dataset = dataset_ops.Dataset.from_tensor_slices(
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    ).batch(dtypes.int64.max, drop_remainder=False)
+    self.assertAllEqual(
+        self.evaluate(dataset.get_single_element()), list(range(10))
+    )
+
+  @combinations.generate(test_base.default_test_combinations())
   def testDataset(self):
 
     def map_fn(i):
