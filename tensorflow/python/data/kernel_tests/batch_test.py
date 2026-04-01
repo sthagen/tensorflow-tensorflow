@@ -117,9 +117,10 @@ class BatchTest(test_base.DatasetTestBase, parameterized.TestCase):
     dataset = dataset_ops.Dataset.from_tensor_slices(
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     ).batch(dtypes.int64.max, drop_remainder=False)
-    self.assertAllEqual(
-        self.evaluate(dataset.get_single_element()), list(range(10))
-    )
+    element = self.evaluate(dataset.get_single_element())
+    self.assertAllEqual(element, list(range(10)))
+    self.assertEqual(element.shape, (10,))
+    self.assertEqual(element.dtype, dtypes.int32)
 
   @combinations.generate(test_base.default_test_combinations())
   def testDataset(self):

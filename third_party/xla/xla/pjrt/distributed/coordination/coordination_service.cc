@@ -449,7 +449,7 @@ void CoordinationService::RegisterTaskAsync(TaskId task,
   const auto task_status = task_cluster_state->GetStatus();
 
   if (task_state == xla::coordination::TaskState::DISCONNECTED ||
-      ((config_.allow_new_incarnation_to_reconnect || config_.recoverable) &&
+      (config_.recoverable &&
        (absl::IsUnavailable(task_status) &&
         task_status.GetPayload(CoordinationErrorPayloadKey())))) {
     // The task is allowed to register itself if:
@@ -600,10 +600,6 @@ absl::Status CoordinationService::DisconnectTask(TaskId task) {
   LOG(INFO) << task << " has disconnected from coordination service.";
   ClusterStateUpdated();
   return absl::OkStatus();
-}
-
-IncarnationId CoordinationService::GetServiceIncarnation() {
-  return service_incarnation_;
 }
 
 absl::Status CoordinationService::ReportTaskError(TaskId task,

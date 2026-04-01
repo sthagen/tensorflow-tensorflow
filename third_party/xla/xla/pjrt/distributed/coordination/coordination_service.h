@@ -90,11 +90,6 @@ class CoordinationService {
     // worker can disconnect individually.
     absl::Duration shutdown_barrier_timeout = absl::ZeroDuration();
 
-    // If a task restarts with a new incarnation, we may allow it to reconnect
-    // silently. This is useful when we know that a task can immediately resume
-    // work upon re-connecting to the service.
-    bool allow_new_incarnation_to_reconnect = false;
-
     // If true, a job can continue running even if some tasks have failed, and
     // tasks are allowed to rejoin. If false, tasks share fate. As soon as one
     // task fails, all tasks are permanently failed.
@@ -114,6 +109,8 @@ class CoordinationService {
     absl::MutexLock lock(state_mu_);
     Stop();
   }
+
+  IncarnationId GetServiceIncarnation() { return service_incarnation_; }
 
   // Register a task to the service.
   // Possible service errors:
@@ -283,11 +280,7 @@ class CoordinationService {
   void PollForErrorAsync(TaskId task, tsl::StatusCallback done);
 
  private:
-  friend class CoordinationServiceRpcHandler;
-
   void LogConnectStatusLocked() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(state_mu_);
-
-  IncarnationId GetServiceIncarnation();
   void BarrierAsyncLocked(absl::string_view barrier_id, int64_t counter,
                           absl::Duration timeout, TaskId task,
                           const std::vector<TaskId>& participating_tasks,
