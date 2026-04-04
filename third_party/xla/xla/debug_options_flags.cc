@@ -203,6 +203,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_large_constants(false);
   opts.set_xla_dump_enable_mlir_pretty_form(true);
   opts.set_xla_dump_full_hlo_config(true);
+  opts.set_xla_dump_buffer_assignment_analysis(true);
   opts.set_xla_debug_buffer_assignment_show_max(15);
   opts.set_xla_cpu_use_onednn(false);
   opts.set_xla_cpu_experimental_onednn_custom_call(false);
@@ -823,20 +824,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
         return true;
       };
 
-  auto setter_for_xla_cpu_opt_preset =
-      [debug_options](absl::string_view input) {
-        std::string upper_input = absl::AsciiStrToUpper(input);
-        if (!absl::StartsWith(upper_input, "CPU_OPT_PRESET_")) {
-          upper_input = absl::StrCat("CPU_OPT_PRESET_", upper_input);
-        }
-        DebugOptions::CpuOptPreset preset;
-        if (!DebugOptions::CpuOptPreset_Parse(upper_input, &preset)) {
-          return false;
-        }
-        debug_options->set_xla_cpu_opt_preset(preset);
-        return true;
-      };
-
   auto setter_for_xla_cpu_enable_concurrency_optimized_scheduler =
       [debug_options](bool value) {
         if (value) {
@@ -1233,10 +1220,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "xla_cpu_use_acl", bool_setter_for(&DebugOptions::set_xla_cpu_use_acl),
       debug_options->xla_cpu_use_acl(),
       "Generate calls to ACL (Arm Compute Library) in the CPU backend."));
-  flag_list->push_back(tsl::Flag(
-      "xla_cpu_opt_preset", setter_for_xla_cpu_opt_preset,
-      DebugOptions::CpuOptPreset_Name(debug_options->xla_cpu_opt_preset()),
-      "Set CPU optimization preset (FAST_RUNTIME, FAST_COMPILE)"));
   flag_list->push_back(
       tsl::Flag("xla_cpu_use_fusion_emitters",
                 bool_setter_for(&DebugOptions::set_xla_cpu_use_fusion_emitters),
@@ -3012,6 +2995,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "Enable VA remapping for command buffer thunks. When enabled, command "
       "buffer thunks use fixed virtual addresses across executions, allowing "
       "the command buffer to be recorded once and replayed without updates."));
+  flag_list->push_back(tsl::Flag(
+      "xla_dump_buffer_assignment_analysis",
+      bool_setter_for(&DebugOptions::set_xla_dump_buffer_assignment_analysis),
+      debug_options->xla_dump_buffer_assignment_analysis(),
+      "Dump BufferAssignment analysis."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
