@@ -257,6 +257,14 @@ class IfrtServingExecutable {
         module_(std::move(module)),
         original_compile_metadata_(std::move(original_compile_metadata)),
         assigned_device_list_(std::move(assigned_device_list)),
+        assigned_device_ids_([this] {
+          std::vector<int> assigned_device_ids;
+          assigned_device_ids.reserve(assigned_device_list_->size());
+          for (const auto& device : assigned_device_list_->devices()) {
+            assigned_device_ids.push_back(device->Id().value());
+          }
+          return assigned_device_ids;
+        }()),
         static_shape_arg_map_(std::move(static_shape_arg_map)),
         ifrt_client_(std::move(client)),
         thread_pool_(*thread_pool),
@@ -283,6 +291,9 @@ class IfrtServingExecutable {
   // released.
   tensorflow::tpu::TPUCompileMetadataProto original_compile_metadata_;
   const xla::ifrt::DeviceListRef assigned_device_list_;
+  // Pre-calculated device IDs to avoid redundant computation on the critical
+  // path within the Execute() call.
+  const std::vector<int> assigned_device_ids_;
   absl::flat_hash_map<size_t /*original_arg_idx*/,
                       size_t /*static_shape_arg_idx*/>
       static_shape_arg_map_;
