@@ -19,24 +19,18 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/blocking_counter.h"
-#include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
-#include "xla/pjrt/distributed/coordination/coordination_client.h"
 #include "xla/pjrt/distributed/coordination/coordination_service.pb.h"
-#include "xla/pjrt/distributed/coordination/coordination_service_error_util.h"
-#include "xla/tsl/distributed_runtime/call_options.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/status.h"
@@ -52,13 +46,10 @@ using ::testing::Each;
 using ::testing::Ge;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
-using ::testing::Matcher;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 using ::testing::status::StatusIs;
 using ::tsl::proto_testing::EqualsProto;
-
-using tensorflow::CoordinationServiceConfig;
 using xla::coordination::KeyValueEntry;
 
 constexpr absl::Duration kHeartbeatTimeout = absl::Seconds(2);
@@ -80,67 +71,13 @@ CoordinationService::Config GetCoordinationServiceConfig(int num_tasks,
   return config;
 }
 
-class TestCoordinationClient : public CoordinationClient {
- public:
-  TestCoordinationClient() = default;
-
-  absl::Status GetStatus() {
-    absl::MutexLock l(mu_);
-    return status_;
-  }
-
-  void RegisterTaskAsync(tsl::CallOptions* opts,
-                         const RegisterTaskRequest* request,
-                         RegisterTaskResponse* response,
-                         tsl::StatusCallback done) override {
-    done(absl::OkStatus());
-  }
-
-#define UNIMPLEMENTED(method)                                              \
-  void method##Async(const method##Request* request,                       \
-                     method##Response* response, tsl::StatusCallback done) \
-      override {                                                           \
-    done(absl::UnimplementedError(#method "Async"));                       \
-  }
-
-  UNIMPLEMENTED(InsertKeyValue);
-  UNIMPLEMENTED(TryGetKeyValue);
-  UNIMPLEMENTED(IncrementKeyValue);
-  UNIMPLEMENTED(GetKeyValueDir);
-  UNIMPLEMENTED(DeleteKeyValue);
-  UNIMPLEMENTED(CancelBarrier);
-  UNIMPLEMENTED(GetAliveTasks);
-#undef UNIMPLEMENTED
-
-#define UNIMPLEMENTED_WITH_CALL_OPTS(method)                           \
-  void method##Async(                                                  \
-      tsl::CallOptions* call_opts, const method##Request* request,     \
-      method##Response* response, tsl::StatusCallback done) override { \
-    done(absl::UnimplementedError(#method "Async"));                   \
-  }
-
-  UNIMPLEMENTED_WITH_CALL_OPTS(GetKeyValue);
-  UNIMPLEMENTED_WITH_CALL_OPTS(Barrier);
-  UNIMPLEMENTED_WITH_CALL_OPTS(Heartbeat);
-  UNIMPLEMENTED_WITH_CALL_OPTS(ShutdownTask);
-  UNIMPLEMENTED_WITH_CALL_OPTS(PollForError);
-  UNIMPLEMENTED_WITH_CALL_OPTS(WatchTasks);
-#undef UNIMPLEMENTED_WITH_CALL_OPTS
-
- private:
-  absl::Mutex mu_;
-  absl::Status status_ ABSL_GUARDED_BY(mu_);
-};
-
 class CoordinationBarrierTest : public ::testing::Test {
  protected:
   explicit CoordinationBarrierTest(bool recoverable = false) {
     // Set up fake cluster with 3 tasks.
     const int num_tasks = 3;
     for (int i = 0; i < num_tasks; ++i) {
-      auto client = std::make_unique<TestCoordinationClient>();
       tasks_.push_back(i);
-      clients_.push_back(std::move(client));
     }
     CoordinationService::Config config =
         GetCoordinationServiceConfig(num_tasks, recoverable);
@@ -162,18 +99,9 @@ class CoordinationBarrierTest : public ::testing::Test {
 
   CoordinationService* GetCoordinationService() { return coord_service_.get(); }
 
-  std::vector<TestCoordinationClient*> GetClients() {
-    std::vector<TestCoordinationClient*> clients;
-    for (const auto& client : clients_) {
-      clients.push_back(client.get());
-    }
-    return clients;
-  }
-
  private:
   std::unique_ptr<CoordinationService> coord_service_;
   std::vector<CoordinationService::TaskId> tasks_;
-  std::vector<std::unique_ptr<TestCoordinationClient>> clients_;
 };
 
 // Sets up coordination service that expects 2 worker tasks.
@@ -200,10 +128,8 @@ class CoordinateTwoTasksTest : public ::testing::Test {
 
   const IncarnationId incarnation_0_{tsl::random::New64()};
   const IncarnationId incarnation_0_new_{tsl::random::New64()};
-  TestCoordinationClient client_0_;
   const IncarnationId incarnation_1_{tsl::random::New64()};
   const IncarnationId incarnation_1_new_{tsl::random::New64()};
-  TestCoordinationClient client_1_;
   std::unique_ptr<CoordinationService> coord_service_;
 };
 
@@ -1792,10 +1718,6 @@ TEST_F(CoordinateTwoTasksTest, RecoverableTaskWillNotPropagateError) {
 
   ASSERT_OK(
       coord_service_->ReportTaskError(0, absl::InternalError("test_error")));
-
-  // Since no error propagation for recoverable tasks, other tasks should work
-  // as normal.
-  TF_EXPECT_OK(client_1_.GetStatus());
 }
 
 TEST_F(CoordinateTwoTasksTest,
@@ -1840,15 +1762,11 @@ TEST_F(CoordinateTwoTasksTest,
 
   EXPECT_THAT(coord_service_->RecordHeartbeat(0, incarnation_0_),
               StatusIs(absl::StatusCode::kAborted));
-  // Since no error propagation for recoverable tasks, other tasks should work
-  // as normal.
-  TF_EXPECT_OK(client_1_.GetStatus());
 
   // Reset and register the error task again, both tasks should be healthy.
   TF_EXPECT_OK(coord_service_->ResetTask(0));
   TF_EXPECT_OK(coord_service_->RegisterTask(0, incarnation_0_new_));
   TF_EXPECT_OK(coord_service_->RecordHeartbeat(0, incarnation_0_new_));
-  TF_EXPECT_OK(client_1_.GetStatus());
 }
 
 TEST_F(CoordinateTwoTasksTest, DoNotAllowPollForErrorIfNotInCluster) {

@@ -1423,7 +1423,7 @@ absl::Status PjRtCpuLoadedExecutable::CheckBufferCompatibilities(
 absl::StatusOr<std::unique_ptr<PjRtRawLoadedExecutable>>
 PjRtCpuLoadedExecutable::LoadRawExecutable(
     const ExecuteOptions& options, size_t host_callback_idx, xla::RunId run_id,
-    DeviceAndAssignment device_and_assign) const {
+    DeviceAndAssignment device_and_assign, int attempt) const {
   auto result = std::make_unique<CpuPjRtRawLoadedExecutable>(run_id);
   result->executable_ = executable_.get();
   result->client_ = client_;
