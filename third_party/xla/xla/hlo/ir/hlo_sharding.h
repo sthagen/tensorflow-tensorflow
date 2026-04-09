@@ -630,7 +630,7 @@ class HloSharding {
   // Returns number of shards in the given dimension.
   int64_t dimension(int64_t dim_index) const {
     if (UseNamedShardingLeaf()) {
-      return named_sharding_->dimension(dim_index);
+      return IsReplicated() ? 1 : named_sharding_->dimension(dim_index);
     }
     // If the sharding is replicated, the tile assignment is invalid.
     return IsReplicated() ? 1 : tile_assignment().dim(dim_index);

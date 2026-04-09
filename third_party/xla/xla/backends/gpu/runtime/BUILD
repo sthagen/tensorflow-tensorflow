@@ -113,6 +113,7 @@ cc_library(
     deps = [
         ":command_state",
         ":thunk",
+        "//xla:xla_proto_cc",
         "//xla/runtime:resource_use",
         "//xla/service:buffer_assignment",
         "//xla/stream_executor:command_buffer",
@@ -356,6 +357,7 @@ cc_library(
         ":while_thunk",
         "//xla:status_macros",
         "//xla:util",
+        "//xla:xla_proto_cc",
         "//xla/runtime:buffer_use",
         "//xla/runtime:resource_use",
         "//xla/service:buffer_assignment",
@@ -550,6 +552,7 @@ xla_test(
         ":thunk_proto_deserialization",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
         "//xla/backends/gpu:ffi",
         "//xla/ffi",
         "//xla/ffi:attribute_map",
@@ -594,7 +597,9 @@ cc_library(
         ":command_state",
         ":sequential_thunk",  # build_cleaner: keep
         ":thunk",
+        "//xla:debug_options_flags",
         "//xla:util",
+        "//xla:xla_proto_cc",
         "//xla/service:buffer_assignment",  # build_cleaner: keep
         "//xla/service/gpu:buffer_allocations",  # build_cleaner: keep
         "//xla/stream_executor:command_buffer",

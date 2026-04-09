@@ -877,6 +877,48 @@ TEST_F(TritonAlgorithmTest, Dot_BF16_X6_WithConst) {
       kHloText, ErrorSpec{/*aabs=*/1e-6, /*arel=*/1e-6}));
 }
 
+TEST_F(TritonAlgorithmTest, UnsetAlgorithmToBF16) {
+  constexpr absl::string_view kHloText = R"hlo(
+    HloModule UnsetAlgorithmToBF16
+
+    triton_fusion_dot {
+      p0 = f32[256,256] parameter(0)
+      p1 = f32[256,256] parameter(1)
+      ROOT dot = f32[256,256] dot(p0, p1),
+          lhs_contracting_dims={0},
+          rhs_contracting_dims={1}
+    }
+
+    ENTRY entry_computation {
+      p0 = f32[256,256] parameter(0)
+      p1 = f32[256,256] parameter(1)
+      ROOT root = f32[256,256] fusion(p0, p1),
+        kind=kCustom,
+        calls=triton_fusion_dot,
+        backend_config={
+          "fusion_backend_config":{
+            "kind":"__triton_nested_gemm_fusion",
+            "block_level_fusion_config":{
+              "output_tiles": [{"sizes": ["16","256","16"]}],
+              "num_stages":4,
+              "num_warps":4,
+              "num_ctas":1
+            }},
+          "force_earliest_schedule":false
+        }
+    }
+  )hlo";
+  ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(kHloText));
+  module->mutable_config()
+      .mutable_debug_options()
+      .set_xla_gpu_default_to_alg_dot_bf16_bf16_f32(true);
+  EXPECT_OK(
+      CreateTritonIrAndFileCheckForDot(module.get(), "triton_fusion_dot", R"(
+      CHECK: tt.dot{{.*}}tensor<256x16xbf16> * tensor<16x16xbf16> -> tensor<256x16xf32>
+    )"))
+      << "Arguments should be converted to BF16.";
+}
+
 using PC = PrecisionConfig;
 using ::testing::TestParamInfo;
 using ::testing::WithParamInterface;

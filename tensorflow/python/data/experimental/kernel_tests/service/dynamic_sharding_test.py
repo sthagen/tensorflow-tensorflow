@@ -16,6 +16,7 @@
 import collections
 import time
 
+from absl import logging
 from absl.testing import parameterized
 import numpy as np
 
@@ -379,6 +380,54 @@ class DynamicShardingTest(data_service_test_base.TestBase,
     assert_items_equal = (num_workers > 1)
     self.assertDatasetProduces(
         ds, list(range(200)), assert_items_equal=assert_items_equal)
+
+  @combinations.generate(
+      combinations.times(test_base.default_test_combinations(),
+                         combinations.combine(num_workers=[1, 3])))
+  def testTake(self, num_workers):
+    cluster = data_service_test_base.TestCluster(num_workers=num_workers)
+    a = dataset_ops.Dataset.range(3).repeat().take(5)
+    b = dataset_ops.Dataset.range(100, 103).repeat().take(5)
+    ds = a.concatenate(b)
+    ds = self._make_dynamic_sharding_dataset(ds, cluster)
+
+    assert_items_equal = num_workers > 1
+    if num_workers == 1:
+      expected = [0, 1, 2, 0, 1, 100, 101, 102, 100, 101]
+    else:
+      expected = [0, 1, 2] * 5 + [100, 101, 102] * 5
+    self.assertDatasetProduces(
+        ds, expected, assert_items_equal=assert_items_equal
+    )
+
+  @combinations.generate(
+      combinations.times(test_base.default_test_combinations(),
+                         combinations.combine(num_workers=[1, 3])))
+  def testTakeWithRestartedWorker(self, num_workers):
+    cluster = data_service_test_base.TestCluster(num_workers=num_workers)
+    a = dataset_ops.Dataset.range(3).take(5)
+    b = dataset_ops.Dataset.range(100, 103).repeat().take(5)
+    ds = a.concatenate(b)
+    ds = self._make_dynamic_sharding_dataset(ds, cluster)
+
+    output = []
+    get_next = self.getNext(ds)
+    for _ in range(5):
+      output.append(self.evaluate(get_next()))
+    cluster.workers[0].restart(use_same_port=True)
+
+    output.extend(self.getIteratorOutput(get_next))
+    logging.info("Dataset output: %s", output)
+
+    if num_workers > 1:
+      return
+
+    # Verifies that once a worker has started to read dataset B, it will not
+    # read dataset A again.
+    for i, val in enumerate(output):
+      if val >= 100:
+        self.assertTrue(all(x >= 100 for x in output[i:]))
+        break
 
   @combinations.generate(
       combinations.times(test_base.default_test_combinations(),

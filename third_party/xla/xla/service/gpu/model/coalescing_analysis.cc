@@ -31,6 +31,7 @@ limitations under the License.
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
+#include "xla/backends/gpu/codegen/emitters/mlir_kernel_emitter.h"
 #include "xla/backends/gpu/codegen/fusion_emitter.h"
 #include "xla/backends/gpu/codegen/fusions.h"
 #include "xla/codegen/tiling/tiled_hlo_instruction.h"
@@ -459,7 +460,7 @@ bool IsIndexingCoalesced(IndexingMap& thread_x_to_linearized_input,
   // extended to sampling several warps.
   MLIRContext* mlir_context = thread_x_to_linearized_input.GetMLIRContext();
   SymbolicExpr thread_x_dim = CreateDimExpr(
-      KernelFusionInterface::kIndexingMapThreadIdxDims[0], mlir_context);
+      MlirKernelFusion::kIndexingMapThreadIdxDims[0], mlir_context);
   SymbolicExpr c0 = CreateSymbolicConstant(0, mlir_context);
   IndexingMap thread_x_first_32_elements{
       SymbolicMap::Get(mlir_context, 1, 0, {thread_x_dim, c0, c0, c0, c0, c0}),
@@ -514,7 +515,7 @@ std::optional<CoalescingMap> ComputeCoalescingForAllOperands(
   auto emitter = GetFusionEmitter(
       PreBufferAssignmentFusionInfo{fusion_analysis}, mlir_context);
   const auto* fusion_interface =
-      dynamic_cast<const KernelFusionInterface*>(emitter.get());
+      dynamic_cast<const MlirKernelFusion*>(emitter.get());
 
   if (fusion_interface == nullptr) {
     return std::nullopt;

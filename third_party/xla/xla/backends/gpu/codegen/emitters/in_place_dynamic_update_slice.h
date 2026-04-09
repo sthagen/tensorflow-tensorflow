@@ -23,7 +23,7 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/MLIRContext.h"
-#include "xla/backends/gpu/codegen/emitters/emitter_base.h"
+#include "xla/backends/gpu/codegen/emitters/mlir_kernel_emitter.h"
 #include "xla/codegen/emitters/computation_partitioner.h"
 #include "xla/hlo/analysis/indexing_map.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -43,9 +43,7 @@ namespace gpu {
 // 3. a tuple op returning the result of several dynamic-update-slice ops
 // 4. a tuple op returning the result of several bitcast
 //    dynamic-update-slice ops
-//
-// Lowers to LLVM via MLIR.
-class InPlaceDynamicUpdateSliceFusion : public EmitterBase {
+class InPlaceDynamicUpdateSliceFusion : public MlirKernelEmitter {
  public:
   explicit InPlaceDynamicUpdateSliceFusion(const HloFusionAnalysis& analysis)
       : analysis_(analysis),

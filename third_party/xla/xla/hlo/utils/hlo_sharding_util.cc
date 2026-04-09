@@ -277,7 +277,12 @@ bool IsSubTilingOrEqualNamedSharding(const Shape& potential_sharded_shape,
       !sharding.manual_axes().empty()) {
     return false;
   }
-  CHECK(sub_mesh.DeviceAssignmentEquals(mesh));
+  if (!sub_mesh.DeviceAssignmentEquals(mesh)) {
+    return IsSubTilingOrEqualSharding(
+        potential_sharded_shape,
+        HloSharding::V3ToV2Sharding(potential_subsharding),
+        HloSharding::V3ToV2Sharding(sharding));
+  }
 
   CHECK_EQ(potential_subsharding.num_dimensions(), sharding.num_dimensions());
 
@@ -602,8 +607,7 @@ std::optional<std::vector<AxisRef>> MergeDimensionAxes(
 
 bool MergeNamedShardingIfCompatible(const NamedSharding& src,
                                     NamedSharding* dst) {
-  if (!src.mesh().DeviceAssignmentEquals(dst->mesh()) ||
-      src.num_dimensions() != dst->num_dimensions()) {
+  if (src.num_dimensions() != dst->num_dimensions()) {
     return false;
   }
 
@@ -672,7 +676,9 @@ bool MergeShardingIfCompatible(const HloSharding& to_merge_input,
     return true;
   }
 
-  if (to_merge_input.UseNamedShardingLeaf() && dst->UseNamedShardingLeaf()) {
+  if (to_merge_input.UseNamedShardingLeaf() && dst->UseNamedShardingLeaf() &&
+      to_merge_input.named_sharding().mesh().DeviceAssignmentEquals(
+          dst->named_sharding().mesh())) {
     NamedSharding dst_named = dst->named_sharding();
     if (MergeNamedShardingIfCompatible(to_merge_input.named_sharding(),
                                        &dst_named)) {

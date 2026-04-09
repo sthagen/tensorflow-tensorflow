@@ -400,14 +400,13 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCommandBufferThunk(
 
   bool enable_loop_unroll = ir_emitter_context_->debug_options()
                                 .xla_gpu_command_buffer_unroll_loops();
-  bool enable_va_remapping = ir_emitter_context_->debug_options()
-                                 .xla_gpu_enable_command_buffer_va_remapping();
+  DebugOptions::CommandBufferUpdateMode update_mode =
+      ir_emitter_context_->debug_options().xla_gpu_command_buffer_update_mode();
   TF_ASSIGN_OR_RETURN(
       CommandExecutor cmd_executor,
-      ConvertToCommands(
-          thunk_sequence,
-          ConvertToCommandsOptions{synchronization_mode, enable_loop_unroll,
-                                   enable_va_remapping}));
+      ConvertToCommands(thunk_sequence, ConvertToCommandsOptions{
+                                            synchronization_mode,
+                                            enable_loop_unroll, update_mode}));
 
   return GetThunkSequence(std::make_unique<CommandBufferThunk>(
       std::move(cmd_executor),
@@ -417,7 +416,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCommandBufferThunk(
                                         std::move(thunk_sequence)),
       ir_emitter_context_->debug_options()
           .xla_enable_command_buffers_during_profiling(),
-      enable_va_remapping));
+      update_mode));
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConvolutionThunk(
