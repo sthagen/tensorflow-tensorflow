@@ -1038,9 +1038,7 @@ class HloCollectivePermuteInstruction : public HloChannelInstruction {
            hlo->opcode() == HloOpcode::kCollectivePermuteStart;
   }
 
-  // Whether this is an in-place collective permute (with dynamic slice
-  // operands). Derived from the presence of slice_sizes.
-  bool inplace() const { return !slice_sizes_.empty(); }
+  bool inplace() const { return inplace_; }
 
  private:
   void PrintExtraAttributesImpl(AttributePrinter& printer,
@@ -1057,6 +1055,7 @@ class HloCollectivePermuteInstruction : public HloChannelInstruction {
 
   const std::vector<std::pair<int64_t, int64_t>> source_target_pairs_;
   const std::vector<std::vector<int64_t>> slice_sizes_;
+  bool inplace_;
 };
 
 inline bool HloAllReduceInstructionBase::ClassOf(const HloInstruction* hlo) {

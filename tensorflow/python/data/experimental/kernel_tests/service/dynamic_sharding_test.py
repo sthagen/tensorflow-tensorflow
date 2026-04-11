@@ -405,10 +405,25 @@ class DynamicShardingTest(data_service_test_base.TestBase,
                          combinations.combine(num_workers=[1, 3])))
   def testTakeWithRestartedWorker(self, num_workers):
     cluster = data_service_test_base.TestCluster(num_workers=num_workers)
-    a = dataset_ops.Dataset.range(3).take(5)
-    b = dataset_ops.Dataset.range(100, 103).repeat().take(5)
+    a = dataset_ops.Dataset.range(3).repeat()
+    b = dataset_ops.Dataset.range(100, 103).repeat()
+    a = a.apply(
+        data_service_ops.distribute(
+            data_service_ops.ShardingPolicy.DYNAMIC,
+            cluster.dispatcher_address(),
+            job_name="job_name",
+        )
+    )
+    b = b.apply(
+        data_service_ops.distribute(
+            data_service_ops.ShardingPolicy.DYNAMIC,
+            cluster.dispatcher_address(),
+            job_name="different_job_name",
+        )
+    )
+    a = a.take(5)
+    b = b.take(5)
     ds = a.concatenate(b)
-    ds = self._make_dynamic_sharding_dataset(ds, cluster)
 
     output = []
     get_next = self.getNext(ds)
@@ -419,15 +434,9 @@ class DynamicShardingTest(data_service_test_base.TestBase,
     output.extend(self.getIteratorOutput(get_next))
     logging.info("Dataset output: %s", output)
 
-    if num_workers > 1:
-      return
-
-    # Verifies that once a worker has started to read dataset B, it will not
-    # read dataset A again.
-    for i, val in enumerate(output):
-      if val >= 100:
-        self.assertTrue(all(x >= 100 for x in output[i:]))
-        break
+    # 5 elements from each of a and b.
+    self.assertTrue(all(x < 100 for x in output[:5]))
+    self.assertTrue(all(x >= 100 for x in output[5:]))
 
   @combinations.generate(
       combinations.times(test_base.default_test_combinations(),

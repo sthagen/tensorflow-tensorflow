@@ -216,7 +216,7 @@ CommonPjRtClient::CreateAliasBuffer(const Shape& shape,
       CreateRawBufferChannel(memory_space, on_device_bytes_count));
 
   tsl::RCReference<xla::PjRtDeviceEventPromise> definition_event_promise;
-  tsl::RCReference<xla::PjRtDeviceEvent> definition_event;
+  PjRtDeviceEventRef definition_event;
   TF_ASSIGN_OR_RETURN(
       std::tie(definition_event_promise, definition_event),
       CreateLinkedEventPromise(memory_space, "CreateRawBufferChannel"));
@@ -505,7 +505,7 @@ Future<> CommonPjRtRawBufferImpl::CopyRawHostToDevice(const void* src,
     return Future<>(event.status());
   }
   return tensorflow::down_cast<CommonPjRtClient*>(memory_space()->client())
-      ->MakeTrackedReadyFuture((*event)->async_value(), memory_space(),
+      ->MakeTrackedReadyFuture(event->async_value(), memory_space(),
                                "CommonPjRtRawBuffer", "CopyRawHostToDevice");
 }
 
@@ -516,7 +516,7 @@ Future<> CommonPjRtRawBufferImpl::CopyRawDeviceToHost(void* dst, int64_t offset,
     return Future<>(event.status());
   }
   return tensorflow::down_cast<CommonPjRtClient*>(memory_space()->client())
-      ->MakeTrackedReadyFuture((*event)->async_value(), memory_space(),
+      ->MakeTrackedReadyFuture(event->async_value(), memory_space(),
                                "CommonPjRtRawBuffer", "CopyRawDeviceToHost");
 }
 
@@ -1483,7 +1483,7 @@ CommonPjRtBufferImpl::CopyToCpuMemorySpace(xla::Shape dst_shape,
         if (!status_or_h2d_transfer_event.ok()) {
           definition_event_promise->SetError(status);
         } else {
-          status_or_h2d_transfer_event.value()->AndThen(
+          status_or_h2d_transfer_event.value().AndThen(
               [literal = std::move(literal)] {});
           definition_event_promise->Set(
               *std::move(status_or_h2d_transfer_event));
@@ -1714,7 +1714,7 @@ CommonPjRtBufferImpl::CopyFromCpuToMemorySpace(
               std::move(dst_raw_buffer));
           CHECK_OK(status_or_h2d_transfer_event);
           auto h2d_transfer_event = *std::move(status_or_h2d_transfer_event);
-          h2d_transfer_event->AndThen(
+          h2d_transfer_event.AndThen(
               [src_raw_buffer = std::move(src_raw_buffer),
                literal = std::move(literal),
                src_usage_event_promise = std::move(src_usage_event_promise)]() {
@@ -1722,7 +1722,7 @@ CommonPjRtBufferImpl::CopyFromCpuToMemorySpace(
               });
           if (dst_client->event_tracking_enabled()) {
             dst_client->AppendDescriptionToEvent(
-                dst_memory_space, h2d_transfer_event->async_value(),
+                dst_memory_space, h2d_transfer_event.async_value(),
                 " TransferToDevice ",
                 {definition_event_promise->async_value()});
           }
@@ -2251,7 +2251,7 @@ Future<> CommonPjRtBufferImpl::CopyRawToHostFuture(Future<void*> dst,
         });
   });
   return tensorflow::down_cast<CommonPjRtClient*>(memory_space()->client())
-      ->MakeTrackedReadyFuture(usage_event->async_value(), memory_space(),
+      ->MakeTrackedReadyFuture(usage_event.async_value(), memory_space(),
                                "CommonPjRtBuffer", "CopyRawToHostFuture");
 }
 

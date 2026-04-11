@@ -122,8 +122,7 @@ class HighwayHashStream final : public llvm::raw_ostream {
   void write_impl(const char* Ptr, size_t Size) final {
     // For tiny writes, it is more efficient to accumulate the data to a buffer
     // first and flush it since `HighwayHashCatT::Append` is optimized for
-    // large writes. Tiny writes are common in `raw_ostream` when used for
-    // printing an operation, e.g., `llvm::printEscapedString()`.
+    // large writes.
     static constexpr size_t kSmallWriteSize = 4;
     static_assert(kSmallWriteSize <= kBufferSize);
 
@@ -158,7 +157,7 @@ class HighwayHashStream final : public llvm::raw_ostream {
 
 }  // namespace
 
-uint64_t HloProgram::Fingerprint() const {
+absl::StatusOr<uint64_t> HloProgram::Fingerprint() const {
   HighwayHashStream os;
   mlir::OpPrintingFlags flags;
   flags.printGenericOpForm(true);

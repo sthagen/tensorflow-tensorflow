@@ -251,7 +251,9 @@ class CordStringListDecoderImpl : public StringListDecoder {
 
   const char* Data(uint32_t size) override {
     tmp_.resize(size);
-    reader_.ReadN(size, tmp_.data());
+    if (size > 0) {
+      reader_.ReadN(size, tmp_.data());
+    }
     return tmp_.data();
   }
 

@@ -1023,7 +1023,7 @@ absl::StatusOr<
 PjRtCpuClient::CreateLinkedEventPromise(PjRtMemorySpace* memory_space,
                                         absl::string_view debug_info) {
   auto definition_event_promise = tsl::MakeIndirectAsyncValue();
-  auto definition_event = tsl::MakeRef<CpuTrackedDeviceEvent>(
+  auto definition_event = PjRtDeviceEventRef(
       tsl::AsyncValueRef<CpuEvent>(definition_event_promise));
   return std::make_pair(tsl::MakeRef<CpuTrackedDeviceEventPromise>(
                             std::move(definition_event_promise)),
@@ -1048,8 +1048,7 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> PjRtCpuClient::DefineBuffer(
   return std::unique_ptr<PjRtBuffer>(std::make_unique<CommonPjRtBufferImpl>(
       std::move(on_device_shape),
       std::make_unique<TrackedCpuDeviceBuffer>(
-          std::move(raw_buffer),
-          CpuTrackedDeviceEvent::AfterAll(definition_device_events)),
+          std::move(raw_buffer), AfterAllCpuEvents(definition_device_events)),
       memory_space));
 }
 
@@ -1488,8 +1487,7 @@ PjRtRawLoadedExecutable::RawExecuteResult CpuPjRtRawLoadedExecutable::Execute(
   }
   auto execute_event = tsl::MakeConstructedAsyncValueRef<CpuEvent>();
   MarkEventReadyOnExit ready_on_exit(execute_event);
-  result.primary_execute_event =
-      tsl::MakeRef<CpuTrackedDeviceEvent>(execute_event);
+  result.primary_execute_event = PjRtDeviceEventRef(execute_event);
 
   std::shared_ptr<cpu::CpuExecutable> cpu_executable =
       executable_->cpu_executable_;

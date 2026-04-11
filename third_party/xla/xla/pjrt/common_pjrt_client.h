@@ -153,8 +153,7 @@ class CommonPjRtClient : public PjRtClient {
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> DefineBuffer(
       Shape on_device_shape, PjRtMemorySpace* memory_space,
       tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
-      absl::InlinedVector<tsl::RCReference<PjRtDeviceEvent>, 4>
-          definition_device_events) {
+      absl::InlinedVector<PjRtDeviceEventRef, 4> definition_device_events) {
     return DefineBuffer(
         std::make_shared<const Shape>(std::move(on_device_shape)), memory_space,
         std::move(raw_buffer), std::move(definition_device_events));

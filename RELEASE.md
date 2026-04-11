@@ -25,6 +25,9 @@ The TensorBoard dependency is no longer included by default. If you use `tf.summ
 
 ### Bug Fixes and Other Changes
 
+* `BatchFunction Operator`
+    * Adds the `num_warmup_batch_threads` op attribute to support a separate thread pool for processing warmup requests.
+
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
 * <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
 * <NOTES SHOULD BE GROUPED PER AREA>

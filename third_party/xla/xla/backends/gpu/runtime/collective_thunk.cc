@@ -314,6 +314,14 @@ absl::Status CollectiveThunk::Prepare(const PrepareParams& params) {
       clique_key, std::move(device_groups), GetCliqueRequirements(clique_key));
 }
 
+absl::Status CollectiveThunk::Initialize(const InitializeParams& params) {
+  ASSIGN_OR_RETURN(
+      GpuCliqueKey clique_key,
+      GetGpuCliqueKey(*params.collective_params, config().replica_groups,
+                      config().group_mode, communication_id_));
+  return InitializeCollective(params, clique_key);
+}
+
 absl::Status CollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
   VLOG(1) << absl::StreamFormat(
       "[%d] Starting %v.", params.stream->parent()->device_ordinal(), kind());

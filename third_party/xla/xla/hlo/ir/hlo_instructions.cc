@@ -1393,6 +1393,7 @@ HloCollectivePermuteInstruction::HloCollectivePermuteInstruction(
     : HloChannelInstruction(opcode, shape, channel_id),
       source_target_pairs_(source_target_pairs) {
   AppendOperands(operands);
+  inplace_ = false;
 }
 
 HloCollectivePermuteInstruction::HloCollectivePermuteInstruction(
@@ -1410,6 +1411,7 @@ HloCollectivePermuteInstruction::HloCollectivePermuteInstruction(
   AppendOperand(output);
   AppendOperand(input_start_indices);
   AppendOperand(output_start_indices);
+  inplace_ = true;
 }
 
 void HloCollectivePermuteInstruction::ToProto(

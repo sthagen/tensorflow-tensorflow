@@ -192,7 +192,7 @@ class SubcomputationInsertionVisitor : public DfsHloVisitorWithDefault {
                 /*old_instruction=*/call_, /*new_instruction=*/new_root,
                 /*preserve_sharding=*/false,
                 /*relay_control_dependency=*/true,
-                /*remove_unused_operands=*/true)
+                /*remove_unused_operands=*/false)
             .status();
     // Restores the original value of the new root, which gets overwritten
     // when it's used to replace the call instruction.
