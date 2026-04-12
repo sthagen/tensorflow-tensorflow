@@ -673,8 +673,8 @@ absl::StatusOr<std::vector<TensorValue>> EmitTiledComputation(
 absl::Status EmitGeneric(ImplicitLocOpBuilder& b,
                          const HloFusionInstruction* fusion,
                          const ge::TiledHloComputation& tiled_computation,
-                         const ::xla::IndexingMap& schedule,
-                         xtile::EntryFuncOp fn, MLIRContext* mlir_context) {
+                         const ge::Schedule& schedule, xtile::EntryFuncOp fn,
+                         MLIRContext* mlir_context) {
   if (VLOG_IS_ON(6)) {
     VLOG(6) << "Emitting XTile IR for fusion\n"
             << ExtractInstructionIntoNewModule(*fusion)->ToString();
@@ -747,7 +747,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
   fn.addEntryBlock();
   b.setInsertionPointToStart(&fn.front());
 
-  ASSIGN_OR_RETURN(auto schedule, Schedule(tiled_computation));
+  ASSIGN_OR_RETURN(auto schedule, GetSchedule(tiled_computation));
   TF_RETURN_IF_ERROR(
       EmitGeneric(b, fusion, tiled_computation, schedule, fn, &mlir_context));
 

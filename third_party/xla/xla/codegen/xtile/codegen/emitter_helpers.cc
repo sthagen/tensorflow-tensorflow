@@ -217,7 +217,7 @@ Value TensorValueToIndexTypeScalar(mlir::ImplicitLocOpBuilder& b,
 // the induction variables yet.
 absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
     ArrayRef<SymbolicExpr> exprs) {
-  MLIRContext* mlir_context = schedule_.GetMLIRContext();
+  MLIRContext* mlir_context = tiled_computation_.GetMLIRContext();
   const ge::TilingSpace& tiling_space = tiled_computation_.tiling_space();
   // Get all dimension and symbol IDs from all of the expressions.
   UsedParameters used_parameters =
@@ -235,7 +235,7 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
     for (int64_t dim : dim_ids) {
       switch (tiling_space.dimensions()[dim].type) {
         case ge::TilingSpace::DimensionSemantics::kParallel: {
-          dim_replacements[dim] = schedule_.GetSymbolicMap().GetResult(dim);
+          dim_replacements[dim] = schedule_.GetPidExpr(dim);
           break;
         }
         case ge::TilingSpace::DimensionSemantics::kSequential: {
@@ -273,9 +273,9 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
         expr.ReplaceDimsAndSymbols(dim_replacements, symbol_replacements));
   }
   IndexingMap offset_indexing_map(
-      SymbolicMap::Get(schedule_.GetMLIRContext(), /*num_dimensions=*/1,
-                       symbol_count, updated_exprs),
-      schedule_.GetDimVars(),
+      SymbolicMap::Get(mlir_context, /*num_dimensions=*/1, symbol_count,
+                       updated_exprs),
+      {IndexingMap::Variable(schedule_.pid_bounds, "pid")},
       std::vector<IndexingMap::Variable>(
           symbol_count,
           IndexingMap::Variable(0, std::numeric_limits<int64_t>::max())),

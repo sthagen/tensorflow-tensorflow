@@ -18,9 +18,7 @@ package_group(
 cc_library(
     name = "emitter_helpers",
     srcs = ["emitter_helpers.cc"],
-    hdrs = [
-        "emitter_helpers.h",
-    ],
+    hdrs = ["emitter_helpers.h"],
     compatible_with = get_compatible_with_portable(),
     deps = [
         "//xla:comparison_util",
@@ -32,6 +30,7 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/codegen/emitters:elemental_hlo_to_mlir",
         "//xla/codegen/tiling:tiled_hlo_instruction",
+        "//xla/codegen/tiling/experimental:scheduling",
         "//xla/codegen/tiling/experimental:tile",
         "//xla/codegen/tiling/experimental:tiled_hlo",
         "//xla/codegen/xtile/ir:xtile",

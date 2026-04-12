@@ -38,10 +38,10 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
+#include "xla/codegen/tiling/experimental/scheduling.h"
 #include "xla/codegen/tiling/experimental/tiled_hlo.h"
 #include "xla/codegen/tiling/tiled_hlo_instruction.h"
 #include "xla/codegen/xtile/ir/xtile_ops.h"
-#include "xla/hlo/analysis/indexing_map.h"
 #include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -63,7 +63,8 @@ class EmitterContext {
  public:
   EmitterContext(
       mlir::ImplicitLocOpBuilder& b, const HloFusionInstruction* fusion,
-      mlir::Value pid, IndexingMap schedule, xtile::EntryFuncOp entry_func,
+      mlir::Value pid, gpu::experimental::Schedule schedule,
+      xtile::EntryFuncOp entry_func,
       const gpu::experimental::TiledHloComputation& tiled_computation)
       : b_(b),
         pid_(pid),
@@ -112,7 +113,7 @@ class EmitterContext {
   absl::flat_hash_map<const gpu::experimental::TiledHloInstruction*,
                       TensorValue>
       tiled_hlo_to_tensor_;
-  IndexingMap schedule_;
+  gpu::experimental::Schedule schedule_;
   const HloFusionInstruction* fusion_ = nullptr;
   xtile::EntryFuncOp entry_func_;
   const gpu::experimental::TiledHloComputation& tiled_computation_;
