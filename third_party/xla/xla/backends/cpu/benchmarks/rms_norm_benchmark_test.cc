@@ -127,7 +127,7 @@ void BM_RmsNorm(benchmark::State& state, const RmsNorm& rms_norm) {
   }
 
   std::vector<int64_t> kept_dims;
-  for (int64_t i = 0; i < rms_norm.input_shape.dimensions_size(); ++i) {
+  for (int64_t i = 0; i < rms_norm.input_shape.dimensions().size(); ++i) {
     bool is_reduced = false;
     for (int64_t d : rms_norm.reduction_dims) {
       if (i == d) {

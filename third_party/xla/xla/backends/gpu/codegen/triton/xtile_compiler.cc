@@ -612,6 +612,13 @@ absl::Status LowerXTileToTriton(
     pm.addPass(mlir::triton::xla::CreateTritonXLAMathToLibdevicePass(
         libdevice_path, triple));
 
+    if (fusion.GetModule()
+            ->config()
+            .debug_options()
+            .xla_gpu_experimental_scaled_dot_with_triton()) {
+      pm.addPass(
+          mlir::triton::xla::CreateTritonXLAConvertUnsupportedTypesPass());
+    }
     tsl::StatusScopedDiagnosticHandler diagnostic_handler(&mlir_context);
     if (absl::Status status =
             diagnostic_handler.consumeStatus(pm.run(xtile_dialect_module));
@@ -622,39 +629,18 @@ absl::Status LowerXTileToTriton(
     }
   }
 
-  {
-    if (fusion.GetModule()
-            ->config()
-            .debug_options()
-            .xla_gpu_experimental_scaled_dot_with_triton()) {
-      // Convert unsupported types before verification.
-      mlir::PassManager pm(&mlir_context);
-
-      EnableIRPrintingIfRequested(pm, &mlir_context, *fusion.GetModule(),
-                                  fusion.name(),
-                                  "convert-scaled-dot-unsupported-types");
-      pm.addPass(
-          mlir::triton::xla::CreateTritonXLAConvertUnsupportedTypesPass());
-      if (mlir::failed(pm.run(xtile_dialect_module))) {
-        return CreateInternalError(
-            "Failed to fix unsupported types in Triton module for fusion:",
-            &fusion, xtile_dialect_module);
-      }
-    }
-
-    if (mlir::failed(mlir::verify(xtile_dialect_module))) {
-      return CreateInternalError("Failed to verify Triton module for fusion:",
-                                 &fusion, xtile_dialect_module);
-    }
-    mlir::PassManager pm(&mlir_context);
-    EnableIRPrintingIfRequested(pm, &mlir_context, *fusion.GetModule(),
-                                fusion.name(), "canonicalize-cse");
-    pm.addPass(mlir::createCanonicalizerPass());
-    pm.addPass(mlir::createCSEPass());
-    if (mlir::failed(pm.run(xtile_dialect_module))) {
-      return CreateInternalError("Failed to create Triton module for fusion:",
-                                 &fusion, xtile_dialect_module);
-    }
+  if (mlir::failed(mlir::verify(xtile_dialect_module))) {
+    return CreateInternalError("Failed to verify Triton module for fusion:",
+                               &fusion, xtile_dialect_module);
+  }
+  mlir::PassManager pm(&mlir_context);
+  EnableIRPrintingIfRequested(pm, &mlir_context, *fusion.GetModule(),
+                              fusion.name(), "canonicalize-cse");
+  pm.addPass(mlir::createCanonicalizerPass());
+  pm.addPass(mlir::createCSEPass());
+  if (mlir::failed(pm.run(xtile_dialect_module))) {
+    return CreateInternalError("Failed to create Triton module for fusion:",
+                               &fusion, xtile_dialect_module);
   }
   return absl::OkStatus();
 }

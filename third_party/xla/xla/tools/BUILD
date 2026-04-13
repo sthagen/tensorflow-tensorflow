@@ -837,6 +837,7 @@ cc_library(
     tags = [
         "no_mac",
     ],
+    target_compatible_with = if_rocm(["@platforms//cpu:x86_64"]),
     deps = [
         ":collective_perf_table_gen",
         "//xla/hlo/ir:hlo",

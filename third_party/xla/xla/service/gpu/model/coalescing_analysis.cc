@@ -68,7 +68,9 @@ bool IsReadCoalescedHeuristic(HloFusionAnalysis::EmitterFusionKind fusion_kind,
             instr->opcode() == HloOpcode::kIota) {
           return true;
         }
-        if (instr->operand_count() != 1) return false;
+        if (instr->operand_count() != 1) {
+          return false;
+        }
         if (instr->opcode() != HloOpcode::kBitcast && !instr->IsElementwise()) {
           return false;
         }
@@ -90,8 +92,12 @@ bool IsReadCoalescedHeuristic(HloFusionAnalysis::EmitterFusionKind fusion_kind,
       return TransposesMinorDimension(instr) &&
              !is_broadcast(instr->operand(0));
     };
-    if (is_bad_transpose(producer)) return false;
-    if (consumer && is_bad_transpose(consumer)) return false;
+    if (is_bad_transpose(producer)) {
+      return false;
+    }
+    if (consumer && is_bad_transpose(consumer)) {
+      return false;
+    }
   }
   // Fusing two row reductions breaks coalescing.
   if (fusion_kind == HloFusionAnalysis::EmitterFusionKind::kReduction &&

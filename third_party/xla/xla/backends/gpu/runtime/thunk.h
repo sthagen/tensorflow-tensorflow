@@ -55,6 +55,7 @@ limitations under the License.
 #include "xla/service/service_executable_run_options.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "xla/tsl/concurrency/future.h"
 #include "xla/tsl/lib/gtl/int_type.h"
 #include "xla/tsl/util/unique_any.h"
 #include "xla/util.h"
@@ -531,7 +532,14 @@ class Thunk {
 // A sequence of thunks.
 class ThunkSequence : public std::vector<std::unique_ptr<Thunk>> {
  public:
-  using std::vector<std::unique_ptr<Thunk>>::vector;
+  ThunkSequence() = default;
+  ThunkSequence(ThunkSequence&&) = default;
+  ThunkSequence(const ThunkSequence&) = delete;
+
+  ThunkSequence& operator=(ThunkSequence&&) = default;
+
+  explicit ThunkSequence(int64_t len)
+      : std::vector<std::unique_ptr<Thunk>>::vector(len) {}
 
   // Creates a thunks sequence from a single thunk.
   static ThunkSequence Of(std::unique_ptr<Thunk> thunk) {
@@ -549,6 +557,8 @@ class ThunkSequence : public std::vector<std::unique_ptr<Thunk>> {
   // thunk-specific description. Useful for diagnosing suboptimal schedules.
   std::string ToString(int indent) const;
 };
+
+using AsyncThunkSequence = tsl::Future<ThunkSequence>;
 
 std::ostream& operator<<(std::ostream& os, Thunk::Kind kind);
 
