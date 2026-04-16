@@ -287,13 +287,6 @@ class CStreamExecutor : public StreamExecutorCommon {
     }
     return true;
   }
-  absl::Status SynchronousMemZero(DeviceMemoryBase* location,
-                                  uint64_t size) override {
-    // TODO(annarev): figure out if we should support memzero/memset
-    // functionality by allocating on host and then copying to device.
-    return tsl::errors::Unimplemented(
-        "SynchronousMemZero is not supported by pluggable device.");
-  }
   absl::Status SynchronousMemcpy(DeviceMemoryBase* gpu_dst,
                                  const void* host_src, uint64_t size) override {
     OwnedTFStatus c_status(TF_NewStatus());

@@ -75,7 +75,7 @@ cc_library(
         ":split_proto_riegeli_options",
         ":split_proto_write_record",
         "//xla/pjrt/proto:compile_options_proto_cc",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:field_mask_util",
         "@com_google_protobuf//:protobuf_lite",

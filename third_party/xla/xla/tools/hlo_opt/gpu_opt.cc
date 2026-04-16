@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "llvm/IR/LLVMContext.h"
 #include "xla/backends/gpu/target_config/target_config.h"
 #include "xla/backends/gpu/transforms/collectives/all_gather_optimizer.h"
@@ -69,7 +70,6 @@ limitations under the License.
 #include "xla/tools/hlo_opt/compiled_opt_lib.h"
 #include "xla/tsl/platform/statusor.h"
 #include "tsl/platform/casts.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 

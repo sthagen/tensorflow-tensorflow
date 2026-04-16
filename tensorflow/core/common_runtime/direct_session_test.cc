@@ -1591,7 +1591,7 @@ class ExpensiveNoopOp : public OpKernel {
       ++pos;
     }
     OP_REQUIRES(ctx, frame_count <= 1,
-                errors::Internal(
+                absl::InternalError(
                     "Recursive call to ExecutorState::Process() detected."));
   }
 };

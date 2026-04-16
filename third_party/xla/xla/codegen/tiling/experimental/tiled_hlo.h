@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "xla/codegen/tiling/experimental/tile.h"
 #include "xla/codegen/tiling/experimental/tiling_space.h"
+#include "xla/hlo/analysis/interval.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/utils/hlo_traversal.h"
 #include "xla/service/instruction_fusion.h"
@@ -150,7 +151,8 @@ class TiledHloComputation {
   absl::Span<const TiledHloInstruction* const> roots() const { return roots_; }
 
   // Returns the map from runtime variable symbol to TiledHloInstruction.
-  const absl::flat_hash_map<int64_t, const TiledHloInstruction*>&
+  const absl::flat_hash_map<int64_t,
+                            std::pair<const TiledHloInstruction*, Interval>>&
   rt_symbol_to_tiled_hlo() const {
     return rt_symbol_to_tiled_hlo_;
   }
@@ -170,7 +172,8 @@ class TiledHloComputation {
       std::unique_ptr<TilingSpace> tiling_space,
       std::vector<std::unique_ptr<TiledHloInstruction>> tiled_hlo_instructions,
       llvm::SmallVector<const TiledHloInstruction*> roots,
-      absl::flat_hash_map<int64_t, const TiledHloInstruction*>
+      absl::flat_hash_map<int64_t,
+                          std::pair<const TiledHloInstruction*, Interval>>
           rt_symbol_to_tiled_hlo)
       : tiling_space_(std::move(tiling_space)),
         tiled_hlo_instructions_(std::move(tiled_hlo_instructions)),
@@ -180,7 +183,8 @@ class TiledHloComputation {
   static TiledHloRegionOrError CreateRegion(
       std::unique_ptr<TiledHloInstruction> tiled_root,
       const HloFusionAdaptor& fusion, const TilingSpace& tiling_space,
-      absl::flat_hash_map<int64_t, const TiledHloInstruction*>&
+      absl::flat_hash_map<int64_t,
+                          std::pair<const TiledHloInstruction*, Interval>>&
           rt_symbol_to_tiled_hlo);
 
   std::unique_ptr<TilingSpace> tiling_space_;
@@ -192,7 +196,7 @@ class TiledHloComputation {
   llvm::SmallVector<const TiledHloInstruction*> roots_;
 
   // Map from runtime variable symbol to TiledHloInstruction.
-  absl::flat_hash_map<int64_t, const TiledHloInstruction*>
+  absl::flat_hash_map<int64_t, std::pair<const TiledHloInstruction*, Interval>>
       rt_symbol_to_tiled_hlo_;
 };
 

@@ -94,7 +94,7 @@ int GetNextCommandBufferVaRangeIdx(const void* executable_key,
   static absl::Mutex mu(absl::kConstInit);
   static auto* counters =
       new absl::flat_hash_map<std::pair<const void*, int>, int>();
-  absl::MutexLock lock(&mu);
+  absl::MutexLock lock(mu);
   auto key = std::make_pair(executable_key, device_ordinal);
   int& idx = (*counters)[key];
   int result = idx;

@@ -152,11 +152,10 @@ absl::Status NewThreadPoolFromThreadPoolOptions(
         /*allocator=*/nullptr);
   } else {
     if (mvalue->first != thread_pool_options.num_threads()) {
-      return errors::InvalidArgument(
-          "Pool ", name,
-          " configured previously with num_threads=", mvalue->first,
-          "; cannot re-configure with num_threads=",
-          thread_pool_options.num_threads());
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Pool ", name, " configured previously with num_threads=",
+          mvalue->first, "; cannot re-configure with num_threads=",
+          thread_pool_options.num_threads()));
     }
   }
   *owned = false;
@@ -207,18 +206,18 @@ class DirectSessionFactory : public SessionFactory {
     const auto& experimental_config = options.config.experimental();
     if (experimental_config.has_session_metadata()) {
       if (experimental_config.session_metadata().version() < 0) {
-        return errors::InvalidArgument(
-            "Session version shouldn't be negative: ",
-            experimental_config.session_metadata().DebugString());
+        return absl::InvalidArgumentError(
+            absl::StrCat("Session version shouldn't be negative: ",
+                         experimental_config.session_metadata().DebugString()));
       }
       const std::string key =
           GetMetadataKey(experimental_config.session_metadata());
       mutex_lock l(sessions_lock_);
       if (!session_metadata_keys_.insert(key).second) {
-        return errors::InvalidArgument(
+        return absl::InvalidArgumentError(absl::StrCat(
             "A session with the same name and version has already been "
             "created: ",
-            experimental_config.session_metadata().DebugString());
+            experimental_config.session_metadata().DebugString()));
       }
     }
 
@@ -450,7 +449,7 @@ absl::Status DirectSession::Create(GraphDef&& graph) {
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
     if (graph_created_) {
-      return errors::AlreadyExists(
+      return absl::AlreadyExistsError(
           "A Graph has already been created for this session.");
     }
     return ExtendLocked(std::move(graph));
@@ -470,7 +469,7 @@ absl::Status DirectSession::Extend(GraphDef&& graph) {
 
 absl::Status DirectSession::ExtendLocked(GraphDef&& graph) {
   if (finalized_) {
-    return errors::FailedPrecondition("Session has been finalized.");
+    return absl::FailedPreconditionError("Session has been finalized.");
   }
   if (!(flib_def_ && execution_state_)) {
     // If this is the first call, we can initialize the execution state
@@ -593,11 +592,11 @@ absl::Status DirectSession::RunInternal(
       // matches what came out of GraphExecutionState::BuildGraph().
       if (run_options.experimental().collective_graph_key() !=
           executors_and_keys->collective_graph_key) {
-        return errors::Internal(
+        return absl::InternalError(absl::StrCat(
             "collective_graph_key in RunOptions ",
             run_options.experimental().collective_graph_key(),
             " should match collective_graph_key from optimized graph ",
-            executors_and_keys->collective_graph_key);
+            executors_and_keys->collective_graph_key));
       }
     }
     if (!collective_executor_mgr_) {
@@ -634,8 +633,9 @@ absl::Status DirectSession::RunInternal(
     if (run_options.inter_op_thread_pool() < -1 ||
         run_options.inter_op_thread_pool() >=
             static_cast<int32_t>(thread_pools_.size())) {
-      return errors::InvalidArgument("Invalid inter_op_thread_pool: ",
-                                     run_options.inter_op_thread_pool());
+      return absl::InvalidArgumentError(
+          absl::StrCat("Invalid inter_op_thread_pool: ",
+                       run_options.inter_op_thread_pool()));
     }
 
     pool = thread_pools_[run_options.inter_op_thread_pool()].first;
@@ -657,9 +657,9 @@ absl::Status DirectSession::RunInternal(
         step_id, call_timeout,
         run_options.experimental().run_handler_pool_options());
     if (!handler) {
-      return errors::DeadlineExceeded(
+      return absl::DeadlineExceededError(absl::StrCat(
           "Could not obtain RunHandler for request after waiting for ",
-          call_timeout, "ms.");
+          call_timeout, "ms."));
     }
   }
   auto* handler_ptr = handler.get();
@@ -737,7 +737,7 @@ absl::Status DirectSession::RunInternal(
   // `Session::Close()` will cancel the step.
   CancellationManager step_cancellation_manager(cancellation_manager_);
   if (step_cancellation_manager.IsCancelled()) {
-    return errors::Cancelled("Run call was cancelled");
+    return absl::CancelledError("Run call was cancelled");
   }
   args.cancellation_manager = &step_cancellation_manager;
 
@@ -805,7 +805,7 @@ absl::Status DirectSession::RunInternal(
   }
 
   if (step_cancellation_manager.IsCancelled()) {
-    run_status.Update(errors::Cancelled("Run call was cancelled"));
+    run_status.Update(absl::CancelledError("Run call was cancelled"));
   }
 
   if (run_metadata != nullptr && device_profiler_session) {
@@ -854,7 +854,7 @@ absl::Status DirectSession::RunInternal(
   // If requested via RunOptions, output the partition graphs.
   if (run_options.output_partition_graphs()) {
     if (options_.config.experimental().disable_output_partition_graphs()) {
-      return errors::InvalidArgument(
+      return absl::InvalidArgumentError(
           "RunOptions.output_partition_graphs() is not supported when "
           "disable_output_partition_graphs is true.");
     } else if (run_metadata != nullptr) {
@@ -934,7 +934,7 @@ absl::Status DirectSession::Run(
   }
   const absl::Status s = call_frame.SetArgs(feed_args);
   if (absl::IsInternal(s)) {
-    return errors::InvalidArgument(s.message());
+    return absl::InvalidArgumentError(s.message());
   } else if (!s.ok()) {
     return s;
   }
@@ -955,7 +955,7 @@ absl::Status DirectSession::Run(
     const absl::Status s = call_frame.ConsumeRetvals(
         &sorted_outputs, /* allow_dead_tensors = */ false);
     if (absl::IsInternal(s)) {
-      return errors::InvalidArgument(s.message());
+      return absl::InvalidArgumentError(s.message());
     } else if (!s.ok()) {
       return s;
     }
@@ -1024,8 +1024,9 @@ absl::Status DirectSession::PRunSetup(
              .emplace(run_state_args.handle,
                       std::unique_ptr<PartialRunState>(run_state))
              .second) {
-      return errors::Internal("The handle '", run_state_args.handle,
-                              "' created for this partial run is not unique.");
+      return absl::InternalError(
+          absl::StrCat("The handle '", run_state_args.handle,
+                       "' created for this partial run is not unique."));
     }
   }
 
@@ -1087,14 +1088,14 @@ absl::Status DirectSession::PRun(const std::string& handle,
     mutex_lock l(executor_lock_);  // could use reader lock
     auto exc_it = executors_.find(key);
     if (exc_it == executors_.end()) {
-      return errors::InvalidArgument(
+      return absl::InvalidArgumentError(
           "Must run 'setup' before performing partial runs!");
     }
     executors_and_keys = exc_it->second.get();
 
     auto prun_it = partial_runs_.find(handle);
     if (prun_it == partial_runs_.end()) {
-      return errors::InvalidArgument(
+      return absl::InvalidArgumentError(
           "Must run 'setup' before performing partial runs!");
     }
     run_state = prun_it->second.get();
@@ -1103,23 +1104,23 @@ absl::Status DirectSession::PRun(const std::string& handle,
     for (const auto& input : inputs) {
       auto it = run_state->pending_inputs.find(input.first);
       if (it == run_state->pending_inputs.end()) {
-        return errors::InvalidArgument(
-            "The feed ", input.first,
-            " was not specified in partial_run_setup.");
+        return absl::InvalidArgumentError(
+            absl::StrCat("The feed ", input.first,
+                         " was not specified in partial_run_setup."));
       } else if (it->second) {
-        return errors::InvalidArgument("The feed ", input.first,
-                                       " has already been fed.");
+        return absl::InvalidArgumentError(
+            absl::StrCat("The feed ", input.first, " has already been fed."));
       }
     }
     // Check that this is a new set of fetches that are still pending.
     for (const auto& output : output_names) {
       auto it = run_state->pending_outputs.find(output);
       if (it == run_state->pending_outputs.end()) {
-        return errors::InvalidArgument(
-            "The fetch ", output, " was not specified in partial_run_setup.");
+        return absl::InvalidArgumentError(absl::StrCat(
+            "The fetch ", output, " was not specified in partial_run_setup."));
       } else if (it->second) {
-        return errors::InvalidArgument("The fetch ", output,
-                                       " has already been fetched.");
+        return absl::InvalidArgumentError(
+            absl::StrCat("The fetch ", output, " has already been fetched."));
       }
     }
   }
@@ -1178,7 +1179,7 @@ absl::Status DirectSession::PRun(const std::string& handle,
 absl::Status DirectSession::ResourceHandleToInputTensor(
     const Tensor& resource_tensor, Tensor* retrieved_tensor) {
   if (resource_tensor.dtype() != DT_RESOURCE) {
-    return errors::InvalidArgument(absl::StrCat(
+    return absl::InvalidArgumentError(absl::StrCat(
         "ResourceHandleToInputTensor() received non-DT_RESOURCE Tensor: ",
         resource_tensor.dtype()));
   }
@@ -1190,7 +1191,7 @@ absl::Status DirectSession::ResourceHandleToInputTensor(
       SessionState::kTensorHandleResourceTypeName) {
     return session_state_.GetTensor(resource_handle.name(), retrieved_tensor);
   } else {
-    return errors::InvalidArgument(strings::StrCat(
+    return absl::InvalidArgumentError(strings::StrCat(
         "Invalid resource type hash code: ", resource_handle.hash_code(),
         "(name: ", resource_handle.name(),
         " type: ", resource_handle.maybe_type_name(),
@@ -1212,7 +1213,8 @@ absl::Status DirectSession::SendPRunInputs(
     auto it =
         executors_and_keys->input_name_to_rendezvous_key.find(input.first);
     if (it == executors_and_keys->input_name_to_rendezvous_key.end()) {
-      return errors::Internal("'", input.first, "' is not a pre-defined feed.");
+      return absl::InternalError(
+          absl::StrCat("'", input.first, "' is not a pre-defined feed."));
     }
     const std::string& input_key = it->second;
 
@@ -1257,8 +1259,8 @@ absl::Status DirectSession::RecvPRunOutputs(
     auto it =
         executors_and_keys->output_name_to_rendezvous_key.find(output_name);
     if (it == executors_and_keys->output_name_to_rendezvous_key.end()) {
-      return errors::Internal("'", output_name,
-                              "' is not a pre-defined fetch.");
+      return absl::InternalError(
+          absl::StrCat("'", output_name, "' is not a pre-defined fetch."));
     }
     const std::string& output_key = it->second;
     Tensor output_tensor;
@@ -1270,8 +1272,8 @@ absl::Status DirectSession::RecvPRunOutputs(
       s = run_state->rendez->Recv(parsed, Rendezvous::Args(), &output_tensor,
                                   &is_dead, operation_timeout_in_ms_);
       if (is_dead && s.ok()) {
-        s = errors::InvalidArgument("The tensor returned for ", output_name,
-                                    " was not valid.");
+        s = absl::InvalidArgumentError(absl::StrCat(
+            "The tensor returned for ", output_name, " was not valid."));
       }
     }
     if (!s.ok()) {
@@ -1302,7 +1304,8 @@ absl::Status DirectSession::CheckFetch(
       TensorId id(ParseTensorName(input.first));
       auto it = name_to_node->find(id.first);
       if (it == name_to_node->end()) {
-        return errors::NotFound("Feed ", input.first, ": not found");
+        return absl::NotFoundError(
+            absl::StrCat("Feed ", input.first, ": not found"));
       }
       pending_feeds.insert(id);
     }
@@ -1318,7 +1321,7 @@ absl::Status DirectSession::CheckFetch(
     TensorId id(ParseTensorName(fetch));
     auto it = name_to_node->find(id.first);
     if (it == name_to_node->end()) {
-      return errors::NotFound("Fetch ", fetch, ": not found");
+      return absl::NotFoundError(absl::StrCat("Fetch ", fetch, ": not found"));
     }
     stack.push_back(it->second);
   }
@@ -1332,10 +1335,10 @@ absl::Status DirectSession::CheckFetch(
     for (const Edge* in_edge : n->in_edges()) {
       const Node* in_node = in_edge->src();
       if (pending_feeds.count({in_node->name(), in_edge->src_output()}) > 0) {
-        return errors::InvalidArgument("Fetch ", in_node->name(), ":",
-                                       in_edge->src_output(),
-                                       " can't be computed from the feeds"
-                                       " that have been fed so far.");
+        return absl::InvalidArgumentError(
+            absl::StrCat("Fetch ", in_node->name(), ":", in_edge->src_output(),
+                         " can't be computed from the feeds"
+                         " that have been fed so far."));
       }
       if (!visited[in_node->id()]) {
         visited[in_node->id()] = true;
@@ -1423,7 +1426,8 @@ absl::Status DirectSession::CreateExecutors(
     auto* item = &(ek->items.back());
     auto lib = func_info->proc_flr->GetFLR(partition_name);
     if (lib == nullptr) {
-      return errors::Internal("Could not find device: ", partition_name);
+      return absl::InternalError(
+          absl::StrCat("Could not find device: ", partition_name));
     }
     item->flib = lib;
 
@@ -1641,7 +1645,7 @@ absl::Status DirectSession::CreateGraphs(
     DataTypeVector* output_types, int64_t* collective_graph_key) {
   mutex_lock l(graph_state_lock_);
   if (finalized_) {
-    return errors::FailedPrecondition("Session has been finalized.");
+    return absl::FailedPreconditionError("Session has been finalized.");
   }
 
   std::unique_ptr<ClientGraph> client_graph;
@@ -1670,19 +1674,19 @@ absl::Status DirectSession::CreateGraphs(
 
   if (subgraph_options.callable_options.feed_size() !=
       client_graph->feed_types.size()) {
-    return errors::Internal(
+    return absl::InternalError(absl::StrCat(
         "Graph pruning failed: requested number of feed endpoints = ",
         subgraph_options.callable_options.feed_size(),
         " versus number of pruned feed endpoints = ",
-        client_graph->feed_types.size());
+        client_graph->feed_types.size()));
   }
   if (subgraph_options.callable_options.fetch_size() !=
       client_graph->fetch_types.size()) {
-    return errors::Internal(
+    return absl::InternalError(absl::StrCat(
         "Graph pruning failed: requested number of fetch endpoints = ",
         subgraph_options.callable_options.fetch_size(),
         " versus number of pruned fetch endpoints = ",
-        client_graph->fetch_types.size());
+        client_graph->fetch_types.size()));
   }
 
   auto current_stateful_placements = execution_state->GetStatefulPlacements();
@@ -1696,10 +1700,10 @@ absl::Status DirectSession::CreateGraphs(
     if (iter == stateful_placements_.end()) {
       stateful_placements_.insert(std::make_pair(node_name, placement));
     } else if (iter->second != placement) {
-      return errors::Internal(
+      return absl::InternalError(absl::StrCat(
           "Stateful placement mismatch. "
           "Current assignment of ",
-          node_name, " to ", iter->second, " does not match ", placement);
+          node_name, " to ", iter->second, " does not match ", placement));
     }
   }
 
@@ -1743,11 +1747,11 @@ absl::Status DirectSession::CreateGraphs(
         DeviceNameUtils::LocalName(partition.first);
     if (std::count(device_names.begin(), device_names.end(),
                    local_partition_name) == 0) {
-      return errors::InvalidArgument(
+      return absl::InvalidArgumentError(absl::StrCat(
           "Creating a partition for ", local_partition_name,
           " which doesn't exist in the list of available devices. Available "
           "devices: ",
-          absl::StrJoin(device_names, ","));
+          absl::StrJoin(device_names, ",")));
     }
   }
 
@@ -1849,7 +1853,7 @@ DirectSession::PartialRunState::PartialRunState(
 
 DirectSession::PartialRunState::~PartialRunState() {
   if (rendez != nullptr) {
-    rendez->StartAbort(errors::Cancelled("PRun cancellation"));
+    rendez->StartAbort(absl::CancelledError("PRun cancellation"));
     executors_done.WaitForNotification();
   }
 }
@@ -1935,7 +1939,8 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 
   absl::Status GetArg(int index, const Tensor** val) override {
     if (TF_PREDICT_FALSE(index > feed_tensors_->size())) {
-      return errors::Internal("Args index out of bounds: ", index);
+      return absl::InternalError(
+          absl::StrCat("Args index out of bounds: ", index));
     } else {
       *val = &(*feed_tensors_)[index];
     }
@@ -1944,7 +1949,8 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 
   absl::Status SetRetval(int index, const Tensor& val) override {
     if (index > fetch_tensors_->size()) {
-      return errors::Internal("RetVal index out of bounds: ", index);
+      return absl::InternalError(
+          absl::StrCat("RetVal index out of bounds: ", index));
     }
     (*fetch_tensors_)[index] = val;
     return absl::OkStatus();
@@ -1980,14 +1986,15 @@ absl::Status DirectSession::RunCallable(
   {
     tf_shared_lock l(callables_lock_);
     if (handle >= next_callable_handle_) {
-      return errors::InvalidArgument("No such callable handle: ", handle);
+      return absl::InvalidArgumentError(
+          absl::StrCat("No such callable handle: ", handle));
     }
     executors_and_keys = callables_[handle].executors_and_keys;
   }
 
   if (!executors_and_keys) {
-    return errors::InvalidArgument(
-        "Attempted to run callable after handle was released: ", handle);
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Attempted to run callable after handle was released: ", handle));
   }
 
   // NOTE(mrry): Debug options are not currently supported in the
@@ -1998,14 +2005,14 @@ absl::Status DirectSession::RunCallable(
   // Configure a call frame for the step, which we use to feed and
   // fetch values to and from the executors.
   if (feed_tensors.size() != executors_and_keys->input_types.size()) {
-    return errors::InvalidArgument(
-        "Expected ", executors_and_keys->input_types.size(),
-        " feed tensors, but got ", feed_tensors.size());
+    return absl::InvalidArgumentError(
+        absl::StrCat("Expected ", executors_and_keys->input_types.size(),
+                     " feed tensors, but got ", feed_tensors.size()));
   }
   if (fetch_tensors != nullptr) {
     fetch_tensors->resize(executors_and_keys->output_types.size());
   } else if (!executors_and_keys->output_types.empty()) {
-    return errors::InvalidArgument(
+    return absl::InvalidArgumentError(
         "`fetch_tensors` must be provided when the callable has one or more "
         "outputs.");
   }
@@ -2065,7 +2072,8 @@ absl::Status DirectSession::RunCallable(
 absl::Status DirectSession::ReleaseCallable(CallableHandle handle) {
   mutex_lock l(callables_lock_);
   if (handle >= next_callable_handle_) {
-    return errors::InvalidArgument("No such callable handle: ", handle);
+    return absl::InvalidArgumentError(
+        absl::StrCat("No such callable handle: ", handle));
   }
   callables_.erase(handle);
   return absl::OkStatus();
@@ -2074,10 +2082,10 @@ absl::Status DirectSession::ReleaseCallable(CallableHandle handle) {
 absl::Status DirectSession::Finalize() {
   mutex_lock l(graph_state_lock_);
   if (finalized_) {
-    return errors::FailedPrecondition("Session already finalized.");
+    return absl::FailedPreconditionError("Session already finalized.");
   }
   if (!graph_created_) {
-    return errors::FailedPrecondition("Session not yet created.");
+    return absl::FailedPreconditionError("Session not yet created.");
   }
   execution_state_.reset();
   flib_def_.reset();

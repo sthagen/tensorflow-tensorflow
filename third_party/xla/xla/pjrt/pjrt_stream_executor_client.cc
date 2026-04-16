@@ -95,6 +95,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "riegeli/bytes/string_reader.h"
 #include "riegeli/bytes/string_writer.h"
 #include "xla/client/executable_build_options.h"
@@ -170,7 +171,6 @@ limitations under the License.
 #include "tsl/platform/fingerprint.h"
 #include "tsl/platform/mem.h"
 #include "tsl/profiler/lib/traceme.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 
@@ -559,23 +559,18 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>>
 PjRtStreamExecutorClient::DefineBuffer(
     std::shared_ptr<const Shape> on_device_shape, PjRtMemorySpace* memory_space,
     tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
-    absl::InlinedVector<PjRtDeviceEventRef, 4> definition_device_events) {
+    absl::InlinedVector<PjRtDeviceEventRef, 2> definition_device_events) {
   if (raw_buffer && raw_buffer->memory_space() != memory_space) {
     return absl::InvalidArgumentError(
         absl::StrFormat("DefineBuffer: Mismatch in memory spaces: %s vs %s",
                         raw_buffer->memory_space()->DebugString(),
                         memory_space->DebugString()));
   }
-  absl::InlinedVector<BufferSequencingEventRef, 2> definition_events;
-  definition_events.reserve(definition_device_events.size());
-  for (auto& ev : definition_device_events) {
-    definition_events.push_back(ev.down_cast<BufferSequencingEvent>());
-  }
   auto* device = tensorflow::down_cast<PjRtStreamExecutorDevice*>(
       memory_space->devices()[0]);
 
   auto dst_device_buffer = std::make_unique<TrackedDeviceBuffer>(
-      device, std::move(raw_buffer), definition_events);
+      device, std::move(raw_buffer), std::move(definition_device_events));
 
   auto py_buffer = std::make_unique<CommonPjRtBufferImpl>(
       std::move(on_device_shape), std::move(dst_device_buffer), memory_space);
@@ -872,7 +867,8 @@ PjRtStreamExecutorClient::CreateErrorBuffer(absl::Status error,
   // Create an empty buffer.
   auto dummy_device_buffer = std::make_unique<TrackedDeviceBuffer>(
       device, tsl::RCReference<CommonPjRtRawBuffer>(),
-      absl::MakeSpan(&definition_event, 1));
+      absl::InlinedVector<PjRtDeviceEventRef, 2>(
+          {PjRtDeviceEventRef(std::move(definition_event))}));
 
   return std::make_unique<CommonPjRtBufferImpl>(
       std::make_shared<const Shape>(shape), std::move(dummy_device_buffer),
@@ -953,9 +949,8 @@ PjRtStreamExecutorClient::CreateViewOfDeviceBuffer(
                       tensorflow::down_cast<PjRtStreamExecutorDevice*>(device)
                           ->GetLocalDeviceState());
 
-  absl::InlinedVector<BufferSequencingEventRef, 2> definition_events;
-  definition_events.emplace_back(
-      BufferSequencingEvent::Create(this->async_work_runner()));
+  auto definition_event =
+      BufferSequencingEvent::Create(this->async_work_runner());
 
   se::Stream* definition_stream;
   if (!stream) {
@@ -964,14 +959,16 @@ PjRtStreamExecutorClient::CreateViewOfDeviceBuffer(
     TF_ASSIGN_OR_RETURN(definition_stream,
                         local_device->GetStreamFromExternalStream(*stream));
   }
-  TF_RETURN_IF_ERROR(AllocateAndRecordEvent(definition_events.back(),
-                                            local_device, definition_stream));
+  TF_RETURN_IF_ERROR(AllocateAndRecordEvent(definition_event, local_device,
+                                            definition_stream));
+  absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events;
+  definition_events.emplace_back(std::move(definition_event));
 
   auto device_buffer = std::make_unique<TrackedDeviceBuffer>(
       device,
       tsl::MakeRef<PjRtStreamExecutorRawBuffer>(
           this, memory_space, local_device, std::move(buffer), buffer_size),
-      definition_events);
+      std::move(definition_events));
   return std::unique_ptr<PjRtBuffer>(std::make_unique<CommonPjRtBufferImpl>(
       std::make_shared<const Shape>(shape), std::move(device_buffer),
       memory_space));

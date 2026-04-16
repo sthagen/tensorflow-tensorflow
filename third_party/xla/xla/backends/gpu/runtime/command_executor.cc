@@ -273,15 +273,18 @@ absl::StatusOr<CommandExecutor> CommandExecutor::Create(
   }
 
   return CommandExecutor(synchronization_mode, std::move(commands),
-                         std::move(execution_graph));
+                         std::move(execution_graph),
+                         std::move(extra_resources));
 }
 
-CommandExecutor::CommandExecutor(SynchronizationMode synchronization_mode,
-                                 CommandSequence commands,
-                                 std::optional<ExecutionGraph> execution_graph)
+CommandExecutor::CommandExecutor(
+    SynchronizationMode synchronization_mode, CommandSequence commands,
+    std::optional<ExecutionGraph> execution_graph,
+    std::vector<Command::ResourceUses> extra_resources)
     : synchronization_mode_(synchronization_mode),
       commands_(std::move(commands)),
-      execution_graph_(std::move(execution_graph)) {
+      execution_graph_(std::move(execution_graph)),
+      extra_resources_(std::move(extra_resources)) {
   // Walk all nested commands and collect all buffers used by this executor.
   commands_.Walk([&](const Command* command) {
     Command::BufferUses buffer_uses = command->buffer_uses();
@@ -565,7 +568,7 @@ absl::Status CommandExecutor::RecordUpdate(
     Command* command = commands_[id];
 
     // For CAPTURE_CMD_NEVER_UPDATE mode, always skip updates for commands
-    // implemented via tracing (TracedCommandBufferCmd subclasses) or collective
+    // implemented via tracing (TracedCommand subclasses) or collective
     // operations (CollectiveCmd subclasses). Their buffer allocations are
     // VA-remapped to fixed offsets within the reserved VA range, so their
     // recorded addresses remain valid across executions — no update is needed.
@@ -729,7 +732,7 @@ absl::Span<const BufferAllocation::Index> CommandExecutor::allocs_indices()
   return allocs_indices_;
 }
 
-absl::StatusOr<std::string> CommandExecutor::RenderExecutionGraph() {
+absl::StatusOr<std::string> CommandExecutor::RenderExecutionGraph() const {
   ExecutionGraph::Renderer* renderer = ExecutionGraph::GetRenderer();
   if (renderer == nullptr) {
     return Unimplemented("No execution graph renderer registered");
@@ -743,7 +746,7 @@ absl::StatusOr<std::string> CommandExecutor::RenderExecutionGraph() {
 
   TF_ASSIGN_OR_RETURN(auto operations,
                       CreateCommandOperations(commands_, synchronization_mode_,
-                                              /*extra_resources=*/{}));
+                                              extra_resources_));
   absl::InlinedVector<const ExecutionGraph::Operation*, 32> operations_ptrs;
   operations_ptrs.reserve(operations.size());
   for (const auto& operation : operations) {

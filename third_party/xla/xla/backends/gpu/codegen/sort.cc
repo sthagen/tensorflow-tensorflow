@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "xla/backends/gpu/codegen/fusion_emitter.h"
 #include "xla/backends/gpu/codegen/llvm/llvm_emitter.h"
 #include "xla/backends/gpu/runtime/device_to_device_copy_thunk.h"
@@ -42,7 +43,6 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
 #include "xla/xla_data.pb.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 namespace gpu {
@@ -102,7 +102,7 @@ absl::StatusOr<FusionEmissionResult> SortFusion::Emit(
   std::string op_name(sort->name());
   result.module = ir_emitter_context.CreateLLVMModule(op_name);
   ASSIGN_OR_RETURN(ThunkSequence sort_thunks,
-                   EmitBitonicSortLLVMIR(sort, &ir_emitter_context));
+                   EmitBitonicSortLLVMIR(sort, &ir_emitter_context).Await());
   result.thunks.insert(result.thunks.end(),
                        std::make_move_iterator(sort_thunks.begin()),
                        std::make_move_iterator(sort_thunks.end()));

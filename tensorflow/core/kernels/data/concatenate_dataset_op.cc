@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
@@ -308,6 +309,8 @@ class ConcatenateDatasetOp::Dataset : public DatasetBase {
         if (!*end_of_sequence) {
           return absl::OkStatus();
         }
+        VLOG(2) << "TF concatenation dataset finished reading input " << i_
+                << ".";
         if (i_ == 0) {
           // Creates the second iterator only when the first iterator
           // is exhausted to save memory usage.

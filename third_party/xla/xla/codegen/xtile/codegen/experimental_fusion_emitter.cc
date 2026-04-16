@@ -27,10 +27,12 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -42,6 +44,7 @@ limitations under the License.
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
@@ -53,15 +56,18 @@ limitations under the License.
 #include "xla/codegen/xtile/codegen/emitter_helpers.h"
 #include "xla/codegen/xtile/ir/transforms/passes.h"
 #include "xla/codegen/xtile/ir/xtile_ops.h"
-#include "xla/hlo/analysis/indexing_map.h"
 #include "xla/hlo/analysis/indexing_map_serialization.h"  // IWYU pragma: keep
+#include "xla/hlo/analysis/interval.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_print_options.h"
+#include "xla/permutation_util.h"
+#include "xla/primitive_util.h"
 #include "xla/service/llvm_ir/llvm_util.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
 #include "xla/stream_executor/device_description.h"
@@ -70,19 +76,18 @@ limitations under the License.
 #include "xla/tsl/platform/errors.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla::xtile {
 namespace {
 
 using ::llvm::ArrayRef;
 using ::llvm::SmallVector;
-using ::mlir::FunctionOpInterface;
 using ::mlir::ImplicitLocOpBuilder;
 using ::mlir::Location;
 using ::mlir::MLIRContext;
 using ::mlir::Type;
 using ::mlir::Value;
+using ::mlir::ValueRange;
 using ::stream_executor::GpuComputeCapability;
 
 namespace arith = ::mlir::arith;
@@ -105,6 +110,54 @@ TensorValue Iota(mlir::ImplicitLocOpBuilder& b, int32_t limit) {
 template <typename T>
 ArrayRef<T> MakeArrayRef(const absl::Span<const T> span) {
   return ArrayRef(span.data(), span.size());
+}
+
+absl::StatusOr<TensorValue> EmitAllReduce(
+    EmitterContext& emitter_ctx, const HloAllReduceInstruction* all_reduce,
+    const ge::TiledHloInstruction& tiled_all_reduce, ValueRange operands) {
+  if (all_reduce->device_list()->replica_groups().empty()) {
+    return Internal(
+        "Triton emitting AllReduce without replica groups is not supported.");
+  }
+
+  llvm::SmallVector<int64_t> flattened_replica_group_ids;
+  for (const auto& replica_group : all_reduce->replica_groups()) {
+    for (const auto& replica_id : replica_group.replica_ids()) {
+      flattened_replica_group_ids.push_back(replica_id);
+    }
+  }
+
+  std::optional<int64_t> channel_handle = all_reduce->channel_id();
+  bool use_global_device_ids = all_reduce->use_global_device_ids();
+
+  ImplicitLocOpBuilder& b = emitter_ctx.b();
+  ASSIGN_OR_RETURN(
+      auto output_element_type,
+      xtile::PrimitiveTypeToMlirType(b, all_reduce->shape().element_type()));
+  ASSIGN_OR_RETURN(SmallVector<int64_t> tile_sizes,
+                   tiled_all_reduce.tile().GetStaticTileSizes());
+  auto output_type =
+      mlir::RankedTensorType::get(tile_sizes, output_element_type);
+
+  auto replica_groups_type = mlir::RankedTensorType::get(
+      {static_cast<int64_t>(all_reduce->replica_groups().size()),
+       static_cast<int64_t>(
+           all_reduce->replica_groups()[0].replica_ids_size())},
+      b.getI64Type());
+  auto replica_groups_attr = mlir::DenseIntElementsAttr::get(
+      replica_groups_type, flattened_replica_group_ids);
+  auto channel_handle_attr =
+      channel_handle ? mlir::stablehlo::ChannelHandleAttr::get(b.getContext(),
+                                                               *channel_handle,
+                                                               /*type=*/0)
+                     : nullptr;
+  auto all_reduce_op = mlir::stablehlo::AllReduceOp::create(
+      b, output_type, operands, replica_groups_attr, channel_handle_attr,
+      use_global_device_ids);
+
+  RETURN_IF_ERROR(EmitReduceComputation(b, all_reduce, all_reduce->to_apply(),
+                                        all_reduce_op));
+  return mlir::cast<TensorValue>(all_reduce_op.getResult(0));
 }
 
 absl::StatusOr<TensorValue> EmitBroadcast(
@@ -378,7 +431,8 @@ absl::StatusOr<TensorValue> EmitDot(EmitterContext& emitter_ctx,
     Value iv = for_op.getInductionVar();
     Value iv_i32 = Cast(b, for_op.getInductionVar(), b.getI32Type());
     CHECK(emitter_ctx.MapSymbolIdToSequentialDimValue(
-        sequential_dim_ids.front(), iv));
+        ge::TiledDimId(sequential_dim_ids.front()), iv,
+        Interval{0, loop_iteration_count.front() - 1}));
 
     // Emit the dot region.
     const ge::TiledHloInstruction* lhs_operand = tiled_dot.operand(0);
@@ -552,6 +606,87 @@ absl::StatusOr<TensorValue> EmitPad(EmitterContext& emitter_ctx,
           .getResult());
 }
 
+absl::StatusOr<TensorValue> EmitBitcast(
+    EmitterContext& emitter_ctx, const ge::TiledHloInstruction& tiled_bitcast,
+    TensorValue input) {
+  Shape input_shape = tiled_bitcast.hlo()->operand(0)->shape();
+  const Shape& output_shape = tiled_bitcast.hlo()->shape();
+  const PrimitiveType input_primitive_type = input_shape.element_type();
+  const PrimitiveType output_primitive_type = output_shape.element_type();
+
+  auto& b = emitter_ctx.b();
+  ASSIGN_OR_RETURN(Type output_element_type,
+                   PrimitiveTypeToMlirType(b, output_primitive_type));
+  ASSIGN_OR_RETURN(SmallVector<int64_t> operand_tile_sizes,
+                   tiled_bitcast.operand(0)->tile().GetStaticTileSizes());
+  ASSIGN_OR_RETURN(SmallVector<int64_t> output_tile_sizes,
+                   tiled_bitcast.tile().GetStaticTileSizes());
+
+  // If the bitcast changes the element type to an element type of the same
+  // bitwidth, we need to emit a ttir::BitcastOp.
+  if (input_primitive_type != output_primitive_type) {
+    if (primitive_util::BitWidth(input_primitive_type) !=
+        primitive_util::BitWidth(output_primitive_type)) {
+      return absl::InvalidArgumentError(
+          "Bitcast with different bitwidth for operand and output shape "
+          "element type is not yet supported.");
+    }
+    auto output_type =
+        mlir::RankedTensorType::get(operand_tile_sizes, output_element_type);
+    input = mlir::cast<TensorValue>(
+        mlir::tensor::BitcastOp::create(b, output_type, input).getResult());
+    input_shape.set_element_type(output_shape.element_type());
+  }
+
+  // Any Bitcast is decomposable to a transpose+reshape+transpose.
+  auto trt = ShapeUtil::DecomposeBitcastToTrt(input_shape, output_shape);
+  TF_RET_CHECK(trt.has_value());
+
+  // When replacing the `bitcast` with `transpose` + `reshape` + `transpose` we
+  // need to provide the tile sizes at output of each op. We already have the
+  // tiling of the `input` (before the first transpose) and the tiling of the
+  // final output (after the second transpose), so what's missing are the two
+  // tilings in between - after the first transpose and after the reshape. In
+  // the case of arbitrary ops, we would need to run the tiling analysis to
+  // compute this, but in the case of bitcast we can trivially compute the
+  // needed tile sizes from the input and output.
+
+  // The tiles sizes we need to use for the output of the first transpose
+  // are the permuted tiles sizes of the input. Note that these are
+  // different, even in rank, compared to the tile sizes of the final shape of
+  // the bitcast, so it's not possible to easily propagate them from the output.
+  std::vector<int64_t> transpose1_tile_sizes =
+      Permute(operand_tile_sizes, trt->transpose1_dims);
+  TensorValue normalized_input =
+      trt->IsTranspose1Identity()
+          ? input
+          : EmitTiledTranspose(b, transpose1_tile_sizes,
+                               llvm::to_vector(trt->transpose1_dims), input);
+
+  // Like the first transpose above, the tile sizes after the second transpose
+  // are a permutation (according to transpose2_dims) of the tile sizes of
+  // the reshape. Since we know the tile sizes of the final transpose and need
+  // the tile sizes of the reshape, we compute the tile sizes backwards, taking
+  // the inverse permutation.
+  std::vector<int64_t> reshape_tile_sizes =
+      PermuteInverse(operand_tile_sizes, trt->transpose2_dims);
+  TensorValue normalized_reshape;
+  if (ShapeUtil::Equal(trt->transpose1_shape, trt->reshape_shape)) {
+    normalized_reshape = normalized_input;
+  } else {
+    ASSIGN_OR_RETURN(normalized_reshape,
+                     EmitTiledReshape(b, reshape_tile_sizes, normalized_input));
+  }
+
+  // The final transpose simply uses the tile sizes computed for the original
+  // bitcast by the tiling analysis.
+  return trt->IsTranspose2Identity()
+             ? normalized_reshape
+             : EmitTiledTranspose(b, output_tile_sizes,
+                                  llvm::to_vector(trt->transpose2_dims),
+                                  normalized_reshape);
+}
+
 absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     EmitterContext& emitter_ctx, const ge::TiledHloInstruction& tiled_hlo) {
   auto& b = emitter_ctx.b();
@@ -609,13 +744,21 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
   for (const ge::TiledHloInstruction* operand : tiled_hlo.operands()) {
     operands.push_back(emitter_ctx.TiledHloToTensorValue(*operand));
   }
+  // Please keep the cases in alphabetical order.
   switch (hlo->opcode()) {
-    case HloOpcode::kTranspose: {
-      ASSIGN_OR_RETURN(auto static_tile_sizes,
-                       tiled_hlo.tile().GetStaticTileSizes());
-      auto padded_tile_sizes = GetPaddedTileSizes(static_tile_sizes);
-      return EmitTranspose(b, padded_tile_sizes, hlo->dimensions(),
-                           mlir::cast<TensorValue>(operands[0]));
+    case (HloOpcode::kAllReduceStart): {
+      const HloComputation* computation =
+          fusion.fused_instructions_computation();
+      const HloInstruction* root_instruction = computation->root_instruction();
+      if (root_instruction->opcode() == HloOpcode::kAllReduceDone) {
+        root_instruction = root_instruction->operand(0);
+      }
+      return EmitAllReduce(emitter_ctx,
+                           xla::Cast<HloAllReduceInstruction>(root_instruction),
+                           tiled_hlo, operands);
+    }
+    case (HloOpcode::kAllReduceDone): {
+      return emitter_ctx.TiledHloToTensorValue(*tiled_hlo.operand(0));
     }
     case HloOpcode::kBroadcast: {
       return EmitBroadcast(b, tiled_hlo, mlir::cast<TensorValue>(operands[0]));
@@ -633,11 +776,26 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     case HloOpcode::kIota: {
       return EmitIota(emitter_ctx, tiled_hlo);
     }
+    case HloOpcode::kPad: {
+      return EmitPad(emitter_ctx, tiled_hlo);
+    }
+    case HloOpcode::kReshape: {
+      ASSIGN_OR_RETURN(auto tile_sizes, tiled_hlo.tile().GetStaticTileSizes());
+      return EmitTiledReshape(
+          emitter_ctx.b(), tile_sizes,
+          emitter_ctx.TiledHloToTensorValue(*tiled_hlo.operand(0)));
+    }
     case HloOpcode::kSlice: {
       return emitter_ctx.TiledHloToTensorValue(*tiled_hlo.operand(0));
     }
-    case HloOpcode::kPad: {
-      return EmitPad(emitter_ctx, tiled_hlo);
+    case HloOpcode::kTranspose: {
+      ASSIGN_OR_RETURN(auto tile_sizes, tiled_hlo.tile().GetStaticTileSizes());
+      return EmitTranspose(b, tile_sizes, hlo->dimensions(),
+                           mlir::cast<TensorValue>(operands[0]));
+    }
+    case HloOpcode::kBitcast: {
+      return EmitBitcast(emitter_ctx, tiled_hlo,
+                         mlir::cast<TensorValue>(operands[0]));
     }
     default:
       break;
@@ -671,25 +829,25 @@ absl::StatusOr<std::vector<TensorValue>> EmitTiledComputation(
 }
 
 absl::Status EmitGeneric(ImplicitLocOpBuilder& b,
-                         const HloFusionInstruction* fusion,
+                         const HloFusionInstruction& fusion,
                          const ge::TiledHloComputation& tiled_computation,
                          const ge::Schedule& schedule, xtile::EntryFuncOp fn,
                          MLIRContext* mlir_context) {
   if (VLOG_IS_ON(6)) {
     VLOG(6) << "Emitting XTile IR for fusion\n"
-            << ExtractInstructionIntoNewModule(*fusion)->ToString();
+            << ExtractInstructionIntoNewModule(fusion)->ToString();
     VLOG(6) << "Tiled computation: \n" << tiled_computation.ToString();
   }
   Value tile_id = fn.getTileId();
-  EmitterContext emitter_ctx{b,        fusion, tile_id,
-                             schedule, fn,     tiled_computation};
+  EmitterContext emitter_ctx{b,        &fusion, tile_id,
+                             schedule, fn,      tiled_computation};
 
   VLOG(2) << "EmitTiledComputation: " << tiled_computation.ToString();
   ASSIGN_OR_RETURN(auto results,
                    EmitTiledComputation(
                        emitter_ctx, tiled_computation.tiled_hlo_instructions(),
                        tiled_computation.roots()));
-  const HloComputation* computation = fusion->fused_instructions_computation();
+  const HloComputation* computation = fusion.fused_instructions_computation();
   for (const auto& [root, result, arg] :
        llvm::zip(tiled_computation.roots(), results,
                  fn.getArguments().drop_front(computation->num_parameters()))) {
@@ -720,12 +878,12 @@ absl::Status EmitGeneric(ImplicitLocOpBuilder& b,
 // triton specific things. It should be migrated to use non-triton specific
 // utilities.
 absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
-    absl::string_view fn_name, const HloFusionInstruction* fusion,
+    absl::string_view fn_name, const HloFusionInstruction& fusion,
     const ::xla::gpu::experimental::TiledHloComputation& tiled_computation,
     MLIRContext& mlir_context, absl::Span<mlir::Type> opaque_args_types,
     const std::optional<GpuComputeCapability>& gpu_cc) {
   const HloComputation* hlo_computation =
-      fusion->fused_instructions_computation();
+      fusion.fused_instructions_computation();
 
   Location loc = mlir::NameLoc::get(
       mlir::StringAttr::get(&mlir_context, hlo_computation->name()));

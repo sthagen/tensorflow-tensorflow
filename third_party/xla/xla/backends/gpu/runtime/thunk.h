@@ -34,12 +34,15 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "xla/backends/gpu/runtime/collective_clique_requests.h"
 #include "xla/backends/gpu/runtime/collective_cliques.h"
 #include "xla/backends/gpu/runtime/collective_memory.h"
 #include "xla/backends/gpu/runtime/collective_memory_requests.h"
 #include "xla/backends/gpu/runtime/collective_params.h"
 #include "xla/backends/gpu/runtime/execution_stream_id.h"
+#include "xla/backends/gpu/runtime/scratch_memory.h"
+#include "xla/backends/gpu/runtime/scratch_memory_requests.h"
 #include "xla/backends/gpu/runtime/thunk.pb.h"
 #include "xla/backends/gpu/runtime/thunk_id.h"
 #include "xla/backends/gpu/runtime/thunk_kind.pb.h"
@@ -56,17 +59,10 @@ limitations under the License.
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/concurrency/future.h"
-#include "xla/tsl/lib/gtl/int_type.h"
 #include "xla/tsl/util/unique_any.h"
 #include "xla/util.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla::gpu {
-
-// Unique identifier for async events. The same identifier is expected to be
-// shared between a pair of StartThunk and corresponding DoneThunk. It is used
-// to collect async regions for a CommandBufferThunk.
-TSL_LIB_GTL_DEFINE_INT_TYPE(AsyncEventsUniqueId, uint64_t);
 
 // Thunk acts as the bridge between IrEmitter and GpuExecutable. It stores the
 // metadata IrEmitter generates for GpuExecutable to invoke an HloInstruction.
@@ -223,6 +219,8 @@ class Thunk {
     CollectiveCliqueRequests* collective_clique_requests = nullptr;
     // Collective memory requests for preparing symmetric allocations.
     CollectiveMemoryRequests* collective_memory_requests = nullptr;
+    // Scratch memory requests for preparing scratch memory allocations.
+    ScratchMemoryRequests* scratch_memory_requests = nullptr;
     // Stream executor for the thunk.
     se::StreamExecutor* absl_nonnull executor = nullptr;
     // Buffer allocations for the thunk.
@@ -263,6 +261,9 @@ class Thunk {
 
     // Collective memory acquired based on memory requests.
     CollectiveMemory* collective_memory = nullptr;
+
+    // Scratch memory acquired based on scratch memory requests.
+    ScratchMemory* scratch_memory = nullptr;
 
     // XLA FFI execution context.
     const ffi::ExecutionContext* ffi_execution_context = nullptr;
@@ -476,14 +477,6 @@ class Thunk {
       absl::AnyInvocable<absl::StatusOr<std::unique_ptr<Thunk>>(
           const ThunkProto&, absl::Span<const BufferAllocation>) const>;
 
-  void add_control_predecessor(const Thunk* control_predecessor) {
-    control_predecessors_.push_back(control_predecessor);
-  }
-
-  std::vector<const Thunk*> control_predecessors() const {
-    return control_predecessors_;
-  }
-
   // In scheduling mode kConcurrentRegions, thunks sequences are divided into
   // regions. Thunks can be executed concurrently within the same region, but
   // regions will be executed sequentially.
@@ -493,14 +486,6 @@ class Thunk {
   void set_concurrent_region_id(uint64_t concurrent_region_id) {
     concurrent_region_id_ = concurrent_region_id;
   }
-
-  virtual std::optional<AsyncEventsUniqueId> GetAsyncEventsUniqueId() const {
-    return std::nullopt;
-  }
-
-  virtual bool IsAsyncStart() const { return false; }
-
-  virtual bool IsAsyncDone() const { return false; }
 
   void set_profile_annotation(absl::string_view profile_annotation) {
     thunk_info_.profile_annotation = std::string(profile_annotation);
@@ -517,13 +502,6 @@ class Thunk {
   Kind kind_;
   ThunkInfo thunk_info_;
 
-  // The list of control predecessors of the thunk.
-  // Thunk needs to maintain the control dependency information because
-  // when it is executed by command buffer, and command buffer may execute the
-  // sequence in concurrent mode, and we should make sure that it does not
-  // violate the control dependency in the original computation.
-  std::vector<const Thunk*> control_predecessors_;
-
   // Used in scheduling mode kConcurrentRegions only. More details in the
   // comments on the getter method above.
   std::optional<uint64_t> concurrent_region_id_;
@@ -534,8 +512,11 @@ class ThunkSequence : public std::vector<std::unique_ptr<Thunk>> {
  public:
   ThunkSequence() = default;
   ThunkSequence(ThunkSequence&&) = default;
+  explicit ThunkSequence(std::vector<std::unique_ptr<Thunk>>&& thunks)
+      : std::vector<std::unique_ptr<Thunk>>(std::move(thunks)) {};
   ThunkSequence(const ThunkSequence&) = delete;
 
+  ThunkSequence& operator=(ThunkSequence&) = delete;
   ThunkSequence& operator=(ThunkSequence&&) = default;
 
   explicit ThunkSequence(int64_t len)

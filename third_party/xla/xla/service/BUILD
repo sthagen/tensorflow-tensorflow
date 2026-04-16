@@ -361,6 +361,7 @@ cc_library(
     hdrs = ["collective_permute_key.h"],
     deps = [
         ":hlo_domain_map",
+        "//xla:side_effect_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
@@ -1660,6 +1661,19 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "service_executable_run_options",
+    hdrs = ["service_executable_run_options.h"],
+    deps = [
+        ":stream_pool",
+        "//xla:executable_run_options",
+        "//xla/stream_executor:platform",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
     name = "executable",
     srcs = ["executable.cc"],
     hdrs = [
@@ -1672,6 +1686,7 @@ cc_library(
         ":hlo_module_config",
         ":hlo_proto_cc",
         ":maybe_owning_device_address",
+        ":service_executable_run_options",
         ":shaped_buffer",
         ":stream_pool",
         "//xla:executable_run_options",
@@ -1726,8 +1741,8 @@ cc_library(
     name = "compiled_module",
     hdrs = ["compiled_module.h"],
     deps = [
-        ":buffer_assignment",
         "//xla/hlo/ir:hlo",
+        "//xla/pjrt:compiled_memory_stats",
         "//xla/stream_executor:platform",
         "//xla/stream_executor/abi:executable_abi_version",
         "@com_google_absl//absl/status",
@@ -1740,10 +1755,10 @@ cc_library(
     testonly = True,
     hdrs = ["mock_compiled_module.h"],
     deps = [
-        ":buffer_assignment",
         ":compiled_module",
         ":executable",
         "//xla/hlo/ir:hlo",
+        "//xla/pjrt:compiled_memory_stats",
         "//xla/stream_executor:platform_id",
         "//xla/stream_executor/abi:executable_abi_version",
         "@com_google_absl//absl/status:statusor",
@@ -2513,7 +2528,7 @@ xla_test(
         "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
         "//xla/tests:hlo_pjrt_test_base",
         "//xla/tests:xla_internal_test_main",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status:status_matchers",
     ],
@@ -2542,13 +2557,28 @@ cc_library(
         "//xla/hlo/analysis:hlo_reachability",
         "//xla/hlo/ir:hlo",
         "//xla/tsl/platform:errors",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+xla_cc_test(
+    name = "collective_combiner_utils_test",
+    srcs = ["collective_combiner_utils_test.cc"],
+    deps = [
+        ":collective_combiner_utils",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/parser:hlo_parser",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -5508,6 +5538,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -6195,7 +6226,7 @@ xla_test(
         "//xla/tests:hlo_pjrt_test_base",
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:env",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -6587,12 +6618,15 @@ cc_library(
         "//xla/hlo/analysis:hlo_reachability",
         "//xla/hlo/ir:hlo",
         "//xla/tsl/platform:errors",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
     ],
 )

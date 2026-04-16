@@ -52,7 +52,7 @@ cc_library(
         "//xla/tsl/concurrency:future",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/util:sorted_range",
         "//xla/tsl/util/proto:proto_utils",

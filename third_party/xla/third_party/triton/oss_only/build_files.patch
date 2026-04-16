@@ -2078,7 +2078,7 @@ new file mode 100644
 +# 
 +# build_test(
 +#     name = "build_test",
-+#     allow_empty_target = False,
++#     allow_empty_target = True,
 +#     targets = [
 +#         "@triton//:TritonDialects",
 +#         "@triton//:TritonGPUToLLVM",

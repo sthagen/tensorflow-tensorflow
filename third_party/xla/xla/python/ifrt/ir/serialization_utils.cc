@@ -153,8 +153,10 @@ absl::Status SerializeIfrtIrAtomExecutables(
     std::shared_ptr<CompiledIfrtIrProgram> ifrt_ir_program) {
   // Create a map from runtime device id to logical device id.
   absl::flat_hash_map<DeviceId, int> device_id_to_logical_device_id;
-  for (int i = 0; i < ifrt_ir_program->device_assignments.size(); ++i) {
-    const DeviceId device_id = ifrt_ir_program->device_assignments[i];
+  for (int i = 0;
+       i < ifrt_ir_program->compile_options->device_assignments.size(); ++i) {
+    const DeviceId device_id =
+        ifrt_ir_program->compile_options->device_assignments[i];
     auto [_, inserted] = device_id_to_logical_device_id.insert({device_id, i});
     if (!inserted) {
       return absl::InvalidArgumentError(

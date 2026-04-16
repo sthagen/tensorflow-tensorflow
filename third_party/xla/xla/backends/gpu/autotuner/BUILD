@@ -474,7 +474,7 @@ cc_library(
         "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -509,6 +509,7 @@ xla_test(
         "//xla:autotuning_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
+        "//xla/backends/gpu/target_config",
         "//xla/hlo/analysis:symbolic_map",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
@@ -753,7 +754,6 @@ cc_library(
 
 xla_test(
     name = "hipblaslt_mx_execution_test",
-    timeout = "long",
     srcs = ["hipblaslt_mx_execution_test.cc"],
     backends = [
         "amdgpu_any",
@@ -777,7 +777,6 @@ xla_test(
 
 xla_test(
     name = "hipblaslt_test",
-    timeout = "long",
     srcs = ["hipblaslt_test.cc"],
     backends = [
         "amdgpu_any",
@@ -1065,7 +1064,7 @@ cc_library(
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/protobuf:dnn_proto_cc",
         "@com_google_absl//absl/algorithm:container",
@@ -1163,11 +1162,11 @@ xla_cc_binary(
 )
 
 xla_test(
-    name = "autotuner_main_tap_test",
+    name = "autotuner_main_test",
     srcs = ["autotuner_main.cc"],
-    args = ["--hlo_file=$(location autotuner_main.hlo)"],
+    args = ["--hlo_file=$(location test.hlo)"],
     backends = ["gpu"],
-    data = ["autotuner_main.hlo"],
+    data = ["test.hlo"],
     fail_if_no_test_linked = False,  # NOLINT=not based on gtest and thus doesn't support --gunit_fail_if_no_test_linked.
     fail_if_no_test_selected = False,  # NOLINT=not based on gtest and thus doesn't support --gunit_fail_if_no_test_selected.
     shuffle_tests = False,  # CANNOT_SHUFFLE_TESTS=not based on gtest and thus doesn't support shuffling.

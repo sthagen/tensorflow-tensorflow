@@ -969,7 +969,10 @@ class TfToMlrtPreParallelizationConversionPass
     options_.copyOptionValuesFrom(options);
   }
   TfToMlrtPreParallelizationConversionPass(
-      const TfToMlrtPreParallelizationConversionPass &other) {}
+      const TfToMlrtPreParallelizationConversionPass& other)
+      : PassWrapper(other) {
+    options_.copyOptionValuesFrom(other.options_);
+  }
   TfToMlrtPreParallelizationConversionPass &operator=(
       const TfToMlrtPreParallelizationConversionPass &) = delete;
 
@@ -1076,8 +1079,10 @@ class TfToMlrtConversionPass
     // This is needed to progating user configs into this pass.
     options_.copyOptionValuesFrom(options);
   }
-  TfToMlrtConversionPass(const TfToMlrtConversionPass &other)
-      : fallback_state_(other.fallback_state_) {}
+  TfToMlrtConversionPass(const TfToMlrtConversionPass& other)
+      : fallback_state_(other.fallback_state_) {
+    options_.copyOptionValuesFrom(other.options_);
+  }
   TfToMlrtConversionPass &operator=(const TfToMlrtConversionPass &) = delete;
 
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TfToMlrtConversionPass)

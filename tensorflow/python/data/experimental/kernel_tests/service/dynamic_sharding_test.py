@@ -424,6 +424,7 @@ class DynamicShardingTest(data_service_test_base.TestBase,
     a = a.take(5)
     b = b.take(5)
     ds = a.concatenate(b)
+    ds = ds.prefetch(buffer_size=dataset_ops.AUTOTUNE)
 
     output = []
     get_next = self.getNext(ds)

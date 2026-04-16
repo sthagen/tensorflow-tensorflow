@@ -601,7 +601,6 @@ void ScatterWithDistributedIndices::ComputeIndexing(
   }
 
   if (updates_map) {
-    // TODO (karupayun): Check number of dimensions.
     auto index_id = CreateSymbolExpr(0, kGpuGridDims, mlir_context);
     auto update_dim_loop = CreateSymbolExpr(1, kGpuGridDims, mlir_context);
     auto vector_id = CreateSymbolExpr(2, kGpuGridDims, mlir_context);

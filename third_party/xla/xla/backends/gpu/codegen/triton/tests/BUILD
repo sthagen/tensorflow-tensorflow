@@ -6,7 +6,7 @@ load(
     "@local_config_sycl//sycl:build_defs.bzl",
     "if_sycl_is_configured",
 )
-load("//xla:lit.bzl", "lit_device_test")
+load("//xla:lit.bzl", "lit_device_test", "lit_test_suite")
 load("//xla:xla.default.bzl", "xla_cc_binary", "xla_cc_test")
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "if_google")
@@ -50,12 +50,30 @@ xla_cc_binary(
     ]),
 )
 
+deviceless_tests = ["collectives/all_reduce.hlo"]
+
+lit_test_suite(
+    name = "deviceless_tests",
+    srcs = deviceless_tests,
+    cfg = "//xla:lit.cfg.py",
+    tools = [
+        "//xla/backends/gpu/codegen/triton/tools:hlo_to_xtileir",
+        "@llvm-project//llvm:FileCheck",
+    ],
+)
+
 lit_device_test(
     name = "tests",
-    srcs = glob(["**/*.hlo"]),
+    srcs = glob(
+        include = ["**/*.hlo"],
+        exclude = deviceless_tests,
+    ),
     backends = [
         "h100",
         "b200",
+    ],
+    data = [
+        "//xla/backends/gpu/target_config:all_gpu_specs",
     ],
     tags_override = {
         "dot/dot_unit_tile_sizes.hlo": ["nozapfhahn"],
@@ -68,6 +86,7 @@ lit_device_test(
     tools = [
         ":triton_test_correctness",
         "//xla/backends/gpu/codegen/triton/tools:hlo_to_xtileir",
+        "//xla/tools:hlo-opt",
         "@llvm-project//llvm:FileCheck",
     ],
 )

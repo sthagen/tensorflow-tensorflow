@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
@@ -114,10 +115,7 @@ struct RaggedAllToAllStreamState {
   tsl::TiedRef<xla::SymmetricMemory> output_buffer_ptr_storage_symmetric_memory;
 
   // Reference to the symmetric memory for the output buffers.
-  tsl::TiedRef<xla::SymmetricMemory> output_temporary_symmetric_memory;
-
-  // Device memory buffer to store the temporary output buffer pointers.
-  std::unique_ptr<se::MemoryAllocation> output_temporary_buffer_ptr_storage;
+  std::shared_ptr<xla::SymmetricMemory> output_temporary_symmetric_memory;
 
   // Contains the output buffer pointers and barrier signal buffers for all
   // peers.
@@ -204,6 +202,9 @@ class RaggedAllToAllThunk : public CollectiveThunk {
     return !is_one_shot_kernel_enabled();
   }
 
+  absl::Status PrepareCollective(const PrepareParams& params,
+                                 const GpuCliqueKey& clique_key) override;
+
   absl::Status RunCollective(const ExecuteParams& params,
                              const GpuCliqueKey& clique_key, se::Stream& stream,
                              Communicator& comm) override;
@@ -281,8 +282,6 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
     const GpuCliqueKey& clique_key, se::Stream& stream, RankId rank,
     std::shared_ptr<xla::SymmetricMemory> barrier_signal_symmetric_memory,
     const se::DeviceAddressBase& barrier_signal_value,
-    std::shared_ptr<xla::SymmetricMemory>
-        output_buffer_ptr_storage_symmetric_memory,
     std::shared_ptr<xla::SymmetricMemory> output_temporary_symmetric_memory,
     int64_t num_total_updates, int64_t num_input_rows, int64_t num_row_elements,
     absl::Span<DeviceBufferPair const> buffers);

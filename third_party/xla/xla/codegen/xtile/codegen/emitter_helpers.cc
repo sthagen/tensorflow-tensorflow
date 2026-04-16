@@ -31,6 +31,7 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/bit.h"
@@ -81,7 +82,6 @@ limitations under the License.
 #include "xla/util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla::xtile {
 
@@ -204,12 +204,15 @@ SmallVector<int64_t> GetPaddedTileSizes(ArrayRef<int64_t> tile_sizes) {
   return result;
 }
 
-Value TensorValueToIndexTypeScalar(mlir::ImplicitLocOpBuilder& b,
-                                   const TensorValue& tensor_value) {
+Value EmitClampedRTVar(mlir::ImplicitLocOpBuilder& b,
+                       const TensorValue& tensor_value,
+                       const Interval& bounds) {
   mlir::OpBuilder::InsertionGuard guard(b);
   b.setInsertionPointAfterValue(tensor_value);
   Value scalar_value = mlir::tensor::ExtractOp::create(b, tensor_value);
-  return Cast(b, scalar_value, b.getIndexType());
+  Value clamped_index =
+      EmitClampedIndex(b, scalar_value, bounds.lower, bounds.upper);
+  return Cast(b, clamped_index, b.getIndexType());
 }
 
 // Evaluates tiling parameters for the given affine expressions, e.g. offsets.
@@ -227,6 +230,9 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
 
   int64_t symbol_count = 0;
   SmallVector<Value> symbol_values;
+  symbol_values.reserve(dim_ids.size() + symbol_ids.size());
+  std::vector<IndexingMap::Variable> symbol_variables;
+  symbol_variables.reserve(dim_ids.size() + symbol_ids.size());
 
   // Remap parallel dimensions.
   SmallVector<SymbolicExpr> dim_replacements;
@@ -241,7 +247,10 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
         case ge::TilingSpace::DimensionSemantics::kSequential: {
           dim_replacements[dim] =
               CreateSymbolExpr(symbol_count++, /*num_dims=*/1, mlir_context);
-          symbol_values.push_back(GetSequentialDimValue(dim));
+          auto [value, range] = GetSequentialDimValue(ge::TiledDimId(dim));
+          symbol_values.push_back(value);
+          symbol_variables.push_back(
+              IndexingMap::Variable{range, absl::StrCat("k_", dim)});
           break;
         }
         default:
@@ -259,10 +268,13 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
     for (const auto& symbol_id : symbol_ids) {
       auto it = rt_symbol_to_tiled_hlo.find(symbol_id);
       TF_RET_CHECK(it != rt_symbol_to_tiled_hlo.end());
-      TensorValue tensor_value = TiledHloToTensorValue(*it->second);
-      symbol_values.push_back(TensorValueToIndexTypeScalar(b_, tensor_value));
+      const auto& [tiled_hlo, bounds] = it->second;
+      TensorValue tensor_value = TiledHloToTensorValue(*tiled_hlo);
+      symbol_values.push_back(EmitClampedRTVar(b_, tensor_value, bounds));
       symbol_replacements[symbol_id] =
           CreateSymbolExpr(symbol_count++, /*num_dims=*/1, mlir_context);
+      symbol_variables.push_back(
+          IndexingMap::Variable{bounds, absl::StrCat("rt_", symbol_id)});
     }
   }
 
@@ -276,10 +288,7 @@ absl::StatusOr<SmallVector<Value>> EmitterContext::EvaluateTilingParameters(
       SymbolicMap::Get(mlir_context, /*num_dimensions=*/1, symbol_count,
                        updated_exprs),
       {IndexingMap::Variable(schedule_.pid_bounds, "pid")},
-      std::vector<IndexingMap::Variable>(
-          symbol_count,
-          IndexingMap::Variable(0, std::numeric_limits<int64_t>::max())),
-      {});
+      std::move(symbol_variables), {});
   SmallVector<Value> dims{Cast(b_, pid_, pid_.getType())};
   return emitters::ApplyIndexing(offset_indexing_map, /*dims=*/dims,
                                  /*symbols=*/symbol_values, b_);
@@ -814,12 +823,12 @@ absl::StatusOr<Type> GetMlirType(
 }
 
 absl::StatusOr<SmallVector<Type>> GetFnArgTypes(
-    mlir::ImplicitLocOpBuilder& b, const HloFusionInstruction* fusion,
+    mlir::ImplicitLocOpBuilder& b, const HloFusionInstruction& fusion,
     absl::Span<mlir::Type> opaque_args_types,
     const std::optional<GpuComputeCapability>& gpu_cc) {
   SmallVector<Type> fn_arg_types;
 
-  auto hlo_computation = fusion->fused_instructions_computation();
+  auto hlo_computation = fusion.fused_instructions_computation();
   // Add parameter types.
   for (HloInstruction* p : hlo_computation->parameter_instructions()) {
     ASSIGN_OR_RETURN(Type ir_type,
@@ -828,7 +837,7 @@ absl::StatusOr<SmallVector<Type>> GetFnArgTypes(
   }
 
   // Add result types.
-  for (const auto& [index, shape] : ShapeUtil::GetLeafShapes(fusion->shape())) {
+  for (const auto& [index, shape] : ShapeUtil::GetLeafShapes(fusion.shape())) {
     ASSIGN_OR_RETURN(Type ir_type,
                      PrimitiveTypeToMlirType(b, shape.element_type(), gpu_cc));
     fn_arg_types.push_back(GetMemRefType(shape, ir_type));
@@ -945,6 +954,48 @@ TensorValue EmitTiledTranspose(mlir::ImplicitLocOpBuilder& b,
   mlir::DenseI64ArrayAttr order = b.getDenseI64ArrayAttr(dimensions);
   return mlir::stablehlo::TransposeOp::create(b, output_tensor_type, input,
                                               order);
+}
+
+absl::Status EmitReduceComputation(mlir::ImplicitLocOpBuilder& b,
+                                   const HloInstruction* hlo_reduction,
+                                   const HloComputation* reduction_computation,
+                                   mlir::Operation* reduction) {
+  ASSIGN_OR_RETURN(
+      Type result_ty,
+      PrimitiveTypeToMlirType(b, hlo_reduction->shape().element_type()));
+  result_ty = mlir::RankedTensorType::get({}, result_ty);
+
+  mlir::Location loc = b.getLoc();
+  mlir::Block* reducer = b.createBlock(&reduction->getRegion(0), {},
+                                       {result_ty, result_ty}, {loc, loc});
+  b.setInsertionPointToStart(reducer);
+
+  std::vector<const HloInstruction*> to_emit;
+  absl::flat_hash_map<const HloInstruction*, TensorValue> region_values;
+  for (const HloInstruction* instr :
+       reduction_computation->MakeInstructionPostOrder()) {
+    if (instr->opcode() == HloOpcode::kParameter) {
+      int parameter_number = instr->parameter_number();
+      TF_RET_CHECK(parameter_number < 2);
+      auto argument = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(
+          reducer->getArgument(parameter_number));
+
+      if (!argument) {
+        return Internal("Expected reducer argument to be a tensor.");
+      }
+
+      TF_RET_CHECK(region_values.insert({instr, argument}).second);
+    } else {
+      to_emit.push_back(instr);
+    }
+  }
+
+  TF_RET_CHECK(!to_emit.empty());
+
+  ASSIGN_OR_RETURN(TensorValue result, EmitScope(b, to_emit, region_values));
+  mlir::stablehlo::ReturnOp::create(b, SmallVector<Value>({result}));
+  b.setInsertionPointAfter(reduction);
+  return absl::OkStatus();
 }
 
 }  // namespace xla::xtile

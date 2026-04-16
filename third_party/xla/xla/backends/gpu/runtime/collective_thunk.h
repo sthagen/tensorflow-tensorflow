@@ -17,13 +17,13 @@ limitations under the License.
 #define XLA_BACKENDS_GPU_RUNTIME_COLLECTIVE_THUNK_H_
 
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -35,6 +35,7 @@ limitations under the License.
 #include "xla/core/collectives/communicator.h"
 #include "xla/hlo/ir/collective_op_group_mode.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/runtime/device_id.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/llvm_ir/llvm_util.h"
@@ -120,6 +121,11 @@ class CollectiveThunk : public Thunk {
   CommunicationId communication_id() const { return communication_id_; }
 
  protected:
+  virtual absl::Status PrepareCollective(const PrepareParams& params,
+                                         const GpuCliqueKey& clique_key) {
+    return absl::OkStatus();
+  }
+
   // Returns true if the first call to this collective operation has to be
   // guarded with a rendezvous synchronization with other local participants
   // before and after running the collective operation itself.
@@ -157,16 +163,13 @@ class CollectiveThunk : public Thunk {
   virtual const CollectiveConfig& config() const = 0;
 
  private:
-  // Before and after a first call to this particular instance of a collective
-  // thunk we do a round of rendezvous to make sure that all participants are
-  // ready to execute the collective operation and that all of them successfully
-  // allocated on-device state required for it. This is required to avoid
-  // deadlocks when one device goes too far ahead and causes a deadlock in CUDA
-  // driver (root cause rumored to be fixed in 590 driver series).
-  RendezvousFlag pre_call_rendezvous_flag_;
-  RendezvousFlag post_call_rendezvous_flag_;
-
   CommunicationId communication_id_;
+
+  // Device assignment is owned by PjRtExecutable and never changes between
+  // thunk executions, and replica groups are baked into the thunk at compile
+  // time. Device groups are the same for all devices, so computed once.
+  absl::once_flag device_groups_once_;
+  absl::StatusOr<std::vector<std::vector<GlobalDeviceId>>> device_groups_;
 };
 
 //===----------------------------------------------------------------------===//

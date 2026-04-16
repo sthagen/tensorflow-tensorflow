@@ -466,12 +466,12 @@ absl::StatusOr<GpuTopology> InferGpuTopology(
   // If the CPU target options are not set, we infer them from the host CPU
   // (typical JIT compilation)
   if (!cpu_target_options.has_value()) {
-    VLOG(1) << "Inferring CPU target options from the host architecture.";
+    VLOG(2) << "Inferring CPU target options from the host architecture.";
     cpu_target_options.emplace(debug_opts);
   }
 
   if (gpu_target_config.has_value()) {
-    VLOG(1) << "Found target compilation environment, and "
+    VLOG(2) << "Found target compilation environment, and "
             << (stream_exec == nullptr
                     ? "not stream executor. Performing deviceless compilation."
                     : "stream executor. Performing cross compilation.");
@@ -2726,7 +2726,7 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
         gpu_device_info.memory_bandwidth());
     GpuHloCostAnalysis cost_analysis(cost_analysis_options, gpu_device_info);
     RETURN_IF_ERROR(module->entry_computation()->Accept(&cost_analysis));
-    VLOG(1) << absl::StrFormat(
+    VLOG(2) << absl::StrFormat(
         "#module=%s,program_id=%d# estimated memory r+w %s", module->name(),
         module->unique_id(),
         tsl::strings::HumanReadableNumBytes(cost_analysis.bytes_accessed()));

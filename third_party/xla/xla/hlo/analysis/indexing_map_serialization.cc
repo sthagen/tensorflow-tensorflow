@@ -635,7 +635,7 @@ std::optional<IndexingMap> ParseIndexingMap(llvm::StringRef input,
       llvm::errs() << "Expected an empty indexing map\n";
       return std::nullopt;
     }
-    return IndexingMap{AffineMap::get(mlir_context),
+    return IndexingMap{SymbolicMap::Get(mlir_context),
                        /*dimensions=*/{}, /*range_vars=*/{}, /*rt_vars=*/{}};
   }
 
@@ -747,15 +747,17 @@ std::optional<IndexingMap> ParseIndexingMap(llvm::StringRef input,
       ArrayRef(affine_exprs).drop_front(num_affine_map_results);
 
   // Populate constraints.
-  SmallVector<std::pair<AffineExpr, Interval>> constraints;
+  SmallVector<std::pair<SymbolicExpr, Interval>> constraints;
   constraints.reserve(constraint_exprs.size());
   for (const auto& [expr, bounds] :
        llvm::zip(constraint_exprs, constraint_bounds)) {
-    constraints.push_back(std::make_pair(expr, bounds));
+    constraints.push_back(std::make_pair(
+        AffineExprToSymbolicExpr(expr, dim_vars.size()), bounds));
   }
-  auto map = AffineMap::get(dim_vars.size(), range_vars.size() + rt_vars.size(),
-                            affine_map_results, mlir_context);
-  return IndexingMap{map, std::move(dim_vars), std::move(range_vars),
+  auto symbolic_map = AffineMapToSymbolicMap(
+      AffineMap::get(dim_vars.size(), range_vars.size() + rt_vars.size(),
+                     affine_map_results, mlir_context));
+  return IndexingMap{symbolic_map, std::move(dim_vars), std::move(range_vars),
                      std::move(rt_vars), constraints};
 }
 
@@ -897,7 +899,7 @@ std::string ToString(const IndexingMap& indexing_map,
   symbol_names.reserve(range_names.size() + rt_names.size());
   symbol_names.append(range_names.begin(), range_names.end());
   symbol_names.append(rt_names.begin(), rt_names.end());
-  // TODO(karupayun): Do not use conversion here.
+  // TODO(b/446856305): Do not use conversion here.
   ss << ToString(SymbolicMapToAffineMap(indexing_map.GetSymbolicMap()),
                  dim_names, range_names, rt_names);
   if (dim_vars.empty() && range_vars.empty() && rt_vars.empty()) {
@@ -925,11 +927,13 @@ std::string ToString(const IndexingMap& indexing_map,
     }
   }
   std::vector<std::string> expr_range_strings;
-  const auto& constraints = indexing_map.GetConstraints();
+  const auto& constraints = indexing_map.GetSymbolicConstraints();
   expr_range_strings.reserve(constraints.size());
   for (const auto& [expr, range] : constraints) {
-    expr_range_strings.push_back(absl::StrCat(
-        ToString(expr, dim_names, symbol_names), " in ", range.ToString()));
+    auto affine_expr = SymbolicExprToAffineExpr(expr, dim_names.size());
+    expr_range_strings.push_back(
+        absl::StrCat(ToString(affine_expr, dim_names, symbol_names), " in ",
+                     range.ToString()));
   }
   std::sort(expr_range_strings.begin(), expr_range_strings.end());
   if (!expr_range_strings.empty()) {

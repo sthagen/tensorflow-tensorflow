@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -144,20 +145,38 @@ struct VariableInputTestParam {
                     // and can be preloaded as an ifrt array.
   std::vector<tensorflow::Tensor> expected_out_tensors;
 };
-using VariableInputTest = ::testing::TestWithParam<VariableInputTestParam>;
 
-class IfrtServingExecutableTest : public ::testing::Test {
+using VariableInputTest =
+    ::testing::TestWithParam<std::tuple<VariableInputTestParam, bool>>;
+
+class IfrtServingExecutableTest : public ::testing::TestWithParam<bool> {
  protected:
   explicit IfrtServingExecutableTest() {
     helper_ = std::make_unique<test_utils::IfrtServingExecutableTestHelper>(
         &selector_);
   }
 
+  absl::StatusOr<std::vector<tensorflow::Tensor>> Execute(
+      IfrtServingExecutable* executable,
+      absl::Span<const tensorflow::Tensor> inputs,
+      absl::Span<const int> variable_arg_indices = {}) {
+    if (GetParam()) {
+      TF_ASSIGN_OR_RETURN(
+          auto future, executable->ExecuteAsync(inputs, variable_arg_indices));
+      return future.Await();
+    } else {
+      return executable->Execute(inputs, variable_arg_indices);
+    }
+  }
+
   tsl::test_util::MockServingDeviceSelector selector_;
   std::unique_ptr<test_utils::IfrtServingExecutableTestHelper> helper_;
 };
 
-TEST_F(IfrtServingExecutableTest, Basic) {
+INSTANTIATE_TEST_SUITE_P(IfrtServingExecutableTests, IfrtServingExecutableTest,
+                         ::testing::Bool());
+
+TEST_P(IfrtServingExecutableTest, Basic) {
   int64_t program_id = 123456;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id)))
       .Times(1)
@@ -171,17 +190,18 @@ TEST_F(IfrtServingExecutableTest, Basic) {
 
   // Iterate over all cores first for warmup execution.
   for (int i = 0; i < helper_->num_cores(); i++) {
-    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs), {}).status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
   }
-  TF_ASSERT_OK_AND_ASSIGN(auto result,
-                          executable->Execute(absl::MakeSpan(inputs), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
   const auto expected_out =
       AsTensor<int32_t>({14}, tensorflow::TensorShape({1, 1}));
 
   EXPECT_THAT(result, ElementsAre(TensorEq(expected_out)));
 }
 
-TEST_F(IfrtServingExecutableTest, MultipleShapes) {
+TEST_P(IfrtServingExecutableTest, MultipleShapes) {
   int64_t program_id = 123456;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id)))
       .Times(6)
@@ -206,13 +226,14 @@ TEST_F(IfrtServingExecutableTest, MultipleShapes) {
   std::vector<tensorflow::Tensor> outputs1, outputs2;
   // Iterate over all cores first for warmup execution.
   for (int i = 0; i < helper_->num_cores(); i++) {
-    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs1), {}).status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
   }
   for (int i = 0; i < 3; i++) {
-    TF_ASSERT_OK_AND_ASSIGN(outputs1,
-                            executable->Execute(absl::MakeSpan(inputs1), {}));
-    TF_ASSERT_OK_AND_ASSIGN(outputs2,
-                            executable->Execute(absl::MakeSpan(inputs2), {}));
+    TF_ASSERT_OK_AND_ASSIGN(
+        outputs1, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
+    TF_ASSERT_OK_AND_ASSIGN(
+        outputs2, Execute(executable.get(), absl::MakeSpan(inputs2), {}));
   }
 
   ASSERT_EQ(executable->num_executables(), 2);
@@ -222,7 +243,7 @@ TEST_F(IfrtServingExecutableTest, MultipleShapes) {
   EXPECT_THAT(outputs2, ElementsAre(TensorEq(expected_out2)));
 }
 
-TEST_F(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
+TEST_P(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
   int64_t program_id = 123456;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id)))
       .Times(3)
@@ -238,10 +259,11 @@ TEST_F(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
   std::vector<tensorflow::Tensor> inputs1{x1, y1};
   std::vector<tensorflow::Tensor> outputs1;
   for (int i = 0; i < helper_->num_cores(); i++) {
-    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs1), {}).status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
   }
-  TF_ASSERT_OK_AND_ASSIGN(outputs1,
-                          executable->Execute(absl::MakeSpan(inputs1), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      outputs1, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
 
   // Freeze the model
   executable->Freeze();
@@ -249,8 +271,8 @@ TEST_F(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
   // After the freeze(), already compiled shape works ok, but uncompiled shape
   // shall return failure.
   outputs1.clear();
-  TF_ASSERT_OK_AND_ASSIGN(outputs1,
-                          executable->Execute(absl::MakeSpan(inputs1), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      outputs1, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
   EXPECT_THAT(outputs1, ElementsAre(TensorEq(expected_out1)));
 
   auto x2 = AsTensor<int32_t>({1, 2, 3, 4}, tensorflow::TensorShape({1, 4}));
@@ -258,13 +280,13 @@ TEST_F(IfrtServingExecutableTest, ReturnFailOnUncompiledShapeAfterFrozen) {
   std::vector<tensorflow::Tensor> inputs2{x2, y2};
 
   std::vector<tensorflow::Tensor> outputs2;
-  auto status = executable->Execute(absl::MakeSpan(inputs2), {});
+  auto status = Execute(executable.get(), absl::MakeSpan(inputs2), {});
 
   EXPECT_THAT(status,
               absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
-TEST_F(IfrtServingExecutableTest, Spmd) {
+TEST_P(IfrtServingExecutableTest, Spmd) {
   int64_t program_id = 111111;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id))).Times(0);
   auto executable = helper_->MakeExecutable(
@@ -282,13 +304,13 @@ TEST_F(IfrtServingExecutableTest, Spmd) {
                                               tensorflow::TensorShape({4, 2}));
 
   std::vector<tensorflow::Tensor> inputs{x, y, z};
-  TF_ASSERT_OK_AND_ASSIGN(auto result,
-                          executable->Execute(absl::MakeSpan(inputs), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
 
   EXPECT_THAT(result, ElementsAre(TensorEq(expected_out)));
 }
 
-TEST_F(IfrtServingExecutableTest, SpmdTwoReturns) {
+TEST_P(IfrtServingExecutableTest, SpmdTwoReturns) {
   int64_t program_id = 111111;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id))).Times(0);
   auto executable = helper_->MakeExecutable(
@@ -309,14 +331,14 @@ TEST_F(IfrtServingExecutableTest, SpmdTwoReturns) {
 
   std::vector<tensorflow::Tensor> inputs{x, y, z};
 
-  TF_ASSERT_OK_AND_ASSIGN(auto result,
-                          executable->Execute(absl::MakeSpan(inputs), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
 
   EXPECT_THAT(result,
               ElementsAre(TensorEq(expected_out0), TensorEq(expected_out1)));
 }
 
-TEST_F(IfrtServingExecutableTest, SpmdXlaCallModuleShardy) {
+TEST_P(IfrtServingExecutableTest, SpmdXlaCallModuleShardy) {
   int64_t program_id = 111111;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id))).Times(0);
   auto executable = helper_->MakeExecutable(
@@ -335,8 +357,8 @@ TEST_F(IfrtServingExecutableTest, SpmdXlaCallModuleShardy) {
 
   std::vector<tensorflow::Tensor> inputs{x, y};
 
-  TF_ASSERT_OK_AND_ASSIGN(auto result,
-                          executable->Execute(absl::MakeSpan(inputs), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
 
   EXPECT_THAT(result,
               ElementsAre(TensorEq(expected_out0), TensorEq(expected_out1)));
@@ -383,7 +405,7 @@ TEST_F(IfrtServingExecutableTest, EncodeLayout) {
   EXPECT_EQ(mlir::cast<mlir::StringAttr>(attr1).getValue(), "{0,1}");
 }
 
-TEST_F(IfrtServingExecutableTest, NoReturn) {
+TEST_P(IfrtServingExecutableTest, NoReturn) {
   int64_t program_id = 111111;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id)))
       .Times(1)
@@ -397,16 +419,17 @@ TEST_F(IfrtServingExecutableTest, NoReturn) {
   std::vector<tensorflow::Tensor> inputs{x, y};
   // Iterate over all cores first for warmup execution.
   for (int i = 0; i < helper_->num_cores(); i++) {
-    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs), {}).status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
   }
 
-  TF_ASSERT_OK_AND_ASSIGN(auto result,
-                          executable->Execute(absl::MakeSpan(inputs), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result, Execute(executable.get(), absl::MakeSpan(inputs), {}));
 
   ASSERT_EQ(result.size(), 0);
 }
 
-TEST_F(IfrtServingExecutableTest, StaticShape) {
+TEST_P(IfrtServingExecutableTest, StaticShape) {
   absl::SetVLogLevel("tpu_h2d_transfer_executor", 2);
   int64_t program_id = 789012;
   EXPECT_CALL(selector_, ReserveDevice(absl::StrCat(program_id)))
@@ -438,11 +461,12 @@ TEST_F(IfrtServingExecutableTest, StaticShape) {
   // Iterate over all cores first for warmup execution. This ensures the
   // executable is compiled and cached.
   for (int i = 0; i < helper_->num_cores(); i++) {
-    TF_ASSERT_OK(executable->Execute(absl::MakeSpan(inputs1), {}).status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
   }
 
-  TF_ASSERT_OK_AND_ASSIGN(auto result1,
-                          executable->Execute(absl::MakeSpan(inputs1), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result1, Execute(executable.get(), absl::MakeSpan(inputs1), {}));
 
   // The computation is effectively `input_x1` * `input_y1`^T.
   // With dynamic shapes {2, 3} and {2, 3}, this results in a {2, 2} matrix
@@ -479,8 +503,8 @@ TEST_F(IfrtServingExecutableTest, StaticShape) {
   auto input_y2 = AsTensor<int32_t>({1, 2, 3}, tensorflow::TensorShape({1, 3}));
   std::vector<tensorflow::Tensor> inputs2{input_x2, input_y2, shape_tensor};
 
-  TF_ASSERT_OK_AND_ASSIGN(auto result2,
-                          executable->Execute(absl::MakeSpan(inputs2), {}));
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto result2, Execute(executable.get(), absl::MakeSpan(inputs2), {}));
 
   // Calculation: `input_x2` (1x3) * `input_y2`^T (3x1) -> 1x1.
   //   1 2 3  *  1
@@ -500,6 +524,9 @@ TEST_F(IfrtServingExecutableTest, StaticShape) {
 }
 
 TEST_P(VariableInputTest, InterleaveVariable) {
+  const auto& param = std::get<0>(GetParam());
+  bool use_async = std::get<1>(GetParam());
+
   tsl::test_util::MockServingDeviceSelector device_selector;
   test_utils::IfrtServingExecutableTestHelper helper(&device_selector);
   int64_t program_id = 111111;
@@ -514,160 +541,172 @@ TEST_P(VariableInputTest, InterleaveVariable) {
 
   std::vector<tensorflow::Tensor> inputs;
   std::vector<int> loaded_variable_indices;
-  for (int i = 0; i < GetParam().in_tensors.size(); i++) {
-    if (GetParam().is_variable[i]) {
+  for (int i = 0; i < param.in_tensors.size(); i++) {
+    if (param.is_variable[i]) {
       auto [input_tensor_promise, input_tensor_future] =
           tsl::MakePromise<tensorflow::Tensor>();
       IfrtRestoreTensorRegistry::RestoredTensorInfo restore_tensor_info = {
           .dtype_and_shape = tsl::Future<DtypeAndShape>(
-              DtypeAndShape{.dtype = GetParam().in_tensors[i].dtype(),
-                            .shape = GetParam().in_tensors[i].shape()}),
+              DtypeAndShape{.dtype = param.in_tensors[i].dtype(),
+                            .shape = param.in_tensors[i].shape()}),
           .tensor_future = input_tensor_future};
       std::string variable_name = absl::StrCat("variable_", i);
       ASSERT_OK(ifrt_restore_tensor_registry->TryRegister(variable_name,
                                                           restore_tensor_info));
       loaded_variable_indices.push_back(i);
-      input_tensor_promise.Set(GetParam().in_tensors[i]);
+      input_tensor_promise.Set(param.in_tensors[i]);
       // Use string tensor containing the key (name) in place of variable
       // tensor.
       tensorflow::Tensor key_tensor(tensorflow::DT_STRING, {});
       key_tensor.scalar<tsl::tstring>()() = variable_name;
       inputs.push_back(key_tensor);
     } else {
-      inputs.push_back(GetParam().in_tensors[i]);
+      inputs.push_back(param.in_tensors[i]);
     }
   }
 
-  ASSERT_EQ(inputs.size(), GetParam().is_variable.size());
+  ASSERT_EQ(inputs.size(), param.is_variable.size());
+
+  auto execute_fn = [&](absl::Span<const tensorflow::Tensor> inputs,
+                        absl::Span<const int> variable_arg_indices)
+      -> absl::StatusOr<std::vector<tensorflow::Tensor>> {
+    if (use_async) {
+      TF_ASSIGN_OR_RETURN(
+          auto future, executable->ExecuteAsync(inputs, variable_arg_indices));
+      return future.Await();
+    } else {
+      return executable->Execute(inputs, variable_arg_indices);
+    }
+  };
+
   // Iterate over all cores first for warmup execution.
   for (int i = 0; i < helper.num_cores(); i++) {
-    TF_ASSERT_OK(executable
-                     ->Execute(absl::MakeSpan(inputs),
-                               absl::MakeSpan(loaded_variable_indices))
-                     .status());
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto result, execute_fn(absl::MakeSpan(inputs),
+                                absl::MakeSpan(loaded_variable_indices)));
   }
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto result,
-      executable->Execute(absl::MakeSpan(inputs),
-                          absl::MakeSpan(loaded_variable_indices)));
+  TF_ASSERT_OK_AND_ASSIGN(auto result,
+                          execute_fn(absl::MakeSpan(inputs),
+                                     absl::MakeSpan(loaded_variable_indices)));
 
-  EXPECT_THAT(result,
-              ElementsAre(TensorEq(GetParam().expected_out_tensors[0]),
-                          TensorEq(GetParam().expected_out_tensors[1]),
-                          TensorEq(GetParam().expected_out_tensors[2])));
+  EXPECT_THAT(result, ElementsAre(TensorEq(param.expected_out_tensors[0]),
+                                  TensorEq(param.expected_out_tensors[1]),
+                                  TensorEq(param.expected_out_tensors[2])));
 }
 
 INSTANTIATE_TEST_SUITE_P(
     VariableInputTests, VariableInputTest,
-    ::testing::ValuesIn<VariableInputTestParam>(
-        {
-            // Basic case: all variables or all non-variables.
+    ::testing::Combine(
+        ::testing::ValuesIn<VariableInputTestParam>(
             {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {true, true, true, true, true},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-            {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {false, false, false, false, false},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-            // Variable and non-variables are non-interleaved
-            {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {false, false, false, true, true},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-            {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {true, true, false, false, false},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-            // Variable and non-variables are interleaved
-            {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {true, false, false, true, false},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-            {
-                .in_tensors =
-                    {
-                        AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
-                        AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
-                        AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
-                    },
-                .is_variable = {false, true, true, false, true},
-                .expected_out_tensors =
-                    {
-                        AsTensor<int32_t>({12}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({40}, TensorShape({1, 1})),
-                        AsTensor<int32_t>({100}, TensorShape({1, 1})),
-                    },
-            },
-        }));
+                // Basic case: all variables or all non-variables.
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {true, true, true, true, true},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {false, false, false, false, false},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+                // Variable and non-variables are non-interleaved
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {false, false, false, true, true},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {true, true, false, false, false},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+                // Variable and non-variables are interleaved
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {true, false, false, true, false},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+                {
+                    .in_tensors =
+                        {
+                            AsTensor<int32_t>({2, 2}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({3, 3}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({4, 4}, TensorShape({1, 2})),
+                            AsTensor<int32_t>({5, 5}, TensorShape({2, 1})),
+                            AsTensor<int32_t>({10, 10}, TensorShape({1, 2})),
+                        },
+                    .is_variable = {false, true, true, false, true},
+                    .expected_out_tensors =
+                        {
+                            AsTensor<int32_t>({12}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({40}, TensorShape({1, 1})),
+                            AsTensor<int32_t>({100}, TensorShape({1, 1})),
+                        },
+                },
+            }),
+        ::testing::Bool()));
 
 }  // namespace
 }  // namespace ifrt_serving

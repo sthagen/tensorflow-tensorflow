@@ -349,7 +349,7 @@ cc_library(
         "//xla/service:shaped_slice",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/service/gpu:ir_emitter_context",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",

@@ -72,7 +72,7 @@ cc_library(
         "//xla/stream_executor/rocm:rocm_compute_capability",
         "//xla/stream_executor/sycl:oneapi_compute_capability",
         "//xla/tsl/lib/math:math_util",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/util:sorted_range",
         "@com_google_absl//absl/algorithm:container",

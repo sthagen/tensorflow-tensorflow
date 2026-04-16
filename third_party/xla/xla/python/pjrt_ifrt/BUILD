@@ -876,7 +876,7 @@ cc_library(
         "//xla/pjrt/plugin:plugin_names",
         "//xla/pjrt/proto:pjrt_abi_version_proto_cc",
         "//xla/python/ifrt:serdes",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
@@ -903,7 +903,7 @@ xla_cc_test(
         "//xla/stream_executor/cuda:cuda_platform_id",
         "//xla/stream_executor/cuda:cuda_runtime_abi_version",
         "//xla/stream_executor/cuda:cuda_runtime_abi_version_registration",  # buildcleaner: keep
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",

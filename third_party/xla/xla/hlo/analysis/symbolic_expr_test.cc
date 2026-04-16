@@ -16,6 +16,8 @@ limitations under the License.
 #include "xla/hlo/analysis/symbolic_expr.h"
 
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -100,6 +102,24 @@ TEST_F(SymbolicExprTest, Evaluate) {
 
   // ((((5 + 42) * max(min(1, 2), 0)) / 2) ceildiv 2) = 23 ceildiv 2 = 12
   EXPECT_EQ(expr.Evaluate({5, 1}), 12);
+}
+
+TEST_F(SymbolicExprTest, SafeEvaluate) {
+  SymbolicExpr expr = (((v0 + 42) * v1.min(2).max(0)) / 2).ceilDiv(2);
+
+  // Normal execution.
+  EXPECT_EQ(SafeEvaluateSymbolicExpr(expr, {5}, {1}),
+            std::optional<int64_t>(12));
+
+  // Division by zero.
+  SymbolicExpr div_by_zero = v0 / 0;
+  EXPECT_EQ(SafeEvaluateSymbolicExpr(div_by_zero, {5}, {}), std::nullopt);
+
+  // Overflow in multiplication.
+  SymbolicExpr overflow_mul = v0 * 2;
+  EXPECT_EQ(SafeEvaluateSymbolicExpr(overflow_mul,
+                                     {std::numeric_limits<int64_t>::max()}, {}),
+            std::nullopt);
 }
 
 TEST_F(SymbolicExprTest, Evaluate_Invalid) {

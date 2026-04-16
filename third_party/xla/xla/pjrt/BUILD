@@ -573,7 +573,6 @@ cc_library(
         "//xla/pjrt/proto:topology_description_proto_cc",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -584,8 +583,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@llvm-project//mlir:IR",
-        "@tsl//tsl/platform:casts",
         "@tsl//tsl/platform:fingerprint",
     ],
 )
@@ -757,8 +754,9 @@ cc_library(
         "//xla/service:executable",
         "//xla/service:hlo_proto_cc",
         "//xla/stream_executor/abi:executable_abi_version",
+        "//xla/tsl/lib/strings:proto_serialization",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
@@ -776,6 +774,7 @@ xla_cc_test(
         ":pjrt_common",
         ":pjrt_executable",
         ":stream_executor_executable",
+        "//xla/pjrt/proto:pjrt_abi_version_proto_cc",
         "//xla/service:compiled_module",
         "//xla/service:mock_compiled_module",
         "//xla/stream_executor/abi:executable_abi_version",
@@ -865,8 +864,8 @@ cc_library(
         "//xla/tsl/framework:allocator",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:logging",
-        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "//xla/util/split_proto:split_executable_and_options_writer",
         "//xla/util/split_proto:split_proto_reader",
@@ -993,6 +992,7 @@ xla_cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:IR",
         "@stablehlo//:stablehlo_portable_api",
@@ -1081,16 +1081,25 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "transpose_kernels",
+    hdrs = ["transpose_kernels.h"],
+    deps = [
+        "//xla:compiler_macros",
+    ],
+)
+
+cc_library(
     name = "transpose",
     srcs = [
         "transpose.cc",
-        "transpose_kernels.h",
     ],
-    hdrs = ["transpose.h"],
+    hdrs = [
+        "transpose.h",
+    ],
     visibility = internal_visibility([":friends"]),
     deps = [
         ":lru_cache",
-        "//xla:compiler_macros",
+        ":transpose_kernels",
         "//xla:ef57",
         "//xla:permutation_util",
         "//xla:util",
@@ -1117,8 +1126,10 @@ xla_cc_test(
     shard_count = 10,
     deps = [
         ":transpose",
+        ":transpose_kernels",
         "//xla:array",
         "//xla:permutation_util",
+        "//xla:types",
         "//xla:util",
         "//xla/hlo/testlib:test",
         "//xla/tsl/lib/core:status_test_util",
@@ -1418,6 +1429,9 @@ cc_library(
     visibility = internal_visibility([":friends"]),
     deps = [
         "//xla:future",
+        "//xla/pjrt/c:pjrt_c_api_device_event_hdrs",
+        "//xla/pjrt/c:pjrt_c_api_hdrs",
+        "//xla/pjrt/c:pjrt_c_api_helpers",
         "//xla/tsl/concurrency:async_value",
         "//xla/tsl/concurrency:ref_count",
         "@com_google_absl//absl/functional:any_invocable",
@@ -1708,7 +1722,7 @@ cc_library(
         "//xla/pjrt/proto:pjrt_abi_version_proto_cc",
         "//xla/stream_executor/abi:executable_abi_version",
         "//xla/stream_executor/abi:executable_abi_version_proto_cc",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],

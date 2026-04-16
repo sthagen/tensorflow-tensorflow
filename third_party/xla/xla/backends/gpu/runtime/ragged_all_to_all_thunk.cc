@@ -36,6 +36,7 @@ limitations under the License.
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"  // gloop
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/backends/gpu/collectives/gpu_communicator.h"
@@ -71,7 +72,6 @@ limitations under the License.
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 namespace gpu {
@@ -355,13 +355,6 @@ absl::StatusOr<RaggedAllToAllStreamState*> RaggedAllToAllThunk::InitializeOnce(
         std::vector<DeviceBufferPair> device_buffers,
         ConvertToDeviceBuffers(params.buffer_allocations, buffers_,
                                config_.config.operand_element_type));
-
-    if (config_.use_multi_gpu_barrier_with_nccl_in_one_shot_kernel) {
-      const se::DeviceAddressBase& output_buffer =
-          device_buffers[1].destination_buffer;
-      ASSIGN_OR_RETURN(state->output_temporary_buffer_ptr_storage,
-                       collective_allocator->Allocate(output_buffer.size()));
-    }
   }
 
   RaggedAllToAllStreamState* state_ptr = state.get();
@@ -398,28 +391,14 @@ absl::Status RaggedAllToAllThunk::Initialize(const InitializeParams& params) {
                        params.collective_cliques->Tie(
                            state->clique_key, std::move(symmetric_memory)));
     }
-
-    if (state->output_buffer_ptr_storage_symmetric_memory.Expired()) {
-      ASSIGN_OR_RETURN(auto symmetric_memory,
-                       comm->CreateSymmetricMemory(
-                           state->output_buffer_ptr_storage->address()));
-
-      ASSIGN_OR_RETURN(state->output_buffer_ptr_storage_symmetric_memory,
-                       params.collective_cliques->Tie(
-                           state->clique_key, std::move(symmetric_memory)));
-    }
-
-    if (config_.use_multi_gpu_barrier_with_nccl_in_one_shot_kernel &&
-        state->output_temporary_symmetric_memory.Expired()) {
-      ASSIGN_OR_RETURN(
-          auto output_temporary_symmetric_memory,
-          comm->CreateSymmetricMemory(
-              state->output_temporary_buffer_ptr_storage->address()));
-
-      ASSIGN_OR_RETURN(
-          state->output_temporary_symmetric_memory,
-          params.collective_cliques->Tie(
-              state->clique_key, std::move(output_temporary_symmetric_memory)));
+    if (config_.use_multi_gpu_barrier_with_nccl_in_one_shot_kernel) {
+      ASSIGN_OR_RETURN(state->output_temporary_symmetric_memory,
+                       params.scratch_memory->GetSymmetricMemory());
+      XLA_VLOG_DEVICE(3, state->device_ordinal)
+          << "Using temporary symmetric memory for output buffers: (addr="
+          << state->output_temporary_symmetric_memory->addr().opaque()
+          << "; size="
+          << state->output_temporary_symmetric_memory->addr().size() << ")";
     }
   } else if (is_local(params.local_device_count)) {
     // Rendezvous - Exchange output pointers and barrier signal buffers.
@@ -545,10 +524,8 @@ absl::Status RaggedAllToAllThunk::RunCollective(const ExecuteParams& params,
         clique_key, stream, state->rank,
         state->barrier_signal_symmetric_memory.Lock(),
         state->barrier_signal_value->address(),
-        state->output_buffer_ptr_storage_symmetric_memory.Lock(),
-        state->output_temporary_symmetric_memory.Lock(),
-        config_.num_total_updates, config_.num_input_rows,
-        config_.num_row_elements, device_buffers);
+        state->output_temporary_symmetric_memory, config_.num_total_updates,
+        config_.num_input_rows, config_.num_row_elements, device_buffers);
   }
 
   if (should_use_one_shot_kernel && peer_access_enabled &&
@@ -608,6 +585,17 @@ RendezvousResources(int device_ordinal, RankId rank,
 
   return Rendezvous<std::vector<RaggedAllToAllRendezvousValue>>(
       rendezvous_name, clique_key, rendezvous_value, num_ranks, rendezvous_fn);
+}
+
+absl::Status RaggedAllToAllThunk::PrepareCollective(
+    const PrepareParams& params, const GpuCliqueKey& clique_key) {
+  if (config_.use_multi_gpu_barrier_with_nccl_in_one_shot_kernel) {
+    // TODO(patrios): Calculate the size based on output buffer size.
+    constexpr int64_t kScratchMemorySize = 512 * 1024 * 1024;
+    params.scratch_memory_requests->RequestScratchMemory(clique_key,
+                                                         kScratchMemorySize);
+  }
+  return absl::OkStatus();
 }
 
 absl::Status RunRaggedAllToAll(
@@ -704,8 +692,6 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
     const GpuCliqueKey& clique_key, se::Stream& stream, RankId rank,
     std::shared_ptr<xla::SymmetricMemory> barrier_signal_symmetric_memory,
     const se::DeviceAddressBase& barrier_signal_value,
-    std::shared_ptr<xla::SymmetricMemory>
-        output_buffer_ptr_storage_symmetric_memory,
     std::shared_ptr<xla::SymmetricMemory> output_temporary_symmetric_memory,
     int64_t num_total_updates, int64_t num_input_rows, int64_t num_row_elements,
     absl::Span<DeviceBufferPair const> buffers) {
@@ -729,15 +715,14 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
       << ") output buffer: (" << output_buffer.opaque()
       << ", size=" << output_buffer.size() << ")"
       << " symmetric temporary output (handle="
-      << output_temporary_symmetric_memory.get()
+      << output_temporary_symmetric_memory
       << ", address=" << output_temporary_symmetric_memory->addr().opaque()
-      << ", size=" << output_temporary_symmetric_memory->addr().size() << ")";
+      << ", size=" << output_temporary_symmetric_memory->addr().size() << ")"
+      << " barrier signal symmetric memory (handle="
+      << barrier_signal_symmetric_memory.get()
+      << ", address=" << barrier_signal_symmetric_memory->addr().opaque()
+      << ", size=" << barrier_signal_symmetric_memory->addr().size() << ")";
 
-  // Copy the output buffer to the symmetric temporary output buffer.
-  se::DeviceAddressBase output_temporary_symmetric_memory_addr =
-      output_temporary_symmetric_memory->addr();
-  TF_RETURN_IF_ERROR(stream.MemcpyD2D(&output_temporary_symmetric_memory_addr,
-                                      output_buffer, output_buffer.size()));
   // 1. Barrier (Pre-Kernel)
   // Global synchronization before P2P writes.
   // Ensures that all peers have reached this point and their output buffers
@@ -767,7 +752,7 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
       barrier_signal_value));
 
   TF_RETURN_IF_ERROR(stream.MemcpyD2D(&output_buffer,
-                                      output_temporary_symmetric_memory_addr,
+                                      output_temporary_symmetric_memory->addr(),
                                       output_buffer.size()));
 
   if (VLOG_IS_ON(6)) {

@@ -535,25 +535,8 @@ CodegenDecision AreDotAlgorithmInputAndOutputConversionsSupported(
   return CodegenDecision::Allow();
 }
 
-bool IsAnnotatedWithTileSizes(const HloInstruction& instr) {
-  if (!instr.has_backend_config()) {
-    return false;
-  }
-  auto tile_sizes = instr.backend_config<Tile>();
-  return tile_sizes.ok() && tile_sizes->sizes_size() > 0;
-}
-
 CodegenDecision IsTritonSupportedDot(
     const HloDotInstruction& dot, const se::GpuComputeCapability& gpu_version) {
-  if (!IsInTritonNestedGemmFusion(dot)) {
-    return CodegenDecision::Forbid(
-        "Dot operation is only supported in nested GEMM fusions.");
-  }
-  if (!IsAnnotatedWithTileSizes(dot)) {
-    return CodegenDecision::Forbid(
-        absl::StrCat("Dot operation must have a contraction tile size set: ",
-                     dot.ToString()));
-  }
   PrimitiveType result_type = dot.shape().element_type();
   PrimitiveType lhs_type = dot.operand(0)->shape().element_type();
   PrimitiveType rhs_type = dot.operand(1)->shape().element_type();

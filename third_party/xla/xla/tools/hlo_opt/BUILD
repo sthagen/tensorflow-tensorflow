@@ -2,6 +2,10 @@ load(
     "@local_config_rocm//rocm:build_defs.bzl",
     "if_rocm_is_configured",
 )
+load(
+    "@local_config_sycl//sycl:build_defs.bzl",
+    "if_sycl_is_configured",
+)
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//xla:lit.bzl", "enforce_glob", "lit_test_suite")
 load(
@@ -68,7 +72,7 @@ cc_library(
         "//xla/service/spmd/shardy:shardy_xla_pass",
         "//xla/stream_executor:platform",
         "//xla/stream_executor:stream_executor_h",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
@@ -137,7 +141,7 @@ cc_library(
         "//xla/stream_executor/cuda:cuda_compute_capability",
         "//xla/stream_executor/platform:initialize",
         "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:status_macros",
+        "//xla/tsl/platform:gloop_status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
@@ -152,6 +156,8 @@ cc_library(
         "//xla/stream_executor:cuda_platform",
     ]) + if_rocm_is_configured([
         "//xla/stream_executor:rocm_platform",
+    ]) + if_sycl_is_configured([
+        "//xla/stream_executor:sycl_platform",
     ]),
     alwayslink = True,  # Initializer needs to run.
 )
@@ -244,6 +250,9 @@ lit_test_suite(
     ]) + if_rocm_is_configured([
         "--param=PTX=GCN",
         "--param=GPU=mi200",
+    ]) + if_sycl_is_configured([
+        "--param=PTX=ONEAPI",
+        "--param=GPU=bmg_g21",
     ]),
     cfg = "//xla:lit.cfg.py",
     data = [":test_utilities"],

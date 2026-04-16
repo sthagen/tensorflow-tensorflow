@@ -562,6 +562,7 @@ cc_library(
         ":ifrt_ir_program",
         ":ir",
         ":program_interpreter",
+        ":utils",
         "//xla:xla_data_proto_cc",
         "//xla/pjrt:pjrt_layout",
         "//xla/python/ifrt",
@@ -633,6 +634,7 @@ cc_library(
         ":ifrt_ir_executable_version",
         ":program_memory_tracer",
         ":serialization_utils",
+        ":utils",
         ":version",
         "//xla:util",
         "//xla:xla_data_proto_cc",
@@ -649,7 +651,6 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -905,5 +906,19 @@ cc_library(
         "@riegeli//riegeli/messages:serialize_message",
         "@stablehlo//:version",
         "@tsl//tsl/platform:protobuf",
+    ],
+)
+
+cc_library(
+    name = "utils",
+    srcs = ["utils.cc"],
+    hdrs = ["utils.h"],
+    compatible_with = get_compatible_with_portable(),
+    visibility = ["//visibility:private"],
+    deps = [
+        "//xla/python/ifrt",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )

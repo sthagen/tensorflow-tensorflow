@@ -537,6 +537,12 @@ config_setting(
 )
 
 config_setting(
+    name = "linux_arm64_cross_compile",
+    define_values = {"linux_arm64_cross_compile": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "linux_armhf",
     constraint_values =
         [
@@ -1098,6 +1104,7 @@ bzl_library(
     deps = [
         ":tf_version_bzl",
         # copybara:uncomment "//devtools/build_cleaner/skylark:build_defs_lib",
+        # copybara:uncomment "@rules_cc//cc:core_rules",
         "@rules_cc//cc/common",
         "@rules_java//java:rules",
         "@xla//xla/tsl:tsl_bzl",

@@ -314,7 +314,7 @@ CommonPjRtClient::BufferFromHostBuffer(
       TF_ASSIGN_OR_RETURN(
           auto output_buffer,
           DefineBuffer(shared_device_shape, memory_space, raw_buffer,
-                       absl::InlinedVector<PjRtDeviceEventRef, 4>{}));
+                       absl::InlinedVector<PjRtDeviceEventRef, 2>{}));
       return output_buffer;
     }
   }
@@ -442,7 +442,7 @@ CommonPjRtClient::CreateViewOfDeviceBuffer(
   TF_ASSIGN_OR_RETURN(
       auto output_buffer,
       DefineBuffer(std::move(device_shape), memory_space, raw_buffer,
-                   absl::InlinedVector<PjRtDeviceEventRef, 4>{}));
+                   absl::InlinedVector<PjRtDeviceEventRef, 2>{}));
   return output_buffer;
 }
 

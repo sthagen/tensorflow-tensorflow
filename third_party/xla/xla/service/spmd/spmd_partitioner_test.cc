@@ -30,7 +30,6 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -8364,6 +8363,30 @@ ENTRY entry {
                                    input, update, op::Constant(), op::Select()),
                                input),
                     op::Shape("s32[64,32]")));
+}
+
+TEST_P(SpmdPartitioningTest, DynamicUpdateSliceOfReshapeOfSliceWithEnzymeOpt) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %operand = f32[1,4,4] parameter(1), sharding={devices=[1,2,1]<=[2]}
+  %slice = f32[1,2,4] slice(%operand), slice={[0:1], [0:2], [0:4]}
+  %reshape = f32[2,4] reshape(%slice)
+  %input = f32[4,4] parameter(0), sharding={devices=[2,1]<=[2]}
+  %constant.0 = s32[] constant(0)
+  %constant.1 = s32[] constant(0)
+  ROOT %dus = f32[4,4] dynamic-update-slice(%input, %reshape, %constant.0, %constant.1), sharding={devices=[2,1]<=[2]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/2,
+                                               SpmdPartitionerOptions(),
+                                               /*enable_enzyme_opt=*/true));
+  VLOG(1) << module->ToString();
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Select());
 }
 
 TEST_P(SpmdPartitioningTest, DynamicUpdateSliceOfConstantInRange) {
@@ -17468,6 +17491,39 @@ ENTRY entry {
       "mesh['replica_0'=2,'replica'=4]");
 }
 
+TEST_P(SpmdPartitioningTest, ConcatenateWithCopySmallDimReplication) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY %module {
+  %parameter.0 = f32[20,128,128] parameter(0), sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.1 = f32[1,120,120] slice(%parameter.0), slice={[8:9], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.2 = f32[4,120,120] slice(%parameter.0), slice={[8:12], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.3 = f32[1,120,120] slice(%parameter.0), slice={[11:12], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %concatenate = f32[6,120,120] concatenate(%slice.1, %slice.2, %slice.3), dimensions={0}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %copy = f32[6,120,120] copy(%concatenate), sharding={replicated}
+  %c7 = s32[] constant(7)
+  %c8 = s32[] constant(8)
+  ROOT %dus = f32[20,128,128] dynamic-update-slice(%parameter.0, %copy, %c7, %c8, %c8), sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/16,
+                                               SpmdPartitionerOptions(),
+                                               /*enable_enzyme_opt=*/true));
+
+  bool has_collective = false;
+  for (auto* comp : module->computations()) {
+    for (auto* inst : comp->instructions()) {
+      if (inst->opcode() == HloOpcode::kAllGather ||
+          inst->opcode() == HloOpcode::kAllReduce ||
+          inst->opcode() == HloOpcode::kCollectivePermute) {
+        has_collective = true;
+      }
+    }
+  }
+  EXPECT_FALSE(has_collective) << "PARTITIONED MODULE:\n" << module->ToString();
+}
+
 class SpmdPartitioningV3Test : public HloHardwareIndependentTestBase {
  public:
   absl::StatusOr<std::unique_ptr<HloModule>> PartitionComputation(
@@ -17575,6 +17631,38 @@ ENTRY entry {
   EXPECT_THAT(module->entry_computation()->parameter_instructions(),
               ::testing::Each(op::Sharding(
                   "{mesh['x'=2,'y'=2] [{?},{'x'}], unreduced={'y'}}")));
+}
+
+TEST_P(SpmdPartitioningTest, ConcatenateSmallDimReplication) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY %module {
+  %parameter.0 = f32[20,128,128] parameter(0), sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.1 = f32[1,120,120] slice(%parameter.0), slice={[8:9], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.2 = f32[4,120,120] slice(%parameter.0), slice={[8:12], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %slice.3 = f32[1,120,120] slice(%parameter.0), slice={[11:12], [8:128], [8:128]}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %concatenate = f32[6,120,120] concatenate(%slice.1, %slice.2, %slice.3), dimensions={0}, sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+  %c7 = s32[] constant(7)
+  %c8 = s32[] constant(8)
+  ROOT %dus = f32[20,128,128] dynamic-update-slice(%parameter.0, %concatenate, %c7, %c8, %c8), sharding={devices=[1,4,4]0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/16,
+                                               SpmdPartitionerOptions(),
+                                               /*enable_enzyme_opt=*/true));
+
+  bool has_collective = false;
+  for (auto* comp : module->computations()) {
+    for (auto* inst : comp->instructions()) {
+      if (inst->opcode() == HloOpcode::kAllGather ||
+          inst->opcode() == HloOpcode::kAllReduce ||
+          inst->opcode() == HloOpcode::kCollectivePermute) {
+        has_collective = true;
+      }
+    }
+  }
+  EXPECT_FALSE(has_collective) << "PARTITIONED MODULE:\n" << module->ToString();
 }
 
 // TODO(b/493211767): parameterise the dynamic slice v2 tests once reshard

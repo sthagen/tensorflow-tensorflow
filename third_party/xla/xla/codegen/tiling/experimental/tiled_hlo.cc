@@ -46,6 +46,7 @@ limitations under the License.
 #include "xla/codegen/tiling/experimental/tile.h"
 #include "xla/codegen/tiling/experimental/tile_propagation.h"
 #include "xla/codegen/tiling/experimental/tiling_space.h"
+#include "xla/hlo/analysis/interval.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -191,8 +192,7 @@ void SortTiledHloInstructionsInPostOrder(
 
 bool IsControlFlowLoop(const TiledHloInstruction& tiled_hlo) {
   const HloOpcode hlo_opcode = tiled_hlo.hlo()->opcode();
-  return hlo_opcode == HloOpcode::kDot || hlo_opcode == HloOpcode::kScaledDot ||
-         hlo_opcode == HloOpcode::kReduce;
+  return hlo_opcode == HloOpcode::kDot || hlo_opcode == HloOpcode::kScaledDot;
 }
 
 bool IsControlFlowCondition(const TiledHloInstruction& tiled_hlo) {
@@ -269,7 +269,8 @@ absl::InlinedVector<const HloInstruction*, 2> ToInstructions(
 /*static*/ TiledHloRegionOrError TiledHloComputation::CreateRegion(
     std::unique_ptr<TiledHloInstruction> tiled_root,
     const HloFusionAdaptor& fusion, const TilingSpace& tiling_space,
-    absl::flat_hash_map<int64_t, const TiledHloInstruction*>&
+    absl::flat_hash_map<int64_t,
+                        std::pair<const TiledHloInstruction*, Interval>>&
         rt_symbol_to_tiled_hlo) {
   std::vector<TiledHloInstruction*> worklist = {tiled_root.get()};
   OrderedUniquePtrValueHashSet<TiledHloInstruction> tiled_hlo_instructions_set;
@@ -284,10 +285,11 @@ absl::InlinedVector<const HloInstruction*, 2> ToInstructions(
 
     auto operands_tiles =
         PropagateTileToInput(tiling_space, *hlo, tiled_hlo->tile(), 0);
-    if (!operands_tiles.has_value()) {
+    if (!operands_tiles.ok()) {
       return FusionDecision::Forbid("Couldn't propagate tile ")
              << tiled_hlo->tile().ToString() << " to the input of "
-             << hlo->ToString();
+             << hlo->ToString()
+             << " with error: " << operands_tiles.status().ToString();
     }
 
     HloInstructionAdaptor instruction_adaptor(*hlo, &fusion);
@@ -344,7 +346,7 @@ absl::InlinedVector<const HloInstruction*, 2> ToInstructions(
         if (rt_var_info.has_value()) {
           rt_symbol_to_tiled_hlo.insert(std::make_pair(
               rt_var_info.value()->id + tiling_space.num_dimensions(),
-              operand_tiled_hlo));
+              std::make_pair(operand_tiled_hlo, rt_var_info.value()->bounds)));
         }
       }
     }
@@ -365,7 +367,7 @@ absl::InlinedVector<const HloInstruction*, 2> ToInstructions(
   SmallVector<const TiledHloInstruction*> roots_with_no_users;
   OrderedUniquePtrValueHashSet<TiledHloInstruction> tiled_hlo_instructions_set;
 
-  absl::flat_hash_map<int64_t, const TiledHloInstruction*>
+  absl::flat_hash_map<int64_t, std::pair<const TiledHloInstruction*, Interval>>
       rt_symbol_to_tiled_hlo;
   for (const auto& [root, tile] :
        llvm::zip(fusion.GetRoots(), tiling_space->tiled_roots())) {
@@ -376,14 +378,16 @@ absl::InlinedVector<const HloInstruction*, 2> ToInstructions(
       roots_with_no_users.push_back(root_tiled_hlo.get());
     }
 
-    auto region_or_error = CreateRegion(std::move(root_tiled_hlo), fusion,
-                                        *tiling_space, rt_symbol_to_tiled_hlo);
-    if (auto* decision = std::get_if<FusionDecision>(&region_or_error)) {
+    TiledHloRegionOrError region_or_error =
+        CreateRegion(std::move(root_tiled_hlo), fusion, *tiling_space,
+                     rt_symbol_to_tiled_hlo);
+    if (FusionDecision* decision =
+            std::get_if<FusionDecision>(&region_or_error)) {
       return *decision;
     }
-    auto region =
+    TiledHloInstruction::Region region =
         std::get<TiledHloInstruction::Region>(std::move(region_or_error));
-    for (auto& tiled_hlo : region) {
+    for (std::unique_ptr<TiledHloInstruction>& tiled_hlo : region) {
       tiled_hlo_instructions_set.Insert(std::move(tiled_hlo));
     }
   }
