@@ -23,12 +23,14 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 #include "xla/pjrt/event_pool.h"
 #include "xla/stream_executor/event.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 #include "xla/tsl/platform/logging.h"
+#include "xla/util.h"
 
 namespace xla {
 
@@ -42,7 +44,7 @@ void BufferSequencingEvent::SetSequencingEvent(EventPool::Handle event,
 
 void BufferSequencingEvent::SetDefinedStatus(absl::Status status) {
   CHECK(!status.ok());
-  event_.SetError(status);
+  event_.SetError(AppendErrorContext(status));
 }
 
 uint64_t BufferSequencingEvent::sequence_number() const {
@@ -72,6 +74,15 @@ void BufferSequencingEvent::WaitForEventOnStream(se::Stream* stream) {
 
   stream->WaitFor(event_->event.event()).IgnoreError();
   streams_defined_on_.push_back(stream);
+}
+
+absl::Status BufferSequencingEvent::AppendErrorContext(
+    absl::Status status) const {
+  if (!error_context_.empty()) {
+    status =
+        AppendStatus(status, absl::StrFormat(" Context(%s)", error_context_));
+  }
+  return status;
 }
 
 absl::Status BufferSequencingEvent::WaitForEventOnExternalStream(

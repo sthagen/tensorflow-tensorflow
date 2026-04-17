@@ -1156,6 +1156,9 @@ absl::Status CommonPjRtLoadedExecutable::ExecutePrepareWithOomRetries(
       break;
     }
   }
+  if (!prepare_status.ok()) {
+    LOG(ERROR) << "ExecutePrepareWithOomRetries failed: " << prepare_status;
+  }
   return prepare_status;
 }
 

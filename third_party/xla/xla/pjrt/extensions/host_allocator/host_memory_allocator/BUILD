@@ -37,6 +37,6 @@ cc_library(
         ":host_memory_allocator_extension",
         "//xla/pjrt:host_memory_allocator",
         "//xla/pjrt/c:pjrt_c_api_hdrs",
-        "//xla/pjrt/c:pjrt_c_api_helpers",
+        "//xla/pjrt/c:pjrt_c_api_status_utils",
     ],
 )

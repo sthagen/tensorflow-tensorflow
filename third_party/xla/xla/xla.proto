@@ -1289,6 +1289,10 @@ message DebugOptions {
   // Include a timestamp in the dumped filenames.
   optional bool xla_dump_include_timestamp = 131;
 
+  // If true, dumps HLO modules in a subfolder titled the HLO module name in the
+  // directory specified by --xla_dump_to.
+  optional bool xla_dump_hlo_to_subfolder = 502;
+
   // Max number of hlo module dumps in a directory. Set to < 0 for unbounded.
   optional int32 xla_dump_max_hlo_modules = 132;
 

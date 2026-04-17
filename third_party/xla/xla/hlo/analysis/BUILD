@@ -798,6 +798,7 @@ cc_library(
     deps = [
         ":interval",
         ":symbolic_map",
+        "@com_google_absl//absl/base:core_headers",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",

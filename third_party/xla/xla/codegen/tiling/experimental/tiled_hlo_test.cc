@@ -119,15 +119,12 @@ class TileAnalysisTest : public HloHardwareIndependentTestBase {
     return module_->entry_computation()->root_instruction();
   }
 
-  TiledHloComputation ParseAndTile(absl::string_view hlo_string,
-                                   absl::Span<const int64_t> tile_sizes) {
+  absl::StatusOr<TiledHloComputation> ParseAndTile(
+      absl::string_view hlo_string, absl::Span<const int64_t> tile_sizes) {
     HloInstruction* root = ParseAndGetRoot(hlo_string);
     auto fusion_adaptor = HloFusionAdaptor::ForInstruction(root);
     auto tiling_space = TilingSpace::Create(*fusion_adaptor, &mlir_context_);
-    auto tiled_computation_or =
-        TiledHloComputation::Tile(*fusion_adaptor, std::move(tiling_space));
-    CHECK(std::holds_alternative<TiledHloComputation>(tiled_computation_or));
-    return std::get<TiledHloComputation>(std::move(tiled_computation_or));
+    return TiledHloComputation::Tile(*fusion_adaptor, std::move(tiling_space));
   }
 
   mlir::MLIRContext mlir_context_;
@@ -135,7 +132,8 @@ class TileAnalysisTest : public HloHardwareIndependentTestBase {
 };
 
 TEST_F(TileAnalysisTest, SingleTileReduce) {
-  const TiledHloComputation tiled_computation = ParseAndTile(R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(R"hlo(
     max {
       x = f32[] parameter(0)
       y = f32[] parameter(1)
@@ -147,7 +145,7 @@ TEST_F(TileAnalysisTest, SingleTileReduce) {
       constant = f32[] constant(-inf)
       ROOT reduce = f32[2]{0} reduce(p0, constant), dimensions={1}, to_apply=max
     })hlo",
-                                                             {4, 100});
+                                    {4, 100}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
 Dimensions:
@@ -170,7 +168,8 @@ Tiled HLO:
 }
 
 TEST_F(TileAnalysisTest, SimpleNormalizationDiamond) {
-  const TiledHloComputation tiled_computation = ParseAndTile(R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(R"hlo(
     max {
       p1 = f32[] parameter(1)
       p0 = f32[] parameter(0)
@@ -189,7 +188,7 @@ TEST_F(TileAnalysisTest, SimpleNormalizationDiamond) {
       p0 = f32[2,97]{1,0} parameter(0)
       ROOT fusion = f32[2,97]{1,0} fusion(p0), kind=kLoop, calls=fusion
     })hlo",
-                                                             {8, 128, 128});
+                                    {8, 128, 128}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:
@@ -230,8 +229,9 @@ TEST_F(TileAnalysisTest, SimpleNormalizationDiamond) {
 }
 
 TEST_F(TileAnalysisTest, ConcatenateIsSupported) {
-  const TiledHloComputation tiled_computation = ParseAndTile(
-      R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(
+                           R"hlo(
     concatenate {
       p0 = bf16[6] parameter(0)
       p1 = bf16[6] parameter(1)
@@ -246,7 +246,7 @@ TEST_F(TileAnalysisTest, ConcatenateIsSupported) {
       ROOT fusion = bf16[18] fusion(p0, p1, p2),
         kind=kCustom, calls=concatenate
     })hlo",
-      {3});
+                           {3}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:
@@ -280,8 +280,9 @@ TEST_F(TileAnalysisTest, ConcatenateIsSupported) {
 }
 
 TEST_F(TileAnalysisTest, Dot) {
-  const TiledHloComputation tiled_computation = ParseAndTile(
-      R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(
+                           R"hlo(
     fusion {
       p0 = f32[4,8] parameter(0)
       p1 = f32[8,16] parameter(1)
@@ -294,7 +295,7 @@ TEST_F(TileAnalysisTest, Dot) {
       p1 = f32[8,16] parameter(1)
       ROOT fusion = f32[4,16] fusion(p0, p1), kind=kLoop, calls=fusion
     })hlo",
-      {1, 2, 4});
+                           {1, 2, 4}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:
@@ -325,8 +326,9 @@ TEST_F(TileAnalysisTest, Dot) {
 }
 
 TEST_F(TileAnalysisTest, DotWithFullContractionDimTile) {
-  const TiledHloComputation tiled_computation = ParseAndTile(
-      R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(
+                           R"hlo(
     fusion {
       p0 = f32[4,8] parameter(0)
       p1 = f32[8,16] parameter(1)
@@ -339,7 +341,7 @@ TEST_F(TileAnalysisTest, DotWithFullContractionDimTile) {
       p1 = f32[8,16] parameter(1)
       ROOT fusion = f32[4,16] fusion(p0, p1), kind=kLoop, calls=fusion
     })hlo",
-      {32, 32, 32});
+                           {32, 32, 32}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:
@@ -371,7 +373,8 @@ TEST_F(TileAnalysisTest, DotWithFullContractionDimTile) {
 }
 
 TEST_F(TileAnalysisTest, ScaledDot) {
-  const TiledHloComputation tiled_computation = ParseAndTile(R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(R"hlo(
     fusion {
       lhs = f8e4m3fn[128,64] parameter(0)
       rhs = f8e4m3fn[64,128] parameter(1)
@@ -389,7 +392,7 @@ TEST_F(TileAnalysisTest, ScaledDot) {
       ROOT fusion = f32[128,128] fusion(lhs, rhs, lhs_scale, rhs_scale),
         kind=kLoop, calls=fusion
     })hlo",
-                                                             {2, 4, 8});
+                                    {2, 4, 8}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:
@@ -431,7 +434,8 @@ TEST_F(TileAnalysisTest, ScaledDot) {
 }
 
 TEST_F(TileAnalysisTest, RuntimeVariablesAreEmittedFirst) {
-  const TiledHloComputation tiled_computation = ParseAndTile(R"hlo(
+  ASSERT_OK_AND_ASSIGN(const TiledHloComputation tiled_computation,
+                       ParseAndTile(R"hlo(
     fusion {
       p0 = s32[64] parameter(0)
       c13 = s32[] constant(13)
@@ -444,7 +448,7 @@ TEST_F(TileAnalysisTest, RuntimeVariablesAreEmittedFirst) {
       p0 = s32[64] parameter(0)
       ROOT fusion = s32[10] fusion(p0), kind=kCustom, calls=fusion
     })hlo",
-                                                             {10});
+                                    {10}));
 
   EXPECT_THAT(tiled_computation, MatchString(R"(
     Dimensions:

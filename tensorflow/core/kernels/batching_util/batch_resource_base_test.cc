@@ -432,7 +432,7 @@ INSTANTIATE_TEST_SUITE_P(
 // from the priority queue (FinishTask called with UnavailableError before
 // outputs are populated), the IncrementalBarrier callback must not crash trying
 // to Concat uninitialized tensor data.
-class SplitInputTaskEvictionTest : public ::testing::Test {
+class SplitInputTaskTest : public ::testing::Test {
  protected:
   void SetUp() override {
     device_ = DeviceFactory::NewDevice("CPU", SessionOptions{},
@@ -481,7 +481,7 @@ class SplitInputTaskEvictionTest : public ::testing::Test {
   std::unique_ptr<OpKernelContext> context_;
 };
 
-TEST_F(SplitInputTaskEvictionTest, EvictedSubtasksDoNotCrash) {
+TEST_F(SplitInputTaskTest, EvictedSubtasksDoNotCrash) {
   // Set up a BatchTask with a real OpKernelContext, shared output and status.
   auto task = std::make_unique<BatchResourceBase::BatchTask>();
   task->inputs.push_back(
@@ -528,6 +528,52 @@ TEST_F(SplitInputTaskEvictionTest, EvictedSubtasksDoNotCrash) {
   // runs on empty tensors and set_output IS called.
   EXPECT_EQ(context_->mutable_output(0), nullptr);
 }
+
+#if defined(PLATFORM_GOOGLE)
+TEST_F(SplitInputTaskTest, SplitTasksKeepCriticalityOfOriginalRequest) {
+  // Create a task under kSheddablePlus criticality.
+  std::unique_ptr<BatchResourceBase::BatchTask> task;
+  {
+    tsl::criticality::ScopedCriticality scoped_criticality(
+        tsl::criticality::Criticality::kSheddablePlus);
+    task = std::make_unique<BatchResourceBase::BatchTask>();
+  }
+  ASSERT_EQ(task->criticality(), tsl::criticality::Criticality::kSheddablePlus);
+
+  task->inputs.push_back(Tensor(DataType::DT_INT64, TensorShape({6, 4})));
+  task->context = context_.get();
+  task->output = std::make_shared<BatchResourceBase::TensorMatrix>();
+  task->status = std::make_shared<ThreadSafeStatus>();
+  task->guid = 0;
+  task->start_time = 0;
+
+  absl::Notification done;
+  task->set_done_callback([&done]() { done.Notify(); });
+
+  // Split the task outside the ScopedCriticality scope. The calling thread's
+  // criticality is the default (kCritical), but the split tasks should
+  // inherit the original task's criticality (kSheddablePlus).
+  std::vector<std::unique_ptr<BatchResourceBase::BatchTask>> output_tasks;
+  TF_ASSERT_OK(
+      BatchResourceBase::SplitInputTask(&task, /*open_batch_remaining_slot=*/2,
+                                        /*max_batch_size=*/4, &output_tasks));
+  ASSERT_EQ(output_tasks.size(), 2);
+  EXPECT_EQ(output_tasks[0]->size(), 2);
+  EXPECT_EQ(output_tasks[1]->size(), 4);
+
+  // Verify all subtasks inherited the original criticality.
+  for (const auto& subtask : output_tasks) {
+    EXPECT_EQ(subtask->criticality(),
+              tsl::criticality::Criticality::kSheddablePlus);
+  }
+
+  // Clean up: finish all subtasks to avoid leaking the IncrementalBarrier.
+  for (auto& sub : output_tasks) {
+    sub->FinishTask(absl::OkStatus());
+  }
+  ASSERT_TRUE(done.WaitForNotificationWithTimeout(absl::Seconds(5)));
+}
+#endif
 
 class TestTpuCostMeasurement : public CostMeasurement {
  public:

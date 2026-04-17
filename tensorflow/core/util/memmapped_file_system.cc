@@ -66,7 +66,7 @@ class RandomAccessFileFromMemmapped : public RandomAccessFile {
   ~RandomAccessFileFromMemmapped() override = default;
 
   absl::Status Name(absl::string_view* result) const override {
-    return errors::Unimplemented(
+    return absl::UnimplementedError(
         "RandomAccessFileFromMemmapped does not support Name()");
   }
 
@@ -99,24 +99,25 @@ MemmappedFileSystem::MemmappedFileSystem() = default;
 absl::Status MemmappedFileSystem::FileExists(absl::string_view fname,
                                              TransactionToken* token) {
   if (!mapped_memory_) {
-    return errors::FailedPrecondition("MemmappedEnv is not initialized");
+    return absl::FailedPreconditionError("MemmappedEnv is not initialized");
   }
   const auto dir_element = directory_.find(fname);
   if (dir_element != directory_.end()) {
     return absl::OkStatus();
   }
-  return errors::NotFound(fname, " not found");
+  return absl::NotFoundError(absl::StrCat(fname, " not found"));
 }
 
 absl::Status MemmappedFileSystem::NewRandomAccessFile(
     const std::string& filename, TransactionToken* token,
     std::unique_ptr<RandomAccessFile>* result) {
   if (!mapped_memory_) {
-    return errors::FailedPrecondition("MemmappedEnv is not initialized");
+    return absl::FailedPreconditionError("MemmappedEnv is not initialized");
   }
   const auto dir_element = directory_.find(filename);
   if (dir_element == directory_.end()) {
-    return errors::NotFound("Region ", filename, " is not found");
+    return absl::NotFoundError(
+        absl::StrCat("Region ", filename, " is not found"));
   }
   *result = std::make_unique<RandomAccessFileFromMemmapped>(
       GetMemoryWithOffset(dir_element->second.offset),
@@ -128,11 +129,12 @@ absl::Status MemmappedFileSystem::NewReadOnlyMemoryRegionFromFile(
     const std::string& filename, TransactionToken* token,
     std::unique_ptr<ReadOnlyMemoryRegion>* result) {
   if (!mapped_memory_) {
-    return errors::FailedPrecondition("MemmappedEnv is not initialized");
+    return absl::FailedPreconditionError("MemmappedEnv is not initialized");
   }
   const auto dir_element = directory_.find(filename);
   if (dir_element == directory_.end()) {
-    return errors::NotFound("Region ", filename, " is not found");
+    return absl::NotFoundError(
+        absl::StrCat("Region ", filename, " is not found"));
   }
   *result = std::make_unique<ReadOnlyMemoryRegionFromMemmapped>(
       GetMemoryWithOffset(dir_element->second.offset),
@@ -144,11 +146,12 @@ absl::Status MemmappedFileSystem::GetFileSize(const std::string& filename,
                                               TransactionToken* token,
                                               uint64_t* size) {
   if (!mapped_memory_) {
-    return errors::FailedPrecondition("MemmappedEnv is not initialized");
+    return absl::FailedPreconditionError("MemmappedEnv is not initialized");
   }
   const auto dir_element = directory_.find(filename);
   if (dir_element == directory_.end()) {
-    return errors::NotFound("Region ", filename, " is not found");
+    return absl::NotFoundError(
+        absl::StrCat("Region ", filename, " is not found"));
   }
   *size = dir_element->second.length;
   return absl::OkStatus();
@@ -168,47 +171,50 @@ absl::Status MemmappedFileSystem::Stat(const std::string& fname,
 absl::Status MemmappedFileSystem::NewWritableFile(
     const std::string& filename, TransactionToken* token,
     std::unique_ptr<WritableFile>* wf) {
-  return errors::Unimplemented("memmapped format doesn't support writing");
+  return absl::UnimplementedError("memmapped format doesn't support writing");
 }
 
 absl::Status MemmappedFileSystem::NewAppendableFile(
     const std::string& filename, TransactionToken* token,
     std::unique_ptr<WritableFile>* result) {
-  return errors::Unimplemented("memmapped format doesn't support writing");
+  return absl::UnimplementedError("memmapped format doesn't support writing");
 }
 
 absl::Status MemmappedFileSystem::GetChildren(
     const std::string& filename, TransactionToken* token,
     std::vector<std::string>* strings) {
-  return errors::Unimplemented("memmapped format doesn't support GetChildren");
+  return absl::UnimplementedError(
+      "memmapped format doesn't support GetChildren");
 }
 
 absl::Status MemmappedFileSystem::GetMatchingPaths(
     const std::string& pattern, TransactionToken* token,
     std::vector<std::string>* results) {
-  return errors::Unimplemented(
+  return absl::UnimplementedError(
       "memmapped format doesn't support GetMatchingPaths");
 }
 
 absl::Status MemmappedFileSystem::DeleteFile(const std::string& filename,
                                              TransactionToken* token) {
-  return errors::Unimplemented("memmapped format doesn't support DeleteFile");
+  return absl::UnimplementedError(
+      "memmapped format doesn't support DeleteFile");
 }
 
 absl::Status MemmappedFileSystem::CreateDir(const std::string& dirname,
                                             TransactionToken* token) {
-  return errors::Unimplemented("memmapped format doesn't support CreateDir");
+  return absl::UnimplementedError("memmapped format doesn't support CreateDir");
 }
 
 absl::Status MemmappedFileSystem::DeleteDir(const std::string& dirname,
                                             TransactionToken* token) {
-  return errors::Unimplemented("memmapped format doesn't support DeleteDir");
+  return absl::UnimplementedError("memmapped format doesn't support DeleteDir");
 }
 
 absl::Status MemmappedFileSystem::RenameFile(const std::string& filename_from,
                                              const std::string& filename_to,
                                              TransactionToken* token) {
-  return errors::Unimplemented("memmapped format doesn't support RenameFile");
+  return absl::UnimplementedError(
+      "memmapped format doesn't support RenameFile");
 }
 
 const void* MemmappedFileSystem::GetMemoryWithOffset(uint64_t offset) const {
@@ -224,23 +230,25 @@ absl::Status MemmappedFileSystem::InitializeFromFile(
       env->NewReadOnlyMemoryRegionFromFile(filename, &mapped_memory_));
   directory_.clear();
   if (mapped_memory_->length() <= sizeof(uint64_t)) {
-    return errors::DataLoss("Corrupted memmapped model file: ", filename,
-                            " Invalid package size");
+    return absl::DataLossError(absl::StrCat(
+        "Corrupted memmapped model file: ", filename, " Invalid package size"));
   }
   const auto memory_start =
       reinterpret_cast<const uint8_t*>(mapped_memory_->data());
   const uint64_t directory_offset = DecodeUint64LittleEndian(
       memory_start + mapped_memory_->length() - sizeof(uint64_t));
   if (directory_offset > mapped_memory_->length() - sizeof(uint64_t)) {
-    return errors::DataLoss("Corrupted memmapped model file: ", filename,
-                            " Invalid directory offset");
+    return absl::DataLossError(
+        absl::StrCat("Corrupted memmapped model file: ", filename,
+                     " Invalid directory offset"));
   }
   MemmappedFileSystemDirectory proto_directory;
   if (!ParseProtoUnlimited(
           &proto_directory, memory_start + directory_offset,
           mapped_memory_->length() - directory_offset - sizeof(uint64_t))) {
-    return errors::DataLoss("Corrupted memmapped model file: ", filename,
-                            " Can't parse its internal directory");
+    return absl::DataLossError(
+        absl::StrCat("Corrupted memmapped model file: ", filename,
+                     " Can't parse its internal directory"));
   }
 
   // Iterating in reverse order to get lengths of elements;
@@ -249,17 +257,18 @@ absl::Status MemmappedFileSystem::InitializeFromFile(
        element_iter != proto_directory.element().rend(); ++element_iter) {
     // Check that the element offset is in the right range.
     if (element_iter->offset() >= prev_element_offset) {
-      return errors::DataLoss("Corrupted memmapped model file: ", filename,
-                              " Invalid offset of internal component");
+      return absl::DataLossError(
+          absl::StrCat("Corrupted memmapped model file: ", filename,
+                       " Invalid offset of internal component"));
     }
     if (!directory_
              .insert(std::make_pair(
                  element_iter->name(),
                  FileRegion(element_iter->offset(), element_iter->length())))
              .second) {
-      return errors::DataLoss("Corrupted memmapped model file: ", filename,
-                              " Duplicate name of internal component ",
-                              element_iter->name());
+      return absl::DataLossError(absl::StrCat(
+          "Corrupted memmapped model file: ", filename,
+          " Duplicate name of internal component ", element_iter->name()));
     }
     prev_element_offset = element_iter->offset();
   }
@@ -298,7 +307,7 @@ absl::Status MemmappedEnv::GetFileSystemForFile(absl::string_view fname,
                                                 FileSystem** result) {
   if (MemmappedFileSystem::IsMemmappedPackageFilename(fname)) {
     if (!memmapped_file_system_) {
-      return errors::FailedPrecondition(
+      return absl::FailedPreconditionError(
           "MemmappedEnv is not initialized from a file.");
     }
     *result = memmapped_file_system_.get();

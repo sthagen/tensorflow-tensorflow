@@ -49,17 +49,17 @@ class TridiagonalMatMulOp : public LinearAlgebraOp<Scalar> {
     OP_REQUIRES(context,
                 input_matrix_shapes[0].dim_size(0) == 1 &&
                     input_matrix_shapes[0].dim_size(1) == n,
-                errors::InvalidArgument("Invalid superdiagonal shape."));
+                absl::InvalidArgumentError("Invalid superdiagonal shape."));
 
     OP_REQUIRES(context,
                 input_matrix_shapes[1].dim_size(0) == 1 &&
                     input_matrix_shapes[1].dim_size(1) == n,
-                errors::InvalidArgument("Invalid main diagonal shape."));
+                absl::InvalidArgumentError("Invalid main diagonal shape."));
 
     OP_REQUIRES(context,
                 input_matrix_shapes[2].dim_size(0) == 1 &&
                     input_matrix_shapes[2].dim_size(1) == n,
-                errors::InvalidArgument("Invalid subdiagonal shape."));
+                absl::InvalidArgumentError("Invalid subdiagonal shape."));
   }
 
   TensorShapes GetOutputMatrixShapes(

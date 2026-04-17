@@ -519,8 +519,9 @@ struct ProtoHelper<qint32> {
 template <>
 struct ProtoHelper<bfloat16> {
   static void Fill(const bfloat16* data, size_t n, TensorProto* proto) {
-    proto->mutable_half_val()->Reserve(proto->mutable_half_val()->size() + n);
-    int32_t* dst = proto->mutable_half_val()->AddNAlreadyReserved(n);
+    google::protobuf::RepeatedField<int32_t>* half_val = proto->mutable_half_val();
+    half_val->Reserve(half_val->size() + n);
+    int32_t* dst = half_val->AddNAlreadyReserved(n);
     for (size_t i = 0; i < n; ++i) {
       dst[i] = Eigen::numext::bit_cast<uint16_t>(data[i]);
     }
@@ -530,8 +531,9 @@ struct ProtoHelper<bfloat16> {
 template <>
 struct ProtoHelper<Eigen::half> {
   static void Fill(const Eigen::half* data, size_t n, TensorProto* proto) {
-    proto->mutable_half_val()->Reserve(proto->mutable_half_val()->size() + n);
-    int32_t* dst = proto->mutable_half_val()->AddNAlreadyReserved(n);
+    google::protobuf::RepeatedField<int32_t>* half_val = proto->mutable_half_val();
+    half_val->Reserve(half_val->size() + n);
+    int32_t* dst = half_val->AddNAlreadyReserved(n);
     for (size_t i = 0; i < n; ++i) {
       dst[i] = Eigen::numext::bit_cast<uint16_t>(data[i]);
     }

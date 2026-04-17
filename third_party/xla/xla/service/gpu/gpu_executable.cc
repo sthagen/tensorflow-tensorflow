@@ -747,10 +747,6 @@ absl::Status ExecuteThunksImpl(const DebugOptions* debug_options,
                      AcquireCollectiveCliques(collective_params,
                                               collective_clique_requests));
   }
-  ASSIGN_OR_RETURN(
-      bool skip_rendezvous_after_init,
-      AllFirstRendezvousCompleted(
-          collective_cliques, collective_clique_requests.RequestedCliques()));
 
   ASSIGN_OR_RETURN(ScratchMemory scratch_memory,
                    AcquireScratchMemory(
@@ -785,7 +781,7 @@ absl::Status ExecuteThunksImpl(const DebugOptions* debug_options,
   // collective operations and clique initialization is famous for introducing
   // deadlocks if we try to execute it concurrently with other potentially
   // memory-allocating operations.
-  if (!skip_rendezvous_after_init) {
+  if (!collective_cliques.empty()) {
     RETURN_IF_ERROR(RendezvousAfterInitialization(*run_options, debug_options));
   }
 
@@ -1437,7 +1433,7 @@ absl::Status GpuExecutable::ExecuteThunksWithVaRemapping(
       run_options->run_options().command_buffer_va_range_idx();
   VaRanges* va_ranges = nullptr;
   {
-    absl::MutexLock lock(&va_ranges_mutex_);
+    absl::MutexLock lock(va_ranges_mutex_);
     auto va_ranges_key = std::make_pair(executor, command_buffer_va_range_idx);
     va_ranges = &module_va_ranges_[va_ranges_key];
   }
@@ -1467,7 +1463,7 @@ absl::Status GpuExecutable::ExecuteThunksWithVaRemapping(
   // Acquire per-executor mutex to protect VA range operations.
   // This ensures only one thread uses the VA ranges at a time for this
   // executor.
-  absl::MutexLock va_lock(&va_ranges->mutex);
+  absl::MutexLock va_lock(va_ranges->mutex);
 
   // Initialize VA ranges if this is first use (va_reservation is null).
   if (va_ranges->va_reservation == nullptr) {

@@ -62,7 +62,7 @@ xla_cc_binary(
         ":test_lib",
         "//xla/codegen/tools:test_lib",
         "//xla/hlo/analysis:symbolic_map",
-        "//xla/tsl/platform:gloop_status_macros",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@llvm-project//llvm:Support",

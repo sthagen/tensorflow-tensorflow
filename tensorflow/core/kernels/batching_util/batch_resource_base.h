@@ -177,6 +177,12 @@ class BatchResourceBase : public ResourceBase {
     }
 
     virtual std::unique_ptr<BatchTask> CreateDerivedTask() {
+#if defined(PLATFORM_GOOGLE)
+      // ScopedCriticality is needed to ensure that the criticality is set
+      // correctly for the derived task.
+      tsl::criticality::ScopedCriticality scoped_criticality(
+          this->criticality());
+#endif
       return std::make_unique<BatchTask>();
     }
 

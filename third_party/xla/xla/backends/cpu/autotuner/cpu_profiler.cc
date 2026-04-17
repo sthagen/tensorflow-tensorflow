@@ -66,7 +66,7 @@ static absl::StatusOr<std::unique_ptr<InputBuffers>> PrepareBackedBuffers(
 absl::StatusOr<std::unique_ptr<InputBuffers>> CpuProfiler::CreateInputBuffers(
     const Executable* executable, const HloInstruction*) {
   const CpuExecutable* cpu_executable =
-      tsl::down_cast<const CpuExecutable*>(executable);
+      absl::down_cast<const CpuExecutable*>(executable);
   return PrepareBackedBuffers(
       cpu_executable->buffer_assignment().Allocations());
 }
@@ -78,7 +78,7 @@ std::unique_ptr<Profiler> CpuProfiler::Create(ProfileOptions options) {
 absl::StatusOr<ProfileResult> CpuProfiler::Profile(
     Executable* executable, const InputBuffers& buffers) {
   const LiteralBackedCpuBuffers& literal_backed_buffers =
-      tsl::down_cast<const LiteralBackedCpuBuffers&>(buffers);
+      absl::down_cast<const LiteralBackedCpuBuffers&>(buffers);
   {
     // Warm up run.
     TF_RETURN_IF_ERROR(Execute(executable, literal_backed_buffers.buffers,
@@ -101,7 +101,7 @@ absl::Status CpuProfiler::Execute(
   run_options.set_execution_profile(profile);
   run_options.set_device_ordinal(0);
 
-  CpuExecutable* cpu_executable = tsl::down_cast<CpuExecutable*>(executable);
+  CpuExecutable* cpu_executable = absl::down_cast<CpuExecutable*>(executable);
 
   TF_RETURN_IF_ERROR(cpu_executable->ExecuteThunks(&run_options, buffers));
 

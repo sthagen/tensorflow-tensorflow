@@ -27,7 +27,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"  // gloop
+#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -95,7 +95,7 @@ namespace stablehlo = ::mlir::stablehlo;
 namespace ge = ::xla::gpu::experimental;
 
 absl::StatusOr<std::vector<TensorValue>> EmitTiledComputation(
-    EmitterContext& emitter_ctx, const ge::TiledHloInstruction::Region& region,
+    EmitterContext& emitter_ctx, const ge::TiledHloRegion& region,
     absl::Span<const ge::TiledHloInstruction* const> roots);
 
 Value MakeIndex(mlir::ImplicitLocOpBuilder& b, int64_t value) {
@@ -184,7 +184,8 @@ absl::StatusOr<TensorValue> EmitConcatenate(
       ::xla::Cast<HloConcatenateInstruction>(tiled_concat.hlo());
   const int64_t concatenate_dimension = hlo_concat->concatenate_dimension();
 
-  TF_RET_CHECK(tiled_concat.operands().size() == tiled_concat.regions().size())
+  TF_RET_CHECK(tiled_concat.operands().size() ==
+               tiled_concat.hlo_regions().size())
       << "Concatenate must have the same number of operands and regions";
 
   ASSIGN_OR_RETURN(SmallVector<int64_t> tile_sizes,
@@ -234,7 +235,7 @@ absl::StatusOr<TensorValue> EmitConcatenate(
       b.setInsertionPointToStart(if_op.thenBlock());
       if_ops.push_back(if_op);
     }
-    const auto& region = tiled_concat.regions()[i];
+    const auto& region = tiled_concat.hlo_regions()[i];
     const ge::TiledHloInstruction* const region_root = region.back().get();
     ASSIGN_OR_RETURN(auto results,
                      EmitTiledComputation(emitter_ctx, region, {region_root}));
@@ -386,7 +387,7 @@ absl::StatusOr<SmallVector<int64_t>> GetSequentialLoopIterationCounts(
 // c = acc
 absl::StatusOr<TensorValue> EmitDot(EmitterContext& emitter_ctx,
                                     const ge::TiledHloInstruction& tiled_dot) {
-  TF_RET_CHECK(tiled_dot.regions().size() == 1);
+  TF_RET_CHECK(tiled_dot.hlo_regions().size() == 1);
   ASSIGN_OR_RETURN(SmallVector<int64_t> padded_tile_sizes,
                    tiled_dot.tile().GetStaticTileSizes());
 
@@ -437,9 +438,10 @@ absl::StatusOr<TensorValue> EmitDot(EmitterContext& emitter_ctx,
     // Emit the dot region.
     const ge::TiledHloInstruction* lhs_operand = tiled_dot.operand(0);
     const ge::TiledHloInstruction* rhs_operand = tiled_dot.operand(1);
-    ASSIGN_OR_RETURN(auto results, EmitTiledComputation(
-                                       emitter_ctx, tiled_dot.regions().front(),
-                                       {lhs_operand, rhs_operand}));
+    ASSIGN_OR_RETURN(
+        auto results,
+        EmitTiledComputation(emitter_ctx, tiled_dot.hlo_regions().front(),
+                             {lhs_operand, rhs_operand}));
 
     // Canonicalize LHS to match Triton's expectations.
     TensorValue lhs_tensor = results[0];
@@ -809,7 +811,7 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
 }
 
 absl::StatusOr<std::vector<TensorValue>> EmitTiledComputation(
-    EmitterContext& emitter_ctx, const ge::TiledHloInstruction::Region& region,
+    EmitterContext& emitter_ctx, const ge::TiledHloRegion& region,
     absl::Span<const ge::TiledHloInstruction* const> roots) {
   for (const auto& tiled_hlo : region) {
     const HloInstruction* hlo = tiled_hlo->hlo();

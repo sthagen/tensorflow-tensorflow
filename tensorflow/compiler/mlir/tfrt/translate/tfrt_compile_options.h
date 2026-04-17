@@ -195,6 +195,8 @@ struct TfrtCompileOptions {
   std::string aot_bef_file;
   // If true, use XLA:CPU for CPU computations.
   bool allow_xla_cpu = true;
+  // If true, enable asynchronous IFRT execution.
+  bool enable_async_ifrt = false;
 };
 
 std::ostream& operator<<(std::ostream& os, const TfrtCompileOptions& options);

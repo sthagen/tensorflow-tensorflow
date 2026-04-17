@@ -86,6 +86,12 @@ class FallbackBatchResource : public tensorflow::serving::BatchResourceBase {
 
    private:
     std::unique_ptr<BatchTask> CreateDerivedTask() override {
+#if defined(PLATFORM_GOOGLE)
+      // ScopedCriticality is needed to ensure that the criticality is set
+      // correctly for the derived task.
+      tsl::criticality::ScopedCriticality scoped_criticality(
+          this->criticality());
+#endif
       return std::make_unique<FallbackBatchTask>(this->tfrt_exec_ctx);
     }
   };

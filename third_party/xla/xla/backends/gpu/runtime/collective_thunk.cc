@@ -31,7 +31,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"  // gloop
+#include "xla/tsl/platform/status_macros.h"
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/runtime/collective_execution.h"
 #include "xla/backends/gpu/runtime/collective_params.h"
@@ -385,16 +385,13 @@ absl::Status CollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
             debug_options
                 .xla_gpu_first_collective_call_terminate_timeout_seconds()));
   };
-  std::pair<RendezvousFlag*, RendezvousFlag*> rend_flags;
-  ASSIGN_OR_RETURN(
-      rend_flags,
-      params.collective_cliques->GetCliqueFirstRendezvousFlags(clique_key));
-  RETURN_IF_ERROR(first_call_rendezvous("before", *(rend_flags.first)));
+
+  RETURN_IF_ERROR(first_call_rendezvous("before", pre_call_rendezvous_flag_));
 
   // Launch collective operation on the compute stream.
   RETURN_IF_ERROR(RunCollective(params, clique_key, *params.stream, *comm));
 
-  RETURN_IF_ERROR(first_call_rendezvous("after", *(rend_flags.second)));
+  RETURN_IF_ERROR(first_call_rendezvous("after", post_call_rendezvous_flag_));
 
   return absl::OkStatus();
 }

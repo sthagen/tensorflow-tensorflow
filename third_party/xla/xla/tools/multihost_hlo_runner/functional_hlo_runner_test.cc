@@ -644,7 +644,7 @@ absl::StatusOr<std::string> GetExpectedBackendFingerprint() {
   if (platform_name == "rocm") {
     return "2971291867";
   }
-  return "3357903800";
+  return "2396424345";
 }
 }  // namespace
 

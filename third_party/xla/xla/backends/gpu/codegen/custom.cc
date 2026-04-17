@@ -37,7 +37,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "xla/backends/gpu/codegen/fusion_emitter.h"
 #include "xla/backends/gpu/codegen/kernels/custom_kernel.h"
-#include "xla/backends/gpu/codegen/kernels/custom_kernel_fusion.h"
 #include "xla/backends/gpu/runtime/all_reduce_thunk.h"
 #include "xla/backends/gpu/runtime/collective_thunk.h"
 #include "xla/backends/gpu/runtime/custom_call_target.h"
@@ -1347,47 +1346,7 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
 absl::StatusOr<FusionEmissionResult> CustomFusion::Emit(
     IrEmitterContext& ir_emitter_context,
     const HloFusionInstruction& fusion) const {
-  TF_ASSIGN_OR_RETURN(auto gpu_config,
-                      fusion.backend_config<GpuBackendConfig>());
-  const FusionBackendConfig& backend_config =
-      gpu_config.fusion_backend_config();
-  const CustomFusionConfig& config = backend_config.custom_fusion_config();
-
-  VLOG(3) << "Lower HLO fusion to a custom fusion " << config.name();
-
-  auto* registry = CustomKernelFusionRegistry::Default();
-  auto* custom_kernel_fusion = registry->Lookup(config.name());
-
-  // If custom fusion is not found it means that some of the build targets might
-  // not be statically linked into the binary.
-  if (custom_kernel_fusion == nullptr) {
-    return absl::InternalError(
-        absl::StrCat("Custom kernel fusion ", config.name(),
-                     " not found in a default registry."));
-  }
-
-  // Load custom kernels that can implement a fusion computation.
-  TF_ASSIGN_OR_RETURN(std::vector<CustomKernel> kernels,
-                      custom_kernel_fusion->LoadKernels(
-                          ir_emitter_context.gpu_device_info(),
-                          fusion.fused_instructions_computation()));
-
-  // This should never happen, it means that compilation pipeline created a
-  // fusion operation that is not supported by a given custom fusion.
-  if (kernels.empty()) {
-    return absl::InternalError(
-        absl::StrCat("Custom kernel fusion ", config.name(),
-                     " returned empty custom kernels for a fused computation"));
-  }
-
-  TF_ASSIGN_OR_RETURN(auto thunk,
-                      BuildCustomKernelThunkForFusion(
-                          ir_emitter_context, fusion,
-                          std::move(kernels[config.kernel_index()])));
-
-  FusionEmissionResult result;
-  result.thunks.push_back(std::move(thunk));
-  return result;
+  return absl::UnimplementedError("Custom kernel fusion is not supported.");
 }
 
 absl::StatusOr<FusionEmissionResult> DynamicSliceFusion::Emit(

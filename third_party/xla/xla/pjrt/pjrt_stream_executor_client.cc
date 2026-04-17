@@ -95,7 +95,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"  // gloop
+#include "xla/tsl/platform/status_macros.h"
 #include "riegeli/bytes/string_reader.h"
 #include "riegeli/bytes/string_writer.h"
 #include "xla/client/executable_build_options.h"
@@ -187,9 +187,11 @@ void PjRtStreamExecutorClient::ThenRecordEvent(BufferSequencingEventRef event,
   event->SetSequencingEvent(std::move(device_event), stream);
   auto status = local_device->ThenExecuteCallback(
       stream, [event]() { event.SetStateConcrete(); },
-      [event](absl::Status status) { event.SetError(status); });
+      [event](absl::Status status) {
+        event.SetError(event->AppendErrorContext(status));
+      });
   if (!status.ok()) {
-    event.SetError(status);
+    event.SetError(event->AppendErrorContext(status));
   }
 }
 
@@ -203,7 +205,7 @@ absl::Status PjRtStreamExecutorClient::AllocateAndRecordEvent(
 void PjRtStreamExecutorClient::SetEventAsError(BufferSequencingEventRef event,
                                                absl::Status s) {
   event->SetDefinedStatus(s);
-  event.SetError(s);
+  event.SetError(event->AppendErrorContext(s));
 }
 
 PjRtStreamExecutorMemorySpace::PjRtStreamExecutorMemorySpace(
@@ -1950,8 +1952,7 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
         StallStreamOnError(device_state, stream);
         return client->CreateErrorDeviceEvent(result_buffer_or_status.status());
       }
-
-      auto definition_event_or =
+      absl::StatusOr<BufferSequencingEventRef> definition_event_or =
           device_state->GetEventForComputeStreamSyncPoint(
               device_state->GetNextComputeStreamSyncPoint(),
               client->async_work_runner());
@@ -1959,6 +1960,8 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
         StallStreamOnError(device_state, stream);
         return client->CreateErrorDeviceEvent(definition_event_or.status());
       }
+      definition_event_or.value()->SetErrorContext(
+          absl::StrCat("executable_name: ", executable->executable()->name()));
       return PjRtDeviceEventRef(*std::move(definition_event_or));
     }();
     if (device_state->allocation_model() == LocalDeviceState::kSynchronous &&

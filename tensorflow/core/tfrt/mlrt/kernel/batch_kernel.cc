@@ -24,6 +24,7 @@ limitations under the License.
 #include "google/protobuf/text_format.h"
 #include "absl/base/optimization.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/platform/criticality.h"
 #include "tensorflow/core/framework/device.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -152,6 +153,12 @@ class MlrtBatchResource : public tensorflow::serving::BatchResourceBase {
 
    private:
     std::unique_ptr<BatchTask> CreateDerivedTask() override {
+#if defined(PLATFORM_GOOGLE)
+      // ScopedCriticality is needed to ensure that the criticality is set
+      // correctly for the derived task.
+      tsl::criticality::ScopedCriticality scoped_criticality(
+          this->criticality());
+#endif
       return std::make_unique<MlrtBatchTask>(this->caller_context);
     }
   };

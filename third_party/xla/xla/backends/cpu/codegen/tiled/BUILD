@@ -51,7 +51,7 @@ cc_library(
         "//xla/runtime:work_dimensions",
         "//xla/service:buffer_assignment",
         "//xla/service:instruction_fusion",
-        "//xla/tsl/platform:gloop_status_macros",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",

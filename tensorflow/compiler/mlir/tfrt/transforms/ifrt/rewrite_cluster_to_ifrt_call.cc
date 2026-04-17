@@ -65,6 +65,10 @@ class RewriteClusterToIfrtCallPass
     : public impl::RewriteClusterToIfrtCallPassBase<
           RewriteClusterToIfrtCallPass> {
  public:
+  explicit RewriteClusterToIfrtCallPass(bool arg_enable_async_ifrt = false) {
+    this->enable_async_ifrt = arg_enable_async_ifrt;
+  }
+
   void runOnOperation() override {
     mlir::ModuleOp module = getOperation();
     mlir::SymbolTable symbol_table(module);
@@ -151,9 +155,16 @@ class RewriteClusterToIfrtCallPass
       // ifrt program already exists
       builder.setInsertionPoint(cluster_func);
 
-      mlir::TF::IfrtCallOp ifrt_call_op = mlir::TF::IfrtCallOp::create(
-          builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
-          cluster_func->getOperands());
+      mlir::Operation* ifrt_call_op;
+      if (enable_async_ifrt) {
+        ifrt_call_op = mlir::TF::AsyncIfrtCallOp::create(
+            builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
+            cluster_func->getOperands());
+      } else {
+        ifrt_call_op = mlir::TF::IfrtCallOp::create(
+            builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
+            cluster_func->getOperands());
+      }
 
       ifrt_call_op->setAttr(
           "operandSegmentSizes",
@@ -183,10 +194,12 @@ class RewriteClusterToIfrtCallPass
 
       // TODO(b/304839793): populate variable names after adding a variable
       // hoisting pass.
-      ifrt_call_op.setVariableArgIndicesAttr(builder.getI32ArrayAttr({}));
-      ifrt_call_op.setProgramId(program_id);
+      ifrt_call_op->setAttr("variable_arg_indices",
+                            builder.getI32ArrayAttr({}));
+      ifrt_call_op->setAttr("program_id",
+                            builder.getI64IntegerAttr(program_id));
 
-      cluster_func->replaceAllUsesWith(ifrt_call_op.getResults());
+      cluster_func->replaceAllUsesWith(ifrt_call_op->getResults());
       cluster_func->erase();
 
       return;
@@ -225,15 +238,22 @@ class RewriteClusterToIfrtCallPass
     cloned_ifrt_program->setAttr("tfrt_ifrt_serving.program_id",
                                  builder.getI64IntegerAttr(program_id));
 
-    // Make clonet ifrt program public so that it does not get dropped by
+    // Make cloned ifrt program public so that it does not get dropped by
     // inliner.
     cloned_ifrt_program.setPublic();
 
     builder.setInsertionPoint(cluster_func);
 
-    mlir::TF::IfrtCallOp ifrt_call_op = mlir::TF::IfrtCallOp::create(
-        builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
-        cluster_func->getOperands());
+    mlir::Operation* ifrt_call_op;
+    if (enable_async_ifrt) {
+      ifrt_call_op = mlir::TF::AsyncIfrtCallOp::create(
+          builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
+          cluster_func->getOperands());
+    } else {
+      ifrt_call_op = mlir::TF::IfrtCallOp::create(
+          builder, cluster_func->getLoc(), cluster_func.getResultTypes(),
+          cluster_func->getOperands());
+    }
 
     ifrt_call_op->setAttr(
         "operandSegmentSizes",
@@ -242,15 +262,15 @@ class RewriteClusterToIfrtCallPass
 
     // TODO(b/304839793): populate variable names after adding a variable
     // hoisting pass.
-    ifrt_call_op.setVariableArgIndicesAttr(builder.getI32ArrayAttr({}));
-    ifrt_call_op.setProgramId(program_id);
+    ifrt_call_op->setAttr("variable_arg_indices", builder.getI32ArrayAttr({}));
+    ifrt_call_op->setAttr("program_id", builder.getI64IntegerAttr(program_id));
     // For better debuggability, attach attributes such as tpu_compile_metadata
     // and device_assignment to IfrtCallOp.
     ifrt_call_op->setAttr(kMetadataTextAttrName,
                           builder.getStringAttr(serialized_metadata));
     ifrt_call_op->setAttr(kDeviceAssignmentAttr, device_assignment_attr);
 
-    cluster_func->replaceAllUsesWith(ifrt_call_op.getResults());
+    cluster_func->replaceAllUsesWith(ifrt_call_op->getResults());
     cluster_func->erase();
 
     symbol_table.insert(cloned_ifrt_program);
@@ -260,8 +280,8 @@ class RewriteClusterToIfrtCallPass
 }  // namespace
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
-CreateRewriteClusterToIfrtCallPass() {
-  return std::make_unique<RewriteClusterToIfrtCallPass>();
+CreateRewriteClusterToIfrtCallPass(bool enable_async_ifrt) {
+  return std::make_unique<RewriteClusterToIfrtCallPass>(enable_async_ifrt);
 }
 
 }  // namespace ifrt_serving

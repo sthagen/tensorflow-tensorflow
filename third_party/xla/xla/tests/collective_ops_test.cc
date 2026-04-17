@@ -128,7 +128,7 @@ class CollectiveOpsTest : public HloPjRtTestBase {
         /*op=*/op, /*datatype=*/dtype);
     TF_ASSERT_OK_AND_ASSIGN(std::vector<Literal> results,
                             ExecuteReplicated(std::move(module), {&input_value},
-                                              /*num_replicas=*/kNumReplicas,
+                                              /*num_devices=*/kNumReplicas,
                                               /*use_threads=*/true,
                                               /*run_hlo_passes=*/true));
     for (int replica_idx = 0; replica_idx < kNumReplicas; replica_idx++) {
@@ -331,7 +331,7 @@ TEST_F(CollectiveOpsTest, AllReduceAnd_Pred) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
       ExecuteReplicated(std::move(module), absl::Span<Literal* const>{},
-                        /*num_replicas=*/2,
+                        /*num_devices=*/2,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
   for (int replica_idx = 0; replica_idx < 2; replica_idx++) {
     EXPECT_TRUE(LiteralTestUtil::Equal(LiteralUtil::CreateR1<bool>({false}),
@@ -372,7 +372,7 @@ TEST_F(CollectiveOpsTest, AllReduceOr_Pred) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
       ExecuteReplicated(std::move(module), absl::Span<Literal* const>{},
-                        /*num_replicas=*/2,
+                        /*num_devices=*/2,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
   for (int replica_idx = 0; replica_idx < 2; replica_idx++) {
     EXPECT_TRUE(LiteralTestUtil::Equal(LiteralUtil::CreateR1<bool>({true}),
@@ -406,7 +406,7 @@ TEST_F(CollectiveOpsTest, AllReduce_AllCombinations) {
     TF_ASSERT_OK_AND_ASSIGN(
         std::vector<Literal> results,
         ExecuteReplicated(std::move(module), {&input_literal},
-                          /*num_replicas=*/devices.size(), &device_assn,
+                          /*num_devices=*/devices.size(), &device_assn,
                           /*run_hlo_passes=*/true, /*use_threads=*/true));
   }
 }
@@ -499,7 +499,7 @@ TEST_F(CollectiveOpsTest, AllReduce_CombinableAllReduces) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
       ExecuteReplicated(std::move(module), {&input0_literal, &input1_literal},
-                        /*num_replicas=*/kNumReplicas,
+                        /*num_devices=*/kNumReplicas,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
   std::vector<float> expected0_vec = {2., 4., 6., 8., 10.};
   auto expected0_literal = LiteralUtil::CreateR1<float>(expected0_vec);
@@ -538,7 +538,7 @@ TEST_F(CollectiveOpsTest, AllReduce_ThreeReplicaGroups) {
 
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
-      ExecuteReplicated(std::move(module), {&input_literal}, /*num_replicas=*/4,
+      ExecuteReplicated(std::move(module), {&input_literal}, /*num_devices=*/4,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
 
   ASSERT_EQ(results.size(), 4);
@@ -584,7 +584,7 @@ TEST_F(CollectiveOpsTest, AllReduce_Degenerate) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
       ExecuteReplicated(std::move(module), absl::Span<Literal* const>{},
-                        /*num_replicas=*/kNumReplicas,
+                        /*num_devices=*/kNumReplicas,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
 
   ASSERT_EQ(results.size(), kNumReplicas);
@@ -1324,7 +1324,7 @@ TEST_F(CollectiveOpsTest, AllReduce_TupleAllReduce) {
   TF_ASSERT_OK_AND_ASSIGN(
       std::vector<Literal> results,
       ExecuteReplicated(std::move(module), {&input0_literal, &input1_literal},
-                        /*num_replicas=*/kNumReplicas,
+                        /*num_devices=*/kNumReplicas,
                         /*use_threads=*/true, /*run_hlo_passes=*/true));
   std::vector<float> expected0_vec = {2., 4., 6., 8., 10.};
   auto expected0_literal = LiteralUtil::CreateR1<float>(expected0_vec);

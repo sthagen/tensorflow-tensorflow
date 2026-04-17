@@ -155,7 +155,7 @@ class TfrtSession : public tensorflow::Session {
                        TfrtDeviceInfraTarget device_target,
                        bool tpu_use_tpu_runner, bool use_gpu,
                        TfrtSessionInterOpThreadPools inter_op_thread_pools,
-                       bool enable_mlrt,
+                       bool enable_mlrt, bool enable_async_native_lowering,
                        bool enable_tpu_host_allocator_for_inputs,
                        tensorflow::BackendCompiler* backend_compiler,
                        std::unique_ptr<StaticDeviceMgr> device_manager)
@@ -167,6 +167,7 @@ class TfrtSession : public tensorflow::Session {
             enable_tpu_host_allocator_for_inputs),
         inter_op_thread_pools_{std::move(inter_op_thread_pools)},
         enable_mlrt_(enable_mlrt),
+        enable_async_native_lowering_(enable_async_native_lowering),
         options_{options},
         backend_compiler_(backend_compiler),
         device_manager_(std::move(device_manager)) {}
@@ -527,6 +528,7 @@ class TfrtSession : public tensorflow::Session {
         enable_tpu_host_allocator_for_inputs_ &&
         (tpu_use_tpu_runner_ || (backend_compiler_ != nullptr));
     options.compile_options.backend_compiler = backend_compiler_;
+    options.compile_options.enable_async_ifrt = enable_async_native_lowering_;
 
     options.model_metadata = options_.config.experimental().session_metadata();
     options.enable_mlrt = enable_mlrt_;
@@ -575,6 +577,7 @@ class TfrtSession : public tensorflow::Session {
       TF_GUARDED_BY(callables_lock_);
 
   bool enable_mlrt_ = false;
+  bool enable_async_native_lowering_ = false;
   SessionOptions options_ = SessionOptions();
   tensorflow::BackendCompiler* backend_compiler_ = nullptr;
   std::unique_ptr<StaticDeviceMgr> device_manager_;
@@ -822,6 +825,7 @@ absl::Status TfrtSessionFactory::InitializeLocked(
     runtime_ = owned_runtime_.get();
   }
   enable_mlrt_ = options.enable_mlrt;
+  enable_async_native_lowering_ = options.enable_async_native_lowering;
   enable_tpu_host_allocator_for_inputs_ =
       options.enable_tpu_host_allocator_for_inputs;
   return absl::OkStatus();
@@ -863,11 +867,11 @@ absl::Status TfrtSessionFactory::NewSession(const SessionOptions& options,
       auto inter_op_thread_pools,
       thread_pool_manager_->UpdateAndGetInterOpThreadPools(options));
 
-  *out_session =
-      new TfrtSession(options, runtime_, device_target_, tpu_use_tpu_runner_,
-                      use_gpu_, std::move(inter_op_thread_pools), enable_mlrt_,
-                      enable_tpu_host_allocator_for_inputs_, backend_compiler_,
-                      std::move(device_manager_));
+  *out_session = new TfrtSession(
+      options, runtime_, device_target_, tpu_use_tpu_runner_, use_gpu_,
+      std::move(inter_op_thread_pools), enable_mlrt_,
+      enable_async_native_lowering_, enable_tpu_host_allocator_for_inputs_,
+      backend_compiler_, std::move(device_manager_));
   return absl::OkStatus();
 }
 

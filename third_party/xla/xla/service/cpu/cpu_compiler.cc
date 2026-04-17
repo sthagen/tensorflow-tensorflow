@@ -129,6 +129,7 @@ limitations under the License.
 #include "xla/hlo/transforms/expanders/stochastic_convert_decomposer.h"
 #include "xla/hlo/transforms/literal_canonicalizer.h"
 #include "xla/hlo/transforms/operand_upcaster.h"
+#include "xla/hlo/transforms/propagate_call_metadata.h"
 #include "xla/hlo/transforms/shape_canonicalizer.h"
 #include "xla/hlo/transforms/simplifiers/algebraic_simplifier.h"
 #include "xla/hlo/transforms/simplifiers/batch_dot_simplification.h"
@@ -604,6 +605,7 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
     // passes.
     AddHloVerifier(&spmd_pipeline);
     spmd_pipeline.AddPass<FlattenCallGraph>();
+    spmd_pipeline.AddPass<PropagateCallMetadata>();
     spmd_pipeline.AddPass<CallInliner>();
     spmd_pipeline.AddPass<ZeroSizedHloElimination>();
     spmd_pipeline.AddPass<ConditionalCanonicalizer>();
@@ -621,6 +623,7 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
       spmd_pipeline.AddPass<RecognizeReduceWindow>();
       spmd_pipeline.AddPass<CollectivePermuteCSE>();
     }
+    spmd_pipeline.AddPass<PropagateCallMetadata>();
     spmd_pipeline.AddPass<xla::CallInliner>(
         /*single_call_site=*/false,
         /*update_domain=*/false,
@@ -735,6 +738,7 @@ absl::Status CpuCompiler::RunHloPassesThroughLayoutAssn(
   pipeline.AddPass<StochasticConvertDecomposer>();
 
   // Inline computations with a single call site.
+  pipeline.AddPass<PropagateCallMetadata>();
   pipeline.AddPass<CallInliner>(/*single_call_site=*/true);
   pipeline.AddPass<BatchDotSimplification>();
   pipeline.AddPass<DotDecomposer>();
@@ -1065,6 +1069,7 @@ absl::Status CpuCompiler::RunHloPassesAfterLayoutAssn(
 
   if (flatten_after_fusion) {
     pipeline.AddPass<FlattenCallGraph>();
+    pipeline.AddPass<PropagateCallMetadata>();
     pipeline.AddPass<CallInliner>(/*single_call_site=*/true);
   }
 
