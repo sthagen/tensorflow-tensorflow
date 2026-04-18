@@ -170,6 +170,7 @@ cc_library(
         "//xla/stream_executor:stream",
         "//xla/tools:hlo_extractor",
         "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:status_macros",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",

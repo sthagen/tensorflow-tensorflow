@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/IR/Attributes.h"
@@ -95,7 +96,7 @@ constexpr unsigned kGEMMWorkspaceBufferIndex = 1;
 absl::StatusOr<std::unique_ptr<Thunk>> BuildCustomKernelThunkForFusion(
     IrEmitterContext& ir_emitter_context, const HloFusionInstruction& fusion,
     CustomKernel custom_kernel) {
-  TF_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       auto kernel_arguments,
       emitters::KernelArguments::Create(ir_emitter_context.buffer_assignment(),
                                         GetDefaultBufferAlignment(), &fusion));
@@ -154,7 +155,7 @@ absl::StatusOr<BufferAllocation::Slice> GetOperandSlice(
     const auto* param = Cast<HloParameterInstruction>(slice_instr->operand(0));
     // At this point we've walked through all `shape_idx`, `index` should be
     // empty.
-    TF_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         BufferAllocation::Slice orig_slice,
         GetAllocationSlice(buffer_assignment,
                            fusion_instr.operand(param->parameter_number()),
@@ -731,9 +732,7 @@ absl::StatusOr<FusionEmissionResult> EmitGemm(
                                         deterministic_ops);
   }
 
-  FusionEmissionResult result;
-  result.thunks.push_back(std::move(thunk));
-  return result;
+  return FusionEmissionResult{ThunkSequence::Of(std::move(thunk))};
 }
 
 absl::StatusOr<FusionEmissionResult> EmitCustomCall(
@@ -1049,9 +1048,7 @@ absl::StatusOr<FusionEmissionResult> EmitCustomCall(
                    : legacy_thunk(std::move(operands), std::move(results)));
   }
 
-  FusionEmissionResult result;
-  result.thunks.push_back(std::move(thunk));
-  return result;
+  return FusionEmissionResult{ThunkSequence::Of(std::move(thunk))};
 }
 
 using Slice = std::optional<BufferAllocation::Slice>;
@@ -1256,8 +1253,6 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
   Thunk::ThunkInfo thunk_info = Thunk::ThunkInfo::WithProfileAnnotation(
       instr, ir_emitter_context.GetNextThunkId());
 
-  FusionEmissionResult result;
-
   // First we get the thunk sequence. This decides whether to generate a d2d
   // copy thunk or collective thunk.
   ThunkSequence seq;
@@ -1311,6 +1306,7 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
     return implementable_status;
   }
 
+  FusionEmissionResult result;
   // Depending on whether this is a dynamic fusion or not, we wrap the
   // thunk(s) within a dynamic-slice thunk.
   if (slice_data.isDynamic) {
@@ -1332,11 +1328,9 @@ absl::StatusOr<FusionEmissionResult> EmitCollective(
         std::move(slice_data.orig_shapes), std::move(slice_data.sliced_shapes),
         std::move(slice_data.offset_primitive_types),
         std::move(offset_modules_metadata));
-    result.thunks.push_back(std::move(thunk));
+    result.thunks = ThunkSequence::Of(std::move(thunk));
   } else {
-    for (auto& thunk : seq) {
-      result.thunks.push_back(std::move(thunk));
-    }
+    result.thunks = std::move(seq);
   }
   return result;
 }

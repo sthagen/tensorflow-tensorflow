@@ -1604,6 +1604,7 @@ cc_library(
         ":compile_module_to_llvm_ir",
         ":conv_layout_normalization",
         ":cublas_cudnn",
+        ":early_exit_compilation_result",
         ":execution_stream_assignment",
         ":flag_utils",
         ":fusion_dispatch_pipeline",
@@ -2085,6 +2086,24 @@ xla_test(
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
         "@tsl//tsl/platform:path",
+    ],
+)
+
+cc_library(
+    name = "early_exit_compilation_result",
+    srcs = ["early_exit_compilation_result.cc"],
+    hdrs = ["early_exit_compilation_result.h"],
+    visibility = [],
+    deps = [
+        "//xla:util",
+        "//xla/hlo/ir:hlo",
+        "//xla/pjrt:compiled_memory_stats",
+        "//xla/service:compiled_module",
+        "//xla/service:executable",
+        "//xla/stream_executor:device_description",
+        "//xla/stream_executor:platform",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 

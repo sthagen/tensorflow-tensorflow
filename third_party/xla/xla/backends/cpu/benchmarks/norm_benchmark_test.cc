@@ -16,6 +16,7 @@ limitations under the License.
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,6 +36,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/literal.h"
+#include "xla/literal_util.h"
 #include "xla/primitive_util.h"
 #include "xla/service/hlo.pb.h"
 #include "xla/shape.h"
@@ -72,7 +74,7 @@ void Set_XLA_FLAGS() {
   tsl::setenv("XLA_FLAGS", xla_flags.data(), /*overwrite=*/1);
 }
 
-struct RmsNorm {
+struct NormShape {
   Shape input_shape;
   std::vector<int64_t> reduction_dims;
 
@@ -83,53 +85,63 @@ struct RmsNorm {
     reduction_shape.DeleteDimensions(reduction_dims);
     return reduction_shape;
   }
-
-  std::string GetBenchmarkName() const {
-    return absl::StrCat("BM_RmsNorm/", input_shape.ToString(), "_{",
-                        absl::StrJoin(reduction_dims, ","), "}");
-  }
 };
 
-RmsNorm ParseRmsNorm(const Shape& s) {
-  RmsNorm rms_norm;
+NormShape ParseShape(const Shape& s) {
+  NormShape result;
   CHECK(s.IsTuple());
   CHECK_EQ(s.tuple_shapes().size(), 2);
 
-  rms_norm.input_shape = s.tuple_shapes(0);
+  result.input_shape = s.tuple_shapes(0);
 
   const Shape& dims_shape = s.tuple_shapes(1);
   absl::Span<const int64_t> dims = dims_shape.dimensions();
-  rms_norm.reduction_dims.assign(dims.begin(), dims.end());
+  result.reduction_dims.assign(dims.begin(), dims.end());
 
-  return rms_norm;
+  return result;
 }
 
-void BM_RmsNorm(benchmark::State& state, const RmsNorm& rms_norm) {
-  const std::string input_shape_str = rms_norm.input_shape.ToString();
-  const std::string reduction_dims_str =
-      absl::StrJoin(rms_norm.reduction_dims, ",");
-  const std::string dtype_str =
-      primitive_util::LowercasePrimitiveTypeName(rms_norm.GetDType());
-  const std::string reduction_shape_str =
-      rms_norm.GetReductionShape().ToString();
+Literal GetRandomLiteral(const Shape& shape) {
+  double mean = 1.0f;
+  double stddev = 0.1f;
+  std::minstd_rand0 engine;
+  PrimitiveType dtype = shape.element_type();
+  switch (dtype) {
+    case F32:
+      return *LiteralUtil::CreateRandomLiteral<F32>(shape, &engine, mean,
+                                                    stddev);
+    case BF16:
+      return *LiteralUtil::CreateRandomLiteral<BF16>(shape, &engine, mean,
+                                                     stddev);
+    default:
+      LOG(FATAL) << "Add dtype to the if-else block before use: " << dtype;
+  }
+}
 
-  Shape input_shape_f32 =
-      ShapeUtil::ChangeElementType(rms_norm.input_shape, F32);
+void BM_RmsNorm(benchmark::State& state, const NormShape& shape) {
+  const std::string input_shape_str = shape.input_shape.ToString();
+  const std::string reduction_dims_str =
+      absl::StrJoin(shape.reduction_dims, ",");
+  const std::string dtype_str =
+      primitive_util::LowercasePrimitiveTypeName(shape.GetDType());
+  const std::string reduction_shape_str = shape.GetReductionShape().ToString();
+
+  Shape input_shape_f32 = ShapeUtil::ChangeElementType(shape.input_shape, F32);
   const std::string input_shape_f32_str = input_shape_f32.ToString();
 
   Shape reduction_shape_f32 =
-      ShapeUtil::ChangeElementType(rms_norm.GetReductionShape(), F32);
+      ShapeUtil::ChangeElementType(shape.GetReductionShape(), F32);
   const std::string reduction_shape_f32_str = reduction_shape_f32.ToString();
 
   int64_t reduction_size = 1;
-  for (int64_t d : rms_norm.reduction_dims) {
-    reduction_size *= rms_norm.input_shape.dimensions(d);
+  for (int64_t d : shape.reduction_dims) {
+    reduction_size *= shape.input_shape.dimensions(d);
   }
 
   std::vector<int64_t> kept_dims;
-  for (int64_t i = 0; i < rms_norm.input_shape.dimensions().size(); ++i) {
+  for (int64_t i = 0; i < shape.input_shape.dimensions().size(); ++i) {
     bool is_reduced = false;
-    for (int64_t d : rms_norm.reduction_dims) {
+    for (int64_t d : shape.reduction_dims) {
       if (i == d) {
         is_reduced = true;
         break;
@@ -141,7 +153,7 @@ void BM_RmsNorm(benchmark::State& state, const RmsNorm& rms_norm) {
   }
   const std::string kept_dims_str = absl::StrJoin(kept_dims, ",");
 
-  absl::string_view hlo_template = R"(
+  absl::string_view hlo = R"(
   reducer_add {
     lhs = f32[] parameter(0)
     rhs = f32[] parameter(1)
@@ -175,14 +187,90 @@ void BM_RmsNorm(benchmark::State& state, const RmsNorm& rms_norm) {
   }
   )";
 
-  std::string hlo_data = absl::StrReplaceAll(
-      hlo_template, {{"$input_shape", input_shape_str},
-                     {"$input_shape_f32", input_shape_f32_str},
-                     {"$reduction_shape_f32", reduction_shape_f32_str},
-                     {"$reduction_dims", reduction_dims_str},
-                     {"$reduction_size", absl::StrCat(reduction_size)},
-                     {"$kept_dims", kept_dims_str},
-                     {"$dtype", dtype_str}});
+  HloBenchmarkOptions benchmark_options;
+  benchmark_options.num_executions = absl::GetFlag(FLAGS_num_executions);
+  benchmark_options.aot_options = absl::GetFlag(FLAGS_aot_compiled_execution)
+                                      ? GetAotCompilationOptions()
+                                      : nullptr;
+
+  Literal input = GetRandomLiteral(shape.input_shape);
+
+  CHECK_OK(RunHloBenchmark(state, hlo, {&input},
+                           {{"$input_shape", input_shape_str},
+                            {"$input_shape_f32", input_shape_f32_str},
+                            {"$reduction_shape_f32", reduction_shape_f32_str},
+                            {"$reduction_dims", reduction_dims_str},
+                            {"$reduction_size", absl::StrCat(reduction_size)},
+                            {"$kept_dims", kept_dims_str},
+                            {"$dtype", dtype_str}},
+                           benchmark_options));
+}
+
+void BM_Softmax(benchmark::State& state, const NormShape& shape) {
+  const std::string input_shape_str = shape.input_shape.ToString();
+  const std::string reduction_dims_str =
+      absl::StrJoin(shape.reduction_dims, ",");
+  const std::string dtype_str =
+      primitive_util::LowercasePrimitiveTypeName(shape.GetDType());
+
+  Shape input_shape_f32 = ShapeUtil::ChangeElementType(shape.input_shape, F32);
+  const std::string input_shape_f32_str = input_shape_f32.ToString();
+
+  Shape reduction_shape_f32 =
+      ShapeUtil::ChangeElementType(shape.GetReductionShape(), F32);
+  const std::string reduction_shape_f32_str = reduction_shape_f32.ToString();
+
+  std::vector<int64_t> kept_dims;
+  for (int i = 0; i < shape.input_shape.dimensions().size(); ++i) {
+    bool is_reduced = false;
+    for (int64_t d : shape.reduction_dims) {
+      if (i == d) {
+        is_reduced = true;
+        break;
+      }
+    }
+    if (!is_reduced) {
+      kept_dims.push_back(i);
+    }
+  }
+  const std::string kept_dims_str = absl::StrJoin(kept_dims, ",");
+
+  absl::string_view hlo = R"(
+  HloModule softmax
+
+  reducer_max {
+    lhs = f32[] parameter(0)
+    rhs = f32[] parameter(1)
+    ROOT max = f32[] maximum(lhs, rhs)
+  }
+
+  reducer_add {
+    lhs = f32[] parameter(0)
+    rhs = f32[] parameter(1)
+    ROOT sum = f32[] add(lhs, rhs)
+  }
+
+  ENTRY main {
+    input = $input_shape parameter(0)
+    input_f32 = $input_shape_f32 convert(input)
+
+    neg_inf = f32[] constant(-inf)
+    max_val = $reduction_shape_f32 reduce(input_f32, neg_inf),
+        dimensions={$reduction_dims}, to_apply=reducer_max
+    max_br = $input_shape_f32 broadcast(max_val), dimensions={$kept_dims}
+
+    input_centered = $input_shape_f32 subtract(input_f32, max_br)
+    input_exp = $input_shape_f32 exponential(input_centered)
+
+    zero = f32[] constant(0)
+    sum_exp = $reduction_shape_f32 reduce(input_exp, zero),
+        dimensions={$reduction_dims}, to_apply=reducer_add
+    sum_exp_br = $input_shape_f32 broadcast(sum_exp), dimensions={$kept_dims}
+
+    output_f32 = $input_shape_f32 divide(input_exp, sum_exp_br)
+    ROOT output = $input_shape convert(output_f32)
+  }
+  )";
 
   HloBenchmarkOptions benchmark_options;
   benchmark_options.num_executions = absl::GetFlag(FLAGS_num_executions);
@@ -190,36 +278,31 @@ void BM_RmsNorm(benchmark::State& state, const RmsNorm& rms_norm) {
                                       ? GetAotCompilationOptions()
                                       : nullptr;
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto module_and_iteration_literals,
-      LoadHloModuleAndMaybeIterationLiteralsFromString(hlo_data));
+  Literal input = GetRandomLiteral(shape.input_shape);
 
-  std::unique_ptr<HloModule> hlo_module =
-      std::move(module_and_iteration_literals.first);
-
-  std::vector<Literal> args;
-  args.reserve(module_and_iteration_literals.second->arguments_size());
-  for (const auto& arg : module_and_iteration_literals.second->arguments()) {
-    TF_ASSERT_OK_AND_ASSIGN(args.emplace_back(), Literal::CreateFromProto(arg));
-  }
-
-  std::vector<Literal*> arg_ptrs;
-  arg_ptrs.reserve(args.size());
-  for (auto& arg : args) {
-    arg_ptrs.push_back(&arg);
-  }
-
-  CHECK_OK(RunHloBenchmark(state, std::move(hlo_module), arg_ptrs,
+  CHECK_OK(RunHloBenchmark(state, hlo, {&input},
+                           {{"$input_shape", input_shape_str},
+                            {"$input_shape_f32", input_shape_f32_str},
+                            {"$reduction_shape_f32", reduction_shape_f32_str},
+                            {"$reduction_dims", reduction_dims_str},
+                            {"$kept_dims", kept_dims_str},
+                            {"$dtype", dtype_str}},
                            benchmark_options));
 }
 
 void RegisterBenchmarks() {
   std::vector<Shape> list = ParseShapeList(absl::GetFlag(FLAGS_shapes)).value();
   for (const auto& s : list) {
-    RmsNorm rms_norm = ParseRmsNorm(s);
+    NormShape shape = ParseShape(s);
 
-    benchmark::RegisterBenchmark(rms_norm.GetBenchmarkName(), BM_RmsNorm,
-                                 rms_norm)
+    std::string shape_str =
+        absl::StrCat(shape.input_shape.ToString(), "_{",
+                     absl::StrJoin(shape.reduction_dims, ","), "}");
+
+    benchmark::RegisterBenchmark("BM_RmsNorm/" + shape_str, BM_RmsNorm, shape)
+        ->MeasureProcessCPUTime();
+
+    benchmark::RegisterBenchmark("BM_Softmax/" + shape_str, BM_Softmax, shape)
         ->MeasureProcessCPUTime();
   }
 }

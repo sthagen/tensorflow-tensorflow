@@ -253,6 +253,7 @@ limitations under the License.
 #include "xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "xla/service/gpu/conv_layout_normalization.h"
 #include "xla/service/gpu/cublas_cudnn.h"
+#include "xla/service/gpu/early_exit_compilation_result.h"
 #include "xla/service/gpu/execution_stream_assignment.h"
 #include "xla/service/gpu/flag_utils.h"
 #include "xla/service/gpu/fusion_dispatch_pipeline.h"

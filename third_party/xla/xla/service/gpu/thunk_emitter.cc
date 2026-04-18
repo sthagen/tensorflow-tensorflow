@@ -1346,8 +1346,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitAsyncComputation(
   return GetThunkSequence(std::move(start_thunk));
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusion(
-    const HloFusionInstruction* instr) {
+AsyncThunkSequence ThunkEmitter::EmitFusion(const HloFusionInstruction* instr) {
   const se::DeviceDescription& device_info =
       ir_emitter_context_->gpu_device_info();
   const HloFusionAnalysis fusion_analysis =
@@ -1360,7 +1359,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusion(
           &ir_emitter_context_->buffer_assignment(),
           /*call_graph=*/*call_graph_),
       ir_emitter_context_->mlir_context());
-  TF_ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
+  ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
 
   // Use override flag because libdevice functions can be present in both.
   if (result.module) {
@@ -2516,14 +2515,14 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncStart(const HloInstruction* instr) {
           std::nullopt);
     }
     case HloOpcode::kFusion: {
-      TF_ASSIGN_OR_RETURN(ThunkSequence fusion_thunks,
-                          EmitFusion(Cast<HloFusionInstruction>(wrapped)));
+      ASSIGN_OR_RETURN(ThunkSequence fusion_thunks,
+                       EmitFusion(Cast<HloFusionInstruction>(wrapped)).Await());
 
       auto* async_start = Cast<HloAsyncInstruction>(instr);
       const ExecutionStreamAssignment& stream_assignment =
           ir_emitter_context_->execution_stream_assignment();
-      TF_ASSIGN_OR_RETURN(ExecutionStreamId execution_stream_id,
-                          stream_assignment.GetExecutionStreamId(async_start));
+      ASSIGN_OR_RETURN(ExecutionStreamId execution_stream_id,
+                       stream_assignment.GetExecutionStreamId(async_start));
 
       auto start_thunk = std::make_unique<AsyncStartThunk>(
           Thunk::ThunkInfo::WithProfileAnnotation(
@@ -2537,7 +2536,7 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncStart(const HloInstruction* instr) {
                         wrapped->ToString());
       }
 
-      return GetThunkSequence(std::move(start_thunk));
+      return ThunkSequence::Of(std::move(start_thunk));
     }
     case HloOpcode::kCall: {
       return EmitAsyncComputation(instr);

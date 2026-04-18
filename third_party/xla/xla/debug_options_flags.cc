@@ -458,7 +458,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_scatter_determinism_expander(false);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(false);
-  opts.set_xla_gpu_unsupported_use_all_reduce_one_shot_kernel(false);
+  opts.set_xla_gpu_unsupported_use_all_reduce_one_shot_kernel(true);
   opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
   opts.set_xla_gpu_experimental_enable_fusion_autotuner(true);
   opts.set_xla_gpu_experimental_max_unroll_factor(32);
@@ -3139,6 +3139,21 @@ xla::DebugOptions GetDebugOptionsFromFlags() {
                                      /*reset_envvar=*/true);
   }
   return *flag_values;
+}
+
+DebugOptions GetDebugOptionsFromProtoAndFlags(
+    DebugOptions* proto_debug_options) {
+  if (proto_debug_options != nullptr) {
+    DebugOptions debug_options = *proto_debug_options;
+    // Apply overrides from XLA_FLAGS environment variable.
+    std::vector<tsl::Flag> flag_list;
+    MakeDebugOptionsFlags(&flag_list, &debug_options);
+    ParseFlagsFromEnvAndDieIfUnknown("XLA_FLAGS", flag_list,
+                                     /*reset_envvar=*/true);
+    return debug_options;
+  }
+
+  return GetDebugOptionsFromFlags();
 }
 
 // LINT.IfChange(get_flag_status)

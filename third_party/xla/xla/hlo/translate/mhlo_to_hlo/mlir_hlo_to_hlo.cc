@@ -1709,7 +1709,9 @@ LogicalResult ExportXlaOp(InfeedOp op, OpLoweringContext ctx) {
   ctx.builder->ClearSharding();
   std::optional<xla::OpSharding> last_sharding;
   if (data_sharding.has_value()) {
-    last_sharding = *data_sharding->mutable_tuple_shardings()->ReleaseLast();
+    std::unique_ptr<xla::OpSharding> last_tuple_sharding(
+        data_sharding->mutable_tuple_shardings()->ReleaseLast());
+    last_sharding = *last_tuple_sharding;
   }
 
   if (!subshapes.empty()) {

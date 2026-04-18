@@ -183,12 +183,13 @@ xla_cc_test(
 )
 
 xla_cc_test(
-    name = "rms_norm_benchmark_test",
-    srcs = ["rms_norm_benchmark_test.cc"],
+    name = "norm_benchmark_test",
+    srcs = ["norm_benchmark_test.cc"],
     deps = [
         ":aot_benchmark_helper",
         ":hlo_benchmark_runner",
         "//xla:literal",
+        "//xla:literal_util",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",

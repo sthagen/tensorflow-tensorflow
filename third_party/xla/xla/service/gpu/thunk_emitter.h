@@ -153,7 +153,7 @@ class ThunkEmitter {
       std::vector<CollectiveThunk::Buffer>& buffers,
       const HloInstruction* async_start, const HloInstType* inst);
 
-  absl::StatusOr<ThunkSequence> EmitFusion(const HloFusionInstruction* hlo);
+  AsyncThunkSequence EmitFusion(const HloFusionInstruction* instr);
 
   absl::StatusOr<ThunkSequence> EmitFftThunk(const HloFftInstruction* hlo);
 

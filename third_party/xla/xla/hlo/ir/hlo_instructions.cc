@@ -2378,6 +2378,7 @@ HloCallableInstruction::GetOrCloneCalledComputations(
     HloCloneContext* context) const {
   HloModule* module = context != nullptr ? context->module() : GetModule();
   absl::InlinedVector<HloComputation*, 1> new_called_computations;
+  auto suffix = context != nullptr ? context->suffix() : "clone";
   for (auto* comp : called_computations()) {
     HloComputation* new_custom_call_computation = nullptr;
     if (context != nullptr) {
@@ -2385,7 +2386,7 @@ HloCallableInstruction::GetOrCloneCalledComputations(
     }
     if (new_custom_call_computation == nullptr) {
       new_custom_call_computation =
-          module->AddEmbeddedComputation(comp->Clone("clone", context));
+          module->AddEmbeddedComputation(comp->Clone(suffix, context));
     }
     new_called_computations.push_back(new_custom_call_computation);
   }

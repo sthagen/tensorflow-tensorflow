@@ -553,10 +553,7 @@ cc_library(
     srcs = ["compiled_ifrt_ir_program.cc"],
     hdrs = ["compiled_ifrt_ir_program.h"],
     compatible_with = get_compatible_with_portable(),
-    visibility = if_google(
-        ["//xla/python/ifrt/ir/google:__pkg__"],
-        ["//visibility:private"],
-    ),
+    visibility = internal_visibility([":friends"]),
     deps = [
         ":atom_program_compiler",
         ":ifrt_ir_program",
