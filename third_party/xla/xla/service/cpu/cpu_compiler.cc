@@ -468,8 +468,14 @@ std::unique_ptr<HloPassFix<HloPassPipeline>> CreateSimplificationPipeline(
     absl::string_view name, HloModule* module, bool use_fusion_emitters,
     bool use_onednn_custom_call) {
   // Run the following passes to a fixed point.
+  const bool fast_compile =
+      module->config().debug_options().xla_cpu_opt_preset() ==
+      xla::DebugOptions::CPU_OPT_PRESET_FAST_COMPILE;
+
+  const int iteration_limit = fast_compile ? 4 : 25;
+
   auto pipeline =
-      std::make_unique<HloPassFix<HloPassPipeline>>(std::string(name));
+      HloPassFix<HloPassPipeline>::Create(iteration_limit, std::string(name));
   AddHloVerifier(pipeline.get(), HloVerifierOpts{},
                  /*debug_only=*/true);
 
