@@ -1232,7 +1232,6 @@ xla_test(
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest",
-        "@com_google_protobuf//:protobuf",
         "@tsl//tsl/platform:path",
     ],
 )

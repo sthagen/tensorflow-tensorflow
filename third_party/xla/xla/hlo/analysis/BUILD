@@ -609,7 +609,6 @@ cc_library(
     deps = [
         ":interval",
         ":symbolic_map",
-        ":symbolic_map_converter",
         "//xla:permutation_util",
         "//xla:shape_util",
         "//xla:util",
@@ -629,7 +628,6 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:AsmParser",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
         "@stablehlo//:stablehlo_ops",

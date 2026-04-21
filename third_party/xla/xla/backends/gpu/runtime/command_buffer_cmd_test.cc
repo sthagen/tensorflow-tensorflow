@@ -408,67 +408,6 @@ TEST(CommandBufferCmdTest, LaunchCmdWithPriority) {
   ASSERT_EQ(dst, std::vector<int32_t>(4, 42 + 42));
 }
 
-TEST(CommandBufferCmdTest, DynamicSliceCopyFusionCmd) {
-  se::StreamExecutor* stream_executor = GpuExecutor();
-
-  auto stream = stream_executor->CreateStream().value();
-  int64_t length = 8;
-  int64_t byte_length = sizeof(int32_t) * length;
-
-  std::vector<int32_t> a_data = {40, 41, 42, 43, 44, 45, 46, 47};
-
-  // Prepare arguments: a=42, b=0
-  se::DeviceAddress<int32_t> a =
-      stream_executor->AllocateArray<int32_t>(length, 0);
-  se::DeviceAddress<int32_t> b =
-      stream_executor->AllocateArray<int32_t>(length, 0);
-
-  TF_ASSERT_OK(stream->Memcpy(&a, a_data.data(), byte_length));
-  TF_ASSERT_OK(stream->MemZero(&b, byte_length));
-
-  // Prepare buffer allocations for recording command buffer.
-  BufferAllocation alloc_a(/*index=*/0, byte_length, /*color=*/0);
-  BufferAllocation alloc_b(/*index=*/1, byte_length, /*color=*/0);
-
-  Shape shape = ShapeUtil::MakeShape(S32, {length});
-  BufferAllocation::Slice slice_a(&alloc_a, 0, byte_length);
-  BufferAllocation::Slice slice_b(&alloc_b, 0, byte_length);
-
-  // Prepare commands sequence for constructing command buffer.
-  CommandSequence commands;
-  commands.Emplace<DynamicSliceCopyFusionCmd>(
-      ShapedSlice{slice_a, shape}, ShapedSlice{slice_b, shape}, 16,
-      DynamicMemcpyThunk::Offsets{false, {16}, {16}});
-  TF_ASSERT_OK_AND_ASSIGN(
-      CommandExecutor executor,
-      CommandExecutor::Create(std::move(commands), serialize));
-
-  ServiceExecutableRunOptions run_options;
-  se::StreamExecutorAddressAllocator allocator(stream_executor);
-  BufferAllocations allocations({a, b}, 0, &allocator);
-
-  Thunk::ExecuteParams params =
-      Thunk::ExecuteParams::Create(run_options, allocations, stream.get(),
-                                   stream.get(), nullptr, nullptr, nullptr);
-
-  CommandStateManager state;
-  Command::RecordParams record_params = {state};
-
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto command_buffer,
-      stream_executor->CreateCommandBuffer(se::CommandBuffer::Mode::kPrimary));
-  TF_ASSERT_OK(executor.Record(params, record_params, command_buffer.get()));
-
-  // Execute command buffer and verify that it copied the memory.
-  TF_ASSERT_OK(command_buffer->Submit(stream.get()));
-
-  // Copy `b` data back to host.
-  std::vector<int32_t> dst(8, 0);
-  TF_ASSERT_OK(stream->Memcpy(dst.data(), b, byte_length));
-
-  ASSERT_EQ(dst, std::vector<int32_t>({0, 0, 0, 0, 44, 45, 46, 47}));
-}
-
 TEST(TracedCommandBuffer, GetOrUpdateCommandBuffer) {
   auto run_traced_test = [](int trace_cache_size) {
     se::StreamExecutor* executor = GpuExecutor();
@@ -737,7 +676,8 @@ TEST(CommandBufferCmdTest, NestedChildCmdCreateAndUpdate) {
   CommandSequence outer_seq;
   outer_seq.Emplace<ChildCmd>(std::move(middle_executor));
   // Add another command at the outer level that still doesn't affect `c`.
-  outer_seq.Emplace<MemzeroCmd>(ShapedSlice{slice_b, shape});
+  outer_seq.Emplace<MemzeroThunk>(Thunk::ThunkInfo(),
+                                  ShapedSlice{slice_b, shape});
   TF_ASSERT_OK_AND_ASSIGN(
       CommandExecutor outer_executor,
       CommandExecutor::Create(std::move(outer_seq), serialize));
@@ -772,7 +712,7 @@ TEST(CommandBufferCmdTest, NestedChildCmdCreateAndUpdate) {
   //
   // Outer graph (graph_1):
   //   Node 0: ChildCmd (graph_2)  -> depends on nothing
-  //   Node 1: MemzeroCmd (MEMSET) -> depends on Node 0
+  //   Node 1: MemzeroThunk (MEMSET) -> depends on Node 0
   //
   // Middle graph (graph_2, nested in ChildCmd):
   //   Node 0: ChildCmd (graph_3)                           -> depends on
@@ -788,10 +728,10 @@ TEST(CommandBufferCmdTest, NestedChildCmdCreateAndUpdate) {
     ASSERT_NE(gpu_cmd_buffer, nullptr)
         << "Expected command buffer to be a GpuCommandBuffer";
 
-    // Verify outer level: 2 commands (ChildCmd, MemzeroCmd)
+    // Verify outer level: 2 commands (ChildCmd, MemzeroThunk)
     auto outer_commands = gpu_cmd_buffer->commands();
     ASSERT_EQ(outer_commands.size(), 2)
-        << "Outer level should have 2 commands: ChildCmd, MemzeroCmd";
+        << "Outer level should have 2 commands: ChildCmd, MemzeroThunk";
 
     // First command: GpuChildCommand (wrapping middle graph)
     auto* outer_child_cmd =
@@ -802,14 +742,14 @@ TEST(CommandBufferCmdTest, NestedChildCmdCreateAndUpdate) {
     ASSERT_NE(outer_child_cmd->command_buffer, nullptr)
         << "GpuChildCommand should have a nested command buffer";
 
-    // Second command: GpuCommand (MemzeroCmd)
+    // Second command: GpuCommand (MemzeroThunk)
     auto* outer_memzero_cmd =
         dynamic_cast<const se::gpu::GpuCommandBuffer::GpuCommand*>(
             outer_commands[1].get());
     ASSERT_NE(outer_memzero_cmd, nullptr)
-        << "Second outer command should be GpuCommand (MemzeroCmd)";
+        << "Second outer command should be GpuCommand (MemzeroThunk)";
     ASSERT_NE(outer_memzero_cmd->handle, nullptr)
-        << "MemzeroCmd should have a valid graph node handle";
+        << "MemzeroThunk should have a valid graph node handle";
 
     // Verify middle level (inside first ChildCmd): 3 commands
     auto* middle_gpu_buffer = dynamic_cast<se::gpu::GpuCommandBuffer*>(
