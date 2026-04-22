@@ -762,6 +762,13 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(FloatNormalizationTest, Fp8Normalization) {
   const PrimitiveType lhs_type = GetParam().first;
   const PrimitiveType rhs_type = GetParam().second;
+
+  se::GpuComputeCapability gpu_cc =
+      device_description().gpu_compute_capability();
+  se::CudaComputeCapability cuda_cc = get_cuda_cc();
+  se::RocmComputeCapability rocm_cc =
+      device_description().rocm_compute_capability();
+
   const std::string lhs_name =
       primitive_util::LowercasePrimitiveTypeName(lhs_type);
   const std::string rhs_name =
@@ -796,12 +803,6 @@ ENTRY main {
     return GetOptimizedModuleForExecutable(module_str, config);
   };
 
-  se::GpuComputeCapability gpu_cc =
-      device_description().gpu_compute_capability();
-  se::CudaComputeCapability cuda_cc = get_cuda_cc();
-  se::RocmComputeCapability rocm_cc =
-      device_description().rocm_compute_capability();
-
   const std::string triton_keep_types = absl::Substitute(
       R"(CHECK: fusion($0{{[^)]*}}, $1{{[^)]*}}){{.*}}"kind":"{{__triton_gemm|__triton_nested_gemm_fusion}}")",
       lhs_name, rhs_name);
@@ -815,7 +816,8 @@ ENTRY main {
 
   HloPrintOptions print_options =
       HloPrintOptions().set_print_operand_shape(true);
-  {
+  if (!gpu_cc.IsCuda() || cuda_cc.IsAtLeastAda() ||
+      (lhs_type != F8E4M3FN && rhs_type != F8E4M3FN)) {
     // Triton enabled, no fallback.
     ASSERT_OK_AND_ASSIGN(auto optimized_module_no_fallback_and_executable,
                          optimize_module(/*enable_triton=*/true,

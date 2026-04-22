@@ -1732,34 +1732,6 @@ xla_test(
 )
 
 xla_test(
-    name = "cublas_gemm_rewriter_test",
-    srcs = ["cublas_gemm_rewriter_test.cc"],
-    backends = ["gpu"],
-    deps = [
-        ":gemm_rewriter",
-        ":gemm_rewriter_test_lib",
-        "//xla:error_spec",
-        "//xla:xla_data_proto_cc",
-        "//xla:xla_proto_cc",
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/testlib:filecheck",
-        "//xla/hlo/testlib:pattern_matcher_gmock",
-        "//xla/hlo/testlib:test",
-        "//xla/service:pattern_matcher",
-        "//xla/stream_executor:device_description",
-        "//xla/stream_executor:semantic_version",
-        "//xla/stream_executor/cuda:cuda_compute_capability",
-        "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-xla_test(
     name = "gemm_rewriter_fp8_test",
     srcs = ["gemm_rewriter_fp8_test.cc"],
     backends = ["gpu"],

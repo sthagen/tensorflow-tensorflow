@@ -322,8 +322,8 @@ absl::Status CollectiveThunk::Initialize(const InitializeParams& params) {
 }
 
 absl::Status CollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
-  VLOG(1) << absl::StreamFormat(
-      "[%d] Starting %v.", params.stream->parent()->device_ordinal(), kind());
+  XLA_VLOG_DEVICE(1, params.stream->parent()->device_ordinal())
+      << absl::StreamFormat("Starting %v.", kind());
 
   ASSIGN_OR_RETURN(
       GpuCliqueKey clique_key,

@@ -126,7 +126,6 @@ TritonDotFusionSearchSpace::TritonDotFusionSearchSpace(
 std::vector<TritonGemmConfig> TritonDotFusionSearchSpace::GenerateConfigs(
     bool autotune_warp_specialization) const {
   std::vector<ConfigWithNotes> configs(1);
-  configs[0].config.split_k = 1;
 
   ExtendConfigs(configs, &TritonDotFusionSearchSpace::AddOutputTilings);
   EliminateLowOccupancyConfigs(configs);

@@ -56,7 +56,8 @@ namespace gpu {
 class CustomKernelThunk : public Command {
  public:
   CustomKernelThunk(Thunk::ThunkInfo thunk_info, CustomKernel custom_kernel,
-                    const emitters::KernelArguments& kernel_arguments);
+                    const emitters::KernelArguments& kernel_arguments,
+                    bool use_pdl = false);
 
   std::string ToString(int indent) const override;
 
@@ -83,6 +84,7 @@ class CustomKernelThunk : public Command {
 
   int64_t shmem_bytes() const { return custom_kernel_.shared_memory_bytes(); }
 
+  bool use_pdl() const { return use_pdl_; }
   BufferUses buffer_uses() const override;
 
   absl::StatusOr<ThunkProto> ToProto() const override;
@@ -96,7 +98,8 @@ class CustomKernelThunk : public Command {
  private:
   // Private constructor for deserialization.
   CustomKernelThunk(Thunk::ThunkInfo thunk_info, CustomKernel custom_kernel,
-                    std::vector<ShapedSlice> args, std::vector<bool> written);
+                    std::vector<ShapedSlice> args, std::vector<bool> written,
+                    bool use_pdl);
 
   // Holds the loaded kernel and the device addresses of its arguments.
   struct KernelWithArgs {
@@ -123,6 +126,9 @@ class CustomKernelThunk : public Command {
   mutable absl::Mutex mutex_;
   absl::flat_hash_map<se::StreamExecutor*, std::unique_ptr<se::Kernel>>
       kernel_cache_ ABSL_GUARDED_BY(mutex_);
+
+  // Programmatic Dependent Launch.
+  bool use_pdl_;
 };
 
 }  // namespace gpu

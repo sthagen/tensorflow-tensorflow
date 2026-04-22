@@ -55,12 +55,13 @@ namespace gpu {
 
 CustomKernelThunk::CustomKernelThunk(
     Thunk::ThunkInfo thunk_info, CustomKernel custom_kernel,
-    const emitters::KernelArguments& kernel_arguments)
+    const emitters::KernelArguments& kernel_arguments, bool use_pdl)
     : Command(CommandType::kCustomKernelLaunchCmd, Kind::kCustomKernel,
               std::move(thunk_info)),
       args_(kernel_arguments.GetArgumentShapedSlices()),
       written_(kernel_arguments.GetArgumentOutputFlags()),
-      custom_kernel_(std::move(custom_kernel)) {}
+      custom_kernel_(std::move(custom_kernel)),
+      use_pdl_(use_pdl) {}
 
 std::string CustomKernelThunk::ToString(int indent) const {
   return custom_kernel_.ToString();
@@ -72,6 +73,7 @@ absl::Status CustomKernelThunk::Initialize(const InitializeParams& params) {
   if (!kernel_cache_.contains(params.executor)) {
     ASSIGN_OR_RETURN(std::unique_ptr<se::Kernel> kernel,
                      params.executor->LoadKernel(custom_kernel_.kernel_spec()));
+    kernel->set_use_pdl(use_pdl_);
     kernel_cache_.emplace(params.executor, std::move(kernel));
   }
 
@@ -176,12 +178,13 @@ Thunk::BufferUses CustomKernelThunk::buffer_uses() const {
 CustomKernelThunk::CustomKernelThunk(Thunk::ThunkInfo thunk_info,
                                      CustomKernel custom_kernel,
                                      std::vector<ShapedSlice> args,
-                                     std::vector<bool> written)
+                                     std::vector<bool> written, bool use_pdl)
     : Command(CommandType::kCustomKernelLaunchCmd, Kind::kCustomKernel,
               std::move(thunk_info)),
       args_(std::move(args)),
       written_(std::move(written)),
-      custom_kernel_(std::move(custom_kernel)) {}
+      custom_kernel_(std::move(custom_kernel)),
+      use_pdl_(use_pdl) {}
 
 absl::StatusOr<ThunkProto> CustomKernelThunk::ToProto() const {
   ThunkProto thunk_proto;
@@ -197,6 +200,8 @@ absl::StatusOr<ThunkProto> CustomKernelThunk::ToProto() const {
   }
   ASSIGN_OR_RETURN(*custom_kernel_thunk_proto->mutable_custom_kernel(),
                    custom_kernel_.ToProto());
+
+  custom_kernel_thunk_proto->set_use_pdl(use_pdl_);
   return thunk_proto;
 }
 
@@ -215,9 +220,9 @@ absl::StatusOr<std::unique_ptr<CustomKernelThunk>> CustomKernelThunk::FromProto(
                      ShapedSlice::FromProto(arg_proto, buffer_allocations));
   }
   std::vector<bool> written{proto.written().begin(), proto.written().end()};
-  return absl::WrapUnique(new CustomKernelThunk(std::move(thunk_info),
-                                                std::move(custom_kernel), args,
-                                                std::move(written)));
+  return absl::WrapUnique(
+      new CustomKernelThunk(std::move(thunk_info), std::move(custom_kernel),
+                            args, std::move(written), proto.use_pdl()));
 }
 
 }  // namespace gpu

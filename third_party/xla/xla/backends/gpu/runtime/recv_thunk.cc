@@ -46,6 +46,7 @@ limitations under the License.
 #include "xla/stream_executor/stream.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+#include "xla/util.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla {
@@ -128,14 +129,14 @@ absl::Status RunRecv(DeviceBufferPair& buffer, se::Stream& stream,
   int device_ordinal = stream.parent()->device_ordinal();
   se::DeviceAddressBase dest_addr = buffer.destination_buffer;
 
-  VLOG(3) << absl::StreamFormat("[%d] %s : id = %d, source_id = %d",
-                                device_ordinal, device_string, current_id,
-                                source_id.value_or(-1));
+  XLA_VLOG_DEVICE(3, device_ordinal)
+      << absl::StreamFormat("%s : id = %d, source_id = %d", device_string,
+                            current_id, source_id.value_or(-1));
 
   // Receive data from the source peer to the destination buffer.
   if (source_id) {
-    VLOG(3) << "[" << device_ordinal << "] source_id: " << *source_id
-            << ", call comm.Recv()";
+    XLA_VLOG_DEVICE(3, device_ordinal)
+        << absl::StreamFormat("source_id: %d, call comm.Recv()", *source_id);
     auto future =
         comm.Recv(dest_addr, buffer.element_type, buffer.element_count,
                   RankId(*source_id), GpuCollectives::On(stream));
@@ -143,8 +144,8 @@ absl::Status RunRecv(DeviceBufferPair& buffer, se::Stream& stream,
   } else {
     // If there is no source peer, i.e. no sender to this instance, zero out
     // the destination buffer.
-    VLOG(3) << absl::StreamFormat("[%d] %s : Recv: Issuing MemZero",
-                                  device_ordinal, device_string);
+    XLA_VLOG_DEVICE(3, device_ordinal)
+        << absl::StreamFormat("%s : Recv: Issuing MemZero", device_string);
     TF_RETURN_IF_ERROR(stream.MemZero(&dest_addr, dest_addr.size()));
   }
 
@@ -187,10 +188,10 @@ absl::Status RecvThunk::RunCollective(const ExecuteParams& params,
 
   const std::optional<int64_t> source_id = source_target.source;
 
-  VLOG(3) << "[" << device_ordinal
-          << "] Performing Recv, current_id: " << current_id << ", group mode: "
-          << CollectiveOpGroupModeToString(config_.config.group_mode)
-          << ", hlo_name=(" << hlo_name_ << ")";
+  XLA_VLOG_DEVICE(3, device_ordinal) << absl::StreamFormat(
+      "Performing Recv, current_id: %d, group mode: %s, hlo_name=(%s)",
+      current_id, CollectiveOpGroupModeToString(config_.config.group_mode),
+      hlo_name_);
 
   return RunRecv(device_buffer_pair, stream, comm, current_id, source_id,
                  device_string);

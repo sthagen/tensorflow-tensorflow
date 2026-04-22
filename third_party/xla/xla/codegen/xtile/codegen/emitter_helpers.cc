@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/codegen/xtile/codegen/emitter_helpers.h"
 
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>

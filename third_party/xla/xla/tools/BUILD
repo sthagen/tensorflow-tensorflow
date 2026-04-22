@@ -1409,3 +1409,17 @@ sh_test(
         "@llvm-project//llvm:FileCheck",
     ],
 )
+
+cc_binary(
+    name = "zstd_compressor",
+    srcs = ["zstd_compressor.cc"],
+    deps = [
+        "//xla/tsl/util:command_line_flags",
+        "@com_google_absl//absl/status",
+        "@riegeli//riegeli/base:initializer",
+        "@riegeli//riegeli/bytes:copy_all",
+        "@riegeli//riegeli/bytes:std_io",
+        "@riegeli//riegeli/zstd:zstd_writer",
+        "@tsl//tsl/platform:platform_port",
+    ],
+)

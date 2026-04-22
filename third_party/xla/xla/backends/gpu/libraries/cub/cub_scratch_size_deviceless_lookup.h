@@ -30,8 +30,11 @@ namespace xla::gpu {
 // CUB sorts without requiring a GPU.
 class CubScratchSizeDevicelessLookup {
  public:
-  static absl::StatusOr<CubScratchSizeDevicelessLookup> Create(
+  static absl::StatusOr<CubScratchSizeDevicelessLookup> CreateFromProto(
       CubScratchSizeLookupTable proto);
+
+  // Creates a lookup instance from the data bundled in the binary.
+  static absl::StatusOr<CubScratchSizeDevicelessLookup> CreateFromBundledData();
 
   // Looks up the estimated scratch space CUB will need for the given
   // parameters. The estimated space will be >= to the actual space CUB will

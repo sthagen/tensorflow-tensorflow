@@ -180,20 +180,6 @@ static absl::StatusOr<std::unique_ptr<Command>> Convert(
                                    thunk.buffer());
 }
 
-static absl::StatusOr<std::unique_ptr<Command>> Convert(
-    const CustomCallThunk& thunk) {
-  if (auto bundle = thunk.bundle(); bundle.has_value()) {
-    return std::make_unique<CustomCallCmd>(
-        thunk.target_name(), bundle->execute, thunk.operands(), thunk.results(),
-        *thunk.call_frame(), thunk.thunk_info().thunk_id,
-        thunk.execution_state(),
-        /*called_computation=*/nullptr);  // TODO(b/342285364)
-  }
-  return absl::InternalError(
-      "CustomCallThunk without FFI handler bundle cannot be converted to a "
-      "command buffer command");
-}
-
 //===----------------------------------------------------------------------===//
 static absl::StatusOr<std::unique_ptr<Command>> CopyMetadata(
     absl::StatusOr<std::unique_ptr<Command>> cmd, const Thunk& thunk) {
@@ -235,15 +221,18 @@ static absl::Status AppendCommands(ConversionContext& ctx,
     case Thunk::Kind::kCopy:
       cmd_sequence.Append(static_cast<DeviceToDeviceCopyThunk*>(&thunk));
       return absl::OkStatus();
-    // LegacyCustomCallThunk implements TracedCommand directly; append as
-    // borrowed pointer — the thunk outlives the command sequence. Note: in
-    // production, command_buffer_conversion_pass excludes
-    // LegacyCustomCallThunk from automatic conversion, so this arm is only
-    // reached when the emitter is invoked directly (e.g. tests).
     case Thunk::Kind::kCustomCall:
-      if (auto* ffi_thunk = dynamic_cast<const CustomCallThunk*>(&thunk)) {
-        return append(Convert(*ffi_thunk));
+      // CustomCallThunk implements TracedCommand directly; append as borrowed
+      // pointer — the thunk outlives the command sequence.
+      if (auto* ffi_thunk = dynamic_cast<CustomCallThunk*>(&thunk)) {
+        cmd_sequence.Append(ffi_thunk);
+        return absl::OkStatus();
       }
+      // LegacyCustomCallThunk implements TracedCommand directly; append as
+      // borrowed pointer — the thunk outlives the command sequence. Note: in
+      // production, command_buffer_conversion_pass excludes
+      // LegacyCustomCallThunk from automatic conversion, so this arm is only
+      // reached when the emitter is invoked directly (e.g. tests).
       if (auto* legacy_thunk = dynamic_cast<LegacyCustomCallThunk*>(&thunk)) {
         cmd_sequence.Append(legacy_thunk);
         return absl::OkStatus();

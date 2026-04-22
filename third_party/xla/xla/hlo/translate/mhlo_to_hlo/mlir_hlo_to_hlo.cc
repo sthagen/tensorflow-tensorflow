@@ -883,10 +883,17 @@ static std::optional<xla::OpSharding> CreateOpShardingFromAttribute(
 // have frontend attributes.
 void CreateFrontendAttributes(mlir::ArrayRef<mlir::NamedAttribute> named_attrs,
                               xla::FrontendAttributes& frontend_attributes) {
-  for (const auto& attr : named_attrs)
-    if (auto value_str_attr = mlir::dyn_cast<mlir::StringAttr>(attr.getValue()))
+  for (const auto& attr : named_attrs) {
+    if (auto value_str_attr =
+            mlir::dyn_cast<mlir::StringAttr>(attr.getValue())) {
       frontend_attributes.mutable_map()->insert(
           {attr.getName().str(), value_str_attr.getValue().str()});
+    } else if (auto bool_attr =
+                   mlir::dyn_cast<mlir::BoolAttr>(attr.getValue())) {
+      frontend_attributes.mutable_map()->insert(
+          {attr.getName().str(), bool_attr.getValue() ? "true" : "false"});
+    }
+  }
 }
 
 // Returns a FrontendAttributes proto from the "frontend_attributes" attribute

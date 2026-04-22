@@ -583,21 +583,23 @@ tf_cuda_library(
     deps = [
         ":gpu_util_hdrs",
         "//tensorflow/core:lib",
+        "//tensorflow/core/framework:tensor",
         "//tensorflow/core/platform:stream_executor",
         "//tensorflow/core/protobuf:autotuning_proto_cc",
         "//tensorflow/core/protobuf:conv_autotuning_proto_cc",
         "//tensorflow/core/util:determinism_for_kernels",
         "//tensorflow/core/util:env_var",
-        "//tensorflow/core/util/autotune_maps:conv_parameters",
         "//tensorflow/core/util/proto:proto_utils",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
+        "@xla//xla/stream_executor:dnn",
         "@xla//xla/stream_executor:lazy_op_runner",
         "@xla//xla/stream_executor/gpu:asm_compiler",
         "@xla//xla/stream_executor/gpu:redzone_allocator",
-    ] + if_cuda([
+    ] + if_google(["//google/protobuf:any_cc_proto"]) + if_cuda([
         "@local_config_cuda//cuda:cudnn_header",
         "@xla//xla/stream_executor/integrations:tf_allocator_adapter",
     ]),
@@ -2536,6 +2538,7 @@ tf_kernel_library(
     ] + if_cuda_or_rocm([
         ":gpu_utils",
         ":conv_ops_gpu_hdrs",
+        "//tensorflow/core/util/autotune_maps:conv_parameters",
     ]) + if_cuda([
         "@local_config_cuda//cuda:cudnn_header",
     ]) + if_rocm([

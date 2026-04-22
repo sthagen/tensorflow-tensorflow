@@ -22,14 +22,25 @@ limitations under the License.
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "riegeli/bytes/string_reader.h"
+#include "riegeli/messages/parse_message.h"
+#include "riegeli/zstd/zstd_reader.h"
 #include "xla/backends/gpu/libraries/cub/cub_sort_utils.h"
+#include "xla/backends/gpu/libraries/cub/embed_cub_scratch_size_lookup_table.h"
 #include "xla/stream_executor/semantic_version.h"
+#include "xla/tsl/util/file_toc.h"
 
 namespace xla::gpu {
 
 absl::StatusOr<CubScratchSizeDevicelessLookup>
-CubScratchSizeDevicelessLookup::Create(CubScratchSizeLookupTable proto) {
+CubScratchSizeDevicelessLookup::CreateFromProto(
+    CubScratchSizeLookupTable proto) {
+  if (proto.entries_size() == 0) {
+    return absl::InvalidArgumentError("No entries found in proto");
+  }
+
   for (const auto& entry : proto.entries()) {
     for (int i = 1; i < entry.scratch_size_recordings_size(); ++i) {
       if (entry.scratch_size_recordings(i).num_items() <=
@@ -40,6 +51,25 @@ CubScratchSizeDevicelessLookup::Create(CubScratchSizeLookupTable proto) {
     }
   }
   return CubScratchSizeDevicelessLookup(std::move(proto));
+}
+
+absl::StatusOr<CubScratchSizeDevicelessLookup>
+CubScratchSizeDevicelessLookup::CreateFromBundledData() {
+  const FileToc* file_toc = embed_cub_scratch_size_lookup_table_create();
+  if (file_toc == nullptr || file_toc[0].name == nullptr) {
+    return absl::InternalError("Failed to find embedded data");
+  }
+  absl::string_view compressed_data(file_toc[0].data, file_toc[0].size);
+  riegeli::StringReader<> string_reader(compressed_data);
+  riegeli::ZstdReader<> zstd_reader(&string_reader);
+
+  CubScratchSizeLookupTable proto;
+  absl::Status status = riegeli::ParseMessage(zstd_reader, proto);
+  if (!status.ok()) {
+    return absl::InternalError(
+        absl::StrCat("Failed to read bundled data: ", status.message()));
+  }
+  return CreateFromProto(std::move(proto));
 }
 
 CubScratchSizeDevicelessLookup::CubScratchSizeDevicelessLookup(
