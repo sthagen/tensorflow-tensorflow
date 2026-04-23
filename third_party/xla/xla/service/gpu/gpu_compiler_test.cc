@@ -816,8 +816,7 @@ ENTRY main {
 
   HloPrintOptions print_options =
       HloPrintOptions().set_print_operand_shape(true);
-  if (!gpu_cc.IsCuda() || cuda_cc.IsAtLeastAda() ||
-      (lhs_type != F8E4M3FN && rhs_type != F8E4M3FN)) {
+  {
     // Triton enabled, no fallback.
     ASSERT_OK_AND_ASSIGN(auto optimized_module_no_fallback_and_executable,
                          optimize_module(/*enable_triton=*/true,

@@ -16,10 +16,12 @@ limitations under the License.
 #include "xla/backends/gpu/libraries/cub/cub_scratch_size_deviceless_lookup.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
 
+#include "absl/base/no_destructor.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -33,6 +35,26 @@ limitations under the License.
 #include "xla/tsl/util/file_toc.h"
 
 namespace xla::gpu {
+
+namespace {
+absl::StatusOr<CubScratchSizeDevicelessLookup> CreateFromBundledData() {
+  const FileToc* file_toc = embed_cub_scratch_size_lookup_table_create();
+  if (file_toc == nullptr || file_toc[0].name == nullptr) {
+    return absl::InternalError("Failed to find embedded data");
+  }
+  absl::string_view compressed_data(file_toc[0].data, file_toc[0].size);
+  riegeli::StringReader<> string_reader(compressed_data);
+  riegeli::ZstdReader<> zstd_reader(&string_reader);
+
+  CubScratchSizeLookupTable proto;
+  absl::Status status = riegeli::ParseMessage(zstd_reader, proto);
+  if (!status.ok()) {
+    return absl::InternalError(
+        absl::StrCat("Failed to read bundled data: ", status.message()));
+  }
+  return CubScratchSizeDevicelessLookup::CreateFromProto(std::move(proto));
+}
+}  // namespace
 
 absl::StatusOr<CubScratchSizeDevicelessLookup>
 CubScratchSizeDevicelessLookup::CreateFromProto(
@@ -53,33 +75,38 @@ CubScratchSizeDevicelessLookup::CreateFromProto(
   return CubScratchSizeDevicelessLookup(std::move(proto));
 }
 
-absl::StatusOr<CubScratchSizeDevicelessLookup>
-CubScratchSizeDevicelessLookup::CreateFromBundledData() {
-  const FileToc* file_toc = embed_cub_scratch_size_lookup_table_create();
-  if (file_toc == nullptr || file_toc[0].name == nullptr) {
-    return absl::InternalError("Failed to find embedded data");
+absl::StatusOr<const CubScratchSizeDevicelessLookup&>
+CubScratchSizeDevicelessLookup::GetInstance() {
+  static absl::NoDestructor<absl::StatusOr<CubScratchSizeDevicelessLookup>>
+      instance(CreateFromBundledData());
+  if (!instance->ok()) {
+    return instance->status();
   }
-  absl::string_view compressed_data(file_toc[0].data, file_toc[0].size);
-  riegeli::StringReader<> string_reader(compressed_data);
-  riegeli::ZstdReader<> zstd_reader(&string_reader);
-
-  CubScratchSizeLookupTable proto;
-  absl::Status status = riegeli::ParseMessage(zstd_reader, proto);
-  if (!status.ok()) {
-    return absl::InternalError(
-        absl::StrCat("Failed to read bundled data: ", status.message()));
-  }
-  return CreateFromProto(std::move(proto));
+  return **instance;
 }
 
 CubScratchSizeDevicelessLookup::CubScratchSizeDevicelessLookup(
     CubScratchSizeLookupTable proto)
     : proto_(std::move(proto)) {}
 
+namespace {
+absl::string_view StripMigSuffix(absl::string_view device_name) {
+  size_t mig_pos = device_name.find(" MIG");
+  if (mig_pos != absl::string_view::npos) {
+    device_name = device_name.substr(0, mig_pos);
+  }
+  return device_name;
+}
+}  // namespace
+
 const CubScratchSizeEntry* CubScratchSizeDevicelessLookup::FindEntry(
     stream_executor::SemanticVersion cub_version, absl::string_view device_name,
     int32_t key_type_size, std::optional<int32_t> value_type_size,
     bool is_segmented) const {
+  // The scratch size doesn't actually differ between MIG and non-MIG devices,
+  // so just lookup the non-MIG device name.
+  device_name = StripMigSuffix(device_name);
+
   for (const CubScratchSizeEntry& entry : proto_.entries()) {
     bool version_matched =
         std::find(entry.cub_version().begin(), entry.cub_version().end(),

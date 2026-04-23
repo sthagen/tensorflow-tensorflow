@@ -622,7 +622,7 @@ message DebugOptions {
   optional bool xla_gpu_enable_cub_radix_sort = 259;
 
   // Whether to use cuBLASLt for GEMMs on GPUs.
-  optional bool xla_gpu_enable_cublaslt = 166;
+  optional bool xla_gpu_enable_cublaslt = 166 [deprecated = true];
 
   optional bool xla_gpu_enable_cudnn_int8x32_convolution_reordering = 189;
 
@@ -856,6 +856,9 @@ message DebugOptions {
   // Force a specific split_k. Zero (default) means do not force split_k and use
   // the heuristic.
   optional int32 xla_gpu_experimental_force_split_k = 472;
+
+  // Enable GEMM fusion v2 pass for building Triton fusions.
+  optional bool xla_gpu_experimental_gemm_fusion_v2 = 475;
 
   // Controls max unroll factor on Blackwell architectures. This is also
   // guarded with a heuristic, but the heuristic is not perfect, so changing
@@ -1519,10 +1522,14 @@ message DebugOptions {
   // If true, enable experimental tiling propagation.
   optional bool xla_gpu_experimental_enable_tiling_propagation = 456;
 
+  // Enables and controls expetimental cost model-driven tiling choices for GEMM
+  // fusions.
+  map<string, string> xla_gpu_experimental_cost_model_gemm_tiling_options = 474;
+
   // Note: when adding a new flag, please add it to one of the hardware-specific
   // or hardware-agnostic sections at the top of this proto message.
 
-  // Next id: 474
+  // Next id: 476
 
   // Extra options to pass to the compilation backend (e.g. LLVM); specific
   // interpretation of these values is left to the backend.

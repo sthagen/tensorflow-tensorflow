@@ -339,6 +339,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_unsupported_enable_triton_multi_output_fusion(true);
   opts.set_xla_gpu_enable_cudnn_int8x32_convolution_reordering(true);
   opts.set_xla_gpu_triton_gemm_any(true);
+  opts.set_xla_gpu_experimental_gemm_fusion_v2(false);
   opts.set_xla_gpu_verify_triton_fusion_numerics(false);
   opts.set_xla_gpu_experimental_enable_tiling_propagation(false);
 
@@ -677,8 +678,7 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       [debug_options](std::string comma_separated_values) {
         auto* extra_options_map =
             debug_options->mutable_xla_backend_extra_options();
-        parse_xla_backend_extra_options(extra_options_map,
-                                        comma_separated_values);
+        parse_comma_separated_values(extra_options_map, comma_separated_values);
         return true;
       };
 
@@ -689,7 +689,7 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
         google::protobuf::Map<std::string, std::string>* options_map =
             debug_options
                 ->mutable_xla_gpu_analytical_latency_estimator_options();
-        parse_xla_backend_extra_options(options_map, comma_separated_values);
+        parse_comma_separated_values(options_map, comma_separated_values);
         return true;
       };
 
@@ -1061,6 +1061,17 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
           (debug_options->*member_setter)(value);
           return true;
         };
+      };
+
+  // Custom "sub-parser" lambda for
+  // xla_gpu_experimental_cost_model_gemm_tiling_options.
+  auto setter_for_xla_gpu_experimental_cost_model_gemm_tiling_options =
+      [debug_options](std::string comma_separated_values) {
+        google::protobuf::Map<std::string, std::string>* options_map =
+            debug_options
+                ->mutable_xla_gpu_experimental_cost_model_gemm_tiling_options();
+        parse_comma_separated_values(options_map, comma_separated_values);
+        return true;
       };
 
   // Don't use an initializer list for initializing the vector; this would
@@ -1834,10 +1845,8 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_enable_cudnn_layer_norm(),
       "Rewrite layer norm patterns into cuDNN library call."));
   flag_list->push_back(
-      tsl::Flag("xla_gpu_enable_cublaslt",
-                bool_setter_for(&DebugOptions::set_xla_gpu_enable_cublaslt),
-                debug_options->xla_gpu_enable_cublaslt(),
-                "Use cuBLASLt for GEMMs when possible."));
+      tsl::Flag("xla_gpu_enable_cublaslt", noop_flag_setter<bool>, false,
+                "[Deprecated] Use cuBLASLt for GEMMs when possible."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_command_buffer",
       SetterForRepeatedEnum<DebugOptions::CommandBufferCmdType>(
@@ -2162,6 +2171,11 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
               set_xla_gpu_enable_cudnn_int8x32_convolution_reordering),
       debug_options->xla_gpu_enable_cudnn_int8x32_convolution_reordering(),
       "Enable cuDNN frontend for int8x32 convolutions with reordered filter."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_gemm_fusion_v2",
+      bool_setter_for(&DebugOptions::set_xla_gpu_experimental_gemm_fusion_v2),
+      debug_options->xla_gpu_experimental_gemm_fusion_v2(),
+      "Enable experimental rewrite of GEMM fusion pass for Triton."));
   flag_list->push_back(
       tsl::Flag("xla_gpu_triton_gemm_any",
                 bool_setter_for(&DebugOptions::set_xla_gpu_triton_gemm_any),
@@ -3089,6 +3103,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
           debug_options->xla_gpu_command_buffer_update_mode()),
       "Controls the VA remapping update strategy for command buffer thunks. "
       "See CommandBufferUpdateMode for details."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_cost_model_gemm_tiling_options",
+      setter_for_xla_gpu_experimental_cost_model_gemm_tiling_options, "",
+      "Experimental options for adjusting cost-model guided GEMM tiling "
+      "selection; comma-separated list of 'key=val' strings (=val may be "
+      "omitted); no whitespace around commas."));
 }  // NOLINT(readability/fn_size)
 
 // Allocates flag_values and flag_objects; this function must not be called more
