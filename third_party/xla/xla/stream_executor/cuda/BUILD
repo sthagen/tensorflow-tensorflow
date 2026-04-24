@@ -1826,6 +1826,8 @@ xla_test(
         "gpu": [
             "multi_gpu",
         ],
+        "gb200": ["broken"],  # TODO(b/505963304): re-enable when fixed.
+        "gb300": ["broken"],  # TODO(b/505963304): re-enable when fixed.
     },
     backends = ["gpu"],
     tags = ["cuda-only"],

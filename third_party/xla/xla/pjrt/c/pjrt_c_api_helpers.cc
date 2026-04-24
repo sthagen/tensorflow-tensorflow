@@ -976,6 +976,8 @@ absl::StatusOr<xla::Shape> BuildXlaShapeFromC(
       }
     }
     *shape.mutable_layout() = cpp_layout;
+  } else {
+    shape.clear_layout();
   }
   return shape;
 }

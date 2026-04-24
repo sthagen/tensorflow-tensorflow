@@ -1676,6 +1676,7 @@ ENTRY test (x: bf16[49152,11008], y: bf16[11008,11008]) -> (bf16[12,4096,11008],
                           ParseAndReturnVerifiedModule(hlo_text, config));
 
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
 
   TF_ASSERT_OK_AND_ASSIGN(bool changed, RunHloPass(&pass, module.get()));
@@ -1853,6 +1854,7 @@ ENTRY test {
 )";
 
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   RunAndFilecheckHloRewrite(hlo_text, std::move(pass),
                             R"(
@@ -1921,6 +1923,7 @@ ENTRY test {
 )";
 
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   RunAndFilecheckHloRewrite(hlo_text, std::move(pass),
                             R"(
@@ -2097,6 +2100,7 @@ ENTRY test {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(hlo_text));
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   TF_ASSERT_OK_AND_ASSIGN(bool changed, this->RunHloPass(&pass, module.get()));
   EXPECT_TRUE(changed);
@@ -2425,49 +2429,6 @@ ENTRY AddDotsFunc {
 ; CHECK-DAG:         }
 ; CHECK-DAG:         "epilogue":"DEFAULT"
 ; CHECK:           }
-)");
-}
-
-TEST_F(ParameterizedGemmRewriteTest, LargeBatch) {
-  const char* hlo_text = R"(
-HloModule BatchedArgRowColTransposeFoldGemm
-
-ENTRY AddDotsFunc {
-  x = f32[20000,4,3,2] parameter(0)
-  y = f32[20000,4,3,4] parameter(1)
-  ROOT dot_a = f32[20000,4,2,4] dot(x, y), lhs_contracting_dims={2}, rhs_contracting_dims={2}, lhs_batch_dims={0,1}, rhs_batch_dims={0,1}
-}
-
-)";
-
-  // Batch sizes larger than 2^16-1 are not supported by cublasLt. Ensure that
-  // the custom_call_target is __cublas$gemm.
-  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{1e-3, 1e-3}));
-  MatchOptimizedHlo(hlo_text,
-                    R"(
-; CHECK-LABEL: ENTRY %{{.*}} ({{.*}}: f32[20000,4,3,2], {{.*}}: f32[20000,4,3,4]) -> f32[20000,4,2,4] {
-; CHECK-DAG:     [[P0:%[^ ]+]] = f32[20000,4,3,2]{3,2,1,0} parameter(0)
-; CHECK-DAG:     [[BC0:%[^ ]+]] = f32[80000,3,2]{2,1,0} bitcast([[P0]])
-; CHECK-DAG:     [[P1:%[^ ]+]] = f32[20000,4,3,4]{3,2,1,0} parameter(1)
-; CHECK-DAG:     [[BC1:%[^ ]+]] = f32[80000,3,4]{2,1,0} bitcast([[P1]])
-; CHECK:         [[GEMM:%[^ ]+]] = (f32[80000,2,4]{2,1,0}, s8[{{[0-9]+}}]{0}) custom-call([[BC0]], [[BC1]]),
-; CHECK:           custom_call_target="__cublas$lt$matmul",
-; CHECK:           backend_config={
-; CHECK-DAG:         "alpha_real":1
-; CHECK-DAG:         "alpha_imag":0
-; CHECK-DAG:         "beta":0
-; CHECK-DAG:         "dot_dimension_numbers":{
-; CHECK-DAG:           "lhs_contracting_dimensions":["1"]
-; CHECK-DAG:           "rhs_contracting_dimensions":["1"]
-; CHECK-DAG:           "lhs_batch_dimensions":["0"]
-; CHECK-DAG:           "rhs_batch_dimensions":["0"]
-; CHECK-DAG:         }
-; CHECK-DAG:         "precision_config":{
-; CHECK-DAG:           "operand_precision":["DEFAULT","DEFAULT"]
-; CHECK-DAG:         }
-; CHECK:           }
-; CHECK:   [[OUT:%[^ ]+]] = f32[80000,2,4]{2,1,0} get-tuple-element([[GEMM]]), index=0
-; CHECK:   ROOT {{[^ ]+}} = f32[20000,4,2,4]{3,2,1,0} bitcast([[OUT]])
 )");
 }
 
@@ -3129,6 +3090,7 @@ ENTRY main {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(hlo_text));
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   TF_ASSERT_OK_AND_ASSIGN(bool changed, this->RunHloPass(&pass, module.get()));
   EXPECT_TRUE(changed);
@@ -3158,6 +3120,7 @@ ENTRY main {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(hlo_text));
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   TF_ASSERT_OK_AND_ASSIGN(bool changed, this->RunHloPass(&pass, module.get()));
   EXPECT_TRUE(changed);
@@ -3189,6 +3152,7 @@ ENTRY main {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(hlo_text));
   GemmRewriterOptions options;
+  options.enable_cublaslt = true;
   GemmRewriter pass(Capability(), GetToolkitVersion(), options);
   TF_ASSERT_OK_AND_ASSIGN(bool changed, this->RunHloPass(&pass, module.get()));
   EXPECT_TRUE(changed);

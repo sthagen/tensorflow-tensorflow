@@ -154,8 +154,11 @@ class TrackedCpuDeviceBuffer : public AbstractTrackedDeviceBuffer {
 
   size_t BufferSize();
 
-  const tsl::AsyncValueRef<CpuEvent>& definition_event() const {
-    return definition_event_;
+  tsl::AsyncValueRef<CpuEvent> definition_event() const {
+    if (definition_events().empty()) {
+      return nullptr;
+    }
+    return definition_events()[0].down_cast<CpuEvent>();
   }
 
   void AddUsageEvents(absl::Span<tsl::AsyncValueRef<CpuEvent>> events);
@@ -165,8 +168,6 @@ class TrackedCpuDeviceBuffer : public AbstractTrackedDeviceBuffer {
   absl::InlinedVector<tsl::AsyncValueRef<CpuEvent>, 4>
   LockUseAndTransferUsageEvents();
 
-  std::vector<tsl::RCReference<tsl::AsyncValue>> GetAsyncValueDefinitionEvents()
-      override;
 
   std::vector<tsl::RCReference<tsl::AsyncValue>>
   GetAsyncValueDefinitionAndUsageEvents() override;
@@ -192,7 +193,6 @@ class TrackedCpuDeviceBuffer : public AbstractTrackedDeviceBuffer {
 
   // The definition event are associated with CPU operations that write to the
   // buffers.
-  tsl::AsyncValueRef<CpuEvent> definition_event_;
   // Usage events are associated with CPU operations that read from the buffers.
   absl::InlinedVector<tsl::AsyncValueRef<CpuEvent>, 4> usage_events_;
 };

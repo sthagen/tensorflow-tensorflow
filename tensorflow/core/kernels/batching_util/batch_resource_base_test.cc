@@ -82,6 +82,43 @@ TEST(BatchTaskCriticalityTest, CriticalityDefaultsToCritical) {
   EXPECT_EQ(batch_task.criticality(), tsl::criticality::Criticality::kCritical);
 }
 
+TEST(BatchTaskTest, IsDeadlineExceeded) {
+  BatchResourceBase::BatchTask task;
+  const absl::Time now = absl::Now();
+
+  task.rpc_deadline = now + absl::Seconds(10);
+  EXPECT_FALSE(task.IsDeadlineExceeded(now));
+
+  task.rpc_deadline = now - absl::Seconds(10);
+  EXPECT_TRUE(task.IsDeadlineExceeded(now));
+}
+
+TEST(BatchTaskTest, IsCancelled) {
+  BatchResourceBase::BatchTask task;
+
+  bool cancelled = false;
+  task.is_rpc_cancelled = [&cancelled]() { return cancelled; };
+  EXPECT_FALSE(task.IsCancelled());
+
+  cancelled = true;
+  EXPECT_TRUE(task.IsCancelled());
+}
+
+TEST(BatchTaskTest, CreateSplitTaskCopiesFields) {
+  BatchResourceBase::BatchTask task;
+  task.rpc_deadline = absl::Now() + absl::Seconds(10);
+  bool cancelled = false;
+  task.is_rpc_cancelled = [&cancelled]() { return cancelled; };
+
+  std::unique_ptr<BatchResourceBase::BatchTask> split_task =
+      task.CreateSplitTask(0, []() {});
+
+  EXPECT_EQ(split_task->rpc_deadline, task.rpc_deadline);
+  EXPECT_FALSE(split_task->IsCancelled());
+  cancelled = true;
+  EXPECT_TRUE(split_task->IsCancelled());
+}
+
 struct PriorityTestParams {
   std::string test_name;
   bool enable_large_batch_splitting;

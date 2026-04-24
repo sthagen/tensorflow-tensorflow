@@ -21,12 +21,14 @@ limitations under the License.
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
+#include "absl/types/span.h"
 #include "xla/future.h"
 #include "xla/pjrt/device_event.h"
 #include "xla/pjrt/pjrt_client.h"
@@ -40,14 +42,29 @@ namespace xla {
 class AbstractTrackedDeviceBuffer {
  public:
   virtual ~AbstractTrackedDeviceBuffer() = default;
-  explicit AbstractTrackedDeviceBuffer(
-      tsl::RCReference<CommonPjRtRawBuffer> raw_buffer)
-      : raw_buffer_(std::move(raw_buffer)) {}
+  AbstractTrackedDeviceBuffer(
+      tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+      absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events)
+      : raw_buffer_(std::move(raw_buffer)),
+        definition_events_(std::move(definition_events)) {}
+
+  absl::Span<const PjRtDeviceEventRef> definition_events() const {
+    return definition_events_;
+  }
 
   // Construct (or return) a vector of tsl::AsyncValue events which
   // will become ready when this buffer is ready.
   virtual std::vector<tsl::RCReference<tsl::AsyncValue>>
-  GetAsyncValueDefinitionEvents() = 0;
+  GetAsyncValueDefinitionEvents() {
+    std::vector<tsl::RCReference<tsl::AsyncValue>> result;
+    result.reserve(definition_events_.size());
+    for (const auto& ev : definition_events_) {
+      if (ev) {
+        result.push_back(tsl::FormRef(ev.async_value()));
+      }
+    }
+    return result;
+  }
 
   // Construct (or return) a vector of tsl::AsyncValue events which
   // will become ready when this buffer is ok to mutate.
@@ -119,10 +136,12 @@ class AbstractTrackedDeviceBuffer {
  protected:
   void ReleaseDeviceMemory() {
     raw_buffer_ = tsl::RCReference<CommonPjRtRawBuffer>();
+    definition_events_.clear();
   }
 
  private:
   tsl::RCReference<CommonPjRtRawBuffer> raw_buffer_;
+  absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events_;
 };
 
 class CommonPjRtBuffer : public PjRtBuffer {

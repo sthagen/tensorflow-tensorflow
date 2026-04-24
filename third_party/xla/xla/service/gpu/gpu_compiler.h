@@ -20,11 +20,16 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "llvm/IR/Module.h"
 #include "mlir/IR/MLIRContext.h"
 #include "xla/autotune_results.pb.h"
@@ -64,6 +69,8 @@ namespace gpu {
 // The GPU compiler generates efficient GPU executables.
 class GpuCompiler : public LLVMCompiler {
  public:
+  using AsmModuleHook = absl::AnyInvocable<void(absl::string_view)>;
+
   GpuCompiler(se::Platform::Id platform_id, const char* target_triple,
               const char* data_layout);
 
@@ -155,6 +162,17 @@ class GpuCompiler : public LLVMCompiler {
                        const DebugOptions& debug_options,
                        mlir::MLIRContext* mlir_context);
 
+  // Sets a callback that is invoked with all compiled ptx.
+  // Can be used for logging or statistics collection.
+  void SetAsmHook(AsmModuleHook hook) {
+    absl::MutexLock lock(user_asm_hook_m_);
+    user_asm_hook_ = std::move(hook);
+  }
+  void RemoveAsmHook() {
+    absl::MutexLock lock(user_asm_hook_m_);
+    user_asm_hook_ = nullptr;
+  }
+
  protected:
   struct BackendCompileResult {
     std::string asm_text;
@@ -163,8 +181,17 @@ class GpuCompiler : public LLVMCompiler {
     ModuleStats module_stats;
   };
 
+  static std::unique_ptr<HloPassPipeline> GetCublasRewriterPipeline(
+      const stream_executor::DeviceDescription& device_description,
+      bool enable_cublaslt = false);
+
   static std::unique_ptr<HloPassPipeline> GetCustomKernelRewriterPipeline(
       const stream_executor::DeviceDescription& device_description);
+
+  // Run right before GemmRewriter to add pads for gpublas gemms.
+  virtual void AddPaddingForGpublasGemms(
+      HloPassPipeline& pipeline, const DebugOptions& debug_options,
+      const se::GpuComputeCapability& gpu_version) = 0;
 
   // During compilation with device, stream_exec != null and autotune_results
   // == null. During deviceless AOT compilation, stream_exec == null and
@@ -312,6 +339,9 @@ class GpuCompiler : public LLVMCompiler {
   // A MLIR context that can be used by pre-codegen passes. For codegen, we will
   // need to have a context with more dialects registered.
   mlir::MLIRContext mlir_context_;
+
+  absl::Mutex user_asm_hook_m_;
+  AsmModuleHook user_asm_hook_ ABSL_GUARDED_BY(user_asm_hook_m_);
 };
 
 }  // namespace gpu

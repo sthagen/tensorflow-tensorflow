@@ -695,6 +695,9 @@ class HloSharding {
 
   // Returns the replication subgroup dim, or -1 if it doesn't exist.
   int64_t SubgroupReplicationDim() const {
+    CHECK(!UseNamedShardingLeaf())
+        << "SubgroupReplicationDim should not be called for HloShardingV3 as "
+           "all relevant use cases are handled separately.";
     auto it = absl::c_find(subgroup_types_, OpSharding::REPLICATED);
     if (it != subgroup_types_.end()) {
       return (it - subgroup_types_.begin()) + TiledDataRank();

@@ -227,21 +227,6 @@ TEST_F(TritonBackendTest, GetDefaultConfig) {
   EXPECT_THAT(config, absl_testing::IsOk());
 }
 
-TEST_F(TritonBackendTest, GetDefaultConfigReturnsSplitKOne) {
-  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(kHlo));
-  debug_options_.set_xla_gpu_enable_split_k_autotuning(true);
-
-  absl::StatusOr<std::unique_ptr<BackendConfig>> config =
-      backend_.GetDefaultConfig(
-          *(module->entry_computation()->root_instruction()));
-
-  ASSERT_THAT(config, absl_testing::IsOk());
-  TritonBackendConfig triton_config;
-  ASSERT_TRUE(config.value()->UnpackTo(&triton_config));
-  EXPECT_EQ(triton_config.split_k(), 1);
-}
-
 TEST_F(TritonBackendTest, GetDefaultConfigForUnsupportedInstruction) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
                           ParseAndReturnVerifiedModule(kHlo));
@@ -292,32 +277,6 @@ TEST_F(TritonBackendTest, AmpereUsesMoreThanTwoStages) {
                               return false;
                             }
                             return triton_config.num_stages() > 2;
-                          }));
-}
-
-TEST_F(TritonBackendTest, SplitKIsDisabled) {
-  debug_options_.set_xla_gpu_enable_split_k_autotuning(false);
-
-  se::CudaComputeCapability ampere_cap{se::CudaComputeCapability::kAmpere,
-                                       /*minor=*/0};
-  target_config_.device_description.set_gpu_compute_capability(
-      se::GpuComputeCapability{ampere_cap});
-
-  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(kSimpleGemmFusionHlo));
-
-  absl::StatusOr<std::vector<std::unique_ptr<BackendConfig>>> configs =
-      backend_.GetSupportedConfigs(
-          *(module->entry_computation()->root_instruction()));
-  EXPECT_THAT(configs, absl_testing::IsOk());
-
-  EXPECT_TRUE(std::all_of(configs.value().begin(), configs.value().end(),
-                          [](const std::unique_ptr<BackendConfig>& config) {
-                            TritonBackendConfig triton_config;
-                            if (!config->UnpackTo(&triton_config)) {
-                              return false;
-                            }
-                            return triton_config.split_k() == 1;
                           }));
 }
 
@@ -714,43 +673,6 @@ ENTRY e {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<BackendConfig> config,
                           backend_.GetDefaultConfig(*root));
   EXPECT_THAT(backend_.Compile(*root, *config), IsOk());
-}
-
-TEST_F(TritonBackendTest, SplitKFloatNormalization) {
-  if (target_config_.device_description.gpu_compute_capability().IsRocm() ||
-      !target_config_.device_description.cuda_compute_capability()
-           .IsAtLeastHopper()) {
-    GTEST_SKIP() << "f8 types are only supported from Hopper onwards.";
-  }
-  const char kHlo[] = R"(
-HloModule module
-
-gemm_fusion_dot_computation {
-  parameter_0 = f8e5m2[256,256]{1,0} parameter(0)
-  parameter_1 = f8e4m3fn[128,256]{1,0} parameter(1)
-  dot1 = f32[256,128]{1,0} dot(parameter_0, parameter_1), lhs_contracting_dims={1}, rhs_contracting_dims={1}
-  ROOT convert2 = f8e5m2[256,128]{1,0} convert(dot1)
-}
-ENTRY entry {
-  p0 = f8e5m2[256,256]{1,0} parameter(0)
-  p1 = f8e4m3fn[128,256]{1,0} parameter(1)
-  ROOT r = f8e5m2[256,128]{1,0} fusion(p0, p1), kind=kCustom, calls=gemm_fusion_dot_computation, backend_config={"fusion_backend_config":{"kind":"__triton_gemm"},"force_earliest_schedule":false}
-})";
-  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                          ParseAndReturnVerifiedModule(kHlo));
-  HloInstruction* root = module->entry_computation()->root_instruction();
-  AutotuneResult::TritonGemmKey triton_config_proto;
-  triton_config_proto.set_block_m(32);
-  triton_config_proto.set_block_n(64);
-  triton_config_proto.set_block_k(64);
-  triton_config_proto.set_split_k(1);
-  triton_config_proto.set_num_stages(1);
-  triton_config_proto.set_num_warps(4);
-  triton_config_proto.set_num_ctas(1);
-  google::protobuf::Any config;
-  config.PackFrom(triton_config_proto);
-
-  EXPECT_THAT(backend_.Compile(*root, config), IsOk());
 }
 
 }  // namespace

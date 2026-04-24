@@ -27,6 +27,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "xla/codegen/emitters/computation_fingerprint.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -39,7 +40,14 @@ limitations under the License.
 
 namespace xla::gpu {
 
+constexpr int kCacheCompatibilityVersion = 0;
+
 absl::Status KernelReuseCache::Load(const CompilationCacheProto& proto) {
+  if (proto.compatibility_version() != kCacheCompatibilityVersion) {
+    LOG(WARNING) << "Provided CompilationCacheProto contains no longer "
+                    "compatible data and needs to be regenerated.";
+    return absl::OkStatus();
+  }
   absl::MutexLock lock(m_);
   for (const auto& [name, entry] : proto.entries()) {
     std::optional<se::ClusterDim> cluster_dim;
@@ -66,6 +74,7 @@ absl::Status KernelReuseCache::Load(const CompilationCacheProto& proto) {
 CompilationCacheProto KernelReuseCache::Export() const {
   absl::MutexLock lock(m_);
   CompilationCacheProto proto;
+  proto.set_compatibility_version(kCacheCompatibilityVersion);
   for (const auto& [fingerprint, future] : cache_) {
     const absl::StatusOr<Entry>& cache_entry = future.Await();
     if (!cache_entry.ok()) {
@@ -109,9 +118,9 @@ absl::Status UpdateDiskKernelCache(
   CompilationCacheProto disk_cache;
   if (do_append) {
     std::string serialized;
-    TF_RETURN_IF_ERROR(tsl::ReadFileToString(tsl::Env::Default(),
-                                             std::string(path), &serialized));
-    if (!disk_cache.ParseFromString(std::string(serialized))) {
+    RETURN_IF_ERROR(tsl::ReadFileToString(tsl::Env::Default(),
+                                          std::string(path), &serialized));
+    if (!disk_cache.ParseFromString(serialized)) {
       return Internal("Failed to parse serialized CompilationCacheProto.");
     }
   }
@@ -129,9 +138,9 @@ absl::Status UpdateDiskKernelCache(
     ++stored_kernel_count;
   }
   if (stored_kernel_count > 0) {
-    TF_RETURN_IF_ERROR(tsl::WriteStringToFile(tsl::Env::Default(),
-                                              std::string(path),
-                                              disk_cache.SerializeAsString()));
+    RETURN_IF_ERROR(tsl::WriteStringToFile(tsl::Env::Default(),
+                                           std::string(path),
+                                           disk_cache.SerializeAsString()));
     VLOG(2) << "Stored " << stored_kernel_count << " / "
             << binaries_to_cache.size() << " kernels in the cache file.";
   }

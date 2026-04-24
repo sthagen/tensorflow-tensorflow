@@ -141,6 +141,8 @@ cc_library(
     deps = [
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:kernel_args",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
     ],
 )

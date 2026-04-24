@@ -139,8 +139,7 @@ void setFrontendAttribute(SmallVector<NamedAttribute>& existingAttributes,
       break;
     }
   }
-  existingAttributes.emplace_back(
-      NamedAttribute(builder.getStringAttr(name), stringValue));
+  existingAttributes.emplace_back(builder.getStringAttr(name), stringValue);
 }
 
 void removeFrontendAttribute(

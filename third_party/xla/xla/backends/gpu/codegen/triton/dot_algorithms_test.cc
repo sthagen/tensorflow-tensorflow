@@ -1149,7 +1149,7 @@ class NumericTestsForTriton : public TritonAlgorithmTest,
       ROOT _ = f32[8,8] fusion(p0, p1), kind=kCustom, calls=triton_dot,
         backend_config={"fusion_backend_config": {kind: "__triton_gemm",
         triton_gemm_config: {"block_m":32,"block_n":32,"block_k":32,
-        "split_k":1,"num_stages":1,"num_warps":1, "num_ctas":1}}}
+        "num_stages":1,"num_warps":1, "num_ctas":1}}}
     }
   )";
   std::string algorithm_;

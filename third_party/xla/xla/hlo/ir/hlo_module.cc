@@ -1197,6 +1197,12 @@ void HloModule::CleanupComputations() {
   to_be_deleted_computations_.clear();
 }
 
+void HloModule::CanonicalizeComputationLocalIds() {
+  for (auto* computation : computations()) {
+    computation->CanonicalizeLocalIds();
+  }
+}
+
 HloInstruction* HloModule::OutlineExpressionFromComputation(
     absl::Span<HloInstruction* const> instructions_to_outline,
     const std::string& outlined_computation_name, HloComputation* computation) {

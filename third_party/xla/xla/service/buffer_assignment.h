@@ -770,6 +770,15 @@ class BufferAssigner {
     buffer_assignment::BufferAssignmentAlgorithmProto::Value
         buffer_assignment_algorithm =
             buffer_assignment::BufferAssignmentAlgorithmProto::DEFAULT;
+
+    buffer_assignment::BufferAssignmentAlgorithmProto::Value
+        fallback_algorithm =
+            buffer_assignment::BufferAssignmentAlgorithmProto::DEFAULT;
+
+    // Optional callback to return the memory limit for a given buffer color.
+    // If set and returns > 0, the returned limit is used instead of the
+    // default module config's device memory size.
+    std::function<int64_t(LogicalBuffer::Color)> color_memory_limit;
   };
 
   static Colorer DefaultColorer() {

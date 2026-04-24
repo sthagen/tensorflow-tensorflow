@@ -123,9 +123,20 @@ class BatchResourceBase : public ResourceBase {
 
     uint64 start_time;
 
+    // Absolute RPC deadline. When set, the task is considered expired if
+    // absl::Now() > rpc_deadline. Defaults to nullopt (no enforcement).
+    std::optional<absl::Time> rpc_deadline;
+
+    // Callback: returns true if client actively cancelled the RPC.
+    std::function<bool()> is_rpc_cancelled;
+
     size_t size() const override { return inputs[0].shape().dim_size(0); }
 
     bool is_subtask() const override { return is_partial; }
+
+    bool IsDeadlineExceeded(absl::Time now) const override;
+
+    bool IsCancelled() const override;
 
     // Create a split task from this one. The caller needs to setup the inputs
     // of the new task

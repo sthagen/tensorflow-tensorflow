@@ -427,8 +427,18 @@ BatchResourceBase::BatchTask::CreateSplitTask(
   task->start_time = this->start_time;
   task->request_cost = this->request_cost;
   task->forced_warmup_batch_size = this->forced_warmup_batch_size;
+  task->rpc_deadline = this->rpc_deadline;
+  task->is_rpc_cancelled = this->is_rpc_cancelled;
 
   return task;
+}
+
+bool BatchResourceBase::BatchTask::IsDeadlineExceeded(absl::Time now) const {
+  return rpc_deadline.has_value() && now > *rpc_deadline;
+}
+
+bool BatchResourceBase::BatchTask::IsCancelled() const {
+  return is_rpc_cancelled && is_rpc_cancelled();
 }
 
 std::string GetTensorNamesAndShapesString(const OpKernelContext* context,

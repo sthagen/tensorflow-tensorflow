@@ -38,6 +38,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/blocking_counter.h"
+#include "absl/synchronization/mutex.h"
 #include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/AsmParser/Parser.h"
@@ -501,6 +502,25 @@ absl::StatusOr<GpuTopology> InferGpuTopology(
 }
 
 }  // namespace
+
+std::unique_ptr<HloPassPipeline> GpuCompiler::GetCublasRewriterPipeline(
+    const stream_executor::DeviceDescription& device_description,
+    bool enable_cublaslt) {
+  auto pipeline = std::make_unique<HloPassPipeline>("cublas_rewriter_pipeline");
+  pipeline->AddPass(std::make_unique<DotAlgorithmRewriter>());
+  pipeline->AddPass(std::make_unique<ScaledDotRewriter>());
+  for (GemmRewriterOptions::DType dtype :
+       {GemmRewriterOptions::DType::kFp8Only,
+        GemmRewriterOptions::DType::kNonFp8Only}) {
+    GemmRewriterOptions options{dtype};
+    options.enable_cublaslt = enable_cublaslt;
+    auto gemm_rewriter = std::make_unique<GemmRewriter>(
+        device_description.gpu_compute_capability(),
+        device_description.runtime_version(), options);
+    pipeline->AddPass(std::move(gemm_rewriter));
+  }
+  return pipeline;
+}
 
 GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
                          const char* target_triple, const char* data_layout)
@@ -1760,10 +1780,12 @@ void AddGemmRewriterPasses(HloPassPipeline& pipeline,
 
   GemmRewriterOptions fp8_options{GemmRewriterOptions::DType::kFp8Only,
                                   bias_mode};
+  fp8_options.enable_cublaslt = true;
   pipeline.AddPass<GemmRewriter>(gpu_version, toolkit_version, fp8_options);
   pipeline.AddPass<GemmRewriter>(
       gpu_version, toolkit_version,
-      GemmRewriterOptions{GemmRewriterOptions::DType::kNonFp8Only, bias_mode});
+      GemmRewriterOptions{GemmRewriterOptions::DType::kNonFp8Only, bias_mode,
+                          debug_options.xla_gpu_enable_cublaslt()});
 }
 }  // namespace
 
@@ -1863,6 +1885,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     }
 
     // Rewrite GEMMs into custom calls.
+    AddPaddingForGpublasGemms(pipeline, debug_options, gpu_version);
     AddGemmRewriterPasses(
         pipeline, debug_options, gpu_version,
         gpu_target_config.device_description.runtime_version());
@@ -1870,6 +1893,11 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
     pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
+    // GemmRewriter pins "__cublas$lt$matmul" output layouts to {n-1,...,1,0},
+    // which can leave a downstream reshape no longer bitcast-compatible.
+    // Decompose any such reshape so LayoutNormalization's ReshapeIsBitcast
+    // precondition holds.
+    pipeline.AddPass<ReshapeDecomposer>();
     pipeline.AddPass<LayoutNormalization>(&NormalizeLayoutForGpuCustomCalls);
     // Remove any redundant operations (such as bitcasts) introduced by layout
     // normalization.
@@ -1940,6 +1968,11 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
+  // GemmRewriter pins "__cublas$lt$matmul" output layouts to {n-1,...,1,0},
+  // which can leave a downstream reshape no longer bitcast-compatible.
+  // Decompose any such reshape so LayoutNormalization's ReshapeIsBitcast
+  // precondition holds.
+  pipeline.AddPass<ReshapeDecomposer>();
   pipeline.AddPass<LayoutNormalization>(&NormalizeLayoutForGpuCustomCalls);
 
   // Layout normalization will create scatters that are not simplified and
@@ -2100,6 +2133,29 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
 }
 
 namespace {
+
+bool UsesCollectiveMemorySpaceFrontendAttr(const HloUse& use) {
+  if (use.instruction->opcode() != HloOpcode::kCustomCall) {
+    return false;
+  }
+  auto attr =
+      use.instruction->get_frontend_attribute(kOperandsMemorySpacesAttr);
+  if (!attr.has_value()) {
+    return false;
+  }
+  auto pairs = ParseIndexMemorySpacePairs(*attr);
+  if (!pairs.ok()) {
+    return false;
+  }
+  for (auto [index, memory_space] : *pairs) {
+    if (index == use.operand_number &&
+        memory_space == MemorySpaceColor::kCollective) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ShouldAddCopyForCollectiveMemorySpace(const HloValue* value) {
   const HloInstruction* inst = value->defining_instruction();
   const HloModule* module = inst->GetModule();
@@ -2117,7 +2173,8 @@ bool ShouldAddCopyForCollectiveMemorySpace(const HloValue* value) {
     for (auto& use : value->GetUses()) {
       if ((is_nccl_buffers_used && IsCollective(use.instruction)) ||
           RequiresCollectiveSymmetricMemorySpace(use.instruction) ||
-          IsCollectiveMosaicGpuInstruction(*use.instruction)) {
+          IsCollectiveMosaicGpuInstruction(*use.instruction) ||
+          UsesCollectiveMemorySpaceFrontendAttr(use)) {
         return true;
       }
     }
@@ -2245,6 +2302,11 @@ GpuCompiler::CompileSingleModule(
   }
 
   CallUserPostOptimizationHook(*llvm_module);
+
+  absl::MutexLock lock(user_asm_hook_m_);
+  if (user_asm_hook_ && !result.asm_text.empty()) {
+    user_asm_hook_(result.asm_text);
+  }
 
   return result;
 }
@@ -3287,7 +3349,7 @@ absl::Status GpuCompiler::AddConvAndGemmAutotuningPass(
                              const HloInstruction& instruction) -> bool {
     if (!do_not_autotune_cublas &&
         (instruction.opcode() == HloOpcode::kCustomCall &&
-         IsCublasGemm(instruction) && !IsLegacyCublasMatmul(instruction))) {
+         IsCublasGemm(instruction))) {
       return true;
     }
     if (!do_not_autotune_cudnn &&
@@ -3358,9 +3420,18 @@ GpuCompiler::GetAutotunerBackends(
     disabled_autotune_backends.push_back(autotuner::Backend::HIPBLASLT_FISSION);
   }
 
-  // Legacy cublas is being removed, and we assume cublasLt is always enabled.
-  disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS_FISSION);
-  disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
+  if (!debug_options.xla_gpu_enable_cublaslt()) {
+    disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT);
+    disabled_autotune_backends.push_back(autotuner::Backend::CUBLASLT_FISSION);
+    // NOTE(ROCm): Do not disable hipblaslt backends even with
+    // xla_gpu_enable_cublaslt=false since we need them for fp8
+  } else {
+    // Breaks xla/backends/gpu/transforms:gemm_rewriter_test_b200, it requires
+    // CUBLAS and CUBLASLT both to be available. TODO: fix tests and uncomment.
+    // disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS);
+    disabled_autotune_backends.push_back(autotuner::Backend::CUBLAS_FISSION);
+    disabled_autotune_backends.push_back(autotuner::Backend::ROCBLAS_FISSION);
+  }
 
   autotune_backends.erase(
       std::remove_if(autotune_backends.begin(), autotune_backends.end(),

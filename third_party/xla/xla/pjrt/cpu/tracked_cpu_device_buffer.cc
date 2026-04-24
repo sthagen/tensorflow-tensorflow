@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/base/casts.h"
 #include "absl/base/no_destructor.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
@@ -191,9 +192,14 @@ absl::Status CpuDeviceMemory::AllocateInto(
 TrackedCpuDeviceBuffer::TrackedCpuDeviceBuffer(
     tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
     tsl::AsyncValueRef<CpuEvent> definition_event)
-    : AbstractTrackedDeviceBuffer(std::move(raw_buffer)),
-      definition_event_(std::move(definition_event)) {
-  DCHECK(definition_event_);
+    : AbstractTrackedDeviceBuffer(std::move(raw_buffer), [definition_event]() {
+        absl::InlinedVector<PjRtDeviceEventRef, 2> events;
+        if (definition_event) {
+          events.push_back(PjRtDeviceEventRef(std::move(definition_event)));
+        }
+        return events;
+      }()) {
+  DCHECK(!definition_events().empty());
 }
 
 TrackedCpuDeviceBuffer::~TrackedCpuDeviceBuffer() = default;
@@ -238,21 +244,16 @@ TrackedCpuDeviceBuffer::LockUseAndTransferUsageEvents() {
 
 void TrackedCpuDeviceBuffer::ConfirmDonation() {
   ReleaseDeviceMemory();
-  definition_event_.reset();
   usage_events_.clear();
 }
 
-std::vector<tsl::RCReference<tsl::AsyncValue>>
-TrackedCpuDeviceBuffer::GetAsyncValueDefinitionEvents() {
-  std::vector<tsl::RCReference<tsl::AsyncValue>> result;
-  result.push_back(definition_event_.CopyRCRef());
-  return result;
-}
 
 std::vector<tsl::RCReference<tsl::AsyncValue>>
 TrackedCpuDeviceBuffer::GetAsyncValueDefinitionAndUsageEvents() {
   std::vector<tsl::RCReference<tsl::AsyncValue>> result;
-  result.push_back(definition_event_.CopyRCRef());
+  if (auto ev = definition_event()) {
+    result.push_back(ev.CopyRCRef());
+  }
   for (auto& event : usage_events_) {
     result.push_back(event.CopyRCRef());
   }
@@ -309,12 +310,12 @@ Future<> TrackedCpuDeviceBuffer::GetReadyFuture(PjRtMemorySpace* memory_space) {
 
 absl::StatusOr<PjRtDeviceEventRef> TrackedCpuDeviceBuffer::GetDefinitionEvent(
     PjRtMemorySpace* memory_space) {
-  if (!definition_event_) {
-    return absl::InternalError(
-        "GetDefinitionEvent only supported on CPU for buffers with "
-        "exactly 1 definition event.");
+  if (auto ev = definition_event()) {
+    return PjRtDeviceEventRef(ev);
   }
-  return PjRtDeviceEventRef(definition_event_);
+  return absl::InternalError(
+      "GetDefinitionEvent only supported on CPU for buffers with "
+      "exactly 1 definition event.");
 }
 
 absl::Status TrackedCpuDeviceBuffer::BlockForOperationsToComplete(
@@ -326,20 +327,23 @@ absl::Status TrackedCpuDeviceBuffer::BlockForOperationsToComplete(
     BlockUntilReady(av.GetAsyncValue());
   }
 
-  // Fetch the error from the definition event (if an error is present).
-  BlockUntilReady(definition_event_.GetAsyncValue());
-  if (auto* error = definition_event_.GetErrorIfPresent()) {
-    return absl::InternalError(
-        absl::StrFormat("Error Execute: %s", error->message()));
+  if (auto ev = definition_event()) {
+    BlockUntilReady(ev.GetAsyncValue());
+    if (auto* error = ev.GetErrorIfPresent()) {
+      return absl::InternalError(
+          absl::StrFormat("Error Execute: %s", error->message()));
+    }
   }
   return absl::OkStatus();
 }
 
 bool TrackedCpuDeviceBuffer::AddDefinitionEventsToSet(
     PjRtDeviceEventSet& events) {
-  if (!definition_event_.IsAvailable() || definition_event_.IsError()) {
-    absl::down_cast<CpuTrackedDeviceEventSet*>(&events)->AddEvent(
-        definition_event_.CopyRCRef());
+  if (auto ev = definition_event()) {
+    if (!ev.IsAvailable() || ev.IsError()) {
+      absl::down_cast<CpuTrackedDeviceEventSet*>(&events)->AddEvent(
+          ev.CopyRCRef());
+    }
   }
   return false;
 }

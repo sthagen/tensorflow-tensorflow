@@ -183,9 +183,9 @@ tsl::AsyncValueRef<RawSEDeviceMemory> RawSEDeviceMemory::CreateSlice(
 TrackedDeviceBuffer::TrackedDeviceBuffer(
     PjRtDevice* device, tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
     absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events)
-    : AbstractTrackedDeviceBuffer(std::move(raw_buffer)),
+    : AbstractTrackedDeviceBuffer(std::move(raw_buffer),
+                                  std::move(definition_events)),
       device_(device),
-      definition_events_(std::move(definition_events)),
       in_use_(true) {}
 
 TrackedDeviceBuffer::~TrackedDeviceBuffer() = default;
@@ -241,8 +241,9 @@ TrackedDeviceBuffer::CloneWithControlDependency(PjRtMemorySpace* memory_space,
   // definition_event_for_status must be the first one so that it blocks other
   // actions like D2H transfer from execution before the buffer is ready.
   definition_events.push_back(PjRtDeviceEventRef(definition_event_for_status));
-  definition_events.insert(definition_events.end(), definition_events_.begin(),
-                           definition_events_.end());
+  definition_events.insert(definition_events.end(),
+                           this->definition_events().begin(),
+                           this->definition_events().end());
 
   auto new_device_buffer = std::make_unique<TrackedDeviceBuffer>(
       device_, raw_buffer(), std::move(definition_events));
@@ -269,25 +270,23 @@ TrackedDeviceBuffer::CloneWithControlDependency(PjRtMemorySpace* memory_space,
 
 Future<> TrackedDeviceBuffer::GetReadyFuture(PjRtMemorySpace* memory_space) {
   auto [promise, future] = MakePromise<>();
-  std::vector<tsl::RCReference<tsl::AsyncValue>> definition_events;
-  definition_events.reserve(definition_events_.size());
-  for (const auto& event : definition_events_) {
-    definition_events.push_back(event.down_cast<BufferSequencingEvent>());
+  std::vector<tsl::RCReference<tsl::AsyncValue>> avs;
+  avs.reserve(this->definition_events().size());
+  for (const auto& event : this->definition_events()) {
+    avs.push_back(event.down_cast<BufferSequencingEvent>());
   }
   absl::Span<tsl::RCReference<tsl::AsyncValue> const> definition_events_span =
-      definition_events;
-  tsl::RunWhenReady(
-      definition_events_span,
-      [promise = std::move(promise),
-       definition_events = std::move(definition_events)]() mutable {
-        for (auto& event : definition_events) {
-          if (const absl::Status* error = event->GetErrorIfPresent()) {
-            promise.Set(*error);
-            return;
-          }
-        }
-        promise.Set();
-      });
+      avs;
+  tsl::RunWhenReady(definition_events_span, [promise = std::move(promise),
+                                             avs = std::move(avs)]() mutable {
+    for (auto& event : avs) {
+      if (const absl::Status* error = event->GetErrorIfPresent()) {
+        promise.Set(*error);
+        return;
+      }
+    }
+    promise.Set();
+  });
   return future;
 }
 
@@ -304,21 +303,12 @@ TrackedDeviceBuffer::LockUseAndTransferUsageEvents() {
   return std::move(usage_events_);
 }
 
-std::vector<tsl::RCReference<tsl::AsyncValue>>
-TrackedDeviceBuffer::GetAsyncValueDefinitionEvents() {
-  std::vector<tsl::RCReference<tsl::AsyncValue>> avs;
-  avs.reserve(definition_events_.size());
-  for (const auto& ev : definition_events_) {
-    avs.push_back(ev.down_cast<BufferSequencingEvent>());
-  }
-  return avs;
-}
 
 std::vector<tsl::RCReference<tsl::AsyncValue>>
 TrackedDeviceBuffer::GetAsyncValueDefinitionAndUsageEvents() {
   std::vector<tsl::RCReference<tsl::AsyncValue>> avs;
-  avs.reserve(definition_events_.size());
-  for (const auto& ev : definition_events_) {
+  avs.reserve(definition_events().size());
+  for (const auto& ev : definition_events()) {
     avs.push_back(ev.down_cast<BufferSequencingEvent>());
   }
   for (const auto& ev : usage_events_) {
@@ -329,12 +319,12 @@ TrackedDeviceBuffer::GetAsyncValueDefinitionAndUsageEvents() {
 
 absl::StatusOr<PjRtDeviceEventRef> TrackedDeviceBuffer::GetDefinitionEvent(
     PjRtMemorySpace* memory_space) {
-  if (definition_events_.size() != 1) {
+  if (definition_events().size() != 1) {
     return absl::InternalError(
         "GetMergedDefinitionEvent only supported on TPU for buffers with "
         "exactly 1 definition event.");
   }
-  return PjRtDeviceEventRef(definition_events_[0]);
+  return PjRtDeviceEventRef(definition_events()[0]);
 }
 
 void TrackedDeviceBuffer::AddUsageEvent(PjRtDeviceEventRef event) {
@@ -344,7 +334,7 @@ void TrackedDeviceBuffer::AddUsageEvent(PjRtDeviceEventRef event) {
 }
 
 bool TrackedDeviceBuffer::AddDefinitionEventsToSet(PjRtDeviceEventSet& events) {
-  for (const auto& e : definition_events_) {
+  for (const auto& e : definition_events()) {
     tensorflow::down_cast<PjRtStreamExecutorDeviceEventSet*>(&events)->AddEvent(
         e.down_cast<BufferSequencingEvent>());
   }

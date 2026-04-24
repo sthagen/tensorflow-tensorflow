@@ -1395,10 +1395,6 @@ cc_library(
 tf_proto_library(
     name = "kernel_reuse_cache_proto",
     srcs = ["kernel_reuse_cache.proto"],
-    deps = [
-        "//xla:xla_proto",
-        "//xla/service:hlo_proto",
-    ],
 )
 
 cc_library(
@@ -1921,9 +1917,11 @@ cc_library(
         "//xla/util/split_proto:split_proto_reader",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -2058,6 +2056,8 @@ xla_test(
     backend_tags = {
         # TODO(b/445172709): Re-enable once nvbug 5552596 is fixed.
         "b200": ["broken"],
+        "gb200": ["broken"],  # TODO(b/505574653): re-enable when fixed.
+        "gb300": ["broken"],  # TODO(b/505574653): re-enable when fixed.
     },
     backends = ["gpu"],
     use_legacy_runtime = True,
@@ -2447,6 +2447,8 @@ xla_test(
     backend_tags = {
         # TODO(b/445172709): Re-enable once fixed.
         "b200": ["broken"],
+        "gb200": ["broken"],  # TODO(b/505574653): re-enable when fixed.
+        "gb300": ["broken"],  # TODO(b/505574653): re-enable when fixed.
     },
     backends = [
         "gpu",
@@ -3376,6 +3378,7 @@ cc_library(
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor/gpu:tma_metadata",
         "//xla/tsl/concurrency:future",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",

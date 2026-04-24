@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <string>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "xla/stream_executor/device_address.h"
 #include "xla/stream_executor/kernel_args.h"
@@ -30,7 +32,19 @@ namespace xla {
 class SymmetricMemory {
  public:
   virtual ~SymmetricMemory() = default;
+
+  // Device address on the local device backing the symmetric memory.
   virtual stream_executor::DeviceAddressBase addr() const = 0;
+
+  // For platforms that support multimem (i.e. CUDA) returns a multimem address
+  // for the LSA (load/store accessible) team associated with the given
+  // symmetric memory. Return default-constructed (nullptr) address if multimem
+  // is not supported.
+  virtual absl::StatusOr<stream_executor::DeviceAddressBase> multimem_addr()
+      const {
+    return absl::UnimplementedError("Multimem not supported");
+  }
+
   virtual std::string ToString() const = 0;
 
   // A packed kernel argument type for passing symmetric memory to device

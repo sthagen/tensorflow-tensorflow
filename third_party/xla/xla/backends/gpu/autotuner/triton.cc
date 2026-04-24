@@ -251,7 +251,7 @@ absl::Status TritonBackend::ApplyConfig(HloInstruction& instr,
 
   // FromProto has validation checks, that's why we call it here.
   TF_RETURN_IF_ERROR(TritonGemmConfig::FromProto(triton_config_proto).status());
-  if (triton_config_proto.split_k() != 1) {
+  if (triton_config_proto.split_k() > 1) {
     return absl::InvalidArgumentError(
         "TritonBackend no longer supports split-k (split_k > 1).");
   }

@@ -164,8 +164,6 @@ class TrackedDeviceBuffer : public AbstractTrackedDeviceBuffer {
       absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events);
   ~TrackedDeviceBuffer() override;
 
-  std::vector<tsl::RCReference<tsl::AsyncValue>> GetAsyncValueDefinitionEvents()
-      override;
 
   std::vector<tsl::RCReference<tsl::AsyncValue>>
   GetAsyncValueDefinitionAndUsageEvents() override;
@@ -175,7 +173,7 @@ class TrackedDeviceBuffer : public AbstractTrackedDeviceBuffer {
   void Delete(PjRtMemorySpace* memory_space) override;
 
   absl::Status WaitUntilBufferReadyOnStream(std::intptr_t stream) override {
-    for (const auto& event : definition_events_) {
+    for (const auto& event : definition_events()) {
       TF_RETURN_IF_ERROR(event.down_cast<BufferSequencingEvent>()
                              ->WaitForEventOnExternalStream(stream));
     }
@@ -202,7 +200,6 @@ class TrackedDeviceBuffer : public AbstractTrackedDeviceBuffer {
   // single-stream execution case where events are not necessary for buffer
   // event sequencing. All events must be triggered before the buffers can be
   // used.
-  absl::InlinedVector<PjRtDeviceEventRef, 2> definition_events_;
 
   // in_use_ starts out true, and is set to false when the buffer is released
   // from its owning PjRtBuffer. Once in_use_ is false, the buffer may no
@@ -211,9 +208,6 @@ class TrackedDeviceBuffer : public AbstractTrackedDeviceBuffer {
   // Set of streams that the buffer has ever been used on, see comment on
   // StreamAndEvent.
   StreamAndEventContainer usage_events_;
-
-  // A callback to call when the TrackedDeviceBuffer is about to be destroyed.
-  absl::AnyInvocable<void() &&> on_delete_callback_;
 };
 
 // Waits for all of the definition events in a buffer on 'stream'.
