@@ -104,7 +104,7 @@ absl::Status SetPragma(Sqlite* db, const char* pragma,
   if (value.empty()) return absl::OkStatus();
   for (auto p = value.begin(); p < value.end(); ++p) {
     if (!(absl::ascii_isalnum(*p) || *p == '-')) {
-      return errors::InvalidArgument("Illegal pragma character");
+      return absl::InvalidArgumentError("Illegal pragma character");
     }
   }
   SqliteStatement stmt;
@@ -227,7 +227,7 @@ absl::Status SqliteStatement::StepOnce() {
   bool is_done;
   TF_RETURN_IF_ERROR(Step(&is_done));
   if (TF_PREDICT_FALSE(is_done)) {
-    return errors::Internal("No rows returned: ", sql());
+    return absl::InternalError(absl::StrCat("No rows returned: ", sql()));
   }
   return absl::OkStatus();
 }
@@ -241,7 +241,7 @@ absl::Status SqliteStatement::StepAndReset() {
   bool is_done;
   absl::Status s = Step(&is_done);
   if (TF_PREDICT_FALSE(s.ok() && !is_done)) {
-    s = errors::Internal("Unexpected row: ", sql());
+    s = absl::InternalError(absl::StrCat("Unexpected row: ", sql()));
   }
   Reset();
   return s;

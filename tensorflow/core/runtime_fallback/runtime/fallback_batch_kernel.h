@@ -143,7 +143,7 @@ void BatchFunctionFallbackKernel<BatchResourceType>::ComputeAsync(
                     BatchResourceType::GetClientGraphResourceContext(c));
   OP_REQUIRES_ASYNC(
       c, client_graph_resource_context != nullptr,
-      errors::FailedPrecondition("client graph resource context not found"),
+      absl::FailedPreconditionError("client graph resource context not found"),
       done);
   std::function<
       absl::StatusOr<tensorflow::core::RefCountPtr<BatchResourceType>>()>

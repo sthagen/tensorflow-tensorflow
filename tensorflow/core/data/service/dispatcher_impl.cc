@@ -764,7 +764,7 @@ absl::Status DataServiceDispatcherImpl::MaybeRemoveTask(
     auto& remover_ref = remove_task_requests_[task->task_id];
     if (remover_ref == nullptr) {
       if (!task->iteration->IsRoundRobin()) {
-        return errors::FailedPrecondition(
+        return absl::FailedPreconditionError(
             "MaybeRemoveTask called on a non-round-robin task.");
       }
       remover_ref = std::make_shared<TaskRemover>(
@@ -848,9 +848,9 @@ absl::Status DataServiceDispatcherImpl::ValidateMatchingJob(
   }
 
   if (!diff.empty()) {
-    return errors::InvalidArgument(
+    return absl::InvalidArgumentError(absl::StrCat(
         "Tried to create job with name ", job->job_name,
-        ", but found an existing job with different parameters: ", diff);
+        ", but found an existing job with different parameters: ", diff));
   }
   return absl::OkStatus();
 }
