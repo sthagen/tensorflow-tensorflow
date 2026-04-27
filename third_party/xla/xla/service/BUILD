@@ -2450,6 +2450,7 @@ xla_cc_test(
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/hlo/testlib:test",
         "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/platform:statusor",
     ],
 )
 

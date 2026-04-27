@@ -87,7 +87,7 @@ TensorShardingPerValueAttr getFuncResultShardings(
 }
 
 ManualAxesAttr getManualAxesAttr(FuncOp funcOp) {
-  return funcOp->getAttrOfType<ManualAxesAttr>(kManualAxes);
+  return funcOp->getAttrOfType<ManualAxesAttr>(mlir::sdy::kFuncManualAxes);
 }
 
 ComputationKey getComputationKey(FuncOp funcOp, const SymbolTable& symbolTable,
@@ -186,7 +186,7 @@ class UnflattenCallGraphPass
 
     moduleOp.walk([&](FuncOp funcOp) {
       funcOp->removeAttr(mlir::sdy::kOriginalFuncName);
-      funcOp->removeAttr(kManualAxes);
+      funcOp->removeAttr(mlir::sdy::kFuncManualAxes);
     });
   }
 

@@ -981,18 +981,6 @@ absl::StatusOr<bool> RunOnComputation(
 
 }  // namespace
 
-bool ShouldTritonHandleGEMM(HloDotInstruction& dot,
-                            const se::GpuComputeCapability& gpu_version) {
-  if (!EnsureTritonSupportsComputeCapability(gpu_version).ok()) {
-    return false;
-  }
-  std::vector<HloInstruction*> fusion_inputs;
-  HloComputation::Builder builder("disposable");
-  return CreateDotFusion(dot, gpu_version, builder, fusion_inputs,
-                         /*fusion_output_ptr=*/nullptr)
-      ->WantToFuse();
-}
-
 absl::StatusOr<bool> GemmFusion::RunImpl(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {

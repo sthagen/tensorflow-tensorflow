@@ -4293,7 +4293,7 @@ ENTRY entry {
   EXPECT_THAT(root, AllOf(op::Transpose(param0), op::Shape("f32[19,4,4,38]")));
 }
 
-TEST_P(SpmdPartitioningTest, NonShardableTranspose) {
+TEST_P(SpmdPartitioningAllShardingTest, NonShardableTranspose) {
   absl::string_view hlo_string = R"(
 HloModule module
 
@@ -10906,7 +10906,8 @@ ENTRY entry {
                 .flattened_replica_groups());
 }
 
-TEST_P(SpmdPartitioningTest, PartialReplicateToTileReshardUnevenPartition) {
+TEST_P(SpmdPartitioningAllShardingTest,
+       PartialReplicateToTileReshardUnevenPartition) {
   absl::string_view hlo_string = R"(
 HloModule module
 
@@ -11237,7 +11238,7 @@ ENTRY entry {
                           op::Shape("f32[5,1,1,512]")));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithBathGroupCountOutputAlignWithLHS) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -11273,7 +11274,7 @@ ENTRY entry {
                           op::Shape("f32[3,1,1,1024]")));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithBathGroupCountOutputAlignWithRHS) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -11508,7 +11509,7 @@ ENTRY entry {
                           op::Shape("f32[5,4,8]")));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithFeatureGroupCountAlignWithOutputPartial) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -11569,7 +11570,7 @@ ENTRY entry {
                           op::Shape("f32[16,801,1,512]")));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithFeatureGroupCountLHSAlignWithRHS) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -11607,7 +11608,7 @@ ENTRY entry {
                           op::Shape("f32[16,801,1,512]")));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithFeatureGroupCountAlignOuputWithLHS) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -11834,7 +11835,7 @@ ENTRY main.4 {
                           PartitionComputation(hlo_string, /*num_devices=*/2));
 }
 
-TEST_P(SpmdPartitioningTest,
+TEST_P(SpmdPartitioningAllShardingTest,
        PartitionConvWithFeatureGroupCountAlignOuputWithRHS) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -17802,6 +17803,90 @@ ENTRY entry {
   EXPECT_EQ(root->operand(0)->opcode(), HloOpcode::kDynamicSlice);
   EXPECT_EQ(root->operand(0)->shape().dimensions(0), 64);
   EXPECT_EQ(root->operand(0)->shape().dimensions(1), 32);
+}
+
+TEST_F(SpmdPartitioningV3Test, ReshardPartialReplicateWithAllToAll) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %param = f32[128,64] parameter(0), sharding={mesh['x'=2,'y'=2] [{'x', 'y'}, {}]}
+  ROOT %copy = f32[128,64] copy(%param), sharding={mesh['x'=2,'y'=2] [{'x'}, {'y'}]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Copy(op::Reshape(op::Reshape(op::Transpose(op::AllToAll(
+                        op::Reshape(op::Reshape(op::Parameter(0)))))))));
+}
+
+TEST_F(SpmdPartitioningV3Test, ReshardPartialReplicateWithAllToAllMultiAxis) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %param = f32[128,64] parameter(0), sharding={mesh['x'=2,'y'=2,'z'=2] [{'x', 'y'}, {'z'}]}
+  ROOT %copy = f32[128,64] copy(%param), sharding={mesh['x'=2,'y'=2,'z'=2] [{'x'}, {'y', 'z'}]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/8));
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Copy(op::CollectivePermute(op::Reshape(op::Transpose(
+                        op::AllToAll(op::Reshape(op::Parameter(0))))))));
+}
+
+TEST_F(SpmdPartitioningV3Test, ReshardPartialReplicateWithAllToAllSubAxis) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %param = f32[128,64] parameter(0), sharding={mesh['x'=8] [{'x':(1)2, 'x':(4)2}, {}]}
+  ROOT %copy = f32[128,64] copy(%param), sharding={mesh['x'=8] [{'x':(1)2}, {'x':(4)2}]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/8));
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Copy(op::Reshape(op::Reshape(op::Transpose(op::AllToAll(
+                        op::Reshape(op::Reshape(op::Parameter(0)))))))));
+}
+
+TEST_F(SpmdPartitioningV3Test, ReshardPartialReplicateWithCollectivePermute) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %param = f32[128,64] parameter(0), sharding={mesh['x'=2,'y'=2] [{'x'}, {'y'}]}
+  ROOT %copy = f32[128,64] copy(%param), sharding={mesh['x'=2,'y'=2] [{'y'}, {'x'}]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Copy(op::CollectivePermute(op::Parameter(0))));
+}
+
+TEST_F(SpmdPartitioningV3Test,
+       ReshardPartialReplicateWithCollectivePermuteSubAxis) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  %param = f32[128,64] parameter(0), sharding={mesh['x'=4] [{'x':(1)2}, {'x':(2)2}]}
+  ROOT %copy = f32[128,64] copy(%param), sharding={mesh['x'=4] [{'x':(2)2}, {'x':(1)2}]}
+})";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
+
+  const auto root = module->entry_computation()->root_instruction();
+  EXPECT_THAT(root, op::Copy(op::CollectivePermute(op::Parameter(0))));
 }
 
 }  // namespace
