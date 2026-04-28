@@ -58,7 +58,6 @@ limitations under the License.
 #include "xla/stream_executor/activate_context.h"
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/command_buffer.h"
-#include "xla/stream_executor/cuda/cuda_collective_allocator.h"
 #include "xla/stream_executor/cuda/cuda_command_buffer.h"
 #include "xla/stream_executor/cuda/cuda_compute_capability.h"
 #include "xla/stream_executor/cuda/cuda_context.h"
@@ -845,7 +844,6 @@ CudaExecutor::CreateMemoryAllocator(MemorySpace type) {
   }
 
   if (type == MemorySpace::kCollective) {
-    // TODO(469289220): Use NCCL/NVSHMEM memory allocator here instead.
     return std::make_unique<GenericMemoryAllocator>(
         [this](uint64_t size)
             -> absl::StatusOr<std::unique_ptr<MemoryAllocation>> {

@@ -879,6 +879,7 @@ void HloComputation::Cleanup() {
 }
 
 void HloComputation::CanonicalizeLocalIds() {
+  Cleanup();
   auto post_order = MakeInstructionPostOrder();
   std::vector<HloInstructionInfo> new_instructions;
   new_instructions.reserve(post_order.size());

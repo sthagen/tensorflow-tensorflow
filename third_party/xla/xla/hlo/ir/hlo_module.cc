@@ -1199,7 +1199,13 @@ void HloModule::CleanupComputations() {
 
 void HloModule::CanonicalizeComputationLocalIds() {
   for (auto* computation : computations()) {
+    if (computation == nullptr) {
+      continue;
+    }
     computation->CanonicalizeLocalIds();
+    if (has_schedule() && schedule().is_computation_scheduled(computation)) {
+      schedule().GetOrCreateSequence(computation).update_id_sequence();
+    }
   }
 }
 

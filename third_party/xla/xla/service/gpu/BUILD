@@ -1697,7 +1697,6 @@ cc_library(
         "//xla/backends/gpu/transforms:hoist_fused_bitcasts",
         "//xla/backends/gpu/transforms:layout_assignment",
         "//xla/backends/gpu/transforms:move_copy_to_users",
-        "//xla/backends/gpu/transforms:onehot_rewriter",
         "//xla/backends/gpu/transforms:ragged_all_to_all_canonicalizer",
         "//xla/backends/gpu/transforms:ragged_all_to_all_decomposer",
         "//xla/backends/gpu/transforms:ragged_all_to_all_multi_host_decomposer",

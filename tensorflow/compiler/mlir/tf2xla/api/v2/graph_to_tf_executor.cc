@@ -153,7 +153,7 @@ void LoadImporterDialects(mlir::MLIRContext& context) {
   mlir::DialectRegistry registry;
   mlir::RegisterAllTensorFlowDialectsImpl(registry, false);
   context.appendDialectRegistry(registry);
-  for (llvm::StringRef name : registry.getDialectNames())
+  for (llvm::StringRef name : registry.getRegisteredDialectNames())
     context.getOrLoadDialect(name);
 }
 

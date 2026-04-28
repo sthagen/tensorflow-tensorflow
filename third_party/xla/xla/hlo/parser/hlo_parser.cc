@@ -2285,6 +2285,10 @@ HloInstruction* HloParserImpl::CreateInstruction(  // NOLINT
           !ParseAttributes(attrs, allow_attributes, shape)) {
         return nullptr;
       }
+      if (operands.empty()) {
+        TokenError("DynamicReshape requires at least one operand.");
+        return nullptr;
+      }
       return builder->AddInstruction(HloInstruction::CreateDynamicReshape(
           *shape, operands[0],
           absl::Span<HloInstruction* const>(operands).subspan(1)));

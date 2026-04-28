@@ -199,7 +199,7 @@ class UnflattenCallGraphPass
   }
 
   void getDependentDialects(mlir::DialectRegistry& registry) const final {
-    registry.insert<SdyDialect, mlir::mhlo::MhloDialect>();
+    registry.insert<SdyDialect>();
   }
 
   Option<bool> dedupFunctionsFully{

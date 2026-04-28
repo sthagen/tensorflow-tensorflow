@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Support/TypeID.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tfrt/transforms/passes.h"
+#include "tensorflow/core/platform/cpu_info.h"
 
 namespace tensorflow {
 namespace tfrt_compiler {
@@ -127,26 +128,8 @@ class ReconfigBatchOpPass
       if (batch_queue_global_prioritization_num_threads_ > 0) {
         batch_op.setNumBatchThreads(
             batch_queue_global_prioritization_num_threads_);
-        batch_op.setMixedPriorityPolicy("priority_merge");
-
-        // Default queue options for the low priority queue will be copied from
-        // the high priority queue if the model doesn't explicitly set low
-        // priority queue options.
-        if (batch_op.getLowPriorityMaxBatchSize() == 0) {
-          batch_op.setLowPriorityMaxBatchSize(batch_op.getMaxBatchSize());
-        }
-        if (batch_op.getLowPriorityBatchTimeoutMicros() == 0) {
-          batch_op.setLowPriorityBatchTimeoutMicros(
-              batch_op.getBatchTimeoutMicros());
-        }
-        if (batch_op.getLowPriorityAllowedBatchSizes().empty()) {
-          batch_op.setLowPriorityAllowedBatchSizesAttr(
-              batch_op.getAllowedBatchSizes());
-        }
-        if (batch_op.getLowPriorityMaxEnqueuedBatches() == 0) {
-          batch_op.setLowPriorityMaxEnqueuedBatches(
-              batch_op.getMaxEnqueuedBatches());
-        }
+        batch_op.setNumWarmupBatchThreads(port::MaxParallelism());
+        batch_op.setEnablePriorityAwareBatchScheduler(true);
       }
       if (enable_priority_aware_batch_scheduler_) {
         batch_op.setEnablePriorityAwareBatchScheduler(true);

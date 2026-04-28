@@ -4425,6 +4425,19 @@ TEST_F(HloParserTest, ParseReplicaGroupsMaximalMeshError) {
               HasSubstr("must have more than one device per group"));
 }
 
+TEST_F(HloParserTest, ParseDynamicReshapeMissingOperands) {
+  const std::string original = R"(
+HloModule test_module
+ENTRY %test_entry () -> f32[10,20] {
+  ROOT %dynamic-reshape = f32[10,20]{1,0} dynamic-reshape()
+}
+)";
+  auto status = ParseAndReturnVerifiedModule(original).status();
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("DynamicReshape requires at least one operand."));
+}
+
 TEST_F(HloParserTest, ParseCollectiveDeviceListV1) {
   const std::string original = "{{0,1},{2,3}}";
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<CollectiveDeviceListBase> device_list,

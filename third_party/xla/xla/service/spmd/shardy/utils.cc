@@ -24,6 +24,7 @@ limitations under the License.
 #include "mhlo/IR/register.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -286,7 +287,7 @@ bool isPythonCallbackCustomCall(mlir::stablehlo::CustomCallOp op) {
          targetName == kFFIPythonGpuCallbackCustomCallTargetName;
 }
 
-std::string duplicateShardingsAtIndices(
+absl::StatusOr<std::string> duplicateShardingsAtIndices(
     mlir::StringRef shardingsFrontendAttr,
     const llvm::BitVector& indicesToDuplicate) {
   auto context = std::make_unique<mlir::MLIRContext>(
@@ -294,7 +295,9 @@ std::string duplicateShardingsAtIndices(
   context->loadDialect<mlir::sdy::SdyDialect>();
   auto shardingPerValue = parseStringAttr<TensorShardingPerValueAttr>(
       shardingsFrontendAttr, context.get());
-  CHECK(shardingPerValue);
+  if (!shardingPerValue) {
+    return absl::InvalidArgumentError("Failed to parse sharding");
+  }
   SmallVector<TensorShardingAttr> newShardings;
   newShardings.reserve(shardingPerValue.size());
   for (auto [index, sharding] :
@@ -542,19 +545,19 @@ mlir::sdy::TensorShardingPerValueAttr convertToSdySharding(
       context, convertToSdyShardingAttr(hloSharding, context));
 }
 
-bool isManualComputation(CallOp callOp) {
-  return callOp.getCallee().contains(kManualComputationFuncName);
+bool isManualComputation(CallOp callOp, bool isInlineable) {
+  return callOp.getCallee().contains(isInlineable
+                                         ? kInlineableManualComputationFuncName
+                                         : kManualComputationFuncName);
 }
 
-bool isManualComputation(FuncOp funcOp) {
-  return funcOp.getName().contains(kManualComputationFuncName);
+bool isManualComputation(FuncOp funcOp, bool isInlineable) {
+  return funcOp.getName().contains(isInlineable
+                                       ? kInlineableManualComputationFuncName
+                                       : kManualComputationFuncName);
 }
 
 namespace {
-mlir::sdy::ManualAxesAttr getManualAxes(CallOp callOp) {
-  return callOp->getAttrOfType<mlir::sdy::ManualAxesAttr>(kManualAxes);
-}
-
 // Returns the first non-maximal mesh on the given shardings, if there is
 // one. Otherwise returns `nullptr`.
 mlir::Attribute getMeshOrRef(
@@ -603,13 +606,9 @@ void insertReshardsOnFuncArguments(FuncOp funcOp, CallOp callOp,
   for (auto [funcArgSharding, operand] : llvm::zip_equal(
            funcArgShardings.getShardings(), callOp->getOpOperands())) {
     if (!funcArgSharding.isEquivalent(getSharding(operand.get()))) {
-      auto copyOp = mlir::mhlo::CopyOp::create(rewriter, operand.get().getLoc(),
-                                               operand.get());
-      if (mlir::sdy::ManualAxesAttr manualAxes = getManualAxes(callOp)) {
-        copyOp->setAttr(kManualAxes, manualAxes);
-      }
-      mlir::sdy::setShardings(copyOp, funcArgSharding);
-      operand.set(copyOp);
+      auto reshardOp = mlir::sdy::ReshardOp::create(
+          rewriter, operand.get().getLoc(), operand.get(), funcArgSharding);
+      operand.set(reshardOp);
     }
   }
 }
@@ -623,17 +622,13 @@ void insertReshardsOnFuncResults(TensorShardingPerValueAttr funcResultShardings,
         mlir::sdy::getSharding(result);
     if (!funcResultSharding.isEquivalent(callResultSharding)) {
       rewriter.setInsertionPointAfterValue(result);
-      auto copyOp =
-          mlir::mhlo::CopyOp::create(rewriter, result.getLoc(), result);
-      if (mlir::sdy::ManualAxesAttr manualAxes = getManualAxes(callOp)) {
-        copyOp->setAttr(kManualAxes, manualAxes);
-      }
-      mlir::sdy::setShardings(
-          copyOp, callResultSharding
-                      ? callResultSharding
-                      : mlir::sdy::TensorShardingAttr::getFullyClosedLike(
-                            funcResultSharding));
-      rewriter.replaceAllUsesExcept(result, copyOp, copyOp);
+      auto reshardOp = mlir::sdy::ReshardOp::create(
+          rewriter, result.getLoc(), result,
+          callResultSharding
+              ? callResultSharding
+              : mlir::sdy::TensorShardingAttr::getFullyClosedLike(
+                    funcResultSharding));
+      rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
     }
   }
   mlir::sdy::setShardings(callOp, funcResultShardings);

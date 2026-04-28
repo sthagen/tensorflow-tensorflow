@@ -31,6 +31,10 @@ namespace sdy {
 
 void addStablehloExportPipeline(mlir::OpPassManager& pm,
                                 const StablehloExportPipelineOptions& options) {
+  if (!options.keepHloShardingConstraints) {
+    pm.addPass(createUnflattenCallGraphPass(options.dedupFunctionsFully));
+    pm.addPass(mlir::createSymbolDCEPass());
+  }
   pm.addPass(createStablehloExportManualReductionCollectivesPass());
   // This pass converts `sdy.constant` (which isn't foldable) into
   // `stablehlo.constant` (which is foldable), therefore greedy pattern
@@ -39,9 +43,6 @@ void addStablehloExportPipeline(mlir::OpPassManager& pm,
   pm.addPass(createExportOpsPass(options.keepHloShardingConstraints));
   pm.addPass(createStablehloRoundTripShardMapExportPass(
       options.keepHloShardingConstraints));
-  if (!options.keepHloShardingConstraints) {
-    pm.addPass(createUnflattenCallGraphPass(options.dedupFunctionsFully));
-  }
   pm.addPass(mlir::createSymbolDCEPass());
   // If we don't add a sharding to a control flow op without one,
   // StableHLO -> HLO conversion won't add a sharding for that op even if a

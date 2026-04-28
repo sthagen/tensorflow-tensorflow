@@ -91,7 +91,6 @@ void addSdyRoundTripImportPipeline(mlir::OpPassManager& pm,
       mlir::stablehlo_ext::createStablehloCanonicalizeFromHloImportPass());
   pm.addPass(createSdyRoundTripImportShardyAttrsPass(enableHloShardingV3));
   pm.addPass(createSdyRoundTripShardMapImportPass());
-  pm.addPass(mlir::sdy::createFlattenCallGraphPass());
   pm.addPass(createImportSdyCustomCallsPass());
   pm.addNestedPass<FuncOp>(createOpenWhileFreeVarsShardingPass());
   if (enableHloShardingV3 || liftAndDedupMeshes) {
@@ -110,6 +109,7 @@ void addSdyRoundTripImportPipeline(mlir::OpPassManager& pm,
           .setRegionSimplificationLevel(mlir::GreedySimplifyRegionLevel::Normal)
           .enableFolding(false)
           .enableConstantCSE(false)));
+  pm.addPass(mlir::sdy::createFlattenCallGraphPass());
 }
 
 namespace {

@@ -4234,7 +4234,9 @@ LogicalResult ExportXlaOp(ScanOp op, OpLoweringContext ctx) {
                 op.getIsReverse(), is_associative);
 
   for (int i = 0; i < op.getNumResults(); ++i) {
-    value_map[op.getResult(i)] = xla::GetTupleElement(result, i);
+    if (!op.getResult(i).use_empty()) {
+      value_map[op.getResult(i)] = xla::GetTupleElement(result, i);
+    }
   }
   return success();
 }
