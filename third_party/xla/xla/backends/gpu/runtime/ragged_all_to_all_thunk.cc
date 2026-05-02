@@ -743,7 +743,7 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
   // 2. Execution of RunRaggedAllToAllKernel
   const int64_t num_updates_per_replica = num_total_updates / num_ranks;
 
-  TF_RETURN_IF_ERROR(RunRaggedAllToAllKernel(
+  TF_RETURN_IF_ERROR(RunRaggedAllToAllWithSymmetricMemoryKernel(
       &stream, element_type, input_buffer,
       output_temporary_symmetric_memory.get(), buffers[2].source_buffer,
       buffers[3].source_buffer, buffers[4].source_buffer, num_ranks,

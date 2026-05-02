@@ -34,6 +34,7 @@ limitations under the License.
 #include "xla/codegen/tiling/experimental/tiling_space.h"
 #include "xla/hlo/analysis/indexing_test_utils.h"
 #include "xla/hlo/analysis/symbolic_expr.h"
+#include "xla/hlo/analysis/symbolic_map.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/testlib/verified_hlo_module.h"
@@ -464,7 +465,7 @@ TEST_F(TilePropagationTest, CanPropagateThroughBitcastTransposeOp) {
   )"));
 }
 
-TEST_F(TilePropagationTest, CanPropagateThroughBitcastReshapeOp) {
+TEST_F(TilePropagationTest, CanNotPropagateThroughBitcastReshapeOp) {
   HloInstruction* root = ParseAndGetRoot(R"(
     HloModule m
     ENTRY e {
@@ -478,6 +479,22 @@ TEST_F(TilePropagationTest, CanPropagateThroughBitcastReshapeOp) {
                   *tiling_space, *root,
                   GetTestTile(*tiling_space, root->shape().dimensions()), 0),
               StatusIs(absl::StatusCode::kUnimplemented));
+  EXPECT_THAT(PropagateTileToInput(
+                  *tiling_space, *root,
+                  GetTestTile(*tiling_space, root->shape().dimensions()), 0),
+              StatusIs(absl::StatusCode::kUnimplemented));
+}
+
+TEST_F(TilePropagationTest, CanNotPropagateThroughBitcastTrtInput) {
+  HloInstruction* root = ParseAndGetRoot(R"(
+    HloModule m
+    ENTRY e {
+      p0 = bf16[16, 4096, 8, 256]{3, 2, 1, 0} parameter(0)
+      ROOT bitcast = bf16[16, 2048, 4096]{1, 2, 0} bitcast(p0)
+    }
+  )");
+  auto tiling_space = TilingSpace::Create(
+      *HloFusionAdaptor::ForInstruction(root), &mlir_context_);
   EXPECT_THAT(PropagateTileToInput(
                   *tiling_space, *root,
                   GetTestTile(*tiling_space, root->shape().dimensions()), 0),
@@ -619,7 +636,7 @@ TEST_F(TilePropagationTest,
 }
 
 TEST_F(TilePropagationTest,
-       CanPropagateToInputsOfConcatenateOpWithNonConstantUpperBound) {
+       CanNotPropagateToInputsOfConcatenateOpWithNonConstantUpperBound) {
   HloInstruction* root = ParseAndGetRoot(R"(
     HloModule m
     ENTRY e {

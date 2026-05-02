@@ -2177,6 +2177,41 @@ absl::StatusOr<mlir::Operation*> HloFunctionImporter::ImportInstructionImpl(
       // instruction. If dimensions are non-default, the XLA builder
       // implements it as a separate transpose.
       NO_ATTRIBUTE_CASE(kReshape, ReshapeOp);
+    case HloOpcode::kDynamicReshape: {
+      mlir::Value output_shape;
+      llvm::SmallVector<mlir::Value, 4> size_tensors;
+      if (operands.size() <= 1) {
+        return InvalidArgument(
+            "DynamicReshape requires at least two operands.");
+      }
+      for (size_t i = 1; i < operands.size(); ++i) {
+        auto size_type =
+            mlir::dyn_cast<mlir::RankedTensorType>(operands[i].getType());
+        if (size_type && size_type.getRank() == 0) {
+          auto new_type =
+              mlir::RankedTensorType::get({1}, size_type.getElementType());
+          auto reshape_op = mlir::stablehlo::ReshapeOp::create(
+              *func_builder, loc, new_type, operands[i]);
+          size_tensors.push_back(reshape_op.getResult());
+        } else {
+          size_tensors.push_back(operands[i]);
+        }
+      }
+      // Build output shape tensor by concatenating the size tensors.
+      // All size tensors are guaranteed to have the same element type.
+      auto element_type =
+          mlir::cast<mlir::ShapedType>(size_tensors[0].getType())
+              .getElementType();
+      auto concat_type = mlir::RankedTensorType::get(
+          {static_cast<int64_t>(size_tensors.size())}, element_type);
+      output_shape = mlir::stablehlo::ConcatenateOp::create(
+          *func_builder, loc, concat_type, size_tensors,
+          builder_->getI64IntegerAttr(0));
+
+      return mlir::stablehlo::DynamicReshapeOp::create(
+                 *func_builder, loc, result_type, operands[0], output_shape)
+          .getOperation();
+    }
       NO_ATTRIBUTE_CASE(kRoundNearestAfz, RoundOp);
       NO_ATTRIBUTE_CASE(kRoundNearestEven, RoundNearestEvenOp);
       NO_ATTRIBUTE_CASE(kSelect, SelectOp);

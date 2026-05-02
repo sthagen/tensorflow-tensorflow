@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/triton/support_legacy.h"
 
 #include <cstdint>
-#include <iterator>
 #include <vector>
 
 #include "absl/algorithm/container.h"

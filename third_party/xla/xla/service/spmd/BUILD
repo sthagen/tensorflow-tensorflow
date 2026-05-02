@@ -441,6 +441,7 @@ xla_cc_test(
     srcs = ["spmd_partitioner_util_test.cc"],
     deps = [
         ":spmd_partitioner",
+        "//xla:array",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:mesh_and_axis",
         "//xla/hlo/ir:named_sharding",

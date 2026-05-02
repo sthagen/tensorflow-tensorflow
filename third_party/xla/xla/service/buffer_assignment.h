@@ -796,8 +796,6 @@ class BufferAssigner {
     };
   }
 
-  // Returns false if a buffer cannot be assigned to given allocation.
-
   // Build and return a BufferAssignment for the given module. The given
   // HloOrdering is used to determine buffer liveness. buffer_size and
   // color_alignment are functions which returns the size and alignment of a

@@ -395,6 +395,8 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
+        "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu:ir_emission_utils",
         "//xla/stream_executor:device_description",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",

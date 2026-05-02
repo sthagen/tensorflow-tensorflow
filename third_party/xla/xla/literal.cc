@@ -1486,7 +1486,7 @@ absl::Status MutableLiteralBase::SetFromDouble(
     absl::Span<const int64_t> multi_index, double value) {
   CHECK(shape().IsArray());
   if (!primitive_util::IsFloatingPointType(shape().element_type())) {
-    return FailedPrecondition("Array element type is not integral: %s",
+    return FailedPrecondition("Array element type is not floating point: %s",
                               PrimitiveType_Name(shape().element_type()));
   }
   primitive_util::FloatingPointTypeSwitch(

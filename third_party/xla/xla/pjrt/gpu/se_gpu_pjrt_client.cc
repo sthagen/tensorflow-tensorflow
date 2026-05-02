@@ -593,8 +593,8 @@ void FulfillDeviceEvent(PjRtStreamExecutorClient* client,
     client->SetEventAsError(device_event, status);
     return;
   }
-  absl::Status s =
-      client->AllocateAndRecordEvent(device_event, local_device_state, stream);
+  absl::Status s = client->AllocateAndRecordEvent(
+      device_event, local_device_state, stream, "CrossHostTransferBuffers");
   if (!s.ok()) {
     client->SetEventAsError(device_event, s);
   }
@@ -697,7 +697,7 @@ StreamExecutorGpuClient::CrossHostSendBuffers(
     TF_RETURN_IF_ERROR(
         tensorflow::down_cast<CommonPjRtBufferImpl*>(buffers[i])
             ->AcquireScopedRawBuffer(
-                [&](tsl::RCReference<CommonPjRtRawBuffer> buf_raw_buffer,
+                [&](PjRtRawBufferRef buf_raw_buffer,
                     std::vector<tsl::RCReference<tsl::AsyncValue>>
                         buf_definition_events) mutable
                     -> absl::StatusOr<PjRtDeviceEventRef> {
@@ -1004,7 +1004,7 @@ StreamExecutorGpuClient::PrepareReceiveBuffer(PjRtDevice* device, Shape shape) {
 
   // Allocate an uninitialized buffer. The buffer will be populated with data
   // received from the sending process.
-  TF_ASSIGN_OR_RETURN(tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+  TF_ASSIGN_OR_RETURN(PjRtRawBufferRef raw_buffer,
                       AllocateRawBuffer(memory_space, on_device_bytes_count,
                                         /*retry_on_oom=*/true,
                                         /*allocate_after=*/{}));
@@ -1103,7 +1103,7 @@ StreamExecutorGpuClient::CrossHostReceiveBuffers(
               shapes[i].has_layout() ? &shapes[i].layout() : nullptr));
       TF_ASSIGN_OR_RETURN(size_t on_device_bytes_count,
                           GetOnDeviceBytesCount(memory_space, on_device_shape));
-      TF_ASSIGN_OR_RETURN(tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+      TF_ASSIGN_OR_RETURN(PjRtRawBufferRef raw_buffer,
                           AllocateRawBuffer(memory_space, on_device_bytes_count,
                                             /*retry_on_oom=*/true,
                                             /*allocate_after=*/{}));
@@ -1238,8 +1238,7 @@ StreamExecutorGpuClient::CrossHostReceiveBuffers(
 
 // Send functionality for original cross-host transfers API.
 void StreamExecutorGpuClient::ScheduleRemoteSend(
-    PjRtMemorySpace* memory_space,
-    tsl::RCReference<CommonPjRtRawBuffer> raw_buffer,
+    PjRtMemorySpace* memory_space, PjRtRawBufferRef raw_buffer,
     std::vector<tsl::RCReference<tsl::AsyncValue>> definition_events,
     tsl::RCReference<PjRtDeviceEventPromise> usage_event_promise,
     Future<std::string> serialized_descriptor,
@@ -1313,8 +1312,8 @@ void StreamExecutorGpuClient::ScheduleRemoteSend(
                     gpu::GpuCollectives::On(*stream));
                 TF_RETURN_IF_ERROR(send_future.Await());
 
-                TF_RETURN_IF_ERROR(
-                    AllocateAndRecordEvent(usage_event, local_device, stream));
+                TF_RETURN_IF_ERROR(AllocateAndRecordEvent(
+                    usage_event, local_device, stream, "CrossHostSendBuffers"));
 
                 return absl::OkStatus();
               }();
@@ -1404,8 +1403,9 @@ StreamExecutorGpuClient::MakeCrossHostReceiveBuffers(
       definition_event.AndThen([mem]() {});
 
       // Set definition event.
-      TF_RETURN_IF_ERROR(
-          AllocateAndRecordEvent(definition_event, local_device, stream));
+      TF_RETURN_IF_ERROR(AllocateAndRecordEvent(definition_event, local_device,
+                                                stream,
+                                                "MakeCrossHostReceiveBuffers"));
 
       return absl::OkStatus();
     };
@@ -1834,6 +1834,7 @@ absl::StatusOr<DeviceTopologyPair> BuildDistributedDevices(
         int process_id = i * sizes.num_hosts_per_partition + j;
         local_topologies[process_id].set_process_id(process_id);
         local_topologies[process_id].set_boot_id(absl::StrCat(i));
+        local_topologies[process_id].set_partition_index(i);
       }
     }
     TF_ASSIGN_OR_RETURN(global_topology,
@@ -2216,8 +2217,8 @@ static absl::Status CheckAlignment(const BufferAllocation& allocation,
 absl::StatusOr<PjRtStreamExecutorExecutionOutput>
 StreamExecutorGpuClient::RunAsync(
     LocalExecutable& exec, PjRtDevice* device,
-    absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> flat_arguments,
-    absl::Span<const tsl::RCReference<CommonPjRtRawBuffer>> results,
+    absl::Span<const PjRtRawBufferRef> flat_arguments,
+    absl::Span<const PjRtRawBufferRef> results,
     ExecutableRunOptions run_options_inp, bool parameter_is_tupled_arguments,
     absl::Span<const Shape> executable_parameter_shapes) {
 #if defined(GOOGLE_CUDA) || defined(TENSORFLOW_USE_ROCM)

@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/types/span.h"
 #include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/STLExtras.h"
@@ -137,6 +138,7 @@ absl::StatusOr<Tiles> PropagateTileToInputForConcatenateOp(
   for (const HloInstruction* operand : concatenate.operands()) {
     SmallVector<DimTile> dim_tiles(output_tile.dim_tiles());
     dim_tiles[concat_dim].offset = dim_tiles[concat_dim].offset - offset;
+    CHECK_LT(concat_dim, operand->shape().dimensions().size());
     int64_t operand_dim_size = operand->shape().dimensions(concat_dim);
 
     dim_tiles[concat_dim].upper_bound = CreateSymbolicConstant(
@@ -159,6 +161,7 @@ Tiles PropagateTileToOutputForConcatenateOp(
 
   int64_t output_offset = 0;
   for (int i = 0; i < input_index; ++i) {
+    CHECK_LT(concat_dim, concatenate.operand(i)->shape().dimensions().size());
     output_offset += concatenate.operand(i)->shape().dimensions(concat_dim);
   }
 
@@ -410,7 +413,9 @@ Tile ComputeTileForScale(const Shape& scale_shape, const Shape& operand_shape,
   scale_dim_tiles.reserve(scale_shape.dimensions().size());
   for (auto [dim, operand_dim_tile] :
        llvm::enumerate(operand_tile.dim_tiles())) {
+    CHECK_LT(dim, scale_shape.dimensions().size());
     const int64_t scale_dim_size = scale_shape.dimensions(dim);
+    CHECK_LT(dim, operand_shape.dimensions().size());
     const int64_t operand_dim_size = operand_shape.dimensions(dim);
     if (scale_dim_size == operand_dim_size) {
       scale_dim_tiles.push_back(operand_dim_tile);
@@ -521,6 +526,7 @@ SmallVector<int64_t> GetNonTrivialDimIds(const Shape& shape,
                                          const DimensionRange& range) {
   SmallVector<int64_t> result;
   for (int64_t i = range.start; i <= range.end(); ++i) {
+    CHECK_LT(i, shape.dimensions().size());
     if (shape.dimensions(i) > 1) {
       result.push_back(i);
     }
@@ -603,6 +609,10 @@ absl::Status PropagateTileThroughMinimalReshape(
     case MinimalReshapeCategory::kIncreaseRank:
     case MinimalReshapeCategory::kDecreaseRank: {
       for (auto [source_id, target_id] : llvm::zip(source_ids, target_ids)) {
+        CHECK_LT(source_id, source_tile.num_dim_tiles())
+            << absl::StrCat("Source dimension index ", source_id,
+                            " out of bounds for tile with ",
+                            source_tile.num_dim_tiles(), " dimensions");
         target_dim_tiles[target_id] = source_tile.dim_tiles()[source_id];
       }
       return absl::OkStatus();
@@ -622,9 +632,20 @@ absl::Status PropagateTileThroughMinimalReshape(
             target_ids.size()));
       }
 
-      auto source_tiles = llvm::to_vector(llvm::map_range(
+      if (!source_ids.empty()) {
+        int64_t max_source_id = *absl::c_max_element(source_ids);
+        CHECK_LT(max_source_id, source_tile.num_dim_tiles())
+            << absl::StrCat("Source dimension index ", max_source_id,
+                            " out of bounds for tile with ",
+                            source_tile.num_dim_tiles(), " dimensions");
+        CHECK_LT(max_source_id, source_shape.dimensions().size())
+            << absl::StrCat("Source dimension index ", max_source_id,
+                            " out of bounds for source shape with ",
+                            source_shape.dimensions().size(), " dimensions");
+      }
+      SmallVector<DimTile> source_tiles = llvm::to_vector(llvm::map_range(
           source_ids, [&](int64_t id) { return source_tile.dim_tiles()[id]; }));
-      auto source_dims = llvm::to_vector(llvm::map_range(
+      SmallVector<int64_t> source_dims = llvm::to_vector(llvm::map_range(
           source_ids, [&](int64_t id) { return source_shape.dimensions(id); }));
       RETURN_IF_ERROR(IsSupportedCollapseShape(source_tiles, source_dims));
 
@@ -664,7 +685,12 @@ absl::Status PropagateTileThroughMinimalReshape(
 absl::StatusOr<Tile> PropagateTileThroughReshape(const Tile& tile,
                                                  const Shape& src,
                                                  const Shape& dst) {
-  auto reshapes = GetMinimalReshapes(src, dst);
+  VLOG(2) << "PropagateTileThroughReshape:\n"
+          << "  src: " << src.ToString() << "\n"
+          << "  dst: " << dst.ToString() << "\n"
+          << "  tile: " << tile.ToString();
+  std::vector<MinimalReshape> reshapes = GetMinimalReshapes(src, dst);
+  VLOG(2) << "reshapes: " << absl::StrJoin(reshapes, ", ");
   RETURN_IF_ERROR(IsSupportedReshape(reshapes));
 
   SmallVector<DimTile> target_dim_tiles;
@@ -718,7 +744,7 @@ absl::StatusOr<Tile> PropagateTileForBitcastOp(const Tile& tile,
   if (ShapeUtil::ReshapeIsBitcast(src, dst, /*ignore_element_type=*/true)) {
     return PropagateTileThroughReshape(tile, src, dst);
   }
-  // Bitcast is a `trt`, i.e. transpose-reshape-transpose.
+  // Bitcast is transpose-reshape-transpose.
   auto maybe_trt = ShapeUtil::DecomposeBitcastToTrt(src, dst);
   if (!maybe_trt.has_value()) {
     return absl::InvalidArgumentError("Bitcast is not decomposable to TRT.");
@@ -727,8 +753,8 @@ absl::StatusOr<Tile> PropagateTileForBitcastOp(const Tile& tile,
   Tile transpose1_tile =
       PropagateTileThroughTransposeOp(tile, trt.transpose1_dims);
   ASSIGN_OR_RETURN(auto reshape_tile, PropagateTileThroughReshape(
-                                          transpose1_tile, trt.reshape_shape,
-                                          trt.transpose1_shape));
+                                          transpose1_tile, trt.transpose1_shape,
+                                          trt.reshape_shape));
   return PropagateTileThroughTransposeOp(reshape_tile, trt.transpose2_dims);
 }
 
@@ -766,6 +792,11 @@ absl::StatusOr<Tiles> PropagateTileToInput(const TilingSpace& tiling_space,
                                            const HloInstruction& hlo,
                                            const Tile& output_tile,
                                            int64_t output_index) {
+  VLOG(1) << "PropagateTileToInput:\n"
+          << "  hlo: " << hlo.ToString() << "\n"
+          << "  output_tile: " << output_tile.ToString() << "\n"
+          << "  output_index: " << output_index;
+  VLOG(2) << "tiling_space: " << tiling_space.ToString();
   if (HloInstruction::IsOpElementwise(hlo.opcode()) ||
       // For a single device, all-reduce is an elementwise op.
       HloPredicateIsOp<HloOpcode::kAllReduceStart, HloOpcode::kAllReduceDone,
@@ -818,6 +849,11 @@ absl::StatusOr<Tiles> PropagateTileToOutput(const TilingSpace& tiling_space,
                                             const HloInstruction& hlo,
                                             const Tile& input_tile,
                                             int64_t input_index) {
+  VLOG(1) << "PropagateTileToOutput:\n"
+          << "  hlo: " << hlo.ToString() << "\n"
+          << "  input_tile: " << input_tile.ToString() << "\n"
+          << "  input_index: " << input_index;
+  VLOG(2) << "tiling_space: " << tiling_space.ToString();
   if (HloInstruction::IsOpElementwise(hlo.opcode()) ||
       hlo.opcode() == HloOpcode::kMap) {
     return PropagateTileToOutputForCwiseOp(hlo, input_tile);

@@ -3809,14 +3809,16 @@ void IterateThroughWindow(
     const Shape& window_shape, const Window& window, const Shape& base_shape,
     const absl::Span<const int64_t> window_count_index,
     const std::function<void(absl::Span<const int64_t>)>& f) {
-  const int64_t rank = base_shape.dimensions().size();
+  const size_t rank = base_shape.dimensions().size();
   DimensionVector window_index(rank);
-  std::fill(window_index.begin(), window_index.end(), 0);
+  absl::Span<int64_t> window_index_span = absl::MakeSpan(window_index);
+  std::fill(window_index_span.begin(), window_index_span.end(), 0);
 
   do {
     DimensionVector base_index(rank);
+    absl::Span<int64_t> base_index_span = absl::MakeSpan(base_index);
     bool out_of_bound = false;
-    for (int64_t i = 0; i < rank; ++i) {
+    for (size_t i = 0; i < rank; ++i) {
       // Padding is applied to the dilated base. Say that padding is 3 and
       // dilation is 2 for some dimension. After applying base dilation and
       // padding, the dimension looks like:
@@ -3830,25 +3832,30 @@ void IterateThroughWindow(
       // When this is a natural number, we index an original element.
       // Otherwise, we index a 0 (pad or hole), and we don't need to apply
       // the callback f.
-      base_index[i] = window_count_index[i] * window.dimensions(i).stride() +
-                      window_index[i] * window.dimensions(i).window_dilation() -
-                      window.dimensions(i).padding_low();
-      if (window.dimensions(i).base_dilation() != 1) {
-        if (base_index[i] % window.dimensions(i).base_dilation() != 0) {
+      const xla::WindowDimension& window_dimension = window.dimensions(i);
+      int64_t base_index_i =
+          window_count_index[i] * window_dimension.stride() +
+          window_index_span[i] * window_dimension.window_dilation() -
+          window_dimension.padding_low();
+      const int64_t base_dilation = window_dimension.base_dilation();
+      if (base_dilation != 1) {
+        if (base_index_i % base_dilation != 0) {
           out_of_bound = true;
+          base_index_span[i] = base_index_i;
           break;
         }
-        base_index[i] /= window.dimensions(i).base_dilation();
+        base_index_i /= base_dilation;
       }
-      if (base_index[i] < 0 || base_index[i] >= base_shape.dimensions(i)) {
+      base_index_span[i] = base_index_i;
+      if (base_index_i < 0 || base_index_i >= base_shape.dimensions(i)) {
         out_of_bound = true;
         break;
       }
     }
     if (!out_of_bound) {
-      f(base_index);
+      f(base_index_span);
     }
-  } while (IndexUtil::BumpIndices(window_shape, absl::MakeSpan(window_index)));
+  } while (IndexUtil::BumpIndices(window_shape, window_index_span));
 }
 
 template <typename Fp, typename Uint, typename ResultT>

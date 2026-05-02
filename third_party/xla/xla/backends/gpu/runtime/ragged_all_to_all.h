@@ -53,13 +53,24 @@ absl::Status RunRaggedAllToAllKernel(
     se::Stream* stream, PrimitiveType element_type,
     se::DeviceAddressBase input_buffer,
     std::variant<stream_executor::gpu::RaggedAllToAllOutputPtrs,
-                 se::DeviceAddressBase, xla::SymmetricMemory*>
+                 se::DeviceAddressBase>
         output_ptrs,
     se::DeviceAddressBase input_offsets_buffer,
     se::DeviceAddressBase send_sizes_buffer,
     se::DeviceAddressBase output_offsets_buffer, int64_t num_outputs,
     int64_t num_updates_per_output, int64_t num_input_rows,
     int64_t num_row_elements);
+
+absl::Status RunRaggedAllToAllWithSymmetricMemoryKernel(
+    se::Stream* stream, PrimitiveType element_type,
+    se::DeviceAddressBase input_buffer,
+    xla::SymmetricMemory* output_ptrs_symmetric_memory,
+    se::DeviceAddressBase input_offsets_buffer,
+    se::DeviceAddressBase send_sizes_buffer,
+    se::DeviceAddressBase output_offsets_buffer, int64_t num_outputs,
+    int64_t num_updates_per_output, int64_t num_input_rows,
+    int64_t num_row_elements);
+
 }  // namespace xla::gpu
 
 #endif  // XLA_BACKENDS_GPU_RUNTIME_RAGGED_ALL_TO_ALL_H_

@@ -2146,6 +2146,67 @@ xla_cc_test(
 )
 
 cc_library(
+    name = "ragged_dot_fusion_rewriter",
+    srcs = ["ragged_dot_fusion_rewriter.cc"],
+    hdrs = ["ragged_dot_fusion_rewriter.h"],
+    deps = [
+        "//xla:comparison_util",
+        "//xla:literal_util",
+        "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/pass:hlo_pass",
+        "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu:ir_emission_utils",
+        "//xla/stream_executor:device_description",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+    ],
+)
+
+xla_test(
+    name = "ragged_dot_fusion_rewriter_test",
+    srcs = ["ragged_dot_fusion_rewriter_test.cc"],
+    backends = [
+        "gpu",
+    ],
+    deps = [
+        ":ragged_dot_fusion_rewriter",
+        "//xla:error_spec",
+        "//xla/backends/gpu/tests:hlo_pjrt_gpu_test_base",
+        "//xla/hlo/ir:hlo",
+        "//xla/hlo/testlib:filecheck",
+        "//xla/hlo/testlib:pattern_matcher_gmock",
+        "//xla/hlo/testlib:verified_hlo_module",
+        "//xla/hlo/transforms/simplifiers:algebraic_simplifier",
+        "//xla/service:hlo_module_config",
+        "//xla/service:pattern_matcher",
+        "//xla/service/gpu:backend_configs_cc",
+        "//xla/service/gpu:ir_emission_utils",
+        "//xla/stream_executor:dnn",
+        "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor/cuda:cuda_compute_capability",
+        "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
+        "//xla/tests:hlo_pjrt_test_base",
+        "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "reduce_scatter_creator",
     srcs = ["reduce_scatter_creator.cc"],
     hdrs = ["reduce_scatter_creator.h"],

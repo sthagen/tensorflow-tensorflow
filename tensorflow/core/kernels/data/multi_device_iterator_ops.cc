@@ -225,6 +225,13 @@ class MultiDeviceIterator : public ResourceBase {
                           int64_t incarnation_id,
                           MultiDeviceIteratorCallback callback) {
       HostBufferElement elem;
+      if (shard_num < 0 || shard_num >= buffer_.size()) {
+        elem.status = absl::InvalidArgumentError(
+            absl::StrCat("Invalid shard_num. Provided: ", shard_num,
+                         "; Expected 0 <= shard_num < buffer_.size();"));
+        callback(elem);
+        return;
+      }
       if (incarnation_id_ != incarnation_id) {
         elem.status = absl::InvalidArgumentError(
             absl::StrCat("Invalid incarnation id. Provided: ", incarnation_id,

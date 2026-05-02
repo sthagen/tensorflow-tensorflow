@@ -5435,5 +5435,76 @@ TEST_F(HloVerifierTest, NonAssociativeScanAllowedInLayoutInsensitiveMode) {
   EXPECT_OK(verifier().Run(module.get()).status());
 }
 
+TEST_F(HloVerifierTest, VerifyAsyncStartOutputToOperandAliasing) {
+  const char* const hlo_string = R"(
+  HloModule module
+
+  async_computation {
+    p0 = f32[32] parameter(0)
+    ROOT custom-call = (f32[32]) custom-call(p0), custom_call_target="foo"
+  }
+
+  ENTRY main {
+    p = f32[32] parameter(0)
+    async-start = ((f32[32]), (f32[32]), s32[]) async-start(p),
+        calls=async_computation,
+        output_to_operand_aliasing={{0, 0}: (0, {})}
+    async-update = ((f32[32]), (f32[32]), s32[]) async-update(async-start)
+    ROOT async-done = (f32[32]) async-done(async-update)
+  })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+  EXPECT_OK(verifier().Run(module.get()).status());
+}
+
+TEST_F(HloVerifierTest, VerifyAsyncStartAliasConfigInvalidOperandIndex) {
+  const char* const hlo_string = R"(
+  HloModule module
+
+  async_computation {
+    p0 = f32[32] parameter(0)
+    ROOT custom-call = (f32[32]) custom-call(p0), custom_call_target="foo"
+  }
+
+  ENTRY main {
+    p = f32[32] parameter(0)
+    async-start = ((f32[32]), (f32[32]), s32[]) async-start(p),
+        calls=async_computation,
+        output_to_operand_aliasing={{0, 0}: (5, {})}
+    async-update = ((f32[32]), (f32[32]), s32[]) async-update(async-start)
+    ROOT async-done = (f32[32]) async-done(async-update)
+  })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.message(), HasSubstr("Invalid aliasing operand index."));
+}
+
+TEST_F(HloVerifierTest, VerifyAsyncStartAliasConfigInvalidShapeIndex) {
+  const char* const hlo_string = R"(
+  HloModule module
+
+  async_computation {
+    p0 = f32[32] parameter(0)
+    ROOT custom-call = (f32[32]) custom-call(p0), custom_call_target="foo"
+  }
+
+  ENTRY main {
+    p = f32[32] parameter(0)
+    async-start = ((f32[32]), (f32[32]), s32[]) async-start(p),
+        calls=async_computation,
+        output_to_operand_aliasing={{5}: (0, {})}
+    async-update = ((f32[32]), (f32[32]), s32[]) async-update(async-start)
+    ROOT async-done = (f32[32]) async-done(async-update)
+  })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Invalid aliasing output shape index."));
+}
+
 }  // namespace
 }  // namespace xla

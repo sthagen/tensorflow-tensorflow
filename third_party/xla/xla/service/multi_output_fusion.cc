@@ -286,6 +286,13 @@ bool MultiOutputFusion::LegalToFusePreliminaryConstraints(
     return false;
   }
 
+  // Skip multi-output fusion inside the body of any kScan.
+  if (const HloComputation* parent = instr1->parent(); parent != nullptr) {
+    if (!parent->caller_instructions(HloOpcode::kScan).empty()) {
+      return false;
+    }
+  }
+
   // Check if the users of multioutput fusion is not a get-tuple-element.
   // If this is the case, we bail out because the transformation assumes
   // the users are get-tuple-element.

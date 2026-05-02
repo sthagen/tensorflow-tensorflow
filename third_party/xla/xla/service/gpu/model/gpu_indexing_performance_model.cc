@@ -286,11 +286,18 @@ absl::StatusOr<EstimateRunTimeData> GetDotEstimates(
   const auto* dot_instr = Cast<const HloDotInstruction>(tiled_hlo->hlo());
   TF_RETURN_IF_ERROR(gpu_dot_fusion_cost_model::IsSupported(dot_instr));
 
+  int64_t block_k = 0;
+  if (!tiled_hlo->operands().empty()) {
+    int64_t lhs_contracting_dim =
+        dot_instr->dot_dimension_numbers().lhs_contracting_dimensions(0);
+    block_k = tiled_hlo->operand(0)->tile_sizes()[lhs_contracting_dim];
+  }
+
   BlockLevelParameters block_params;
   block_params.output_tile_sizes.push_back(std::vector<int64_t>{
       tiled_hlo->tile_sizes().begin(), tiled_hlo->tile_sizes().end()});
   return gpu_dot_fusion_cost_model::EstimateRunTimeForDotOpWithBlockParameters(
-      dot_instr, block_params, device_info);
+      dot_instr, block_params, device_info, block_k);
 }
 
 }  // namespace

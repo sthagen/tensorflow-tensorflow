@@ -22,6 +22,7 @@ limitations under the License.
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -53,6 +54,7 @@ limitations under the License.
 #include "xla/primitive_util.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/concurrency/async_value.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 #include "xla/tsl/concurrency/ref_count.h"
 #include "xla/tsl/platform/errors.h"
@@ -191,7 +193,7 @@ absl::StatusOr<PjRtDeviceEventRef> CpuRawBuffer::CopyFromHostBuffer(
     AsyncWorkRunner* async_work_runner, tsl::thread::ThreadPool* thread_pool,
     int max_transpose_threads) {
   CommonPjRtClient* client =
-      tensorflow::down_cast<CommonPjRtClient*>(memory_space()->client());
+      absl::down_cast<CommonPjRtClient*>(memory_space()->client());
   tsl::AsyncValueRef<CpuDeviceMemory> device_buffer = buffer_;
   bool has_default_layout =
       !byte_strides || HasMajorToMinorLayout(type, dims, *byte_strides);
@@ -341,7 +343,7 @@ void CpuRawBuffer::CopyToLiteralAsync(
     Promise<> promise, tsl::RCReference<PjRtDeviceEventPromise> device_promise,
     MutableLiteralBase* literal, xla::Shape shape) {
   CommonPjRtClient* client =
-      tensorflow::down_cast<CommonPjRtClient*>(memory_space()->client());
+      absl::down_cast<CommonPjRtClient*>(memory_space()->client());
   client->async_work_runner()->Execute(
       [client, buffer = buffer_, promise = std::move(promise),
        device_promise = std::move(device_promise), literal, shape]() mutable {
@@ -416,7 +418,7 @@ void CpuRawBuffer::CopyToLiteralAsync(
 }
 
 void CpuRawBuffer::CopyTo(
-    tsl::RCReference<CommonPjRtRawBuffer> dst_raw_buffer,
+    PjRtRawBufferRef dst_raw_buffer,
     tsl::RCReference<PjRtDeviceEventPromise> definition_event_promise,
     tsl::RCReference<PjRtDeviceEventPromise> src_usage_event_promise,
     ::tsl::AsyncValueRef<bool> allocation_event) {
@@ -461,6 +463,17 @@ void CpuTrackedDeviceEventSet::AppendTo(PjRtDeviceEventSet& events) {
   for (const auto& ev : events_) {
     events.AddEvent(PjRtDeviceEventRef(tsl::AsyncValueRef<CpuEvent>(ev)));
   }
+}
+
+std::unique_ptr<PjRtDeviceEventSet> CpuTrackedDeviceEventSet::Clone() const {
+  return std::make_unique<CpuTrackedDeviceEventSet>(*this);
+}
+
+absl::StatusOr<PjRtDeviceEventRef> CpuRawBuffer::CopyRawToRemoteDevice(
+    Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
+    std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs) {
+  return absl::UnimplementedError(
+      "CpuRawBuffer does not support CopyRawToRemoteDevice.");
 }
 
 }  // namespace xla

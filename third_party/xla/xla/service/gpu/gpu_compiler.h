@@ -238,6 +238,18 @@ class GpuCompiler : public LLVMCompiler {
     CompileModuleResults compile_module_results;
   };
 
+  absl::Status AutotunerAndPostCleanup(
+      HloPassPipeline& pipeline, HloModule* hlo_module,
+      const se::GpuComputeCapability& gpu_version,
+      const DebugOptions& debug_options, mlir::MLIRContext* mlir_context,
+      const se::DeviceDescription& device_description,
+      const std::string& platform_name, const CompileOptions& options,
+      tsl::thread::ThreadPool* thread_pool, se::StreamExecutor* stream_exec,
+      const Compiler::GpuTargetConfig* target_config,
+      const MultiProcessKeyValueStore& key_value_store,
+      const se::SemanticVersion& toolkit_version, const AliasInfo* alias_info,
+      HloCostAnalysis::ShapeSizeFunction shape_size_fn);
+
   // Schedule and compile the module.
   absl::StatusOr<CompileResultWithMetadata> CompileToBackendResult(
       HloModule* module, llvm::LLVMContext* llvm_context,

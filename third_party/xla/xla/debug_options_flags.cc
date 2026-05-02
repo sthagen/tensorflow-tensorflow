@@ -294,6 +294,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_nccl_user_buffers(false);
   opts.set_xla_gpu_experimental_enable_nccl_symmetric_buffers(false);
   opts.set_xla_gpu_experimental_enable_nvshmem(false);
+  opts.set_xla_gpu_experimental_move_gemm_conv_autotuner(false);
   opts.set_xla_gpu_enable_nccl_comm_splitting(true);
   opts.set_xla_gpu_nccl_init_max_rank_per_root_ratio(0);
 
@@ -2958,6 +2959,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_experimental_use_ragged_dot_grouped_gemm(),
       "If true, use grouped GEMM (hipBLASLt) for ragged dot operations."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_use_ragged_dot_fusion",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_use_ragged_dot_fusion),
+      debug_options->xla_gpu_experimental_use_ragged_dot_fusion(),
+      "If true, use cuDNN fusion for ragged dot operations."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_scaled_dot_with_triton",
       bool_setter_for(
           &DebugOptions::set_xla_gpu_experimental_scaled_dot_with_triton),
@@ -3107,6 +3114,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
           debug_options->xla_gpu_command_buffer_update_mode()),
       "Controls the VA remapping update strategy for command buffer thunks. "
       "See CommandBufferUpdateMode for details."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_move_gemm_conv_autotuner",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_experimental_move_gemm_conv_autotuner),
+      debug_options->xla_gpu_experimental_move_gemm_conv_autotuner(),
+      "If true, move GEMM and Conv autotuning and post cleanup after fusiion "
+      "passes."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_cost_model_gemm_tiling_options",
       setter_for_xla_gpu_experimental_cost_model_gemm_tiling_options, "",

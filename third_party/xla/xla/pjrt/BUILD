@@ -105,39 +105,14 @@ xla_cc_test(
 )
 
 cc_library(
-    name = "abstract_tracked_device_buffer",
-    srcs = ["abstract_tracked_device_buffer.cc"],
-    hdrs = ["abstract_tracked_device_buffer.h"],
-    visibility = ["//xla:internal"],
-    deps = [
-        ":device_event",
-        ":pjrt_client",
-        ":raw_buffer",
-        "//xla:future",
-        "//xla:util",
-        "//xla/tsl/concurrency:async_value",
-        "//xla/tsl/concurrency:ref_count",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:inlined_vector",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/types:span",
-        "@tsl//tsl/profiler/lib:traceme",
-    ],
-)
-
-cc_library(
     name = "common_pjrt_client",
     srcs = [
+        "abstract_tracked_device_buffer.cc",
         "common_pjrt_client.cc",
         "host_to_device_transfer_manager.cc",
     ],
     hdrs = [
+        "abstract_tracked_device_buffer.h",
         "common_pjrt_client.h",
         "host_to_device_transfer_manager.h",
     ],
@@ -146,7 +121,6 @@ cc_library(
         "//third_party/py/torch_tpu:__pkg__",
     ]),
     deps = [
-        ":abstract_tracked_device_buffer",
         ":async_work_runner",
         ":device_event",
         ":host_callback",
@@ -164,9 +138,11 @@ cc_library(
         "//xla/error:error_codes",
         "//xla/hlo/ir:hlo",
         "//xla/tsl/concurrency:async_value",
+        "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -298,6 +274,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
@@ -733,10 +710,7 @@ tf_proto_library(
     name = "stream_executor_executable_proto",
     srcs = ["stream_executor_executable.proto"],
     visibility = ["//visibility:public"],
-    deps = [
-        "//xla:xla_proto",
-        "//xla/pjrt/proto:compile_options_proto",
-    ],
+    deps = ["//xla/pjrt/proto:compile_options_proto"],
 )
 
 cc_library(
@@ -807,7 +781,6 @@ cc_library(
     ],
     visibility = internal_visibility(["//xla:friends"]),
     deps = [
-        ":abstract_tracked_device_buffer",
         ":async_work_runner",
         ":common_pjrt_client",
         ":device_event",
@@ -1542,6 +1515,7 @@ cc_library(
         "//xla/pjrt/c:pjrt_c_api_helpers",
         "//xla/pjrt/c:pjrt_c_api_phase_compile_extension_hdrs",
         "//xla/pjrt/c:pjrt_c_api_phase_compile_internal",
+        "//xla/pjrt/c:pjrt_c_api_status_utils",
         "//xla/pjrt/c:pjrt_c_api_wrapper_impl",
         "//xla/pjrt/plugin/xla_cpu:cpu_client_options",
         "//xla/pjrt/plugin/xla_cpu:xla_cpu_pjrt_client",
@@ -1757,6 +1731,7 @@ cc_library(
     name = "compiled_memory_stats",
     srcs = ["compiled_memory_stats.cc"],
     hdrs = ["compiled_memory_stats.h"],
+    visibility = internal_visibility([":friends"]),
     deps = [
         "//xla:shape_util",
         "//xla/pjrt/proto:executable_metadata_proto_cc",

@@ -863,6 +863,9 @@ message DebugOptions {
   // regressions.
   optional int32 xla_gpu_experimental_max_unroll_factor = 459;
 
+  // If true, move GEMM and Conv autotuning after fusion passes.
+  optional bool xla_gpu_experimental_move_gemm_conv_autotuner = 477;
+
   // For sub-byte dot operands, layout them along contracting dimensions.
   optional bool xla_gpu_experimental_pack_dot_operands_along_k_dimension = 362;
 
@@ -1526,7 +1529,7 @@ message DebugOptions {
   // Note: when adding a new flag, please add it to one of the hardware-specific
   // or hardware-agnostic sections at the top of this proto message.
 
-  // Next id: 476
+  // Next id: 478
 
   // Extra options to pass to the compilation backend (e.g. LLVM); specific
   // interpretation of these values is left to the backend.

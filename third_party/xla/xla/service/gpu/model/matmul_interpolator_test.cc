@@ -768,5 +768,40 @@ TEST_F(MatmulInterpolatorTest, SupportsDotTritonFusion) {
   EXPECT_EQ(*interpolator().EstimatedRuntime(custom_call), absl::Seconds(1));
 }
 
+TEST_F(MatmulInterpolatorTest, SupportsDotTritonNestedGemmFusion) {
+  absl::string_view hlo = R"(
+    HloModule m
+
+    comp {
+      p0 = bf16[1024,1024] parameter(0)
+      p1 = bf16[1024,1024] parameter(1)
+      ROOT dot = bf16[1024,1024] dot(p0,p1), lhs_contracting_dims={0}, rhs_contracting_dims={1}
+    }
+
+    ENTRY e {
+      p0 = bf16[1024,1024] parameter(0)
+      p1 = bf16[1024,1024] parameter(1)
+      ROOT _ =  bf16[1024,1024] fusion(p0,p1),
+        kind=kCustom,
+        calls=comp,
+        backend_config={
+          "fusion_backend_config": {
+            "kind":"__triton_nested_gemm_fusion",
+            "block_level_fusion_config":{
+              "output_tiles":[{"sizes":["64","32"]}],
+              "num_stages":"2",
+              "num_warps":"8",
+              "num_ctas":"1"
+            }
+          }
+        }
+    }
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  const HloInstruction& custom_call =
+      *module->entry_computation()->root_instruction();
+  EXPECT_EQ(*interpolator().EstimatedRuntime(custom_call), absl::Seconds(1));
+}
+
 }  // namespace
 }  // namespace xla::gpu

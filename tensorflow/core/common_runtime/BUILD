@@ -1600,9 +1600,19 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
-        "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+tf_cc_test(
+    name = "pool_allocator_test",
+    srcs = ["pool_allocator_test.cc"],
+    deps = [
+        ":pool_allocator",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
     ],
 )
 

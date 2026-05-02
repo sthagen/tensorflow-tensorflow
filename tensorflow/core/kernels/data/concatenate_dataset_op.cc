@@ -357,7 +357,11 @@ class ConcatenateDatasetOp::Dataset : public DatasetBase {
     absl::Status RestoreInternal(IteratorContext* ctx,
                                  IteratorStateReader* reader) override {
       mutex_lock l(mu_);
-
+      if (input_impls_.size() != 2) {
+        return absl::FailedPreconditionError(
+            "`Initialize` should be called before restoring from tf.data "
+            "checkpoints.");
+      }
       int64_t input_uninitialized[2];
       TF_RETURN_IF_ERROR(reader->ReadScalar(
           prefix(), absl::StrFormat("%s[%d]", kInputImplUninitialized, 0),
@@ -373,11 +377,6 @@ class ConcatenateDatasetOp::Dataset : public DatasetBase {
       }
 
       if (ctx->restored_element_count()) {
-        if (input_impls_.size() != 2) {
-          return absl::FailedPreconditionError(
-              "`Initialize` should be called before restoring from the "
-              "checkpoint.");
-        }
         {
           int64_t tmp_element_count;
           TF_RETURN_IF_ERROR(

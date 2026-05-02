@@ -85,7 +85,6 @@ cc_library(
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
         "//xla/hlo/builder:xla_computation",
-        "//xla/pjrt:abstract_tracked_device_buffer",
         "//xla/pjrt:async_work_runner",
         "//xla/pjrt:common_pjrt_client",
         "//xla/pjrt:device_event",
@@ -369,6 +368,11 @@ xla_test(
             "multi_gpu",
             "broken",
         ],
+        # See b/491475964 for details.
+        "gb300": [
+            "multi_gpu",
+            "broken",
+        ],
     },
     backends = ["gpu"],
     env = {
@@ -573,6 +577,31 @@ cc_library(
 )
 
 cc_library(
+    name = "se_gpu_pjrt_compiler_sycl_registration",
+    srcs = ["se_gpu_pjrt_compiler_sycl_registration.cc"],
+    compatible_with = [],
+    tags = [
+        "gpu",
+        "oneapi-only",
+    ] + if_google([
+        # TODO(b/456585142): Currently we don't support building the SYCL backend.
+        "notap",
+        "nobuilder",
+        "manual",
+    ]),
+    deps = [
+        ":se_gpu_pjrt_compiler_impl",
+        "//xla/pjrt:pjrt_compiler",
+        "//xla/pjrt:stream_executor_platform_id_mapping",
+        "//xla/service/gpu:intel_gpu_compiler",
+        "//xla/stream_executor/platform:initialize",
+        "//xla/stream_executor/sycl:sycl_platform_id",
+        "@com_google_absl//absl/log:check",
+    ],
+    alwayslink = 1,
+)
+
+cc_library(
     name = "se_gpu_pjrt_compiler",
     hdrs = ["se_gpu_pjrt_compiler.h"],
     # TODO(b/382070262): Migrate users off this target - They should go though the PjRt ABI compatibility layer.
@@ -599,6 +628,8 @@ cc_library(
         ":se_gpu_pjrt_compiler_cuda_registration",
     ]) + if_rocm([
         ":se_gpu_pjrt_compiler_rocm_registration",
+    ]) + if_sycl([
+        ":se_gpu_pjrt_compiler_sycl_registration",
     ]),
 )
 

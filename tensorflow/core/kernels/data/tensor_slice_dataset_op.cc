@@ -185,6 +185,11 @@ class TensorSliceDatasetOp::Dataset : public DatasetBase {
       }
 
       Tensor split;
+      if (split_provider_ == nullptr) {
+        return absl::FailedPreconditionError(
+            "`Initialize` should be called before calling `GetNext` on an "
+            "Iterator.");
+      }
       TF_RETURN_IF_ERROR(split_provider_->GetNext(&split, end_of_sequence));
       if (*end_of_sequence) {
         return absl::OkStatus();
@@ -217,6 +222,11 @@ class TensorSliceDatasetOp::Dataset : public DatasetBase {
                                  IteratorStateReader* reader) override {
       if (ctx->restored_element_count().has_value()) {
         return global_shuffle_iterator_.Restore(prefix(), ctx, reader);
+      }
+      if (split_provider_ == nullptr) {
+        return absl::FailedPreconditionError(
+            "`Initialize` should be called before restoring from tf.data "
+            "checkpoints.");
       }
       return split_provider_->Restore(
           [this](const std::string& key) { return full_name(key); }, reader);
@@ -253,6 +263,9 @@ void TensorSliceDatasetOp::MakeDataset(OpKernelContext* ctx,
   OP_REQUIRES_OK(ctx, ctx->input_list(kComponents, &inputs));
   std::vector<Tensor> components;
   components.reserve(inputs.size());
+  OP_REQUIRES(ctx, inputs.size() > 0,
+              absl::InvalidArgumentError(
+                  "All components must be at least 1-dimensional"));
   OP_REQUIRES(ctx, inputs[0].dims() > 0,
               absl::InvalidArgumentError(
                   "All components must be at least 1-dimensional"));

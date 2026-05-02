@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -1456,6 +1457,12 @@ class SnapshotDatasetOp : public UnaryDatasetOpKernel {
             int64_t temp;
             TF_RETURN_IF_ERROR(reader->ReadScalar(
                 full_name(absl::StrCat(kFilenames, kSizeSuffix)), &temp));
+            if (temp < 0 || temp > std::numeric_limits<size_t>::max()) {
+              return absl::InvalidArgumentError(absl::StrCat(
+                  "Invalid checkpoint for tf.data snapshot dataset: ",
+                  kFilenames, kSizeSuffix, "=", temp,
+                  " is not a valid value."));
+            }
             filenames_size = static_cast<size_t>(temp);
           }
           if (filenames_.size() != filenames_size) {
