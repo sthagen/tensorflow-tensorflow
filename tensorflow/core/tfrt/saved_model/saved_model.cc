@@ -330,7 +330,7 @@ absl::Status CheckInputSpecs(
         "model: ", model_metadata.name(),
         ", version: ", model_metadata.version(), ", error: ", status.message());
     if (!run_options.validate_input_specs_dry_run) {
-      return tensorflow::errors::InvalidArgument(error_string);
+      return absl::InvalidArgumentError(error_string);
     }
     LOG_EVERY_N_SEC(WARNING, 5)
         << "TFRT input specs validation failed, " << error_string;
@@ -1332,7 +1332,7 @@ SavedModelImpl::GetOrCreateLoadingResult(const RunOptions& run_options,
   if (iter != loading_result_cache_.end()) return {*iter->second};
 
   if (run_options.disable_compilation) {
-    return tensorflow::errors::InvalidArgument(
+    return absl::InvalidArgumentError(
         absl::StrCat("GraphExecutor: compilation is disabled in execution but "
                      "the compiled graph is not found for ",
                      joined_name));
