@@ -22,7 +22,9 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -762,9 +764,9 @@ GpuPerformanceModelWithIndexingAnalysis::GetLaunchDimensionsForTiledFusion(
           static_cast<uint64_t>(num_warps * WarpSize(device_info))};
 }
 
-absl::StatusOr<TiledRunTimeDataOrError>
-GpuPerformanceModelWithIndexingAnalysis::TryFindBestTilingForFusion(
-    const HloFusionAdaptor& fusion_adaptor) {
+absl::StatusOr<TopKTiledRunTimeDataOrError>
+GpuPerformanceModelWithIndexingAnalysis::TryFindTopKBestTilingsForFusion(
+    const HloFusionAdaptor& fusion_adaptor, int top_k) {
   SymbolicTileAnalysisOrError analysis_or_error =
       SymbolicTileAnalysis::AnalyzeFusion(
           fusion_adaptor, mlir_context_,
@@ -780,7 +782,7 @@ GpuPerformanceModelWithIndexingAnalysis::TryFindBestTilingForFusion(
 
   TF_ASSIGN_OR_RETURN(auto tilings, analysis.GetValidTilings());
 
-  std::optional<TiledRunTimeData> best_tiled_run_time_data;
+  absl::InlinedVector<TiledRunTimeData, 4> candidates;
 
   for (const auto& tiling : tilings) {
     // TODO(b/372454662): This needs to be adjusted if we want to support more
@@ -813,28 +815,46 @@ GpuPerformanceModelWithIndexingAnalysis::TryFindBestTilingForFusion(
       continue;
     }
 
-    if (!best_tiled_run_time_data.has_value() ||
-        estimate_run_time_data.exec_time <
-            best_tiled_run_time_data->runtime_data.exec_time) {
-      BlockLevelParameters block_level_parameters;
-      auto tiled_roots = tiled_hlo_computation.GetRoots();
-      block_level_parameters.output_tile_sizes.reserve(tiled_roots.size());
-      for (auto tiled_root : tiled_roots) {
-        block_level_parameters.output_tile_sizes.emplace_back(
-            tiled_root->tile_sizes().begin(), tiled_root->tile_sizes().end());
-      }
-      block_level_parameters.num_warps =
-          launch_dimensions.num_threads_per_block() / WarpSize(*device_info_);
-
-      best_tiled_run_time_data =
-          TiledRunTimeData{estimate_run_time_data, block_level_parameters};
+    BlockLevelParameters block_level_parameters;
+    auto tiled_roots = tiled_hlo_computation.GetRoots();
+    block_level_parameters.output_tile_sizes.reserve(tiled_roots.size());
+    for (auto tiled_root : tiled_roots) {
+      block_level_parameters.output_tile_sizes.emplace_back(
+          tiled_root->tile_sizes().begin(), tiled_root->tile_sizes().end());
     }
+    block_level_parameters.num_warps =
+        launch_dimensions.num_threads_per_block() / WarpSize(*device_info_);
+
+    candidates.push_back(
+        TiledRunTimeData{estimate_run_time_data, block_level_parameters});
   }
 
-  if (!best_tiled_run_time_data.has_value()) {
+  absl::c_stable_sort(
+      candidates, [](const TiledRunTimeData& a, const TiledRunTimeData& b) {
+        return a.runtime_data.exec_time < b.runtime_data.exec_time;
+      });
+
+  if (candidates.size() > top_k) {
+    candidates.resize(top_k);
+  }
+
+  return candidates;
+}
+
+absl::StatusOr<TiledRunTimeDataOrError>
+GpuPerformanceModelWithIndexingAnalysis::TryFindBestTilingForFusion(
+    const HloFusionAdaptor& fusion_adaptor) {
+  TF_ASSIGN_OR_RETURN(auto top_k_result, TryFindTopKBestTilingsForFusion(
+                                             fusion_adaptor, /*top_k=*/1));
+  if (std::holds_alternative<FusionDecision>(top_k_result)) {
+    return std::get<FusionDecision>(top_k_result);
+  }
+  auto& tilings =
+      std::get<absl::InlinedVector<TiledRunTimeData, 4>>(top_k_result);
+  if (tilings.empty()) {
     return FusionDecision::Forbid("No valid tilings found.");
   }
-  return *best_tiled_run_time_data;
+  return tilings.front();
 }
 
 }  // namespace gpu

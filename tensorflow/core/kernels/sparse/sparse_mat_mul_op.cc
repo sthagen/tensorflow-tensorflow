@@ -63,7 +63,7 @@ void SwapDimSizes(const int dim_a, const int dim_b, TensorShape* shape) {
 
 // Concatenates 'inputs' into a single tensor along the zeroth dimension.
 // Requires that all elements of 'inputs' have element type T, all inputs
-// have more than zero elements and ouput is preallocated.
+// have more than zero elements and output is preallocated.
 template <typename T>
 void ConcatHelper(OpKernelContext* context, const std::vector<Tensor>& inputs,
                   Tensor* output) {

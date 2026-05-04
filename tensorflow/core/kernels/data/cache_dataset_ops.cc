@@ -823,6 +823,16 @@ class CacheDatasetOp::MemoryDatasetBase : public DatasetBase {
 
   absl::Status Get(AnyContext ctx, int64_t index,
                    std::vector<Tensor>* out_tensors) const override {
+    CardinalityOptions options;
+    options.set_compute_level(CardinalityOptions::CARDINALITY_COMPUTE_LOW);
+    int64_t cardinality = Cardinality(options);
+
+    if (index < 0 ||
+        (cardinality != kUnknownCardinality &&
+         cardinality != kInfiniteCardinality && index >= cardinality)) {
+      return errors::OutOfRange("Index out of range [0, ", cardinality,
+                                "):", index);
+    }
     mutex_lock l(mu_);
     if (!iterator_random_access_cache_) {
       iterator_random_access_cache_ =

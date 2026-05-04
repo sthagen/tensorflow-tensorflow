@@ -1067,6 +1067,7 @@ tf_cc_test(
 
 tf_kernel_library(
     name = "gather_nd_op",
+    features = if_cuda(["-layering_check"]),
     prefix = "gather_nd_op",
     deps = ARRAY_DEPS,
 )

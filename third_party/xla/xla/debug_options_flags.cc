@@ -180,6 +180,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_backend_optimization_level(3);
   opts.set_xla_gpu_autotune_level(4);
   opts.set_xla_gpu_autotune_max_solutions(0);
+  opts.set_xla_gpu_fusion_autotune_top_k_configs(1);
   opts.set_xla_cpu_multi_thread_eigen(true);
   opts.set_xla_gpu_cuda_data_dir("./cuda_sdk_lib");
   opts.set_xla_gpu_generate_debug_info(false);
@@ -360,8 +361,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
 
   opts.set_xla_gpu_copy_insertion_use_region_analysis(false);
   opts.set_xla_gpu_collect_cost_model_stats(false);
-  opts.set_xla_gpu_enable_split_k_autotuning(false);
-
   opts.set_xla_gpu_cublas_fallback(true);
   opts.set_xla_gpu_cudnn_gemm_fusion_level(0);
   opts.set_xla_gpu_enable_while_loop_double_buffering(false);
@@ -1422,6 +1421,13 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_autotune_max_solutions(),
       "Maximal number of GEMM solutions to consider for autotuning: 0 means "
       "consider all solutions returned by the GEMM library."));
+  flag_list->push_back(
+      tsl::Flag("xla_gpu_fusion_autotune_top_k_configs",
+                int32_setter_for(
+                    &DebugOptions::set_xla_gpu_fusion_autotune_top_k_configs),
+                debug_options->xla_gpu_fusion_autotune_top_k_configs(),
+                "Maximum number of candidate configs considered during "
+                "autotuning non-gemm fusions."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_autotune_gemm_rtol",
       float_setter_for(&DebugOptions::set_xla_gpu_autotune_gemm_rtol),
@@ -2296,11 +2302,7 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_collect_cost_model_stats(),
       "If true, each fusion instruction will have a cost model runtime "
       "estimate in backend config after compilation."));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_enable_split_k_autotuning",
-      bool_setter_for(&DebugOptions::set_xla_gpu_enable_split_k_autotuning),
-      debug_options->xla_gpu_enable_split_k_autotuning(),
-      "Enable split_k autotuning for triton gemms."));
+
   flag_list->push_back(tsl::Flag("xla_gpu_enable_nccl_clique_optimization",
                                  noop_flag_setter<bool>, false,
                                  "[Deprecated, do not use]."));

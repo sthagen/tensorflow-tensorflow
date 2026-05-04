@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <variant>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "mlir/IR/MLIRContext.h"
@@ -47,6 +48,9 @@ struct TiledRunTimeData {
 };
 
 using TiledRunTimeDataOrError = std::variant<TiledRunTimeData, FusionDecision>;
+
+using TopKTiledRunTimeDataOrError =
+    std::variant<absl::InlinedVector<TiledRunTimeData, 4>, FusionDecision>;
 
 // Implementation of Cost Model that uses indexing analysis to estimate amount
 // of compute and memory access time.
@@ -119,6 +123,11 @@ class GpuPerformanceModelWithIndexingAnalysis : public GpuPerformanceModelBase {
   // Otherwise returns block level parameters that give the best execution time.
   absl::StatusOr<TiledRunTimeDataOrError> TryFindBestTilingForFusion(
       const HloFusionAdaptor& fusion_adaptor);
+
+  // Returns top_k (possibly fewer if not enough valid tilings are found) block
+  // level parameters for the given fusion.
+  absl::StatusOr<TopKTiledRunTimeDataOrError> TryFindTopKBestTilingsForFusion(
+      const HloFusionAdaptor& fusion_adaptor, int top_k);
 
   // Returns an estimate how many FLOPs will be used to produce one element of
   // the output.
