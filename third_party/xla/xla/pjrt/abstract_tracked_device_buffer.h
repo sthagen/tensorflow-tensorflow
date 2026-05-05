@@ -329,6 +329,13 @@ class CommonPjRtBuffer : public PjRtBuffer {
           scoped_acquire,
       const char* caller_name = "AcquireScopedRawBuffer");
 
+  absl::Status AcquireScopedRawBuffer(
+      absl::AnyInvocable<absl::StatusOr<PjRtDeviceEventRef>(
+          PjRtRawBufferRef raw_buffer,
+          std::vector<PjRtDeviceEventRef> definition_events) &&>
+          scoped_acquire,
+      const char* caller_name = "AcquireScopedRawBuffer");
+
   ScopedHold GetBufferWithHold(ScopedHold::Type type);
 
  protected:

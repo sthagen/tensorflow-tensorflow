@@ -38,8 +38,8 @@ namespace functor {
 // Explicit instantiation of the CPU functor.
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
-template struct FillProjectiveTransform<CPUDevice, uint8>;
-template struct FillProjectiveTransform<CPUDevice, int32>;
+template struct FillProjectiveTransform<CPUDevice, uint8_t>;
+template struct FillProjectiveTransform<CPUDevice, int32_t>;
 template struct FillProjectiveTransform<CPUDevice, int64_t>;
 template struct FillProjectiveTransform<CPUDevice, Eigen::half>;
 template struct FillProjectiveTransform<CPUDevice, float>;

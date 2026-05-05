@@ -19,6 +19,7 @@ limitations under the License.
 #include <climits>
 #include <functional>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <utility>
@@ -970,12 +971,21 @@ absl::Status CustomReader::SnappyUncompress(
       iov[index].iov_len = buffer->size();
       simple_tensors->push_back(std::move(simple_tensor));
     } else {
-      auto tensor_proto_str =
-          std::make_unique<char[]>(tensor_metadata.tensor_size_bytes());
+      int64_t tensor_size = tensor_metadata.tensor_size_bytes();
+      if (tensor_size < 0) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Tensor size is negative: ", tensor_size));
+      }
+      std::unique_ptr<char[]> tensor_proto_str =
+          std::make_unique<char[]>(tensor_size);
+      if (tensor_proto_str == nullptr) {
+        return absl::ResourceExhaustedError(absl::StrCat(
+            "Failed to allocate memory for tensor of size ", tensor_size));
+      }
       iov[index].iov_base = tensor_proto_str.get();
-      iov[index].iov_len = tensor_metadata.tensor_size_bytes();
-      tensor_proto_strs->push_back(std::make_pair(
-          std::move(tensor_proto_str), tensor_metadata.tensor_size_bytes()));
+      iov[index].iov_len = tensor_size;
+      tensor_proto_strs->push_back(
+          std::make_pair(std::move(tensor_proto_str), tensor_size));
     }
     total_size += iov[index].iov_len;
     index++;

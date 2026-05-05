@@ -122,6 +122,13 @@ std::optional<absl::Status> PjRtDeviceEventPtr::GetErrorIfPresent() const {
   return std::nullopt;
 }
 
+PJRT_DeviceEvent_State PjRtDeviceEventPtr::state() const {
+  if (event_.device_event == nullptr || event_.vtable == nullptr) {
+    LOG(FATAL) << "state() called on invalid PjRtDeviceEventPtr.";
+  }
+  return event_.vtable->get_state(event_.device_event);
+}
+
 tsl::AsyncValue* PjRtDeviceEventPtr::async_value() const {
   if (event_.device_event == nullptr || !IsCompatibleWithLocalAsyncValue()) {
     return nullptr;

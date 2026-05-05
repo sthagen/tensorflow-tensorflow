@@ -143,7 +143,7 @@ class SqlDatasetOp : public DatasetOpKernel {
       explicit Iterator(const Params& params)
           : DatasetIterator<Dataset>(params) {}
       ~Iterator() override {
-        if (query_connection_initialized_) {
+        if (query_connection_initialized_ && query_connection_ != nullptr) {
           absl::Status s = query_connection_->Close();
           if (!s.ok()) {
             LOG(WARNING) << "Failed to close query connection: " << s;

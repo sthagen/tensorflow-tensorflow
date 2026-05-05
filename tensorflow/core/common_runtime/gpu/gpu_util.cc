@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/gpu/gpu_util.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -592,11 +593,14 @@ uint64_t GPUUtil::Checksum(Device* gpu_device,
 }
 
 uint64_t GPUUtil::Checksum(const Tensor& tensor) {
-  const float* fptr = reinterpret_cast<const float*>(GetBase(&tensor));
-  size_t num_bytes = tensor.TotalBytes();
-  size_t num_floats = num_bytes / sizeof(float);
-  for (size_t i = 0; i < num_floats; ++i) {
-    CHECK(!std::isnan(fptr[i])) << " i " << i;
+  if (tensor.dtype() == DT_FLOAT) {
+    const float* fptr = reinterpret_cast<const float*>(GetBase(&tensor));
+    size_t num_bytes = tensor.TotalBytes();
+    size_t num_floats = num_bytes / sizeof(float);
+    for (size_t i = 0; i < num_floats; ++i) {
+      CHECK(!std::isnan(fptr[i]))  // Crash OK
+          << "NaN detected in float tensor at index i: " << i;
+    }
   }
   // TODO(tucker): consider using crc32c instead.
   return Hash64(reinterpret_cast<const char*>(GetBase(&tensor)),

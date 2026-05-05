@@ -127,6 +127,17 @@ class PjRtDeviceEventPtr {
   }
 
   template <typename T>
+  void DeleteWhenReady(const tsl::RCReference<T>& ref) {
+    if (event_.device_event == nullptr || event_.vtable == nullptr) {
+      return;
+    }
+    event_.vtable->and_then(
+        event_.device_event,
+        +[](void* user_arg) { static_cast<T*>(user_arg)->DropRef(); },
+        tsl::RCReference<T>(ref).release());
+  }
+
+  template <typename T>
   tsl::AsyncValuePtr<T> down_cast() const {
     if (event_.device_event == nullptr ||
         event_.vtable !=
@@ -162,6 +173,8 @@ class PjRtDeviceEventPtr {
   }
 
   std::optional<absl::Status> GetErrorIfPresent() const;
+
+  PJRT_DeviceEvent_State state() const;
 
   PJRT_DeviceEvent ToC() const { return event_; }
 
@@ -233,6 +246,8 @@ class PjRtDeviceEventRef {
   std::optional<absl::Status> GetErrorIfPresent() const {
     return ptr_.GetErrorIfPresent();
   }
+
+  PJRT_DeviceEvent_State state() const { return ptr_.state(); }
 
   // TODO(parkers): Remove direct async_value usages.
   tsl::AsyncValue* async_value() const { return ptr_.async_value(); }

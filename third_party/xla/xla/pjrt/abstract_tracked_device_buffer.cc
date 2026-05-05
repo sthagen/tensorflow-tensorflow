@@ -415,6 +415,35 @@ absl::Status CommonPjRtBuffer::AcquireScopedRawBuffer(
   device_buffer.ConvertUsageHold(std::move(device_event));
   return absl::OkStatus();
 }
+absl::Status CommonPjRtBuffer::AcquireScopedRawBuffer(
+    absl::AnyInvocable<absl::StatusOr<PjRtDeviceEventRef>(
+        PjRtRawBufferRef raw_buffer,
+        std::vector<PjRtDeviceEventRef> definition_events) &&>
+        scoped_acquire,
+    const char* caller_name) {
+  ScopedHold device_buffer(this, ScopedHold::kUsage);
+  {
+    absl::MutexLock lock(mu_);
+    // Ensure that at most one donation hold can be in progress at a time.
+    WaitForOutstandingDonationHold();
+    AcquireHoldLocked(&device_buffer);
+  }
+  if (!device_buffer.ok()) {
+    return InvalidArgument("%s called on deleted or donated buffer: %s",
+                           caller_name, device_buffer.status().ToString());
+  }
+
+  auto definition_events_span = device_buffer.buffer()->definition_events();
+  std::vector<PjRtDeviceEventRef> definition_events(
+      definition_events_span.begin(), definition_events_span.end());
+
+  TF_ASSIGN_OR_RETURN(
+      auto device_event,
+      std::move(scoped_acquire)(device_buffer.buffer()->raw_buffer(),
+                                std::move(definition_events)));
+  device_buffer.ConvertUsageHold(std::move(device_event));
+  return absl::OkStatus();
+}
 
 CommonPjRtBuffer::ScopedHold CommonPjRtBuffer::GetBufferWithHold(
     ScopedHold::Type type) {
