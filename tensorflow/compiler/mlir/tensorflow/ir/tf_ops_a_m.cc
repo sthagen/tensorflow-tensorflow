@@ -2250,7 +2250,7 @@ class DivNoNanOrMulNoNanConstantY : public OpRewritePattern<OpT> {
 
     // Returns true iff `val` (a complex constant with float real and imaginary
     // parts) is zero.
-    auto complexIsZero = [](const std::complex<APFloat> val) {
+    auto complexIsZero = [](const mlir::Complex<APFloat> val) {
       // Note that when `val` is of complex type, it is zero iff both
       // its real and imaginary parts are zero.
       if (val.real().isZero() && val.imag().isZero())
@@ -2273,7 +2273,7 @@ class DivNoNanOrMulNoNanConstantY : public OpRewritePattern<OpT> {
               if (foundZero && foundNonzero) return true;
             }
           } else {
-            for (const auto val : attr.getValues<std::complex<APFloat>>()) {
+            for (const auto val : attr.getValues<mlir::Complex<APFloat>>()) {
               if (complexIsZero(val))
                 foundZero = true;
               else
@@ -2308,7 +2308,7 @@ class DivNoNanOrMulNoNanConstantY : public OpRewritePattern<OpT> {
           if (splatAttr.getSplatValue<APFloat>().isZero())
             splatAttrIsZero = true;
         } else {
-          if (complexIsZero(splatAttr.getSplatValue<std::complex<APFloat>>()))
+          if (complexIsZero(splatAttr.getSplatValue<mlir::Complex<APFloat>>()))
             splatAttrIsZero = true;
         }
         if (splatAttrIsZero) {

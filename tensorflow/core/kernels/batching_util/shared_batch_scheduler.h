@@ -37,6 +37,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "xla/tsl/platform/criticality.h"
@@ -413,20 +414,26 @@ template <typename TaskType>
 class PriorityTaskQueue {
  public:
   explicit PriorityTaskQueue(
-      size_t max_queue_depth,
+      const std::vector<int32_t>& allowed_batch_sizes,
+      absl::string_view batch_padding_policy, size_t max_queue_depth,
       std::function<
           absl::Status(std::unique_ptr<TaskType>* input_task,
                        int first_output_task_size, int input_batch_size_limit,
                        std::vector<std::unique_ptr<TaskType>>* output_tasks)>
           split_input_task_func,
       bool enable_large_batch_splitting, bool enable_task_resplit,
-      size_t max_execution_batch_size, int64_t batch_timeout_micros, Env* env)
-      : max_queue_depth_(max_queue_depth),
+      size_t max_execution_batch_size, int64_t batch_timeout_micros,
+      bool disable_padding, ModelBatchStats* model_batch_stats, Env* env)
+      : allowed_batch_sizes_(allowed_batch_sizes),
+        batch_padding_policy_(batch_padding_policy),
+        max_queue_depth_(max_queue_depth),
         split_input_task_func_(split_input_task_func),
         enable_large_batch_splitting_(enable_large_batch_splitting),
         enable_task_resplit_(enable_task_resplit),
         max_execution_batch_size_(max_execution_batch_size),
         batch_timeout_micros_(batch_timeout_micros),
+        disable_padding_(disable_padding),
+        model_batch_stats_(model_batch_stats),
         env_(env) {}
 
   // If queue has capacity, adds task to queue and returns OK.
@@ -572,6 +579,9 @@ class PriorityTaskQueue {
     return tasks_.begin()->criticality;
   }
 
+  // Returns a batch of tasks from the queue if the batch is ready to be
+  // executed. Otherwise, returns nullptr.
+  // BatchPaddingPolicy is applied to determine the optimal batch size.
   std::unique_ptr<Batch<TaskType>> ScheduleBatch() {
     if (empty()) {
       return nullptr;
@@ -579,9 +589,12 @@ class PriorityTaskQueue {
     if (size() >= max_execution_batch_size_ ||
         env_->NowMicros() >=
             EarliestTaskStartTime().value() + batch_timeout_micros_) {
-      auto batch = std::make_unique<Batch<TaskType>>();
-      size_t tasks_to_schedule =
+      size_t candidate_size =
           std::min(static_cast<size_t>(size()), max_execution_batch_size_);
+      int32_t tasks_to_schedule = ApplyBatchPaddingPolicy(
+          candidate_size, allowed_batch_sizes_, disable_padding_,
+          batch_padding_policy_, model_batch_stats_);
+      auto batch = std::make_unique<Batch<TaskType>>();
       std::vector<std::unique_ptr<TaskType>> tasks =
           RemoveTask(tasks_to_schedule);
       for (auto& t : tasks) {
@@ -633,10 +646,6 @@ class PriorityTaskQueue {
     return std::move(entry);
   }
 
-  std::multiset<QueueEntry> tasks_;
-  std::multiset<uint64_t> start_times_;
-  const size_t max_queue_depth_;
-  size_t current_queue_size_ = 0;
   bool CanSplitTask(const TaskType& task) const {
     if constexpr (std::is_base_of_v<BatchTask, TaskType>) {
       // If a BatchTask is a subtask, we can split it if task resplitting and
@@ -648,6 +657,13 @@ class PriorityTaskQueue {
     return enable_large_batch_splitting_;
   }
 
+  std::multiset<QueueEntry> tasks_;
+  std::multiset<uint64_t> start_times_;
+  size_t current_queue_size_ = 0;
+
+  const std::vector<int32_t> allowed_batch_sizes_;
+  const std::string batch_padding_policy_;
+  const size_t max_queue_depth_;
   const std::function<absl::Status(
       std::unique_ptr<TaskType>* input_task, int first_output_task_size,
       int input_batch_size_limit,
@@ -657,6 +673,8 @@ class PriorityTaskQueue {
   const bool enable_task_resplit_ = false;
   const size_t max_execution_batch_size_;
   const int64_t batch_timeout_micros_;
+  const bool disable_padding_;
+  ModelBatchStats* const model_batch_stats_;
   Env* const env_;
 };
 
@@ -1079,21 +1097,6 @@ absl::Status SharedBatchScheduler<TaskType>::AddQueueAfterRewritingOptions(
   }
 
   if (options.enable_priority_aware_batch_scheduler) {
-    if (options.disable_padding) {
-      return absl::InvalidArgumentError(
-          "If enable_priority_aware_batch_scheduler is true, disable_padding "
-          "must be false.");
-    }
-    if (options.batch_padding_policy != kPadUpPolicy &&
-        options.allowed_batch_sizes.size() > 1) {
-      return absl::InvalidArgumentError(absl::StrFormat(
-          "If enable_priority_aware_batch_scheduler is true, "
-          "batch_padding_policy must be kPadUpPolicy for "
-          "more than one allowed batch sizes. The "
-          "batch_padding_policy is %s with "
-          "number of allowed batch sizes %d.",
-          options.batch_padding_policy, options.allowed_batch_sizes.size()));
-    }
     if (options.mixed_priority_batching_policy !=
         MixedPriorityBatchingPolicy::kLowPriorityPaddingWithMaxBatchSize) {
       return absl::InvalidArgumentError(
@@ -1299,10 +1302,12 @@ Queue<TaskType>::Queue(
     SchedulableBatchCallback schedulable_batch_callback,
     SchedulableBatchCallback schedulable_warmup_batch_callback)
     : tasks_priority_queue_(
+          options.allowed_batch_sizes, options.batch_padding_policy,
           options.priority_aware_scheduler_options.max_queue_depth,
           options.split_input_task_func, options.enable_large_batch_splitting,
           options.priority_aware_scheduler_options.enable_task_resplit,
-          GetMaxExecutionBatchSize(options), options.batch_timeout_micros, env),
+          GetMaxExecutionBatchSize(options), options.batch_timeout_micros,
+          options.disable_padding, options.model_batch_stats, env),
       options_(options),
       env_(env),
       enable_warmup_queue_(enable_warmup_queue),

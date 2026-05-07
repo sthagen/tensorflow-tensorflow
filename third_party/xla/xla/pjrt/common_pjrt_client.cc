@@ -35,6 +35,7 @@ limitations under the License.
 #include "absl/functional/any_invocable.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/log/vlog_is_on.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -89,11 +90,6 @@ absl::Status CommonPjRtClient::WaitOnStream(PjRtMemorySpace* memory_space,
       "WaitUntilBufferReadyOnStream is only implemented for GPU.");
 }
 
-absl::StatusOr<std::unique_ptr<PjRtDeviceEventSet>>
-CommonPjRtClient::CreateUsageEventSet(PjRtMemorySpace* memory_space) const {
-  return std::make_unique<DefaultUsageEventSet>();
-}
-
 absl::StatusOr<std::unique_ptr<PjRtBuffer>> CommonPjRtClient::DefineBuffer(
     std::shared_ptr<const Shape> on_device_shape, PjRtMemorySpace* memory_space,
     PjRtRawBufferRef raw_buffer,
@@ -108,12 +104,11 @@ absl::StatusOr<std::unique_ptr<PjRtBuffer>> CommonPjRtClient::DefineBuffer(
                         raw_buffer->memory_space()->DebugString(),
                         memory_space->DebugString()));
   }
-  TF_ASSIGN_OR_RETURN(auto usage_events, CreateUsageEventSet(memory_space));
   return std::make_unique<CommonPjRtBufferImpl>(
       std::move(on_device_shape),
       std::make_unique<AbstractTrackedDeviceBuffer>(
           std::move(raw_buffer), std::move(definition_device_events),
-          std::move(usage_events)),
+          use_stream_based_compaction()),
       memory_space);
 }
 
@@ -165,6 +160,9 @@ absl::StatusOr<xla::Shape> CommonPjRtClient::GetCopyDestinationShape(
     return absl::InternalError(absl::StrFormat(
         "GetCopyDestinationShape not supported %s -> %s",
         src_memory_space->ToString(), dst_memory_space->ToString()));
+  }
+  if (shape.IsToken()) {
+    return shape;
   }
   return other_client->MakeDefaultShapeForMemorySpace(
       dst_memory_space,
@@ -325,8 +323,12 @@ CommonPjRtClient::BufferFromHostBuffer(
     HostBufferSemantics host_buffer_semantics,
     absl::AnyInvocable<void() &&> on_done_with_host_buffer,
     PjRtMemorySpace* memory_space, const Layout* device_layout) {
-  TF_ASSIGN_OR_RETURN(const Shape shape,
-                      ShapeUtil::MakeValidatedShape(type, dims));
+  Shape shape;
+  if (type == TOKEN) {
+    shape = ShapeUtil::MakeTokenShape();
+  } else {
+    TF_ASSIGN_OR_RETURN(shape, ShapeUtil::MakeValidatedShape(type, dims));
+  }
   TF_ASSIGN_OR_RETURN(
       Shape device_shape,
       MakeDefaultShapeForMemorySpace(memory_space, shape, device_layout));
@@ -488,28 +490,30 @@ CommonPjRtClient::CreateViewOfDeviceBuffer(
 absl::StatusOr<xla::Shape> CommonPjRtClient::MakeDefaultShapeForMemorySpace(
     PjRtMemorySpace* memory_space, xla::Shape shape,
     const xla::Layout* layout) const {
-  if (layout) {
-    *shape.mutable_layout() = *layout;
-    if (primitive_util::IsSubByteNonPredType(shape.element_type())) {
+  if (!shape.IsToken()) {
+    if (layout) {
+      *shape.mutable_layout() = *layout;
+      if (primitive_util::IsSubByteNonPredType(shape.element_type())) {
+        TF_ASSIGN_OR_RETURN(
+            xla::Layout default_layout,
+            (*GetTopologyDescription())
+                ->GetDefaultLayout(shape.element_type(), shape.dimensions()));
+        if (default_layout.element_size_in_bits() !=
+            shape.layout().element_size_in_bits()) {
+          return InvalidArgument(
+              "Device buffers require %d bits per element for an element type "
+              "%s, but got layout %s for shape %s",
+              default_layout.element_size_in_bits(),
+              PrimitiveType_Name(shape.element_type()), layout->ToString(),
+              shape.ToString());
+        }
+      }
+    } else {
       TF_ASSIGN_OR_RETURN(
-          xla::Layout default_layout,
+          *shape.mutable_layout(),
           (*GetTopologyDescription())
               ->GetDefaultLayout(shape.element_type(), shape.dimensions()));
-      if (default_layout.element_size_in_bits() !=
-          shape.layout().element_size_in_bits()) {
-        return InvalidArgument(
-            "Device buffers require %d bits per element for an element type "
-            "%s, but got layout %s for shape %s",
-            default_layout.element_size_in_bits(),
-            PrimitiveType_Name(shape.element_type()), layout->ToString(),
-            shape.ToString());
-      }
     }
-  } else {
-    TF_ASSIGN_OR_RETURN(
-        *shape.mutable_layout(),
-        (*GetTopologyDescription())
-            ->GetDefaultLayout(shape.element_type(), shape.dimensions()));
   }
   return shape;
 }
@@ -1936,8 +1940,11 @@ CommonPjRtBufferImpl::CopyToMemorySpaceSyncThroughLiteral(
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
 CommonPjRtBufferImpl::CopyToMemorySpaceFallbackThroughLiteral(
     PjRtMemorySpace* dst_memory_space) {
-  Shape shape = ShapeUtil::MakeShapeWithDescendingLayout(
-      on_device_shape().element_type(), on_device_shape().dimensions());
+  Shape shape = on_device_shape().IsToken()
+                    ? on_device_shape()
+                    : ShapeUtil::MakeShapeWithDescendingLayout(
+                          on_device_shape().element_type(),
+                          on_device_shape().dimensions());
   TF_ASSIGN_OR_RETURN(
       auto manager,
       dst_memory_space->client()->CreateBuffersForAsyncHostToDevice(
@@ -2486,25 +2493,20 @@ CommonPjRtBufferImpl::ReleaseDeviceMemoryOwnership(
 
 absl::StatusOr<std::unique_ptr<PjRtBuffer>>
 CommonPjRtBufferImpl::DonateWithControlDependency(Future<> dependency) {
-  auto hold = GetBufferWithHold(CommonPjRtBuffer::ScopedHold::kDonation);
-  if (!hold.ok()) {
+  TF_ASSIGN_OR_RETURN(auto extra_definition_event,
+                      client()->CreateDeviceEvent(memory_space(), dependency));
+  absl::StatusOr<std::unique_ptr<AbstractTrackedDeviceBuffer>> tracked_buffer =
+      DonateTrackedBuffer();
+  if (!tracked_buffer.ok()) {
     return InvalidArgument(
         "Invalid buffer passed to DonateWithControlDependency: %s",
-        hold.status().ToString());
+        tracked_buffer.status().ToString());
   }
-  // Make the new buffer which is identical to the old, except for the new
-  // definition event.
-  TF_ASSIGN_OR_RETURN(auto new_tracked_buffer,
-                      hold.buffer()->CloneWithControlDependency(
-                          memory_space(), std::move(dependency)));
-  hold.ConfirmDonation();
+  (*tracked_buffer)
+      ->UnsafePrependDefinitionEvent(std::move(extra_definition_event));
 
   return std::make_unique<CommonPjRtBufferImpl>(
-      on_device_shape_,
-      std::unique_ptr<AbstractTrackedDeviceBuffer>(
-          tensorflow::down_cast<AbstractTrackedDeviceBuffer*>(
-              new_tracked_buffer.release())),
-      memory_space());
+      on_device_shape_, std::move(*tracked_buffer), memory_space());
 }
 
 Future<> CommonPjRtBufferImpl::GetReadyFuture() {

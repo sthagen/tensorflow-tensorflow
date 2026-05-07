@@ -1736,6 +1736,10 @@ xla_test(
     srcs = ["gemm_rewriter_fp8_test.cc"],
     backends = ["gpu"],
     shard_count = 5,
+    # TODO(intel-tf): Enable for SYCL when support for FP8 is added.
+    tags = [
+        "no-oneapi",
+    ],
     deps = [
         ":gemm_rewriter",
         ":gemm_rewriter_test_lib",
@@ -3008,6 +3012,8 @@ xla_test(
     tags = [
         "cuda-only",
         "no_oss",  # We don't generate data for the devices used in the OSS CI.
+        # Scratch space is smaller in debug mode. So we only test in opt mode.
+        "optonly",
     ],
     deps = [
         ":deviceless_estimate_cub_sort_scratch_size",

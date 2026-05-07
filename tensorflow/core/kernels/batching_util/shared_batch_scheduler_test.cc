@@ -41,6 +41,7 @@ limitations under the License.
 #include "xla/tsl/platform/statusor.h"
 #include "tensorflow/core/kernels/batching_util/batch_scheduler.h"
 #include "tensorflow/core/kernels/batching_util/batch_scheduler_utils.h"
+#include "tensorflow/core/kernels/batching_util/batch_stats.h"
 #include "tensorflow/core/kernels/batching_util/fake_clock_env.h"
 #include "tensorflow/core/kernels/batching_util/input_split_metadata.h"
 #include "tensorflow/core/platform/cpu_info.h"
@@ -2656,44 +2657,6 @@ TEST_P(SharedBatchSchedulerPriorityAwareTest, InvalidOptions) {
     EXPECT_FALSE(status.ok());
   }
 
-  // Test invalid padding policy with more than one allowed batch sizes.
-  {
-    QueueOptions options = CreatePriorityAwareQueueOptions(
-        /*max_execution_batch_size=*/10, /*batch_timeout_micros=*/1000,
-        /*max_queue_depth=*/2);
-    options.batch_padding_policy = kBatchDownPolicy;
-    options.allowed_batch_sizes = {2, 4, 6, 8, 10};
-
-    std::unique_ptr<BatchScheduler<FakeTask>> queue;
-    auto status = scheduler->AddQueue(options, [](auto) {}, &queue);
-    EXPECT_FALSE(status.ok());
-  }
-
-  // Test invalid padding policy with more than one allowed batch sizes.
-  {
-    QueueOptions options = CreatePriorityAwareQueueOptions(
-        /*max_execution_batch_size=*/10, /*batch_timeout_micros=*/1000,
-        /*max_queue_depth=*/2);
-    options.batch_padding_policy = kMinimizeTpuCostPerRequestPolicy;
-    options.allowed_batch_sizes = {2, 4, 6, 8, 10};
-
-    std::unique_ptr<BatchScheduler<FakeTask>> queue;
-    auto status = scheduler->AddQueue(options, [](auto) {}, &queue);
-    EXPECT_FALSE(status.ok());
-  }
-
-  // Test disable_padding set to true
-  {
-    QueueOptions options = CreatePriorityAwareQueueOptions(
-        /*max_execution_batch_size=*/10, /*batch_timeout_micros=*/1000,
-        /*max_queue_depth=*/2);
-    options.disable_padding = true;
-
-    std::unique_ptr<BatchScheduler<FakeTask>> queue;
-    auto status = scheduler->AddQueue(options, [](auto) {}, &queue);
-    EXPECT_FALSE(status.ok());
-  }
-
   // Test invalid mixed priority policy
   {
     QueueOptions options = CreatePriorityAwareQueueOptions(
@@ -4267,6 +4230,145 @@ TEST_P(SharedBatchSchedulerPriorityAwareTest,
   // Unblock both.
   batch_processing_continue.Notify();
   warmup_processing_continue.Notify();
+}
+
+// Tests that kBatchDownPolicy adjusts the batch size to the previous allowed
+// batch size and rest of the tasks are scheduled in a subsequent batch.
+TEST_P(SharedBatchSchedulerPriorityAwareTest, BatchPaddingPolicyBatchDown) {
+  test_util::FakeClockEnv env(Env::Default());
+  absl::Notification start_teardown, stop_teardown;
+  std::unique_ptr<Thread> teardown_thread =
+      CreateFakeClockAdvancerThread(&env, &start_teardown, &stop_teardown);
+
+  {
+    absl::Notification first_batch_processed;
+    absl::Notification second_batch_processed;
+    auto callback = [&](std::unique_ptr<Batch<FakeTask>> batch) {
+      EXPECT_TRUE(batch->IsClosed());
+      if (!first_batch_processed.HasBeenNotified()) {
+        // With 3 tasks of size 1 (total=3) and allowed_batch_sizes={2, 4, 8},
+        // BATCH_DOWN trims candidate size 3 to the previous allowed size 2.
+        EXPECT_EQ(batch->size(), 2);
+        first_batch_processed.Notify();
+        return;
+      }
+      if (!second_batch_processed.HasBeenNotified()) {
+        // The 1 leftover task is re-queued and scheduled in a second batch.
+        EXPECT_EQ(batch->size(), 1);
+        second_batch_processed.Notify();
+        return;
+      }
+      ADD_FAILURE() << "Unexpected batch callback invocation";
+    };
+
+    TF_ASSERT_OK_AND_ASSIGN(
+        std::shared_ptr<Scheduler> scheduler,
+        CreateSharedBatchScheduler(/*num_batch_threads=*/1, &env));
+
+    QueueOptions options = CreatePriorityAwareQueueOptions(
+        /*max_execution_batch_size=*/8,
+        /*batch_timeout_micros=*/1000, /*max_queue_depth=*/10);
+    options.allowed_batch_sizes = {2, 4, 8};
+    options.batch_padding_policy = kBatchDownPolicy;
+
+    TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<Queue> queue,
+                            CreateQueue(scheduler, options, callback));
+
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+
+    // Trigger batch timeout.
+    env.AdvanceByMicroseconds(1001);
+    first_batch_processed.WaitForNotification();
+
+    // Trigger batch timeout for the second batch.
+    env.AdvanceByMicroseconds(1001);
+    second_batch_processed.WaitForNotification();
+
+    start_teardown.Notify();
+  }
+  stop_teardown.Notify();
+}
+
+// Tests that kMinimizeTpuCostPerRequestPolicy uses ModelBatchStats to decide
+// whether to batch down or pad up. When batch-down is cheaper per request, the
+// batch is trimmed and the leftover tasks are scheduled in a subsequent batch.
+TEST_P(SharedBatchSchedulerPriorityAwareTest,
+       BatchPaddingPolicyMinimizeTpuCostPerRequest) {
+  test_util::FakeClockEnv env(Env::Default());
+  absl::Notification start_teardown, stop_teardown;
+  std::unique_ptr<Thread> teardown_thread =
+      CreateFakeClockAdvancerThread(&env, &start_teardown, &stop_teardown);
+
+  {
+    // Set up ModelBatchStats so that batch-down is cheaper per request.
+    // With allowed_batch_sizes={2, 4, 8} and candidate_size=3:
+    //   pad_up_size=4, batch_down_size=2
+    //   cost_per_request(pad_up)  = cost(4) / candidate_size = 3.1s / 3 ≈ 1.03s
+    //   cost_per_request(batch_down) = cost(2) / batch_down_size = 2.0s / 2
+    //   = 1.0s
+    // Since 1.0s < 1.03s, the policy should batch down to size 2.
+    ModelBatchStats model_batch_stats;
+    model_batch_stats.batch_size(2).tpu_cost().Register(absl::Seconds(2));
+    model_batch_stats.batch_size(4).tpu_cost().Register(absl::Seconds(3.1));
+
+    absl::Notification first_batch_processed;
+    absl::Notification second_batch_processed;
+    auto callback = [&](std::unique_ptr<Batch<FakeTask>> batch) {
+      EXPECT_TRUE(batch->IsClosed());
+      if (!first_batch_processed.HasBeenNotified()) {
+        // With 3 tasks of size 1 (total=3) and allowed_batch_sizes={2, 4, 8},
+        // kMinimizeTpuCostPerRequestPolicy trims candidate size 3 to 2 because
+        // batch-down is cheaper per request.
+        EXPECT_EQ(batch->size(), 2);
+        first_batch_processed.Notify();
+        return;
+      }
+      if (!second_batch_processed.HasBeenNotified()) {
+        // The 1 leftover task is re-queued and scheduled in a second batch.
+        EXPECT_EQ(batch->size(), 1);
+        second_batch_processed.Notify();
+        return;
+      }
+      ADD_FAILURE() << "Unexpected batch callback invocation";
+    };
+
+    TF_ASSERT_OK_AND_ASSIGN(
+        std::shared_ptr<Scheduler> scheduler,
+        CreateSharedBatchScheduler(/*num_batch_threads=*/1, &env));
+
+    QueueOptions options = CreatePriorityAwareQueueOptions(
+        /*max_execution_batch_size=*/8,
+        /*batch_timeout_micros=*/1000, /*max_queue_depth=*/10);
+    options.allowed_batch_sizes = {2, 4, 8};
+    options.batch_padding_policy = kMinimizeTpuCostPerRequestPolicy;
+    options.model_batch_stats = &model_batch_stats;
+
+    TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<Queue> queue,
+                            CreateQueue(scheduler, options, callback));
+
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+    TF_EXPECT_OK(ScheduleTask(/*task_size=*/1, queue.get(),
+                              tsl::criticality::Criticality::kCritical));
+
+    // Trigger batch timeout.
+    env.AdvanceByMicroseconds(1001);
+    first_batch_processed.WaitForNotification();
+
+    // Trigger batch timeout for the second batch.
+    env.AdvanceByMicroseconds(1001);
+    second_batch_processed.WaitForNotification();
+
+    start_teardown.Notify();
+  }
+  stop_teardown.Notify();
 }
 
 INSTANTIATE_TEST_SUITE_P(Parameter, SharedBatchSchedulerPriorityAwareTest,

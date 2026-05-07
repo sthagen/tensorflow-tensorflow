@@ -32,6 +32,8 @@ limitations under the License.
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/function_handle_cache.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/resource_handle.h"
+#include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/framework/resource_op_kernel.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/data/iterator_ops.h"
@@ -664,8 +666,9 @@ class MultiDeviceIteratorInitOp : public OpKernel {
     DatasetBase* dataset;
     OP_REQUIRES_OK(ctx, GetDatasetFromVariantTensor(ctx->input(0), &dataset));
     core::RefCountPtr<MultiDeviceIterator> resource;
-    OP_REQUIRES_OK(ctx,
-                   LookupResource(ctx, HandleFromInput(ctx, 1), &resource));
+    ResourceHandle handle;
+    OP_REQUIRES_OK(ctx, HandleFromInput(ctx, 1, &handle));
+    OP_REQUIRES_OK(ctx, LookupResource(ctx, handle, &resource));
 
     IteratorContext::Params params(ctx);
     params.flr = resource->flr();
@@ -720,8 +723,9 @@ class MultiDeviceIteratorGetNextFromShardOp : public AsyncOpKernel {
     int64_t incarnation_id = tensor_incarnation_id->scalar<int64_t>()();
 
     MultiDeviceIterator* iterator;
-    OP_REQUIRES_OK_ASYNC(
-        ctx, LookupResource(ctx, HandleFromInput(ctx, 0), &iterator), done);
+    ResourceHandle handle;
+    OP_REQUIRES_OK_ASYNC(ctx, HandleFromInput(ctx, 0, &handle), done);
+    OP_REQUIRES_OK_ASYNC(ctx, LookupResource(ctx, handle, &iterator), done);
 
     background_worker_.Schedule(std::bind(
         [ctx, iterator, shard_num, incarnation_id](DoneCallback done) {
@@ -781,8 +785,9 @@ class MultiDeviceIteratorToStringHandleOp : public OpKernel {
     // Validate that the handle corresponds to a real resource, and
     // that it is an MultiDeviceIterator.
     core::RefCountPtr<MultiDeviceIterator> resource;
-    OP_REQUIRES_OK(ctx,
-                   LookupResource(ctx, HandleFromInput(ctx, 0), &resource));
+    ResourceHandle handle;
+    OP_REQUIRES_OK(ctx, HandleFromInput(ctx, 0, &handle));
+    OP_REQUIRES_OK(ctx, LookupResource(ctx, handle, &resource));
 
     Tensor* string_handle_t;
     OP_REQUIRES_OK(ctx,

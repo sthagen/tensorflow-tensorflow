@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/tfrt/ifrt/ifrt_serving_executable.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>

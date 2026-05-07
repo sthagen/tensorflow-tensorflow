@@ -152,6 +152,7 @@ cc_library(
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/log:vlog_is_on",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -247,6 +248,7 @@ cc_library(
     ],
     deps = [
         ":async_work_runner",
+        ":device_event",
         ":event_pool",
         ":pjrt_common",
         ":semaphore",
