@@ -75,16 +75,36 @@ if [[ "$TFCI_WHL_NUMPY_VERSION" == 1 ]]; then
     "$python" -m pip install numpy==1.26.0
   fi
 fi
+
+
 if [[ "$TFCI_BAZEL_COMMON_ARGS" =~ gpu|cuda ]]; then
   echo "Checking to make sure tensorflow[and-cuda] is installable..."
   "$python" -m pip install "$(echo *.whl)[and-cuda]" $TFCI_PYTHON_VERIFY_PIP_INSTALL_ARGS
 else
   "$python" -m pip install *.whl $TFCI_PYTHON_VERIFY_PIP_INSTALL_ARGS
 fi
+
 if [[ "$TFCI_WHL_IMPORT_TEST_ENABLE" == "1" ]]; then
-  "$python" -c 'import tensorflow as tf; t1=tf.constant([1,2,3,4]); t2=tf.constant([5,6,7,8]); print(tf.add(t1,t2).shape)'
-  "$python" -c 'import sys; import tensorflow as tf; sys.exit(0 if "keras" in tf.keras.__name__ else 1)'
+  # FIXME: Preventing the error: 
+  #   CUDA Runtime error: cudaErrorInsufficientDriver: 
+  #     CUDA driver version is insufficient for CUDA runtime version
+  if [[ ! "$TFCI" =~ "rbe" ]]; then
+    export CUDA_VISIBLE_DEVICES="-1"
+  fi
+
+  "$python" -c '
+import tensorflow as tf
+t1=tf.constant([1,2,3,4])
+t2=tf.constant([5,6,7,8])
+print(tf.add(t1,t2).shape)
+'
+  "$python" -c '
+import sys
+import tensorflow as tf
+sys.exit(0 if "keras" in tf.keras.__name__ else 1)
+'
 fi
+
 # Import tf nightly wheel built with numpy2 from PyPI in numpy1 env for testing.
 # This aims to maintain TF compatibility with NumPy 1.x until 2025 b/361369076.
 if [[ "$TFCI_WHL_NUMPY_VERSION" == 1 ]]; then

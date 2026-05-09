@@ -89,12 +89,12 @@ void RecordBatchSplitUsage(
       "model_name");
   if (maybe_enable_large_batch_splitting.has_value()) {
     if (maybe_enable_large_batch_splitting.value()) {
-      cell->GetCell(std::string(model_name))->Set("true");
+      cell->GetCell(model_name)->Set("true");
     } else {
-      cell->GetCell(std::string(model_name))->Set("false");
+      cell->GetCell(model_name)->Set("false");
     }
   } else {
-    cell->GetCell(std::string(model_name))->Set("unset");
+    cell->GetCell(model_name)->Set("unset");
   }
 }
 
@@ -103,7 +103,7 @@ void RecordBatchParamNumBatchThreads(int64_t num_batch_threads,
   static auto* cell = monitoring::Gauge<int64_t, 1>::New(
       "/tensorflow/serving/batching/num_batch_threads",
       "Tracks the number of batch threads of a model.", "model_name");
-  cell->GetCell(std::string(model_name))->Set(num_batch_threads);
+  cell->GetCell(model_name)->Set(num_batch_threads);
 }
 
 absl::string_view GetModelName(OpKernelContext* ctx) {
@@ -132,7 +132,7 @@ static thread::ThreadPool* GetOrCreateBatchThreadsPool() {
     options.num_threads =
         NumBatchThreadsFromEnvironmentWithDefault(kBatchThreadPoolSize);
 
-    options.thread_name = std::string("adaptive_batch_threads");
+    options.thread_name = "adaptive_batch_threads";
 
     auto status_or_executor = serving::BoundedExecutor::Create(options);
     if (!status_or_executor.ok()) {

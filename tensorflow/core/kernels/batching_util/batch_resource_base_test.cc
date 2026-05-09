@@ -347,9 +347,9 @@ TEST_P(BatchResourceBaseWithPriorityTest, BatchingWithMixedPriorityPolicy) {
   TF_ASSERT_OK_AND_ASSIGN(absl::string_view policy_str,
                           GetMixedPriorityBatchingPolicyString(
                               GetParam().mixed_priority_batching_policy));
-  EXPECT_EQ(
-      mixed_priority_policy_reader_->Read("my_model_name", "my_batch_node"),
-      policy_str);
+  EXPECT_EQ(mixed_priority_policy_reader_->Read("my_model_name",
+                                                "my_batch_node", "true"),
+            policy_str);
 
   for (const auto& [batch_size, expected_count] :
        GetParam().expected_batch_size_count) {

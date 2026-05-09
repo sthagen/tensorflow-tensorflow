@@ -36,6 +36,7 @@ limitations under the License.
 #include "xla/pjrt/buffer_sequencing_event.h"
 #include "xla/pjrt/device_event.h"
 #include "xla/pjrt/device_event_utils.h"
+#include "xla/pjrt/dynamic_shapes.h"
 #include "xla/pjrt/host_memory_allocator.h"
 #include "xla/pjrt/local_device_state.h"
 #include "xla/pjrt/pjrt_client.h"
@@ -226,6 +227,26 @@ ShapedBuffer PjRtStreamExecutorRawBuffer::AsShapedBuffer(
   }
   CHECK(iterator == shaped_buffer.buffers().end());
   return shaped_buffer;
+}
+
+absl::Status PjRtStreamExecutorRawBuffer::ValidateSlice(int64_t offset,
+                                                        int64_t slice_size) {
+  size_t buffer_size = GetOnDeviceSizeInBytes();
+  if (offset < 0 || offset > buffer_size || buffer_size - offset < slice_size) {
+    return InvalidArgument(
+        "Invalid slicing of buffer size %lld with "
+        "invalid offset %lld, slice size %lld",
+        buffer_size, offset, slice_size);
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<PjRtRawBufferRef> PjRtStreamExecutorRawBuffer::Slice(
+    int64_t offset, int64_t size) {
+  TF_RETURN_IF_ERROR(ValidateSlice(offset, size));
+  return tsl::MakeRef<PjRtStreamExecutorRawBuffer>(
+      client_, memory_space_, local_device_,
+      RawSEDeviceMemory::CreateSlice(device_buffer_, offset, size), size);
 }
 
 void PjRtStreamExecutorRawBuffer::ReadDynamicShape(
@@ -567,8 +588,10 @@ void PjRtStreamExecutorRawBuffer::IntraClientCopyToWithDependencies(
       auto dst_buffer_mem = dst_buffer->mem();
       TF_RETURN_IF_ERROR(client->WaitForAllocation(stream, *src_raw_buffer));
       TF_RETURN_IF_ERROR(client->WaitForAllocation(stream, *dst_raw_buffer));
-      TF_RETURN_IF_ERROR(stream->MemcpyD2D(&dst_buffer_mem, src_buffer->mem(),
-                                           dst_buffer_mem.size()));
+      if (dst_buffer_mem.size() > 0) {
+        TF_RETURN_IF_ERROR(stream->MemcpyD2D(&dst_buffer_mem, src_buffer->mem(),
+                                             dst_buffer_mem.size()));
+      }
       client->ThenRecordEvent(usage_event, local_device, std::move(event),
                               stream);
       usage_event.AndThen([src_buffer, dst_raw_buffer]() {});
@@ -635,7 +658,7 @@ void PjRtStreamExecutorDeviceEventSet::AppendTo(PjRtDeviceEventSet& events) {
 absl::StatusOr<PjRtDeviceEventRef>
 PjRtStreamExecutorRawBuffer::CopyRawToRemoteDevice(
     Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
-    std::vector<tsl::RCReference<tsl::AsyncValue>> transfer_dependency_avs) {
+    std::vector<PjRtDeviceEventRef> transfer_dependency_avs) {
   return absl::UnimplementedError(
       "PjRtStreamExecutorRawBuffer does not support CopyRawToRemoteDevice.");
 }

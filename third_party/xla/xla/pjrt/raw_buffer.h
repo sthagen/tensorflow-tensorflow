@@ -124,15 +124,15 @@ class CommonPjRtRawBuffer : public PjRtRawBuffer {
       std::function<void(absl::Status status, bool sends_were_enqueued)>;
   virtual absl::StatusOr<PjRtDeviceEventRef> CopyRawToRemoteDevice(
       Future<std::string> serialized_descriptor, RemoteSendCallback on_done,
-      std::vector<tsl::RCReference<tsl::AsyncValue>>
-          transfer_dependency_avs) = 0;
+      std::vector<PjRtDeviceEventRef> transfer_dependency_avs) = 0;
 
   // A sliced buffer is a view into the offset and range of this buffer.
   //
   // Note that the underlying driver may have requirements
   // on the alignment of `offset`. Look at implementations of
   // this method for specific alignment requirements.
-  absl::StatusOr<PjRtRawBufferRef> Slice(int64_t offset, int64_t size);
+  virtual absl::StatusOr<PjRtRawBufferRef> Slice(int64_t offset,
+                                                 int64_t size) = 0;
 
   struct SliceInfo {
     int64_t offset;

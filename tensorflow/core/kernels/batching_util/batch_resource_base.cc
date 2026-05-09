@@ -300,18 +300,20 @@ void RecordBatchParamPaddingPolicy(const std::string& batch_padding_policy,
 }
 
 static auto* mixed_priority_batching_policy_value =
-    monitoring::Gauge<std::string, 2>::New(
+    monitoring::Gauge<std::string, 3>::New(
         "/tensorflow/serving/batching/mixed_priority_batching_policy",
         "The value of BatchFunction.mixed_priority_batching_policy attribute.",
-        "model_name", "op_name");
+        "model_name", "op_name", "enable_priority_queue");
 
 void RecordBatchParamMixedPriorityBatchingPolicy(
     MixedPriorityBatchingPolicy mixed_priority_batching_policy,
-    const std::string& model_name, const std::string& op_name) {
+    bool enable_priority_queue, const std::string& model_name,
+    const std::string& op_name) {
   auto policy_str =
       GetMixedPriorityBatchingPolicyString(mixed_priority_batching_policy);
   if (policy_str.ok()) {
-    mixed_priority_batching_policy_value->GetCell(model_name, op_name)
+    mixed_priority_batching_policy_value
+        ->GetCell(model_name, op_name, enable_priority_queue ? "true" : "false")
         ->Set(std::string(*policy_str));
   }
 }
@@ -539,6 +541,7 @@ absl::Status BatchResourceBase::RegisterInput(
         GetModelName(context), context->op_kernel().name());
     RecordBatchParamMixedPriorityBatchingPolicy(
         this->batcher_queue_options_.mixed_priority_batching_policy,
+        this->batcher_queue_options_.enable_priority_queue,
         GetModelName(context), context->op_kernel().name());
   } else if (adaptive_batcher_) {
     RecordBatchParamBatchTimeoutMicros(
