@@ -228,7 +228,8 @@ absl::Status ConfigureTPUEmbeddingRewritePass::Run(
                  output_dependencies,
              Graph* graph) -> absl::Status {
             if (host_devices.empty()) {
-              return errors::InvalidArgument("TPU job contains no CPU devices");
+              return absl::InvalidArgumentError(
+                  "TPU job contains no CPU devices");
             }
             TF_RET_CHECK(!host_devices.empty());
 
@@ -249,7 +250,8 @@ absl::Status ConfigureTPUEmbeddingRewritePass::Run(
             const std::string& embedding_attr_string = GetNodeAttrString(
                 AttrSlice(configuration_node_def), kEmbeddingConfigurationAttr);
             if (embedding_attr_string.empty()) {
-              return errors::InvalidArgument("TPU embedding config is empty.");
+              return absl::InvalidArgumentError(
+                  "TPU embedding config is empty.");
             } else {
               // Auto populate the feature descriptor so that we can make use
               // of these fields later.

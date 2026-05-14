@@ -185,7 +185,10 @@ tf_kernel_library(
 tf_kernel_library(
     name = "attention_ops",
     prefix = "attention_ops",
-    deps = IMAGE_DEPS,
+    deps = IMAGE_DEPS + [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 tf_kernel_library(

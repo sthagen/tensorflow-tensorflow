@@ -264,21 +264,35 @@ void convertShardyAttrsWithoutHloShardingV3(FuncOp funcOp,
   // Copy over the argument shardings, but not the result shardings yet.
   // We need to wait until after we've converted all the Operations before
   // copying the result shardings.
-  for (auto [argNum, argType] : llvm::enumerate(funcOp.getArgumentTypes())) {
+  StringRef attributeName =
+      xla::ToStringRef(HloSharding::kShardingFrontendAttrName);
+  llvm::SmallVector<mlir::DictionaryAttr> funcArgAttrs;
+  funcArgAttrs.reserve(funcOp.getNumArguments());
+  for (int64_t argNum = 0; argNum < funcOp.getNumArguments(); argNum++) {
     // Attempt to extract the TensorShardingAttr from the frontend attributes
     // of the function argument/result.
+    // TODO(b/510714593): Batch remove/set attributes through a shardy utility.
+    mlir::NamedAttrList attrs(funcOp.getArgAttrDict(argNum));
     if (DictionaryAttr dictAttr = getFuncArgFrontendAttrs(funcOp, argNum)) {
-      if (auto sharding = parseStringAttr<TensorShardingAttr>(
-              dictAttr,
-              xla::ToStringRef(HloSharding::kShardingFrontendAttrName))) {
-        funcOp.setArgAttr(argNum, kShardingAttr, sharding);
-        removeFrontendAttribute(
-            funcOp, xla::ToStringRef(HloSharding::kShardingFrontendAttrName),
-            argNum);
+      if (auto sharding =
+              parseStringAttr<TensorShardingAttr>(dictAttr, attributeName)) {
+        attrs.set(kShardingAttr, sharding);
+        llvm::SmallVector<NamedAttribute> existingAttributes =
+            getExistingFrontendAttributes(dictAttr,
+                                          /*excludedAttribute=*/attributeName);
+        if (!existingAttributes.empty()) {
+          attrs.set(
+              kFrontendAttributesAttr,
+              DictionaryAttr::get(funcOp.getContext(), existingAttributes));
+        } else {
+          attrs.erase(kFrontendAttributesAttr);
+        }
       }
     }
-    funcOp.removeArgAttr(argNum, kXlaShardingAttr);
+    attrs.erase(kXlaShardingAttr);
+    funcArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
   }
+  funcOp.setAllArgAttrs(funcArgAttrs);
 
   // Due to `SdyRoundTripExportShardingsPass` keeping `kXlaShardingAttr`, remove
   // them purely for cleanliness of the module.

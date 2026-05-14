@@ -28,6 +28,7 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/debugging/leak_check.h"
 #include "absl/status/status.h"
@@ -1770,10 +1771,9 @@ static PyTypeObject TFE_Py_VariableWatcher_Type = {
     "TFE_Py_VariableWatcher objects", /* tp_doc */
 };
 
-// Note: in the current design no mutex is needed here because of the python
-// GIL, which is always held when any TFE_Py_* methods are called. We should
-// revisit this if/when decide to not hold the GIL while manipulating the tape
-// stack.
+// Note: in the current design no mutex is needed here for the tape set because
+// it is thread_local. However, initialization of global types like
+// TFE_Py_Tape_Type requires synchronization under free-threading.
 tensorflow::gtl::CompactPointerSet<TFE_Py_Tape*>* GetTapeSet() {
   thread_local std::unique_ptr<tensorflow::gtl::CompactPointerSet<TFE_Py_Tape*>>
       tape_set;
@@ -1961,8 +1961,17 @@ PyObject* TFE_Py_TapeSetIsStopped() {
 
 PyObject* TFE_Py_TapeSetNew(PyObject* persistent,
                             PyObject* watch_accessed_variables) {
-  TFE_Py_Tape_Type.tp_new = PyType_GenericNew;
-  if (PyType_Ready(&TFE_Py_Tape_Type) < 0) return nullptr;
+  // Ensure global type object is initialized only once to prevent data races
+  // under free-threading.
+  static absl::once_flag tape_type_once;
+  static bool tape_type_ready = false;
+  absl::call_once(tape_type_once, []() {
+    TFE_Py_Tape_Type.tp_new = PyType_GenericNew;
+    if (PyType_Ready(&TFE_Py_Tape_Type) >= 0) {
+      tape_type_ready = true;
+    }
+  });
+  if (!tape_type_ready) return nullptr;
   TFE_Py_Tape* tape = PyObject_NEW(TFE_Py_Tape, &TFE_Py_Tape_Type);
   tape->tape = new GradientTape(persistent == Py_True,
                                 watch_accessed_variables == Py_True);
@@ -2321,8 +2330,17 @@ PyObject* TFE_Py_TapeWatchedVariables(PyObject* tape) {
 }
 
 PyObject* TFE_Py_VariableWatcherNew() {
-  TFE_Py_VariableWatcher_Type.tp_new = PyType_GenericNew;
-  if (PyType_Ready(&TFE_Py_VariableWatcher_Type) < 0) return nullptr;
+  // Ensure global type object is initialized only once to prevent data races
+  // under free-threading.
+  static absl::once_flag variable_watcher_type_once;
+  static bool variable_watcher_type_ready = false;
+  absl::call_once(variable_watcher_type_once, []() {
+    TFE_Py_VariableWatcher_Type.tp_new = PyType_GenericNew;
+    if (PyType_Ready(&TFE_Py_VariableWatcher_Type) >= 0) {
+      variable_watcher_type_ready = true;
+    }
+  });
+  if (!variable_watcher_type_ready) return nullptr;
   TFE_Py_VariableWatcher* variable_watcher =
       PyObject_NEW(TFE_Py_VariableWatcher, &TFE_Py_VariableWatcher_Type);
   variable_watcher->variable_watcher = new VariableWatcher();
@@ -2943,8 +2961,17 @@ PyObject* TFE_Py_TapeGradient(PyObject* tape, PyObject* target,
 }
 
 PyObject* TFE_Py_ForwardAccumulatorNew(bool use_batch) {
-  TFE_Py_ForwardAccumulator_Type.tp_new = PyType_GenericNew;
-  if (PyType_Ready(&TFE_Py_ForwardAccumulator_Type) < 0) return nullptr;
+  // Ensure global type object is initialized only once to prevent data races
+  // under free-threading.
+  static absl::once_flag accumulator_type_once;
+  static bool accumulator_type_ready = false;
+  absl::call_once(accumulator_type_once, []() {
+    TFE_Py_ForwardAccumulator_Type.tp_new = PyType_GenericNew;
+    if (PyType_Ready(&TFE_Py_ForwardAccumulator_Type) >= 0) {
+      accumulator_type_ready = true;
+    }
+  });
+  if (!accumulator_type_ready) return nullptr;
   TFE_Py_ForwardAccumulator* accumulator =
       PyObject_NEW(TFE_Py_ForwardAccumulator, &TFE_Py_ForwardAccumulator_Type);
   if (py_vspace == nullptr) {

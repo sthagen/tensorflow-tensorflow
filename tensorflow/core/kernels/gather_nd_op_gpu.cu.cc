@@ -89,7 +89,8 @@ struct GatherNdSlice<GPUDevice, T, Index, IXDIM> {
       batch_indices[i - 1] = Tparams.dimension(i - 1);
       batch_strides[i - 1] = batch_strides[i] * Tparams.dimension(i);
     }
-    StatusOr<GpuLaunchConfig64> config = GetGpuLaunchConfig64(out_size, d);
+    absl::StatusOr<GpuLaunchConfig64> config =
+        GetGpuLaunchConfig64(out_size, d);
     CHECK_OK(config.status());                                      // Crash OK
     CHECK_OK(GpuLaunchKernel(GatherSliceOpKernel<T, Index, IXDIM>,  // Crash OK
                              config->block_count, config->thread_per_block, 0,
