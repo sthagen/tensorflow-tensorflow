@@ -1543,6 +1543,7 @@ cc_library(
             if_cuda_is_configured([
                 "@xla//xla/tsl/cuda:cupti",
                 "@xla//xla/tsl/cuda:nvshmem_stub",
+                "@xla//xla/tsl/cuda:cusolver",
             ]) + if_nccl([
                 "@xla//xla/tsl/cuda:nccl",
             ])

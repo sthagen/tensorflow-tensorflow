@@ -49,7 +49,6 @@ load("@xla//third_party/tensorrt:tensorrt_configure.bzl", "tensorrt_configure")
 load("@xla//third_party/tensorrt:workspace.bzl", tensorrt = "repo")
 load("@xla//third_party/triton:workspace.bzl", triton = "repo")
 load("@xla//third_party/xnnpack:workspace.bzl", xnnpack = "repo")
-load("@xla//third_party/xxd:workspace.bzl", xxd = "repo")
 load("@xla//tools/def_file_filter:def_file_filter_configure.bzl", "def_file_filter_configure")
 load("@xla//tools/toolchains:cpus/aarch64/aarch64_compiler_configure.bzl", "aarch64_compiler_configure")
 load("@xla//tools/toolchains:cpus/arm/arm_compiler_configure.bzl", "arm_compiler_configure")
@@ -99,6 +98,7 @@ load("//third_party/tflite_ovic_testdata:workspace.bzl", tflite_ovic_testdata = 
 load("//third_party/vulkan_headers:workspace.bzl", vulkan_headers = "repo")
 load("//third_party/xctestrunner:workspace.bzl", xctestrunner = "repo")
 load("//third_party/xprof:workspace.bzl", xprof = "repo")
+load("//third_party/xxd:workspace.bzl", xxd = "repo")
 
 def _initialize_third_party():
     """ Load third party repositories.  See above load() statements. """

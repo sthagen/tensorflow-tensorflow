@@ -48,31 +48,6 @@ filegroup(
 )
 
 cc_library(
-    name = "gpu_codegen_test",
-    testonly = True,
-    srcs = ["gpu_codegen_test.cc"],
-    hdrs = ["gpu_codegen_test.h"],
-    tags = tf_gpu_tests_tags(),
-    deps = [
-        "//xla:debug_options_flags",
-        "//xla:shape_util",
-        "//xla/hlo/testlib:filecheck",
-        "//xla/hlo/testlib:verified_hlo_module",
-        "//xla/service:executable",
-        "//xla/service:gpu_plugin",
-        "//xla/service:hlo_module_config",
-        "//xla/service/gpu:gpu_compiler",
-        "//xla/stream_executor:platform_manager",
-        "//xla/tests:llvm_irgen_test_base",
-        "//xla/tsl/platform:logging",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_googletest//:gtest_for_library",
-    ],
-)
-
-cc_library(
     name = "hlo_gpu_test_base_interface",
     hdrs = ["hlo_gpu_test_base_interface.h"],
     deps = [
@@ -104,11 +79,10 @@ cc_library(
         "//xla/service:llvm_compiler",
         "//xla/service/gpu:gpu_compiler",
         "//xla/tests:codegen_utils",
-        "@com_google_absl//absl/base:core_headers",
+        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest_for_library",
     ],
 )
@@ -708,6 +682,27 @@ xla_test(
         "//xla/tests:hlo_pjrt_test_base",
         "//xla/tests:test_utils",
         "//xla/tsl/platform:statusor",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+xla_test(
+    name = "kernel_cache_regression_test",
+    srcs = ["kernel_cache_regression_test.cc"],
+    backends = [
+        "a100",
+        "h100",
+        "b200",
+        "amdgpu_any",
+    ] + if_oss([
+        "nvgpu_any",
+    ]),
+    deps = [
+        ":hlo_pjrt_gpu_test_base",
+        "//xla:error_spec",
+        "//xla/stream_executor:device_description",
+        "//xla/tests:hlo_pjrt_interpreter_reference_mixin",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -1490,12 +1485,12 @@ xla_test(
         "gpu",
     ],
     deps = [
+        ":collective_ops_e2e_test_base",
         "//xla:array",
         "//xla:literal",
         "//xla:literal_util",
         "//xla:types",
         "//xla:xla_data_proto_cc",
-        "//xla/backends/gpu/tests:collective_ops_e2e_test_base",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_module_config",
         "//xla/service/gpu:backend_configs_cc",

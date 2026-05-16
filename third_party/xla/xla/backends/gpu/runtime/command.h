@@ -67,9 +67,7 @@ namespace xla::gpu {
   V(kCollectiveCmd, "CollectiveCmd")                         \
   V(kAllToAllCmd, "AllToAllCmd")                             \
   V(kAllGatherCmd, "AllGatherCmd")                           \
-  V(kCollectiveBroadcastCmd, "CollectiveBroadcastCmd")       \
   V(kCollectivePermuteCmd, "CollectivePermuteCmd")           \
-  V(kRaggedAllToAllCmd, "RaggedAllToAllCmd")                 \
   V(kRecvCmd, "RecvCmd")                                     \
   V(kSendCmd, "SendCmd")                                     \
   V(kAsyncDone, "AsyncDone")                                 \

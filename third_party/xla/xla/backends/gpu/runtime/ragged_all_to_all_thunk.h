@@ -40,6 +40,7 @@ limitations under the License.
 #include "xla/core/collectives/symmetric_memory.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/buffer_assignment.h"
+#include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_address.h"
 #include "xla/stream_executor/device_address_handle.h"
 #include "xla/stream_executor/memory_allocation.h"
@@ -69,6 +70,10 @@ struct RaggedAllToAllConfig {
   // If set, the will be used to determine if optimized kernels that assume a
   // fast interconnect can be used.
   std::optional<int64_t> fast_interconnect_slice_size_override = std::nullopt;
+
+  // If true, one-shot kernel will use the Symmetric Memory for
+  // output buffers resulting in zero copy and temporary sym buffer elimination.
+  bool zero_copy_in_one_shot_kernel = false;
 };
 
 // Contains the values that are passed between host threads with rendezvous.
@@ -154,6 +159,10 @@ class RaggedAllToAllThunk : public CollectiveThunk {
 
   absl::Status Initialize(const InitializeParams& params) override;
 
+  absl::StatusOr<const se::CommandBuffer::Command*> Record(
+      const ExecuteParams& execute_params, const RecordParams& record_params,
+      RecordAction record_action, se::CommandBuffer* command_buffer) override;
+
   static absl::string_view GetHloOpName() { return "ragged-all-to-all-start"; }
 
   static CollectiveOpGroupMode GetGroupMode(
@@ -171,6 +180,10 @@ class RaggedAllToAllThunk : public CollectiveThunk {
 
   bool use_multi_gpu_barrier_with_nccl_in_one_shot_kernel() const {
     return config_.use_multi_gpu_barrier_with_nccl_in_one_shot_kernel;
+  }
+
+  bool zero_copy_in_one_shot_kernel() const {
+    return config_.zero_copy_in_one_shot_kernel;
   }
 
   // Returns true if one shot kernel is supported
@@ -268,8 +281,8 @@ absl::Status RunOneShotRaggedAllToAllWithNccl(
     const GpuCliqueKey& clique_key, se::Stream& stream, RankId rank,
     std::shared_ptr<xla::SymmetricMemory> barrier_signal_symmetric_memory,
     const se::DeviceAddressBase& barrier_signal_value,
-    std::shared_ptr<xla::SymmetricMemory> output_temporary_symmetric_memory,
-    size_t output_sym_offset, int64_t num_total_updates, int64_t num_input_rows,
+    SymmetricMemory* output_sym_mem, size_t output_sym_offset,
+    bool is_zero_copy, int64_t num_total_updates, int64_t num_input_rows,
     int64_t num_row_elements, absl::Span<DeviceBufferPair const> buffers);
 
 }  // namespace gpu

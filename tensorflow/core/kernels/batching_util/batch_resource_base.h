@@ -173,6 +173,9 @@ class BatchResourceBase : public ResourceBase {
     // Ownership is shared by individual splits and callback.
     std::shared_ptr<ThreadSafeStatus> status;
 
+    // Note the done callback MUST NOT (although unlikely in practice) attempt
+    // to acquire the queue's lock — e.g., by calling methods like Schedule() on
+    // the same queue — as this may lead to deadlock.
     void set_done_callback(AsyncOpKernel::DoneCallback callback) {
       done_callback = std::move(callback);
     }

@@ -66,6 +66,7 @@ limitations under the License.
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/hlo/testlib/test.h"
 #include "xla/layout.h"
+#include "xla/layout_util.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/pjrt/device_event.h"
@@ -256,7 +257,8 @@ TEST(StreamExecutorGpuClientTest, NumaNode) {
   }
 }
 
-#if defined(GOOGLE_CUDA) || defined(TENSORFLOW_USE_ROCM)
+#if defined(GOOGLE_CUDA) || defined(TENSORFLOW_USE_ROCM) || \
+    defined(TENSORFLOW_USE_SYCL)
 TEST(StreamExecutorGpuClientTest, DonateExternalMem) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
@@ -304,7 +306,8 @@ ENTRY main.5 {
   ASSERT_EQ(result[0].size(), 1);
   TF_EXPECT_OK(result[0][0]->GetReadyFuture().Await());
 }
-#endif  // defined(GOOGLE_CUDA) || defined(TENSORFLOW_USE_ROCM)
+#endif  // defined(GOOGLE_CUDA) || defined(TENSORFLOW_USE_ROCM) ||
+        // defined(TENSORFLOW_USE_SYCL)
 
 TEST(StreamExecutorGpuClientTest, CreateErrorBuffer) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
@@ -1429,7 +1432,8 @@ TEST(StreamExecutorGpuClientTest, DistributedInit) {
       options.kv_store = kv_store;
       TF_ASSERT_OK_AND_ASSIGN(auto client, GetStreamExecutorGpuClient(options));
       EXPECT_TRUE(client->platform_name() == xla::CudaName() ||
-                  client->platform_name() == xla::RocmName());
+                  client->platform_name() == xla::RocmName() ||
+                  client->platform_name() == xla::OneapiName());
       EXPECT_EQ(client->addressable_device_count(), 2);
       EXPECT_EQ(client->device_count(), 4);
     });
@@ -1520,16 +1524,33 @@ TEST(StreamExecutorGpuClientTest, GetTopologyDescriptionWithGlobalDevicesTest) {
 TEST(PjRtCpuClientTest, CopyToMemorySpace) {
   TF_ASSERT_OK_AND_ASSIGN(auto client,
                           GetStreamExecutorGpuClient(DefaultOptions()));
+  xla::Shape shape = xla::ShapeUtil::MakeShape(S32, {128, 256});
+  TF_ASSERT_OK_AND_ASSIGN(auto literal, xla::MakeFakeLiteral(shape));
   for (auto* memory_space : client->memory_spaces()) {
-    xla::Shape shape = xla::ShapeUtil::MakeShape(S32, {128, 256});
-    TF_ASSERT_OK_AND_ASSIGN(auto literal, xla::MakeFakeLiteral(shape));
     TF_ASSERT_OK_AND_ASSIGN(
         auto buffer, client->BufferFromHostLiteral(literal, memory_space));
     TF_ASSERT_OK_AND_ASSIGN(buffer,
                             buffer->CopyToMemorySpace(buffer->memory_space()));
     TF_ASSERT_OK_AND_ASSIGN(auto received_literal, buffer->ToLiteral().Await());
-    EXPECT_THAT(received_literal->data<int32_t>(),
-                ElementsAreArray(literal.data<int32_t>()));
+    EXPECT_EQ(*received_literal, literal);
+  }
+}
+
+TEST(PjRtCpuClientTest, CopyToMemorySpaceWithCustomLayout) {
+  TF_ASSERT_OK_AND_ASSIGN(auto client,
+                          GetStreamExecutorGpuClient(DefaultOptions()));
+  xla::Shape shape = xla::ShapeUtil::MakeShape(S32, {128, 256});
+  TF_ASSERT_OK_AND_ASSIGN(auto literal, xla::MakeFakeLiteral(shape));
+  Layout device_layout = LayoutUtil::MakeAscendingLayout(2);
+  for (auto* memory_space : client->memory_spaces()) {
+    TF_ASSERT_OK_AND_ASSIGN(
+        auto buffer,
+        client->BufferFromHostLiteral(literal, memory_space, &device_layout));
+    TF_ASSERT_OK_AND_ASSIGN(buffer,
+                            buffer->CopyToMemorySpace(buffer->memory_space()));
+    EXPECT_EQ(buffer->layout()->xla_layout(), device_layout);
+    TF_ASSERT_OK_AND_ASSIGN(auto received_literal, buffer->ToLiteral().Await());
+    EXPECT_EQ(*received_literal, literal);
   }
 }
 
@@ -3659,7 +3680,8 @@ absl::Status ShardedAutotuningWorksTestBody(const int node_id,
   TF_ASSIGN_OR_RETURN(std::unique_ptr<PjRtClient> client,
                       GetStreamExecutorGpuClient(options));
   TF_RET_CHECK(client->platform_name() == xla::CudaName() ||
-               client->platform_name() == xla::RocmName());
+               client->platform_name() == xla::RocmName() ||
+               client->platform_name() == xla::OneapiName());
   if (client->platform_name() == xla::CudaName()) {
     TF_ASSIGN_OR_RETURN(
         se::CudaComputeCapability cc,
