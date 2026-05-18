@@ -65,11 +65,8 @@ namespace xla::gpu {
   V(kCustomCallCmd, "CustomCallCmd")                         \
   V(kBarrierCmd, "BarrierCmd")                               \
   V(kCollectiveCmd, "CollectiveCmd")                         \
-  V(kAllToAllCmd, "AllToAllCmd")                             \
   V(kAllGatherCmd, "AllGatherCmd")                           \
   V(kCollectivePermuteCmd, "CollectivePermuteCmd")           \
-  V(kRecvCmd, "RecvCmd")                                     \
-  V(kSendCmd, "SendCmd")                                     \
   V(kAsyncDone, "AsyncDone")                                 \
   V(kUnknownCmd, "UnknownCmd") \
   // clang-format on
