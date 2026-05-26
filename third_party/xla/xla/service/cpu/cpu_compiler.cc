@@ -1266,11 +1266,13 @@ absl::Status CreateHloProfilingArtifacts(
 absl::StatusOr<std::unique_ptr<HloModule>> CpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  XLA_SCOPED_LOGGING_TIMER(
+      absl::StrFormat("Running HLO passes on [%s] for CPU", module->name()));
   if (MultiModuleDriver::ShouldProcess(*module)) {
     VLOG(1) << "Triggering HLO module splitting for module: " << module->name();
     {
       HloComputationDeduplicator deduplicator;
-      TF_RETURN_IF_ERROR(deduplicator.Run(module.get()).status());
+      RETURN_IF_ERROR(deduplicator.Run(module.get()).status());
     }
     MultiModuleDriver driver(
         [this, stream_exec](std::unique_ptr<HloModule> m,
