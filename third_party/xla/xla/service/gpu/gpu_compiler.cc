@@ -540,9 +540,7 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
       data_layout_(data_layout),
       pointer_size_(llvm::DataLayout(data_layout)
                         .getPointerSize(0 /* default address space */)),
-      mlir_context_pool_([]() { return CreateMlirContext(); }) {
-  RegisterSymbolicExprStorage(&mlir_context_);
-}
+      mlir_context_pool_([]() { return CreateMlirContext(); }) {}
 
 namespace {
 // Adds the HloVerifier for GPU to the given pipeline.
@@ -765,9 +763,7 @@ absl::Status RunOptimizationPasses(
       debug_options.xla_gpu_enable_scatter_determinism_expander()) {
     // Scatter can be indeterministic if indices are not unique or a non
     // associative combiner function is used. Eliminate these Scatter ops.
-    if (debug_options.xla_gpu_enable_scatter_determinism_expander()) {
-      pipeline.AddPass<ScatterDeterminismExpander>();
-    }
+    pipeline.AddPass<ScatterDeterminismExpander>();
     pipeline.AddPass<ScatterExpander>(
         ScatterExpander::kEliminateIndeterministicScatters);
   }
@@ -801,12 +797,13 @@ absl::Status RunOptimizationPasses(
   pipeline.AddPass<ConditionalCanonicalizer>();
   pipeline.AddPass<DynamicDimensionSimplifier>();
 
-  if (debug_options.xla_reduce_window_rewrite_base_length() != 0) {
-    pipeline.AddPass<HloPassFix<ReduceWindowRewriter>>(
-        debug_options.xla_reduce_window_rewrite_base_length());
+  int64_t rw_length = debug_options.xla_reduce_window_rewrite_base_length();
+  pipeline.AddPass<HloPassFix<AssociativeScanRewriter>>(rw_length);
+  if (rw_length != 0) {
+    pipeline.AddPass<HloPassFix<ReduceWindowRewriter>>(rw_length);
     pipeline.AddPass<ReduceWindowResizer>();
-    pipeline.AddPass<ScanExpander>();
   }
+  pipeline.AddPass<ScanExpander>();
 
   DynamicPadderOptions dynamic_padder_options;
 
@@ -1080,8 +1077,7 @@ absl::Status RunCollectiveOptimizationPasses(
         /*collective_size_threshold_to_delay_sinking=*/INT64_MAX,
         /*delay_sinking_large_collectives=*/true,
         /*unique_channel_id=*/true,
-        /*postprocess_transformed_while_loop=*/
-        host_offload_utils::MarkDynamicVariables,
+        /*postprocess_transformed_while_loop=*/{},
     };
     collectives_pipeline.AddPass<CollectivePipeliner>(config);
   }
@@ -1145,8 +1141,7 @@ absl::Status RunCollectiveOptimizationPasses(
         /*collective_size_threshold_to_delay_sinking=*/INT64_MAX,
         /*delay_sinking_large_collectives=*/true,
         /*unique_channel_id=*/true,
-        /*postprocess_transformed_while_loop=*/
-        host_offload_utils::MarkDynamicVariables,
+        /*postprocess_transformed_while_loop=*/{},
     };
 
     collectives_pipeline.AddPass<CollectivePipeliner>(config_backward);
@@ -1779,7 +1774,7 @@ absl::Status GpuCompiler::OptimizeHloModule(
     RETURN_IF_ERROR(AddAutotunerPass(
         &pipeline, hlo_module, gpu_version, options, thread_pool.get_mutable(),
         stream_exec, &gpu_topology.gpu_target_config(), alias_info,
-        &mlir_context_, ShapeSizeBytesFunction(), options.key_value_store));
+        mlir_context, ShapeSizeBytesFunction(), options.key_value_store));
 
     RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
   } else {
