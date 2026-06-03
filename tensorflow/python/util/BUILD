@@ -288,6 +288,7 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/python/lib/core:safe_pyobject_ptr",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
@@ -1018,6 +1019,7 @@ py_library(
 py_library(
     name = "module_wrapper",
     srcs = ["module_wrapper.py"],
+    lazy_imports = True,
     strict_deps = True,
     visibility = util_subpackage_visibility,
     deps = [

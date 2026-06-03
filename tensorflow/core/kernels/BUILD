@@ -3303,28 +3303,32 @@ tf_kernel_library(
     deps = IO_DEPS,
 )
 
-SAVE_RESTORE_DEPS = [
-    ":checkpoint_callback_manager",
-    ":save_restore_tensor",
-    "//tensorflow/core:framework",
-    "//tensorflow/core:lib",
-    "//tensorflow/core:lib_internal",
-    "//tensorflow/core:protos_all_cc",
-    "//tensorflow/core/framework:bounds_check",
-    "//tensorflow/core/util/tensor_bundle",
-    "//tensorflow/core/util/tensor_bundle:naming",
-]
-
 tf_kernel_library(
     name = "restore_op",
     prefix = "restore_op",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":checkpoint_callback_manager",
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+    ],
 )
 
 tf_kernel_library(
     name = "save_op",
     prefix = "save_op",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core/framework:tensor",
+        "//tensorflow/core/framework:tensor_shape",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+    ],
 )
 
 tf_kernel_library(
@@ -3362,7 +3366,17 @@ tf_cc_tests(
 tf_kernel_library(
     name = "save_restore_v2_ops",
     prefix = "save_restore_v2_ops",
-    deps = SAVE_RESTORE_DEPS,
+    deps = [
+        ":checkpoint_callback_manager",
+        ":save_restore_tensor",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/framework:bounds_check",
+        "//tensorflow/core/util/tensor_bundle",
+        "//tensorflow/core/util/tensor_bundle:naming",
+    ],
 )
 
 tf_kernel_library(
@@ -4805,6 +4819,8 @@ cc_library(
 
 PARSING_DEPS = [
     "@com_google_absl//absl/base",
+    "@com_google_absl//absl/status",
+    "@com_google_absl//absl/strings",
     "//tensorflow/core:core_cpu_internal",
     "//tensorflow/core:framework",
     "//tensorflow/core:lib",
@@ -4834,7 +4850,6 @@ tf_kernel_library(
     prefix = "decode_compressed_op",
     deps = [
         "//tensorflow/core:lib_internal",
-        "@com_google_absl//absl/status",
         "@net_zstd//:zstd",
     ] + PARSING_DEPS,
 )
@@ -4850,7 +4865,6 @@ tf_kernel_library(
     prefix = "parse_tensor_op",
     deps = [
         "//tensorflow/core/util/tensor_bundle:byteswaptensor",
-        "@com_google_absl//absl/strings",
     ] + PARSING_DEPS,
 )
 
@@ -5160,7 +5174,11 @@ tf_kernel_library(
     name = "sparse_concat_op",
     features = ["-layering_check"],
     prefix = "sparse_concat_op",
-    deps = SPARSE_DEPS + if_cuda_or_rocm([
+    deps = SPARSE_DEPS + [
+        "//tensorflow/core/util:overflow",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ] + if_cuda_or_rocm([
         ":gpu_device_array",
         ":gpu_prim_helpers",
     ]),

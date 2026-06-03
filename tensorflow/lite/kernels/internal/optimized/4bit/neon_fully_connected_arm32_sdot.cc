@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2026 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,31 +15,28 @@ limitations under the License.
 
 #if defined(FC_4BIT_NEON) && (defined(__ARM_NEON__) || defined(__ARM_NEON))
 
-#include <arm_neon.h>
 #include <stdint.h>
 
 #include <algorithm>
-#include <vector>
 
-#include "tensorflow/lite/kernels/internal/cppmath.h"
-#include "tensorflow/lite/kernels/internal/optimized/4bit/fully_connected_common.h"
 #include "tensorflow/lite/kernels/internal/optimized/4bit/neon_fully_connected_impl.h"
+
+#define DOTPROD_ATTRIBUTE __attribute__((target("dotprod")))
 
 namespace tflite {
 namespace optimized_4bit {
 
 template <int RowsLeft, int RowsRight, int Cols>
-void NeonRunKernelNoSDot(const uint8_t* lhs, const int8_t* rhs, int32_t* dst,
-                         int lhs_layout_rows, int lhs_layout_cols,
-                         int rhs_layout_rows, int rhs_layout_cols,
-                         int dst_layout_rows, int dst_layout_cols) {}
+void NeonRunKernelSDot(const uint8_t* lhs, const int8_t* rhs, int32_t* dst,
+                       int lhs_layout_rows, int lhs_layout_cols,
+                       int rhs_layout_rows, int rhs_layout_cols,
+                       int dst_layout_rows, int dst_layout_cols);
 
 template <>
-void NeonRunKernelNoSDot<4, 1, 32>(const uint8_t* lhs, const int8_t* rhs,
-                                   int32_t* dst, int lhs_layout_rows,
-                                   int lhs_layout_cols, int rhs_layout_rows,
-                                   int rhs_layout_cols, int dst_layout_rows,
-                                   int dst_layout_cols) {
+DOTPROD_ATTRIBUTE void NeonRunKernelSDot<4, 1, 32>(
+    const uint8_t* lhs, const int8_t* rhs, int32_t* dst, int lhs_layout_rows,
+    int lhs_layout_cols, int rhs_layout_rows, int rhs_layout_cols,
+    int dst_layout_rows, int dst_layout_cols) {
   const int rows_left = 4;
   const int rows_right = 1;
   const int cols = 32;
@@ -64,46 +61,38 @@ void NeonRunKernelNoSDot<4, 1, 32>(const uint8_t* lhs, const int8_t* rhs,
           R"asm(
           vmov.i8 q14, #15
           vld1.8 {q4}, [%[lhs_ptr]]!
-          vmov.i16 q0, #0
-          vmov.i16 q1, #0
+          vmov.i32 q0, #0
+          vmov.i32 q1, #0
           vld1.8 {q5}, [%[lhs_ptr]]!
-          vmov.i16 q2, #0
-          vmov.i16 q3, #0
+          vmov.i32 q2, #0
+          vmov.i32 q3, #0
           vld1.8 {q6}, [%[lhs_ptr]]!
           vand q8, q4, q14
           vand q9, q5, q14
           vld1.8 {q7}, [%[lhs_ptr]]!
           vshr.u8 q4, q4, #4
           vshr.u8 q5, q5, #4
-          vld1.8 {d24, d25}, [%[rhs_ptr]]!
+          vld1.8 {q12}, [%[rhs_ptr]]!
           vand q10, q6, q14
           vand q11, q7, q14
-          vld1.8 {d26, d27}, [%[rhs_ptr]]!
+          vld1.8 {q13}, [%[rhs_ptr]]!
           vshr.u8 q6, q6, #4
           vshr.u8 q7, q7, #4
           mov r3, %[run_depth]
           subs r3, r3, #1
           bls 1f /* skip loop */
             0: /* loop start */
-            vmlal.s8 q0, d8, d24
-            vmlal.s8 q1, d10, d24
-            vmlal.s8 q0, d9, d25
-            vmlal.s8 q1, d11, d25
+            vsdot.s8 q0, q4, q12
+            vsdot.s8 q0, q8, q13
+            vsdot.s8 q1, q5, q12
+            vsdot.s8 q1, q9, q13
             vld1.8 {q4, q5}, [%[lhs_ptr]]!
-            vmlal.s8 q2, d12, d24
-            vmlal.s8 q3, d14, d24
-            vmlal.s8 q2, d13, d25
-            vmlal.s8 q3, d15, d25
+            vsdot.s8 q2, q6, q12
+            vsdot.s8 q2, q10, q13
+            vsdot.s8 q3, q7, q12
+            vsdot.s8 q3, q11, q13
             vld1.8 {q6, q7}, [%[lhs_ptr]]!
-            vmlal.s8 q0, d16, d26
-            vmlal.s8 q1, d18, d26
-            vmlal.s8 q2, d20, d26
-            vmlal.s8 q3, d22, d26
-            vmlal.s8 q0, d17, d27
-            vmlal.s8 q1, d19, d27
-            vmlal.s8 q2, d21, d27
-            vmlal.s8 q3, d23, d27
-            vld1.8 {d24, d25, d26, d27}, [%[rhs_ptr]]!
+            vld1.8 {q12, q13}, [%[rhs_ptr]]!
             vand q8, q4, q14
             vand q9, q5, q14
             vand q10, q6, q14
@@ -115,41 +104,27 @@ void NeonRunKernelNoSDot<4, 1, 32>(const uint8_t* lhs, const int8_t* rhs,
             subs r3, r3, #1
             bhi 0b /* loop branch */
           1: /* loop end */
-          vmlal.s8 q0, d8, d24
-          vmlal.s8 q1, d10, d24
-          vmlal.s8 q2, d12, d24
-          vmlal.s8 q3, d14, d24
-          vmlal.s8 q0, d9, d25
-          vmlal.s8 q1, d11, d25
-          vmlal.s8 q2, d13, d25
-          vmlal.s8 q3, d15, d25
-          vmlal.s8 q0, d16, d26
-          vmlal.s8 q1, d18, d26
-          vmlal.s8 q2, d20, d26
-          vmlal.s8 q3, d22, d26
-          vmlal.s8 q0, d17, d27
-          vmlal.s8 q1, d19, d27
-          vmlal.s8 q2, d21, d27
-          vmlal.s8 q3, d23, d27
-          vpaddl.s16 q4, q0
-          vpaddl.s16 q5, q1
-          vpaddl.s16 q6, q2
-          vpaddl.s16 q7, q3
-          vpadd.i32 d0, d8, d9
-          vpadd.i32 d1, d10, d11
-          vpadd.i32 d2, d12, d13
-          vpadd.i32 d3, d14, d15
+          vsdot.s8 q0, q4, q12
+          vsdot.s8 q0, q8, q13
+          vsdot.s8 q1, q5, q12
+          vsdot.s8 q1, q9, q13
+          vsdot.s8 q2, q6, q12
+          vsdot.s8 q2, q10, q13
+          vsdot.s8 q3, q7, q12
+          vsdot.s8 q3, q11, q13
+          vpadd.i32 d0, d0, d1
+          vpadd.i32 d1, d2, d3
+          vpadd.i32 d2, d4, d5
+          vpadd.i32 d3, d6, d7
           vpadd.i32 d4, d0, d1
           vpadd.i32 d5, d2, d3
           vst1.32 {d4, d5}, [%[dst]]!
           )asm"
           : [lhs_ptr] "+r"(lhs_ptr), [rhs_ptr] "+r"(rhs_ptr), [dst] "+r"(dst)
           : [run_depth] "r"(run_depth)
-          : "cc", "memory", "r3", "d0", "d1", "d2", "d3", "d4", "d5", "d8",
-            "d9", "d10", "d11", "d12", "d13", "d14", "d15", "d16", "d17", "d18",
-            "d19", "d20", "d21", "d22", "d23", "d24", "d25", "d26", "d27", "q0",
-            "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10", "q11",
-            "q14");
+          : "cc", "memory", "r3", "d0", "d1", "d2", "d3", "d4", "d5", "d6",
+            "d7", "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9",
+            "q10", "q11", "q12", "q13", "q14");
     }
   }
 }

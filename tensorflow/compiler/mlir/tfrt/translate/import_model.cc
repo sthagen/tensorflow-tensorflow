@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/log.h"
+#include "absl/log/vlog_is_on.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -352,6 +353,8 @@ std::unique_ptr<tensorflow::TfrtPipelineOptions> GetTfrtPipelineOptions(
       options.enable_priority_aware_batch_scheduler;
   pipeline_options->enable_priority_aware_batch_scheduler_resplit =
       options.enable_priority_aware_batch_scheduler_resplit;
+  pipeline_options->enable_batching_task_lazy_cancellation =
+      options.enable_batching_task_lazy_cancellation;
   pipeline_options->batch_padding_policy = options.batch_padding_policy;
   pipeline_options->num_batch_threads =
       options.batch_options.num_batch_threads();

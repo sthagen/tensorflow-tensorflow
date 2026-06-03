@@ -86,7 +86,6 @@ cc_library(
 xla_cc_test(
     name = "sol_latency_estimator_test",
     srcs = ["sol_latency_estimator_test.cc"],
-    tags = ["pjrt_migration_candidate"],
     deps = [
         ":collective_interpolator",
         ":sol_gpu_cost_model",
@@ -577,13 +576,13 @@ cc_library(
         "//xla/backends/gpu/codegen/triton:fusion",
         "//xla/codegen/tiling:symbolic_tile_analysis",
         "//xla/codegen/tiling:tiled_hlo_computation",
-        "//xla/codegen/tiling:tiled_hlo_instruction",
         "//xla/codegen/tiling:tiling_specification",
         "//xla/codegen/tiling/experimental:tile",
         "//xla/codegen/tiling/experimental:tiled_hlo",
         "//xla/codegen/xtile/codegen:emitter_helpers",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_traversal",
+        "//xla/service:decision",
         "//xla/service:hlo_cost_analysis",
         "//xla/service:instruction_fusion",
         "//xla/service/gpu:backend_configs_cc",
@@ -733,6 +732,7 @@ cc_library(
         "//xla/hlo/analysis:symbolic_map",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_traversal",
+        "//xla/service:decision",
         "//xla/stream_executor:device_description",
         "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/algorithm:container",
@@ -762,6 +762,7 @@ xla_cc_test(
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/hlo/testlib:verified_hlo_module",
         "//xla/hlo/utils:hlo_traversal",
+        "//xla/service:decision",
         "//xla/service:instruction_fusion",
         "//xla/service/gpu:gpu_device_info_for_tests",
         "//xla/stream_executor:device_description",
@@ -808,6 +809,7 @@ cc_library(
 xla_cc_test(
     name = "coalescing_analysis_test",
     srcs = ["coalescing_analysis_test.cc"],
+    tags = ["gpu"],
     deps = [
         ":coalescing_analysis",
         "//xla:shape_util",
