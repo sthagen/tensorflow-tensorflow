@@ -9008,6 +9008,15 @@ absl::Status AlgebraicSimplifierVisitor::HandleReduceWindow(
       return absl::OkStatus();
     }
 
+    // In case the source operand is not a scalar, we reshape it to a scalar
+    // before we attempt to broadcast it.
+    if (!ShapeUtil::IsScalar(val_const->shape())) {
+      TF_RET_CHECK(ShapeUtil::IsEffectiveScalar(val_const->shape()));
+      val_const = reduce_window->AddInstruction(HloInstruction::CreateReshape(
+          ShapeUtil::MakeScalarShape(val_const->shape().element_type()),
+          val_const));
+    }
+
     int64_t reduction_dim = -1;
     bool valid_pattern = true;
 
@@ -10510,6 +10519,32 @@ absl::Status AlgebraicSimplifierVisitor::HandleConditional(
   }
 
   return absl::OkStatus();
+}
+
+bool AlgebraicSimplifierVisitor::ShouldStrengthReduceDotToReduce(
+    const HloInstruction* hlo) {
+  if (options_.executing_on_cpu()) {
+    if (hlo->opcode() != HloOpcode::kDot) {
+      return false;
+    }
+    const HloDotInstruction* dot = Cast<HloDotInstruction>(hlo);
+    const auto& dnums = dot->dot_dimension_numbers();
+    const HloInstruction* lhs = dot->operand(0);
+    const HloInstruction* rhs = dot->operand(1);
+
+    bool lhs_has_only_batch_and_contracting =
+        dnums.lhs_batch_dimensions_size() +
+            dnums.lhs_contracting_dimensions_size() ==
+        lhs->shape().dimensions().size();
+    bool rhs_has_only_batch_and_contracting =
+        dnums.rhs_batch_dimensions_size() +
+            dnums.rhs_contracting_dimensions_size() ==
+        rhs->shape().dimensions().size();
+
+    return lhs_has_only_batch_and_contracting &&
+           rhs_has_only_batch_and_contracting;
+  }
+  return true;
 }
 
 }  // namespace xla

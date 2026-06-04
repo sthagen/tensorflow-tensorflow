@@ -146,15 +146,6 @@ class CommonPjRtRawBuffer : public PjRtRawBuffer {
   // Creates an event which signals when the allocation is complete.
   virtual absl::StatusOr<PjRtDeviceEventRef> MakeAllocationReadyEvent() = 0;
 
-  // Slices out any dynamic shape information (if present).
-  virtual absl::StatusOr<PjRtRawBufferRef> RemoveDynamicShapeMetadataIfPresent(
-      const xla::Shape& device_shape, const xla::Shape& logical_shape);
-
-  // Reads the dynamic shape for a raw buffer. output_shape must be a
-  // constructed AsyncValueRef which will have its dimensions updated.
-  virtual void ReadDynamicShape(tsl::AsyncValueRef<xla::Shape> output_shape,
-                                xla::Shape shape) = 0;
-
   // Interprets buffer contents as having shape and linearizes these contents
   // async into the provided literal.
   virtual void CopyToLiteralAsync(
@@ -184,7 +175,7 @@ class CommonPjRtRawBuffer : public PjRtRawBuffer {
       tsl::AsyncValueRef<bool> allocation_event);
 
   // Returns the async value associated with the buffer.
-  virtual tsl::AsyncValue* GetRawBufferAsyncValue() = 0;
+  virtual PjRtDeviceEventPtr GetRawBufferAsyncValue() = 0;
 
   virtual bool is_mutable() const { return true; }
 
