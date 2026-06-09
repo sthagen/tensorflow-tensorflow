@@ -52,6 +52,7 @@ limitations under the License.
 #include "xla/service/executable.h"
 #include "xla/service/gpu/alias_info.h"
 #include "xla/service/gpu/buffer_allocations.h"
+#include "xla/service/gpu/dense_data_intermediate.h"
 #include "xla/service/gpu/gpu_executable.pb.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/hlo.pb.h"
@@ -95,7 +96,8 @@ class GpuExecutable : public Executable {
     DenseDataIntermediate content;
     int allocation_index = -1;
 
-    GpuExecutableProto::ConstantInfoProto ToProto() const;
+    GpuExecutableProto::ConstantInfoProto ToProto(
+        bool skip_content_serialization = false) const;
 
     static absl::StatusOr<ConstantInfo> FromProto(
         const GpuExecutableProto::ConstantInfoProto& proto,
