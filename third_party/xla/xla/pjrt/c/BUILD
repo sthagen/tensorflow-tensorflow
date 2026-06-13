@@ -315,6 +315,7 @@ cc_library(
     hdrs = ["pjrt_c_api_raw_buffer_extension.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":pjrt_c_api_device_event_hdrs",
         ":pjrt_c_api_hdrs",
     ],
 )
@@ -331,7 +332,6 @@ cc_library(
         ":pjrt_c_api_status_utils",
         ":pjrt_c_api_wrapper_impl",
         "//xla/pjrt:raw_buffer",
-        "//xla/tsl/concurrency:ref_count",
         "@com_google_absl//absl/status",
     ],
 )

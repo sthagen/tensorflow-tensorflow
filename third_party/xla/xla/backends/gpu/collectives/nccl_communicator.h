@@ -161,7 +161,7 @@ class NcclCommunicator : public GpuCommunicator {
 
   ncclComm_t comm() const { return comm_; }
 
-  se::StreamExecutor* stream_executor() const { return stream_executor_; }
+  se::StreamExecutor* stream_executor() const final { return stream_executor_; }
 
   bool IsBlocking() const { return executor_ == nullptr; }
 
@@ -270,7 +270,7 @@ class NcclCommunicator : public GpuCommunicator {
   // ncclComm_t is accessed from multiple threads. Empirically, the lack of
   // thread safety only manifests as buggy behavior when using non-blocking
   // communicators.
-  std::unique_ptr<tsl::Executor> executor_;
+  std::shared_ptr<tsl::Executor> executor_;
 
   // Should all pending collectives cancel?
   std::shared_ptr<CancellationToken> cancel_;

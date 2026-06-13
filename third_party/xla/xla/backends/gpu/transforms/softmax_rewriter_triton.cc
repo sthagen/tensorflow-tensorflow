@@ -460,8 +460,8 @@ absl::StatusOr<bool> CanSymbolicTileAnalysisTileDiamond(
     using experimental::TilingSpace;
     std::unique_ptr<HloFusionAdaptor> fusion_adaptor =
         HloFusionAdaptor::ForInstruction(normalization_fusion);
-    std::unique_ptr<TilingSpace> tiling_space =
-        TilingSpace::Create(*fusion_adaptor, &mlir_context);
+    ASSIGN_OR_RETURN(std::unique_ptr<TilingSpace> tiling_space,
+                     TilingSpace::Create(*fusion_adaptor, &mlir_context));
     absl::StatusOr<TiledHloComputation> tiled_computation_or =
         TiledHloComputation::Tile(*fusion_adaptor, std::move(tiling_space));
     // We don't have concrete tile sizes here and don't validate Triton
@@ -672,7 +672,8 @@ absl::StatusOr<bool> SoftmaxRewriterTriton::MaybeFuseNormalizationDiamond(
     const DiamondDescriptor& diamond) {
   HloFusionAnalysisCache fusion_analysis_cache(device_info_);
   GpuPerformanceModelWithIndexingAnalysis indexing_performance_model(
-      &device_info_, &fusion_analysis_cache, shape_size_, mlir_context_);
+      &device_info_, &fusion_analysis_cache, shape_size_, mlir_context_,
+      use_experimental_tiling_);
 
   return MaybeFuseDiamondImpl(diamond, indexing_performance_model, device_info_,
                               shape_size_, alias_info_, mlir_context_,
