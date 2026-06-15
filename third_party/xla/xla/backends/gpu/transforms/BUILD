@@ -1268,15 +1268,12 @@ xla_test(
             "//xla/hlo/ir:hlo",
             "//xla/hlo/utils:hlo_matchers",
             "//xla/service:pattern_matcher",
-            "@tsl//tsl/platform:statusor",
         ],
         [
             # b/317293391
             "@com_google_googletest//:gtest_main",
         ],
-    ) + [
-        "//xla/tsl/platform:statusor",
-    ],
+    ) + ["//xla/tsl/platform:statusor"],
 )
 
 cc_library(
@@ -1701,7 +1698,6 @@ cc_library(
         "//xla/codegen/tiling:symbolic_tile_analysis",
         "//xla/codegen/tiling/experimental:tile",
         "//xla/codegen/tiling/experimental:tiled_hlo",
-        "//xla/hlo/analysis:symbolic_map",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_query",
@@ -2891,7 +2887,6 @@ cc_library(
         "//xla/codegen/tiling:symbolic_tile_analysis",
         "//xla/codegen/tiling/experimental:tile",
         "//xla/codegen/tiling/experimental:tiled_hlo",
-        "//xla/hlo/analysis:symbolic_map",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/pass:hlo_pass_pipeline",

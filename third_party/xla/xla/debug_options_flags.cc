@@ -206,6 +206,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_enable_mlir_pretty_form(true);
   opts.set_xla_dump_full_hlo_config(true);
   opts.set_xla_dump_buffer_assignment_analysis(true);
+  opts.set_xla_dump_compact_gte(false);
   opts.set_xla_debug_buffer_assignment_show_max(15);
   opts.set_xla_cpu_use_onednn(false);
   opts.set_xla_cpu_experimental_onednn_custom_call(false);
@@ -300,6 +301,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_dynamic_slice_fusion_verify_offsets(false);
   opts.set_xla_gpu_nccl_termination_timeout_seconds(-1);
   opts.set_xla_gpu_enable_nccl_user_buffers(false);
+  opts.set_xla_gpu_enable_allocator_spatial_partitioning(true);
   opts.set_xla_gpu_experimental_enable_nccl_symmetric_buffers(false);
   opts.set_xla_gpu_experimental_enable_nvshmem(false);
   opts.set_xla_gpu_enable_nccl_comm_splitting(true);
@@ -2026,6 +2028,14 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "allocator config must also be set to a non-zero value that is large "
       "enough to meet peak collective memory usage."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_enable_allocator_spatial_partitioning",
+      bool_setter_for(
+          &DebugOptions::set_xla_gpu_enable_allocator_spatial_partitioning),
+      debug_options->xla_gpu_enable_allocator_spatial_partitioning(),
+      "Enables spatial partitioning of the GPU BFC allocator so default and "
+      "collective allocations share one fixed address range. Requires BFC "
+      "preallocation."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_nccl_symmetric_buffers",
       bool_setter_for(
           &DebugOptions::
@@ -2935,6 +2945,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_hlo_pass_fix_detect_cycles(),
       "Perform hash-based cycle detection in fixed-point loops."));
   flag_list->push_back(tsl::Flag(
+      "xla_dump_compact_gte",
+      bool_setter_for(&DebugOptions::set_xla_dump_compact_gte),
+      debug_options->xla_dump_compact_gte(),
+      "If true, GTE (get-tuple-element) instructions will be compacted when "
+      "printing HLO."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_heuristic_collective_combining",
       bool_setter_for(
           &DebugOptions::
@@ -3250,7 +3266,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_gpu_log_minmax),
                 debug_options->xla_gpu_log_minmax(),
                 "If true, log min/max values from kernel outputs."));
-
   flag_list->push_back(tsl::Flag(
       "xla_early_exit_with_layouts",
       bool_setter_for(&DebugOptions::set_xla_early_exit_with_layouts),
