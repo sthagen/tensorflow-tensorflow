@@ -80,7 +80,6 @@ limitations under the License.
 
 #include "absl/algorithm/container.h"
 #include "absl/base/casts.h"
-#include "absl/base/const_init.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
@@ -642,11 +641,14 @@ PjRtStreamExecutorClient::CreateRawBufferChannel(PjRtMemorySpace* memory_space,
       buffer_promise->SetError(status);
       return status;
     }
-    buffer_promise->ForwardTo(
-        tensorflow::down_cast<xla::PjRtStreamExecutorRawBuffer*>(
-            raw_buffer->get())
-            ->device_buffer()
-            .CopyRCRef());
+    auto* cpp_buf = raw_buffer->get()->down_cast<PjRtStreamExecutorRawBuffer>();
+    if (cpp_buf == nullptr) {
+      auto status =
+          absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+      buffer_promise->SetError(status);
+      return status;
+    }
+    buffer_promise->ForwardTo(cpp_buf->device_buffer().CopyRCRef());
     return absl::OkStatus();
   };
 
@@ -654,12 +656,14 @@ PjRtStreamExecutorClient::CreateRawBufferChannel(PjRtMemorySpace* memory_space,
 }
 
 absl::Status PjRtStreamExecutorClient::WaitForAllocation(
-    se::Stream* stream, const PjRtRawBuffer& raw_buffer) {
-  ASSIGN_OR_RETURN(
-      auto event,
-      tensorflow::down_cast<const PjRtStreamExecutorRawBuffer*>(&raw_buffer)
-          ->device_buffer()
-          ->GetDefinitionEvent(async_work_runner(), /*nullptr_if_past=*/true));
+    se::Stream* stream, const PjRtRawBufferInterface& raw_buffer) {
+  auto* cpp_buf = raw_buffer.down_cast<const PjRtStreamExecutorRawBuffer>();
+  if (cpp_buf == nullptr) {
+    return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+  }
+  ASSIGN_OR_RETURN(auto event,
+                   cpp_buf->device_buffer()->GetDefinitionEvent(
+                       async_work_runner(), /*nullptr_if_past=*/true));
   if (event) {
     event->WaitForEventOnStream(stream);
   }
@@ -805,11 +809,9 @@ PjRtStreamExecutorClient::LinearizeHostBufferInto(
         // memory that has already been allocated, and a possible Event
         // allocation.
 
-        se::DeviceAddressBase device_memory =
-            tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(
-                raw_buffer.get())
-                ->device_buffer()
-                ->mem();
+        auto* cpp_buf = raw_buffer->down_cast<PjRtStreamExecutorRawBuffer>();
+        CHECK(cpp_buf != nullptr) << "Not a StreamExecutor raw buffer";
+        se::DeviceAddressBase device_memory = cpp_buf->device_buffer()->mem();
 
         // If applicable on the backend, stage the transfer via host memory
         // allocated via the host_memory_allocator. On GPU, this is pinned
@@ -937,9 +939,11 @@ absl::StatusOr<PjRtDeviceEventRef> PjRtStreamExecutorClient::LinearizeInto(
 
   CHECK_EQ(memory_space->devices().size(), 1);
   PjRtDevice* device = memory_space->devices().front();
-  auto* local_device =
-      tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(raw_buffer.get())
-          ->local_device();
+  auto* cpp_buf = raw_buffer->down_cast<PjRtStreamExecutorRawBuffer>();
+  if (cpp_buf == nullptr) {
+    return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+  }
+  auto* local_device = cpp_buf->local_device();
   auto* copy_stream = local_device->host_to_device_stream();
   BufferSequencingEventRef event =
       BufferSequencingEvent::Create(async_work_runner());
@@ -965,9 +969,9 @@ absl::StatusOr<PjRtDeviceEventRef> PjRtStreamExecutorClient::LinearizeInto(
     // unlikely to fail and not recoverable even if we were to fail: DMAs to
     // memory that has already been allocated, and a possible Event
     // allocation.
-    auto device_memory =
-        tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(raw_buffer.get())
-            ->device_buffer();
+    auto* cpp_buf = raw_buffer->down_cast<PjRtStreamExecutorRawBuffer>();
+    CHECK(cpp_buf != nullptr) << "Not a StreamExecutor raw buffer";
+    auto device_memory = cpp_buf->device_buffer();
 
     se::Stream* h2d_stream = local_device->host_to_device_stream();
 
@@ -1566,9 +1570,11 @@ MakeTupleHelper(PjRtStreamExecutorClient* client,
   ++input_iterator;
   // Then set each sub-tuple in turn from the parameters.
   for (const PjRtRawBufferRef& input : execution_inputs) {
-    input_iterator->second.buf =
-        tensorflow::down_cast<const PjRtStreamExecutorRawBuffer*>(input.get())
-            ->device_buffer();
+    auto* cpp_buf = input->down_cast<const PjRtStreamExecutorRawBuffer>();
+    if (cpp_buf == nullptr) {
+      return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+    }
+    input_iterator->second.buf = cpp_buf->device_buffer();
     input_iterator->second.is_donated = false;
     ++input_iterator;
   }
@@ -1613,10 +1619,12 @@ WrapInputsInShapeTree(PjRtStreamExecutorClient* client,
       auto input_iterator = execution_input.begin();
       auto iterator_end = execution_input.end();
       CHECK(input_iterator != iterator_end);
-      input_iterator->second.buf =
-          tensorflow::down_cast<const PjRtStreamExecutorRawBuffer*>(
-              execution_inputs[i].get())
-              ->device_buffer();
+      auto* cpp_buf =
+          execution_inputs[i]->down_cast<const PjRtStreamExecutorRawBuffer>();
+      if (cpp_buf == nullptr) {
+        return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+      }
+      input_iterator->second.buf = cpp_buf->device_buffer();
       input_iterator->second.is_donated = false;
       ++input_iterator;
       CHECK(input_iterator == iterator_end);
@@ -1651,9 +1659,11 @@ PjRtStreamExecutorClient::RunAsync(
     if (alias) {
       auto& input = *arguments[alias->parameter_number].mutable_element(
           alias->parameter_index);
-      auto buf =
-          tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(results[i].get())
-              ->device_buffer();
+      auto* cpp_buf = results[i]->down_cast<PjRtStreamExecutorRawBuffer>();
+      if (cpp_buf == nullptr) {
+        return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+      }
+      auto buf = cpp_buf->device_buffer();
       if (buf.GetAsyncValue() == input.buf.GetAsyncValue()) {
         input.is_donated = true;
       }
@@ -1687,9 +1697,11 @@ PjRtStreamExecutorClient::RunAsync(
   absl::flat_hash_set<RawSEDeviceMemory*> output_args;
   se::DeviceAddressAllocator* allocator = ssb.memory_allocator();
   auto set_memory = [&](se::DeviceAddressBase mem, int i) -> absl::Status {
-    auto buf =
-        tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(results[i].get())
-            ->device_buffer();
+    auto* cpp_buf = results[i]->down_cast<PjRtStreamExecutorRawBuffer>();
+    if (cpp_buf == nullptr) {
+      return absl::InvalidArgumentError("Not a StreamExecutor raw buffer");
+    }
+    auto buf = cpp_buf->device_buffer();
     if (buf.IsAvailable()) {
       if (buf->mem().opaque() != mem.opaque() ||
           buf->mem().size() != mem.size()) {
@@ -1732,11 +1744,6 @@ PjRtStreamExecutorClient::RunAsync(
   }
   return PjRtStreamExecutorExecutionOutput({{}, std::move(se_to_be_released)});
 }
-
-// Number of VA reservation sets used for command buffer remapping multiplexing.
-// With 2 sets, one VA range can be remapped by the CPU while the GPU executes
-// commands on the other, enabling CPU/GPU overlap.
-constexpr int kNumVaReservationSets = 2;
 
 // Enqueues a computation onto the compute stream. Each buffer returned in
 // device_buffers has a usage hold added that must be dropped on error or
@@ -1794,17 +1801,11 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
         compute_semaphore->ScopedAcquire(1));
   }
 
-  // Compute the VA range index at scheduling time so the scheduling order
-  // determines the counter order, keeping all ranks in sync.
-  int command_buffer_va_range_idx =
-      executable_->executable()->GetNextCommandBufferVaRangeIdx(
-          device_ordinal, kNumVaReservationSets);
-
   auto launch_on_device =
       [device_state, gpu_run_options = client_->gpu_run_options(options),
        launch_id = options.launch_id, run_id = run_id_,
-       command_buffer_va_range_idx, context = options.context, client = client_,
-       device = device_, device_assignment = device_assignment_,
+       context = options.context, client = client_, device = device_,
+       device_assignment = device_assignment_,
        compute_reservation = std::move(compute_reservation),
        send_device_memory = std::move(send_device_memory),
        recv_device_memory = std::move(recv_device_memory),
@@ -1834,7 +1835,6 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
         client->client()->backend().eigen_intra_op_thread_pool_device());
     run_options.set_device_assignment(device_assignment.get());
     run_options.set_run_id(run_id);
-    run_options.set_command_buffer_va_range_idx(command_buffer_va_range_idx);
     run_options.set_rng_seed(device_state->GetNewPrngSeed());
     run_options.set_gpu_executable_run_options(std::move(gpu_run_options));
     run_options.set_launch_id(launch_id);
@@ -2030,14 +2030,14 @@ PjRtStreamExecutorRawLoadedExecutable::Execute(
       std::vector<tsl::AsyncValueRef<RawSEDeviceMemory>> buffers_to_release;
       buffers_to_release.reserve(results.size() + inputs.size());
       for (auto& node : results) {
-        buffers_to_release.push_back(
-            tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(node.get())
-                ->device_buffer());
+        auto* cpp_buf = node->down_cast<PjRtStreamExecutorRawBuffer>();
+        CHECK(cpp_buf != nullptr) << "Not a StreamExecutor raw buffer";
+        buffers_to_release.push_back(cpp_buf->device_buffer());
       }
       for (auto& node : inputs) {
-        buffers_to_release.push_back(
-            tensorflow::down_cast<PjRtStreamExecutorRawBuffer*>(node.get())
-                ->device_buffer());
+        auto* cpp_buf = node->down_cast<PjRtStreamExecutorRawBuffer>();
+        CHECK(cpp_buf != nullptr) << "Not a StreamExecutor raw buffer";
+        buffers_to_release.push_back(cpp_buf->device_buffer());
       }
       definition_event.AndThen(
           [donated_memory = std::move(result_buffer_or_status->to_be_released),
