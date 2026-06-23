@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 
 #include "absl/base/casts.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -27,17 +28,23 @@ limitations under the License.
 #include "xla/tsl/platform/status_macros.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/text_format.h"
+#include "riegeli/base/maker.h"
 #include "riegeli/base/types.h"
 #include "riegeli/bytes/reader.h"
+#include "riegeli/bytes/string_reader.h"
+#include "riegeli/bytes/string_writer.h"
 #include "riegeli/bytes/writer.h"
 #include "riegeli/messages/parse_message.h"
 #include "riegeli/messages/serialize_message.h"
 #include "riegeli/records/record_reader.h"
 #include "xla/pjrt/proto/compile_options.pb.h"
 #include "xla/service/gpu/gpu_executable.pb.h"
+#include "xla/service/hlo.pb.h"
+#include "xla/tools/split_proto/split_proto_cli.pb.h"
 #include "xla/tsl/util/fixed_option_set_flag.h"
 #include "xla/util/split_proto/split_executable_and_options_writer.h"
 #include "xla/util/split_proto/split_gpu_executable_writer.h"
+#include "xla/util/split_proto/split_hlo_writer.h"
 #include "xla/util/split_proto/split_proto.pb.h"
 #include "xla/util/split_proto/split_proto_reader.h"
 
@@ -112,11 +119,15 @@ absl::Status ParseProto(riegeli::Reader& reader, ProtoFormat format,
 absl::Status Pack(std::unique_ptr<riegeli::Reader> reader,
                   std::unique_ptr<riegeli::Writer> writer,
                   const PackOptions& options) {
+  LOG(INFO) << "Packing standard protobuf (type: " << options.proto_type
+            << ") to split proto format";
   std::unique_ptr<google::protobuf::Message> message;
   if (options.proto_type == "xla.gpu.GpuExecutableProto") {
     message = std::make_unique<xla::gpu::GpuExecutableProto>();
   } else if (options.proto_type == "xla.ExecutableAndOptionsProto") {
     message = std::make_unique<xla::ExecutableAndOptionsProto>();
+  } else if (options.proto_type == "xla.HloProto") {
+    message = std::make_unique<xla::HloProto>();
   } else {
     return absl::InvalidArgumentError(
         absl::StrCat("Unsupported proto type: ", options.proto_type));
@@ -134,6 +145,11 @@ absl::Status Pack(std::unique_ptr<riegeli::Reader> reader,
     auto* options_proto =
         absl::down_cast<xla::ExecutableAndOptionsProto*>(message.get());
     return WriteSplitExecutableAndOptions(*options_proto, std::move(writer));
+  }
+
+  if (options.proto_type == "xla.HloProto") {
+    auto* hlo_proto = absl::down_cast<xla::HloProto*>(message.get());
+    return WriteSplitHloProto(*hlo_proto, std::move(writer));
   }
 
   return absl::InvalidArgumentError("Unreachable");
@@ -186,12 +202,17 @@ absl::Status Unpack(std::unique_ptr<riegeli::Reader> reader,
                     std::unique_ptr<riegeli::Writer> writer,
                     const UnpackOptions& options) {
   ASSIGN_OR_RETURN(SplitProtoManifest manifest, ReadManifest(*reader));
+  LOG(INFO) << "Unpacking split proto format (type: "
+            << manifest.result_proto_type() << ") to standard protobuf ("
+            << AbslUnparseFlag(options.output_format) << " format)";
 
   std::unique_ptr<google::protobuf::Message> message;
   if (manifest.result_proto_type() == "xla.gpu.GpuExecutableProto") {
     message = std::make_unique<xla::gpu::GpuExecutableProto>();
   } else if (manifest.result_proto_type() == "xla.ExecutableAndOptionsProto") {
     message = std::make_unique<xla::ExecutableAndOptionsProto>();
+  } else if (manifest.result_proto_type() == "xla.HloProto") {
+    message = std::make_unique<xla::HloProto>();
   } else {
     return absl::InvalidArgumentError(absl::StrCat(
         "Unsupported proto type in manifest: ", manifest.result_proto_type()));
@@ -200,6 +221,60 @@ absl::Status Unpack(std::unique_ptr<riegeli::Reader> reader,
   RETURN_IF_ERROR(ReadSplitProto(std::move(reader), *message));
 
   RETURN_IF_ERROR(SerializeProto(*message, options.output_format, *writer));
+
+  if (!writer->Close()) {
+    return writer->status();
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status PackAot(std::unique_ptr<riegeli::Reader> reader,
+                     std::unique_ptr<riegeli::Writer> writer,
+                     const PackOptions& options) {
+  LOG(INFO) << "Packing DeserializedSplitExecutableAndOptions to split "
+               "ExecutableAndOptionsProto";
+  DeserializedSplitExecutableAndOptions wrapper;
+  RETURN_IF_ERROR(ParseProto(*reader, options.input_format, wrapper));
+
+  std::unique_ptr<riegeli::Writer> serialized_executable_writer =
+      riegeli::Maker<riegeli::StringWriter>(
+          wrapper.mutable_executable_and_options()
+              ->mutable_serialized_executable());
+  RETURN_IF_ERROR(
+      WriteSplitGpuExecutable(std::move(*wrapper.mutable_gpu_executable()),
+                              std::move(serialized_executable_writer)));
+
+  RETURN_IF_ERROR(WriteSplitExecutableAndOptions(
+      *wrapper.mutable_executable_and_options(), std::move(writer)));
+
+  return absl::OkStatus();
+}
+
+absl::Status UnpackAot(std::unique_ptr<riegeli::Reader> reader,
+                       std::unique_ptr<riegeli::Writer> writer,
+                       const UnpackOptions& options) {
+  LOG(INFO) << "Unpacking split ExecutableAndOptionsProto to "
+               "DeserializedSplitExecutableAndOptions ("
+            << AbslUnparseFlag(options.output_format) << " format)";
+  ExecutableAndOptionsProto executable_and_options_proto;
+  RETURN_IF_ERROR(
+      ReadSplitProto(std::move(reader), executable_and_options_proto));
+
+  xla::gpu::GpuExecutableProto gpu_proto;
+  RETURN_IF_ERROR(ReadSplitProto(
+      riegeli::Maker<riegeli::StringReader>(
+          executable_and_options_proto.mutable_serialized_executable()),
+      gpu_proto));
+
+  executable_and_options_proto.clear_serialized_executable();
+
+  DeserializedSplitExecutableAndOptions wrapper;
+  *wrapper.mutable_executable_and_options() =
+      std::move(executable_and_options_proto);
+  *wrapper.mutable_gpu_executable() = std::move(gpu_proto);
+
+  RETURN_IF_ERROR(SerializeProto(wrapper, options.output_format, *writer));
 
   if (!writer->Close()) {
     return writer->status();
