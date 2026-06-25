@@ -1606,9 +1606,10 @@ tf_kernel_library(
     prefix = "ragged_fill_empty_rows_op",
     deps = [
         "fill_empty_rows_functor",
+        ":gpu_prim_hdrs",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
-    ] + [":gpu_prim_hdrs"] + if_cuda_or_rocm([
+    ] + if_cuda_or_rocm([
         ":gpu_prim_helpers",
     ]) + if_cuda([
         "//tensorflow/core/util:cuda_solvers",
@@ -3883,7 +3884,11 @@ tf_kernel_library(
         "scan_ops_gpu_half.cu.cc",
         "scan_ops_gpu_int.cu.cc",
     ],
-    deps = MATH_DEPS + [":gpu_prim_hdrs"],
+    deps = MATH_DEPS + [
+        ":gpu_prim_hdrs",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 tf_kernel_library(
@@ -5167,6 +5172,8 @@ tf_kernel_library(
     prefix = "sendrecv_ops",
     deps = REQUIRED_DEPS + [
         "//tensorflow/core/profiler/lib:traceme",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -5221,7 +5228,10 @@ SPARSE_DEPS = [
 tf_kernel_library(
     name = "sparse_add_grad_op",
     prefix = "sparse_add_grad_op",
-    deps = SPARSE_DEPS,
+    deps = SPARSE_DEPS + [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 tf_kernel_library(
@@ -5989,13 +5999,12 @@ tf_cc_test(
         ":as_string_op",
         ":ops_testutil",
         ":ops_util",
-        "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
-        "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -6192,6 +6201,7 @@ tf_kernel_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
@@ -8198,6 +8208,24 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "strided_slice_op_define_grad",
+    srcs = ["strided_slice_op_define_grad.cc"],
+    deps = [":strided_slice_op"],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "tile_functor_sycl",
+    srcs = ["tile_functor_sycl.cc"],
+    deps = [
+        ":loose_headers",
+        ":ops_util",
+        "//tensorflow/core/framework:tensor",
+    ],
+    alwayslink = True,
+)
+
 # Deleted deps
 # [
 
@@ -8424,5 +8452,17 @@ tf_kernel_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+    ],
+)
+
+tf_cc_test(
+    name = "eigen_cuboid_convolutions_test",
+    srcs = ["eigen_cuboid_convolutions_test.cc"],
+    deps = [
+        ":eigen_helpers_no_mkl",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/platform:test_benchmark",
+        "@com_google_absl//absl/strings",
     ],
 )

@@ -1390,8 +1390,8 @@ void AddCollectiveCombinerPasses(
     HloPassPipeline& pipeline, const HloModule& module,
     const se::DeviceDescription& device_description,
     const GpuAliasInfo* alias_info, int pointer_size,
-    const GpuCompiler::CompileOptions& options,
-    int num_visible_devices_per_process, mlir::MLIRContext* mlir_context) {
+    const GpuCompiler::CompileOptions& options, const GpuTopology& gpu_topology,
+    mlir::MLIRContext* mlir_context) {
   const DebugOptions& opts = module.config().debug_options();
 
   if (EnableHeuristicCollectiveCombining(module.config(), device_description,
@@ -1431,24 +1431,23 @@ void AddCollectiveCombinerPasses(
   // KERNEL_STRATEGY_DEFAULT.
   if (opts.xla_gpu_unsupported_use_all_reduce_one_shot_kernel()) {
     pipeline.AddPass<CollectiveKernelStrategyAnnotator>(
-        device_description, /*is_multimem_enabled=*/false);
+        gpu_topology, /*is_multimem_enabled=*/false);
   }
 }
 
 absl::Status RunPostFusionPasses(
     HloModule* hlo_module, const se::DeviceDescription& device_description,
     const GpuAliasInfo* alias_info, int pointer_size,
-    const GpuCompiler::CompileOptions& options,
-    int num_visible_devices_per_process, mlir::MLIRContext* mlir_context,
-    CompilationStats* compilation_stats) {
+    const GpuCompiler::CompileOptions& options, const GpuTopology& gpu_topology,
+    mlir::MLIRContext* mlir_context, CompilationStats* compilation_stats) {
   HloPassPipeline pipeline("post-fusion optimization", compilation_stats);
   pipeline.AddPass<RenameFusions>();
   pipeline.AddPass<DusAccumulatorZeroInitElimination>();
   pipeline.AddPass<HloDCE>();
   pipeline.AddPass<TupleSimplifier>();
   AddCollectiveCombinerPasses(pipeline, *hlo_module, device_description,
-                              alias_info, pointer_size, options,
-                              num_visible_devices_per_process, mlir_context);
+                              alias_info, pointer_size, options, gpu_topology,
+                              mlir_context);
 
   pipeline.AddPass<AllReduceContiguous>();
 
@@ -1814,7 +1813,7 @@ absl::Status GpuCompiler::OptimizeHloModule(
       ShapeSizeBytesFunction(), alias_info, mlir_context, compilation_stats));
   RETURN_IF_ERROR(RunPostFusionPasses(
       hlo_module, device_description, alias_info, pointer_size_, options,
-      gpu_topology.number_of_devices(), mlir_context, compilation_stats));
+      gpu_topology, mlir_context, compilation_stats));
   RETURN_IF_ERROR(RunAsyncCollectivesConversionPasses(hlo_module));
   RETURN_IF_ERROR(RunPostFusionSimplificationPasses(
       hlo_module,
@@ -2837,6 +2836,14 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
 
   RecordGpuCompilerStacktrace();
 
+  const DebugOptions& debug_opts = module->config().debug_options();
+  XLA_SCOPED_LOGGING_TIMER_IF(
+      absl::StrCat("GpuCompiler::RunBackend for ", module->name()),
+      debug_opts.xla_enable_scoped_logging_timers());
+  std::string slow_compilation_msg =
+      absl::StrCat("Compiling module ", module->name(), " for GPU");
+  auto slow_compile_alarm = SlowCompilationAlarm(slow_compilation_msg);
+
   BinaryMap dnn_compiled_graphs;
   if (stream_exec) {
     se::dnn::DnnSupport* dnn_support = stream_exec->AsDnn();
@@ -2845,7 +2852,6 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
                                            &dnn_compiled_graphs));
   }
 
-  const DebugOptions& debug_opts = module->config().debug_options();
   ASSIGN_OR_RETURN(GpuTopology gpu_topology,
                    InferGpuTopology(module->config(), stream_exec, options,
                                     debug_opts, platform_id_));
@@ -2856,13 +2862,6 @@ absl::StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
         gpu_topology.gpu_target_config().ToProto(), &textproto);
     DumpToFileInDirOrStdout(*module, "", "gpu_target_config.pbtxt", textproto);
   }
-
-  XLA_SCOPED_LOGGING_TIMER_IF(
-      absl::StrCat("GpuCompiler::RunBackend for ", module->name()),
-      debug_opts.xla_enable_scoped_logging_timers());
-  std::string slow_compilation_msg =
-      absl::StrCat("Compiling module ", module->name(), " for GPU");
-  auto slow_compile_alarm = SlowCompilationAlarm(slow_compilation_msg);
 
   llvm::LLVMContext llvm_context;
   const se::DeviceDescription& gpu_device_info =
