@@ -363,7 +363,9 @@ cc_library(
     ],
     deps = [
         "//xla/tsl/platform:logging",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@local_config_rocm//rocm:rocm_headers",
         "@local_config_rocm//rocm:rocm_smi",
     ],
@@ -381,6 +383,7 @@ cc_library(
         ":rocm_smi_util",
         "//xla/tsl/platform:logging",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@local_config_rocm//rocm:rocm_headers",
         "@local_config_rocm//rocm:rocm_smi",
     ],
@@ -398,6 +401,7 @@ cc_library(
         ":rocm_smi_util",
         "//xla/tsl/platform:logging",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@local_config_rocm//rocm:rocm_headers",
         "@local_config_rocm//rocm:rocm_smi",
     ],
@@ -817,6 +821,8 @@ cc_library(
         ":all_reduce_kernel_rocm",
         ":amdhipblaslt_plugin",
         ":buffer_comparator_kernel_rocm",
+        ":buffer_debug_float_check_kernel_rocm",
+        ":buffer_debug_xor_checksum_kernel_rocm",
         ":collective_signal_rocm",
         ":cub_scan_kernel_rocm",
         ":cub_sort_kernel_rocm",
@@ -1463,11 +1469,11 @@ xla_cc_test(
         "//xla/stream_executor:platform_manager",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:statusor",
-        "@tsl//tsl/platform:test",
     ],
 )
 
@@ -1518,13 +1524,13 @@ xla_cc_test(
         "//xla/stream_executor:stream",
         "//xla/stream_executor:stream_executor_h",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:test",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:statusor",
-        "@tsl//tsl/platform:test",
     ],
 )
 
@@ -1629,6 +1635,56 @@ xla_cc_test(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
     ],
+)
+
+rocm_library(
+    name = "buffer_debug_float_check_kernel_rocm",
+    srcs = [
+        "buffer_debug_float_check_kernel_rocm.cu.cc",
+        "//xla/stream_executor/gpu:buffer_debug_float_check_kernel_lib.cu.h.inc",
+    ],
+    # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ],
+    deps = [
+        ":rocm_platform",
+        ":rocm_platform_id",
+        "//xla:util",
+        "//xla/backends/gpu/runtime:buffer_debug_log_structs",
+        "//xla/stream_executor:kernel_spec",
+        "//xla/stream_executor/gpu:buffer_debug_float_check_kernel",
+        "//xla/stream_executor/gpu:gpu_kernel_registry",
+        "@com_google_absl//absl/base",
+        "@local_config_rocm//rocm:rocm_headers",
+    ],
+    alwayslink = True,
+)
+
+rocm_library(
+    name = "buffer_debug_xor_checksum_kernel_rocm",
+    srcs = [
+        "buffer_debug_xor_checksum_kernel_rocm.cu.cc",
+        "//xla/stream_executor/gpu:buffer_debug_xor_checksum_kernel_lib.cu.h.inc",
+    ],
+    # copybara:uncomment compatible_with = ["//buildenv/target:non_prod"],
+    tags = [
+        "gpu",
+        "rocm-only",
+    ],
+    deps = [
+        ":rocm_platform",
+        ":rocm_platform_id",
+        "//xla/backends/gpu/runtime:buffer_debug_log_structs",
+        "//xla/stream_executor:kernel_spec",
+        "//xla/stream_executor/gpu:buffer_debug_xor_checksum_kernel",
+        "//xla/stream_executor/gpu:gpu_kernel_registry",
+        "@com_google_absl//absl/base",
+        "@local_config_rocm//rocm:rocm_headers",
+    ],
+    alwayslink = True,
 )

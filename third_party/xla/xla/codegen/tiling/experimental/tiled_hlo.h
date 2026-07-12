@@ -67,7 +67,7 @@ class TiledHloInstruction {
   llvm::ArrayRef<const TiledHloInstruction*> operands() const {
     return operands_;
   }
-  void AddOperand(TiledHloInstruction* operand) {
+  void AddOperand(const TiledHloInstruction* operand) {
     operands_.push_back(operand);
   }
 
@@ -228,13 +228,13 @@ class TiledHloComputation {
         roots_(std::move(roots)),
         rt_symbol_to_tiled_hlo_(std::move(rt_symbol_to_tiled_hlo)) {}
 
-  // Constructs a tiled HLO region starting from a single root instruction.
-  //
-  // This serves as the entry point for region reconstruction, wrapping the
-  // recursive `CreateFlatRegion` traversal. It initializes the traversal
-  // with the given `tiled_root`.
-  static absl::StatusOr<TiledHloRegion> CreateHloRegion(
-      std::unique_ptr<TiledHloInstruction> tiled_root,
+  struct RegionResult {
+    TiledHloRegion region;
+    llvm::SmallVector<const TiledHloInstruction*, 4> canonical_roots;
+  };
+
+  static absl::StatusOr<RegionResult> CreateHloRegion(
+      std::vector<std::unique_ptr<TiledHloInstruction>> roots,
       const HloFusionAdaptor& fusion, TilingSpace& tiling_space,
       absl::flat_hash_map<int64_t,
                           std::pair<const TiledHloInstruction*, Interval>>&

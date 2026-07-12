@@ -50,6 +50,7 @@ default_visibility = [
     #internal library 2,
     #internal library 1,
     #internal library 3,
+    #internal library 4,
 ]
 
 package(
@@ -935,6 +936,7 @@ cc_library(
         "//tensorflow/core/platform:macros",
         "//tensorflow/core/util:overflow",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
     ],
 )
 

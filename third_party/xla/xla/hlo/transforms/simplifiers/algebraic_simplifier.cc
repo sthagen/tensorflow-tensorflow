@@ -2686,7 +2686,8 @@ AlgebraicSimplifierVisitor::RemoveDegenerateDimensionFromDot(
     RETURN_IF_ERROR(ReplaceInstruction(dot, new_dot));
   } else {
     RETURN_IF_ERROR(ReplaceWithNewInstruction(
-        dot, HloInstruction::CreateReshape(dot->shape(), new_dot)));
+        dot, HloInstruction::CreateReshape(dot->shape(), new_dot),
+        /*preserve_sharding=*/false, /*relay_control_dependency=*/true));
   }
   return true;
 }
@@ -6622,7 +6623,9 @@ absl::Status AlgebraicSimplifierVisitor::HandleReshape(
     auto empty_constant = simplifier_->CreateConstantWithLayoutUpdated(
         Literal::CreateFromShape(reshaped_shape));
 
-    return ReplaceWithNewInstruction(reshape, std::move(empty_constant));
+    return ReplaceWithNewInstruction(reshape, std::move(empty_constant),
+                                     /*preserve_sharding=*/false,
+                                     /*relay_control_dependency=*/true);
   }
 
   // Delete no-op reshapes, i.e. where shape = operand shape.
@@ -6635,8 +6638,10 @@ absl::Status AlgebraicSimplifierVisitor::HandleReshape(
   // Merge reshapes.
   if (HloOpcode::kReshape == operand->opcode()) {
     return ReplaceWithNewInstruction(
-        reshape, HloInstruction::CreateReshape(reshape->shape(),
-                                               operand->mutable_operand(0)));
+        reshape,
+        HloInstruction::CreateReshape(reshape->shape(),
+                                      operand->mutable_operand(0)),
+        /*preserve_sharding=*/false, /*relay_control_dependency=*/true);
   }
 
   if (operand->opcode() == HloOpcode::kRng && operand->user_count() == 1) {
@@ -6784,7 +6789,8 @@ absl::Status AlgebraicSimplifierVisitor::HandleReshape(
           reshape,
           HloInstruction::CreateBroadcast(
               reshape->shape(), reshape->mutable_operand(0)->mutable_operand(0),
-              *opt_dims));
+              *opt_dims),
+          /*preserve_sharding=*/false, /*relay_control_dependency=*/true);
     }
   }
 
@@ -6876,7 +6882,9 @@ absl::Status AlgebraicSimplifierVisitor::HandleReshape(
       new_dus_operands[1] = new_slice;
       auto new_dus =
           dus->CloneWithNewOperands(reshape->shape(), new_dus_operands);
-      return ReplaceWithNewInstruction(reshape, std::move(new_dus));
+      return ReplaceWithNewInstruction(reshape, std::move(new_dus),
+                                       /*preserve_sharding=*/false,
+                                       /*relay_control_dependency=*/true);
     }
   }
 
@@ -9612,6 +9620,12 @@ absl::StatusOr<bool> AlgebraicSimplifierVisitor::TryFoldTransposeIntoScatter(
       !xla::ScatterSimplifier::IsSimplifiedScatter(scatter)) {
     return false;
   }
+  const ScatterDimensionNumbers& old_dnums =
+      scatter->scatter_dimension_numbers();
+  if (!old_dnums.input_batching_dims().empty() ||
+      !old_dnums.scatter_indices_batching_dims().empty()) {
+    return false;
+  }
 
   absl::Span<const int64_t> permutation = transpose->dimensions();
   std::vector<int64_t> inverse_permutation = InversePermutation(permutation);
@@ -9637,8 +9651,6 @@ absl::StatusOr<bool> AlgebraicSimplifierVisitor::TryFoldTransposeIntoScatter(
       transpose->AddInstruction(HloInstruction::CreateTranspose(
           new_update_shape, scatter_update, update_permutation));
 
-  const ScatterDimensionNumbers& old_dnums =
-      scatter->scatter_dimension_numbers();
   ScatterDimensionNumbers new_dnums = old_dnums;
   new_dnums.clear_scatter_dims_to_operand_dims();
   for (int64_t dim : old_dnums.scatter_dims_to_operand_dims()) {

@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
@@ -1063,26 +1064,17 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
   }
   // Please keep the cases in alphabetical order.
   switch (hlo->opcode()) {
-    case HloOpcode::kAllGather:
-    case HloOpcode::kAllGatherStart:
-    case HloOpcode::kAllGatherDone: {
-      // AllGatherStart and AllGatherDone are no-ops.
-      // Tile extraction handles the data movement.
+    case HloOpcode::kAllGather: {
+      // AllGather is a no-op. Tile extraction handles the data movement.
       return emitter_ctx.TiledHloToTensorValue(*tiled_hlo.operand(0));
     }
-    case (HloOpcode::kAllReduceStart): {
+    case HloOpcode::kAllReduce: {
       const HloComputation* computation =
           fusion.fused_instructions_computation();
       const HloInstruction* root_instruction = computation->root_instruction();
-      if (root_instruction->opcode() == HloOpcode::kAllReduceDone) {
-        root_instruction = root_instruction->operand(0);
-      }
       return EmitAllReduce(emitter_ctx,
                            xla::Cast<HloAllReduceInstruction>(root_instruction),
                            tiled_hlo, operands);
-    }
-    case (HloOpcode::kAllReduceDone): {
-      return emitter_ctx.TiledHloToTensorValue(*tiled_hlo.operand(0));
     }
     case HloOpcode::kBitcast: {
       return EmitBitcast(emitter_ctx, tiled_hlo,
@@ -1093,7 +1085,9 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     }
     case HloOpcode::kConstant: {
       if (ShapeUtil::IsEffectiveScalar(hlo->shape())) {
-        return EmitConstant(b, *hlo);
+        ASSIGN_OR_RETURN(auto tile_sizes,
+                         tiled_hlo.tile().GetStaticTileSizes());
+        return EmitConstant(b, *hlo, GetPaddedTileSizes(tile_sizes));
       }
       return absl::UnimplementedError(
           absl::StrCat("Unsupported non-scalar constant ", hlo->ToString()));
@@ -1214,8 +1208,31 @@ absl::Status EmitGeneric(ImplicitLocOpBuilder& b,
             << ExtractInstructionIntoNewModule(fusion)->ToString();
     VLOG(6) << "Tiled computation: \n" << tiled_computation.ToString();
   }
-  Value tile_id = fn.getTileId();
-  EmitterContext emitter_ctx{b,        &fusion, tile_id,
+  Value program_id = fn.getProgramId();
+  Value tile_id = program_id;
+
+  // If there are more than one tile per pid, we need to add a scf.for loop to
+  // iterate through the tiles.
+  int64_t num_tiles_per_pid = schedule.GetNumTilesPerPid();
+  if (num_tiles_per_pid > 1) {
+    Value zero = arith::ConstantIndexOp::create(b, 0);
+    Value one = arith::ConstantIndexOp::create(b, 1);
+    Value num_tiles_per_pid_val =
+        arith::ConstantIndexOp::create(b, num_tiles_per_pid);
+
+    // Loop ub = min(num_tiles_per_pid, num_tiles - pid * num_tiles_per_pid).
+    Value upper_bound = arith::SubIOp::create(
+        b, arith::ConstantIndexOp::create(b, schedule.num_tiles),
+        arith::MulIOp::create(b, program_id, num_tiles_per_pid_val));
+    upper_bound = arith::MinUIOp::create(b, upper_bound, num_tiles_per_pid_val);
+    auto for_op = mlir::scf::ForOp::create(b, zero, num_tiles_per_pid_val, one);
+
+    tile_id = arith::AddIOp::create(
+        b, arith::MulIOp::create(b, program_id, num_tiles_per_pid_val),
+        for_op.getInductionVar());
+    b.setInsertionPointToStart(for_op.getBody());
+  }
+  EmitterContext emitter_ctx{b,        &fusion, program_id,       tile_id,
                              schedule, fn,      tiled_computation};
 
   VLOG(2) << "EmitTiledComputation: " << tiled_computation.ToString();

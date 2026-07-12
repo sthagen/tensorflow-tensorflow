@@ -1012,7 +1012,7 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
 
   if (hlo->opcode() == HloOpcode::kConstant) {
     if (ShapeUtil::IsEffectiveScalar(hlo->shape())) {
-      return EmitConstant(b, *hlo);
+      return EmitConstant(b, *hlo, GetPaddedTileSizes(tiled_hlo.tile_sizes()));
     }
     return absl::UnimplementedError(
         absl::StrCat("Unsupported non-scalar constant ", hlo->ToString()));
@@ -1030,7 +1030,7 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     return EmitReduce(b, tiled_hlo, values);
   }
 
-  if (hlo->opcode() == HloOpcode::kAllReduceStart) {
+  if (hlo->opcode() == HloOpcode::kAllReduce) {
     const HloComputation* computation = fusion.fused_instructions_computation();
     const HloInstruction* root_instruction = computation->root_instruction();
     if (root_instruction->opcode() == HloOpcode::kAllReduceDone) {
@@ -1039,10 +1039,6 @@ absl::StatusOr<TensorValue> EmitTiledHloInstruction(
     return EmitAllReduce(b, computation,
                          *xla::Cast<HloAllReduceInstruction>(root_instruction),
                          tiled_hlo, values);
-  }
-
-  if (hlo->opcode() == HloOpcode::kAllReduceDone) {
-    return values[tiled_hlo.operand(0)];
   }
 
   if (hlo->IsElementwise()) {
@@ -1195,7 +1191,7 @@ absl::Status EmitGeneric(mlir::OpBuilder builder,
   VLOG(3) << "EmitGeneric: tiled HLO computation:\n"
           << tiled_hlo_computation.ToString();
 
-  Value tile_id = fn.getTileId();
+  Value tile_id = fn.getProgramId();
   absl::flat_hash_map<const TiledHloInstruction*, TensorValue> values;
   ASSIGN_OR_RETURN(auto results,
                    EmitTiledComputation(b, fusion, tiled_hlo_computation, fn,
@@ -1244,6 +1240,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> EmitXTileModule(
       !debug_options.xla_gpu_unsupported_enable_triton_multi_output_fusion()) {
     return absl::InvalidArgumentError("Multi-output fusion is disabled.");
   }
+
+  CHECK(!debug_options.xla_gpu_experimental_enable_tiling_propagation());
 
   const HloComputation* hlo_computation =
       fusion.fused_instructions_computation();
