@@ -104,9 +104,11 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_print_options.h"
 #include "xla/hlo/translate/hlo_to_mhlo/hlo_function_importer.h"
 #include "xla/hlo/utils/hlo_traversal.h"
+#include "xla/primitive_util.h"
 #include "xla/service/decision.h"
 #include "xla/service/dump.h"
 #include "xla/service/gpu/backend_configs.pb.h"
@@ -141,6 +143,85 @@ absl::Status CheckAtLeastAmpere(const se::GpuComputeCapability& gpu_cc) {
         absl::StrCat("Triton support is only enabled for Ampere GPUs (compute ",
                      "capability 8.0) and up, but got compute capability ",
                      cuda_cc->ToString(), "."));
+  }
+  return absl::OkStatus();
+}
+
+bool IsF4Array(const HloInstruction& instruction) {
+  return instruction.shape().IsArray() &&
+         instruction.shape().element_type() == F4E2M1FN;
+}
+
+// Packed f4 values are represented as i8 storage in Triton lowering. These HLO
+// ops can forward that storage without interpreting or changing the logical f4
+// values.
+bool IsF4StoragePreservingOpcode(HloOpcode opcode) {
+  switch (opcode) {
+    case HloOpcode::kBitcast:
+    case HloOpcode::kCopy:
+    case HloOpcode::kParameter:
+    case HloOpcode::kReshape:
+    case HloOpcode::kSlice:
+    case HloOpcode::kTranspose:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Scaled-dot lhs/rhs operands are terminal consumers that decode i8-packed f4
+// storage. Scale operands use their own element types.
+bool IsScaledDotDataOperandUser(const HloInstruction& instruction,
+                                const HloInstruction& scaled_dot) {
+  if (scaled_dot.opcode() != HloOpcode::kScaledDot) {
+    return false;
+  }
+  // Operands 0 and 1 carry packed f4 data; operands 2 and 3 are scale tensors.
+  return scaled_dot.operand(0) == &instruction ||
+         scaled_dot.operand(1) == &instruction;
+}
+
+// Every f4 array in a Triton fusion must stay on an i8-packed storage path that
+// terminates in scaled-dot data operands. Generic f4 arithmetic and f4 outputs
+// are not supported by this lowering.
+absl::Status ValidateF4UseInTritonFusion(const HloComputation& computation) {
+  for (const HloInstruction* instruction : computation.instructions()) {
+    if (!IsF4Array(*instruction)) {
+      continue;
+    }
+    if (!IsF4StoragePreservingOpcode(instruction->opcode())) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Generic f4e2m1fn Triton codegen is unsupported outside "
+          "storage-preserving scaled-dot operand paths: ",
+          instruction->ToString(HloPrintOptions::ShortParsable())));
+    }
+    if (instruction->users().empty()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "f4e2m1fn storage value must feed scaled-dot operand 0 or 1: ",
+          instruction->ToString(HloPrintOptions::ShortParsable())));
+    }
+    for (const HloInstruction* user : instruction->users()) {
+      if (IsScaledDotDataOperandUser(*instruction, *user) ||
+          (IsF4Array(*user) && IsF4StoragePreservingOpcode(user->opcode()))) {
+        continue;
+      }
+      return absl::InvalidArgumentError(absl::StrCat(
+          "f4e2m1fn storage value has unsupported Triton user: ",
+          instruction->ToString(HloPrintOptions::ShortParsable()), " -> ",
+          user->ToString(HloPrintOptions::ShortParsable())));
+    }
+  }
+  return absl::OkStatus();
+}
+
+absl::Status ValidateComplexUseInTritonFusion(
+    const HloComputation& computation) {
+  for (const HloInstruction* instruction : computation.instructions()) {
+    if (primitive_util::IsComplexType(instruction->shape().element_type())) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Complex types are unsupported in Triton codegen: ",
+          instruction->ToString(HloPrintOptions::ShortParsable())));
+    }
   }
   return absl::OkStatus();
 }
@@ -222,11 +303,11 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> TileAndEmitXTileModule(
     ASSIGN_OR_RETURN(std::unique_ptr<TilingSpace> tiling_space,
                      TilingSpace::Create(*fusion_adaptor, &mlir_context));
 
-    VLOG(6) << "fusion instruction: " << fusion.ToString() << "\n";
-    VLOG(6) << "tiling space: " << tiling_space->ToString();
-    if (VLOG_IS_ON(7)) {
+    VLOG(3) << "fusion instruction: " << fusion.ToString() << "\n";
+    VLOG(3) << "tiling space: " << tiling_space->ToString();
+    if (VLOG_IS_ON(4)) {
       XLA_VLOG_LINES(
-          7, absl::StrCat("HLO module to reproduce:\n",
+          4, absl::StrCat("HLO module to reproduce:\n",
                           ExtractInstructionIntoNewModule(fusion)->ToString(
                               HloPrintOptions::ShortParsable())));
     }
@@ -239,6 +320,8 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> TileAndEmitXTileModule(
     ASSIGN_OR_RETURN(
         TiledHloComputation tiled_computation,
         TiledHloComputation::Tile(*fusion_adaptor, std::move(tiling_space)));
+    tiled_computation.Simplify();
+    tiled_computation.SortInstructionsPostOrder();
     if (Decision constraints = experimental::VerifyTritonConstraints(
             tiled_computation, device_info);
         !constraints) {
@@ -246,11 +329,12 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> TileAndEmitXTileModule(
           absl::StrCat("Triton constraints violated during codegen: ",
                        constraints.Explain()));
     }
-    VLOG(6) << "tiled computation: " << tiled_computation.ToString();
+    VLOG(4) << "tiled computation: " << tiled_computation.ToString();
     return xtile::EmitXTileModule(
         fn_name, fusion, tiled_computation, mlir_context,
         absl::MakeSpan(opaque_args_types),
-        std::make_optional(device_info.gpu_compute_capability()));
+        std::make_optional(device_info.gpu_compute_capability()),
+        block_level_parameters.num_tiles_per_pid);
   }
   SymbolicTileAnalysisOrError symbolic_tile_analysis_or =
       SymbolicTileAnalysis::AnalyzeComputation(
@@ -335,6 +419,9 @@ absl::StatusOr<TritonKernelSource> CreateTritonModule(
         AddCollectiveMetadataArguments(opaque_args_types, b, hlo_computation));
   }
 
+  RETURN_IF_ERROR(ValidateComplexUseInTritonFusion(*hlo_computation));
+  RETURN_IF_ERROR(ValidateF4UseInTritonFusion(*hlo_computation));
+
   ASSIGN_OR_RETURN(auto triton_module,
                    TileAndEmitXTileModule(
                        fn_name, fusion, device_info, block_level_parameters,
@@ -357,7 +444,7 @@ absl::StatusOr<TritonKernelSource> CreateTritonModule(
       triton_module.get(), mlir_context, fusion, device_info,
       block_level_parameters));
 
-  VLOG(6) << GetModuleIrString(triton_module.get());
+  VLOG(5) << GetModuleIrString(triton_module.get());
   if (DumpingEnabledForHloModule(*hlo_computation->parent()) &&
       DumpingEnabledForEmitter("triton-fusion", debug_options)) {
     std::string suffix = absl::StrCat(fusion.name(), ".ttir.txt");
@@ -424,11 +511,11 @@ absl::StatusOr<TritonWrapperResult> CompileTritonToLLVM(
   should_verify = true;
 #endif
 
-  mlir_context.printOpOnDiagnostic(should_verify || VLOG_IS_ON(1));
+  mlir_context.printOpOnDiagnostic(should_verify || VLOG_IS_ON(5));
   std::optional<mlir::ScopedDiagnosticHandler> diag_handler;
-  if (VLOG_IS_ON(1)) {
+  if (VLOG_IS_ON(5)) {
     diag_handler.emplace(&mlir_context, [](mlir::Diagnostic& diag) {
-      VLOG(1) << "MLIR Diagnostic: " << diag.str();
+      VLOG(5) << "MLIR Diagnostic: " << diag.str();
       return mlir::failure();
     });
   }

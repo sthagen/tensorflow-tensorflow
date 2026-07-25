@@ -79,6 +79,19 @@ cc_library(
     ] + if_cuda_is_configured(nvtx_headers()),
 )
 
+xla_cc_test(
+    name = "annotation_test",
+    srcs = ["annotation_test.cc"],
+    deps = [
+        ":annotation",
+        "//xla:literal_util",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_module_config",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 #===-------------------------------------------------------------------------------------------===//
 # Command Buffer Integration
 #===-------------------------------------------------------------------------------------------===//
@@ -680,7 +693,6 @@ xla_test(
         ":kernel_thunk",
         ":memset_thunk",
         ":sequential_thunk",
-        ":shaped_slice",
         ":thunk",
         ":while_thunk",
         "//xla:shape_util",
@@ -691,6 +703,7 @@ xla_test(
         "//xla/service:buffer_assignment",
         "//xla/service:executable",
         "//xla/service:platform_util",
+        "//xla/service:shaped_slice",
         "//xla/service/gpu:buffer_allocations",
         "//xla/service/gpu:launch_dimensions",
         "//xla/service/gpu:matmul_utils",
@@ -2331,6 +2344,7 @@ cc_library(
     hdrs = ["ragged_all_to_all_thunk.h"],
     deps = [
         ":collective_clique_requests",
+        ":collective_cliques",
         ":collective_kernel_api",
         ":collective_memory",
         ":collective_memory_requests",
@@ -2360,6 +2374,7 @@ cc_library(
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:device_address_allocator",
+        "//xla/stream_executor:device_description",
         "//xla/stream_executor:memory_allocation",
         "//xla/stream_executor:memory_allocator",
         "//xla/stream_executor:memory_space",
@@ -2908,7 +2923,9 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":collective_clique_requests",
+        ":collective_kernel_api",
         ":collective_params",
+        "//xla:status_macros",
         "//xla:util",
         "//xla/backends/gpu/collectives:gpu_clique",
         "//xla/backends/gpu/collectives:gpu_clique_key",
@@ -2918,8 +2935,14 @@ cc_library(
         "//xla/core/collectives:clique_key",
         "//xla/core/collectives:communicator",
         "//xla/core/collectives:rank_id",
+        "//xla/core/collectives:symmetric_memory",
         "//xla/runtime:device_id",
         "//xla/service/gpu:gpu_executable_run_options",
+        "//xla/stream_executor:device_address",
+        "//xla/stream_executor:memory_allocation",
+        "//xla/stream_executor:memory_allocator",
+        "//xla/stream_executor:memory_space",
+        "//xla/stream_executor:stream",
         "//xla/tsl/platform:env",
         "//xla/tsl/platform:errors",
         "//xla/tsl/platform:status_macros",
@@ -3389,6 +3412,7 @@ cc_library(
     name = "collective_kernel_api",
     srcs = ["collective_kernel_api.cc"],
     hdrs = ["collective_kernel_api.h"],
+    compatible_with = get_compatible_with_portable(),
     deps = [
         "//xla:status_macros",
         "//xla/backends/gpu/collectives:gpu_clique_key",
@@ -3590,6 +3614,7 @@ xla_cc_test(
     srcs = ["thunk_test.cc"],
     deps = [
         ":thunk",
+        ":thunk_proto_cc",
         "//xla/tsl/util/proto:proto_matchers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -4292,11 +4317,13 @@ cc_library(
         "//xla:types",
         "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla/backends/gpu/collectives:gpu_communicator",
         "//xla/core/collectives:symmetric_memory",
         "//xla/stream_executor:device_address",
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:stream",
         "//xla/stream_executor/gpu:gpu_kernel_registry",
+        "//xla/stream_executor/gpu:ragged_all_to_all_device_kernel",
         "//xla/stream_executor/gpu:ragged_all_to_all_kernel",
         "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/log",
@@ -4910,6 +4937,7 @@ xla_cc_test(
         ":thunk_executor",
         ":thunk_id",
         ":thunk_pass_pipeline",
+        ":thunk_proto_cc",
         ":while_thunk",
         "//xla:debug_options_flags",
         "//xla:literal_util",

@@ -80,7 +80,13 @@ using AutotuneDecision = Decision;
 // regressions. These are allowed on non-GEMM fusions because sometimes these
 // are the only viable configurations to try.
 AutotuneDecision AllowRegSpillsForGpuInstruction(
-    const HloInstruction& instruction) {
+    const HloInstruction& instruction, autotuner::Backend backend) {
+  // CUBLASLT_FISSION creates loop fusions for the decomposed prologue and
+  // epilogue of the GEMM fusion. These fusions are allowed to spill as they
+  // have limited configs and can still be faster.
+  if (backend == autotuner::Backend::CUBLASLT_FISSION) {
+    return AutotuneDecision::Allow();
+  }
   if (instruction.opcode() == HloOpcode::kCustomCall) {
     if (IsCublasLtGemm(instruction) ||
         IsCustomCallToDnnConvolution(instruction)) {
@@ -234,33 +240,27 @@ std::unique_ptr<AutotunerCacheInterface> CreateAutotunerCache(
     const DebugOptions& debug_options,
     const Compiler::GpuTargetConfig& target_config,
     const std::vector<std::unique_ptr<CodegenBackend>>& backends) {
-  std::string legacy_cache_dir =
-      debug_options.xla_gpu_per_fusion_autotune_cache_dir();
-  std::string new_cache_dir =
-      debug_options.xla_gpu_experimental_autotuner_cache_dir();
-  if (!new_cache_dir.empty() && !legacy_cache_dir.empty()) {
-    LOG(WARNING) << "Both legacy and new autotune cache directories are set. "
-                    "Using the new directory: "
-                 << new_cache_dir;
-  }
-  if (!new_cache_dir.empty()) {
-    AutotuneCacheContext cache_ctx = AutotuneCacheContext::Create(
-        target_config.device_description, backends);
+  std::string cache_dir = debug_options.xla_gpu_per_fusion_autotune_cache_dir();
 
-    auto dir_cache = std::make_unique<DirectoryCache>(
-        cache_ctx, new_cache_dir,
-        GetCacheMode(debug_options.xla_gpu_experimental_autotune_cache_mode()),
-        KeyMatchingMode::kLoose);
-    auto local_cache = std::make_unique<LocalCache>(
-        dir_cache->GetKeyMatchingMode(),
-        &LocalCacheStorage::GetInstance(cache_ctx));
-    return std::make_unique<TieredCache>(std::move(local_cache),
-                                         std::move(dir_cache));
+  if (!debug_options.xla_gpu_use_new_autotune_cache_format()) {
+    return std::make_unique<LegacyCache>(
+        cache_dir, debug_options.xla_gpu_experimental_autotune_cache_mode(),
+        target_config.device_description);
   }
-  return std::make_unique<LegacyCache>(
-      legacy_cache_dir,
-      debug_options.xla_gpu_experimental_autotune_cache_mode(),
-      target_config.device_description);
+
+  AutotuneCacheContext cache_ctx =
+      AutotuneCacheContext::Create(target_config.device_description, backends);
+  auto local_cache =
+      std::make_unique<LocalCache>(cache_ctx, KeyMatchingMode::kLoose);
+  if (cache_dir.empty()) {
+    return local_cache;
+  }
+  auto dir_cache = std::make_unique<DirectoryCache>(
+      cache_ctx, cache_dir,
+      GetCacheMode(debug_options.xla_gpu_experimental_autotune_cache_mode()),
+      KeyMatchingMode::kLoose);
+  return std::make_unique<TieredCache>(std::move(local_cache),
+                                       std::move(dir_cache));
 }
 
 }  // namespace
@@ -296,8 +296,9 @@ CodegenOrchestrator::Options GetCodegenOrchestratorOptions(
   CodegenOrchestrator::Options options;
   options.exclude_cublas_config = !debug_options.xla_gpu_cublas_fallback();
   if (!debug_options.xla_gpu_fail_ptx_compilation_on_register_spilling()) {
-    options.allow_reg_spills_fn = [](const HloInstruction& instr) {
-      return static_cast<bool>(AllowRegSpillsForGpuInstruction(instr));
+    options.allow_reg_spills_fn = [](const HloInstruction& instr,
+                                     autotuner::Backend backend) {
+      return static_cast<bool>(AllowRegSpillsForGpuInstruction(instr, backend));
     };
   }
   // xla_gpu_filter_kernels_spilling_registers_on_autotuning is true by default,
@@ -307,7 +308,8 @@ CodegenOrchestrator::Options GetCodegenOrchestratorOptions(
   // explicitly set to false.
   if (!debug_options
            .xla_gpu_filter_kernels_spilling_registers_on_autotuning()) {
-    options.allow_reg_spills_fn = [](const HloInstruction&) { return false; };
+    options.allow_reg_spills_fn = [](const HloInstruction&,
+                                     autotuner::Backend) { return false; };
   }
   return options;
 }

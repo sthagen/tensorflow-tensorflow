@@ -497,6 +497,21 @@ tf_proto_library(
     ],
 )
 
+tf_proto_library(
+    name = "debug_event_proto",
+    srcs = ["debug_event.proto"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xla:xla_data_proto",
+    ],
+)
+
+xla_py_proto_library(
+    name = "debug_event_pb2",
+    visibility = ["//visibility:public"],
+    deps = [":debug_event_proto"],
+)
+
 xla_py_proto_library(
     name = "run_hlo_module_pb2",
     visibility = ["//visibility:public"],
@@ -643,9 +658,7 @@ xla_cc_test(
         "//xla:literal_util",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/parser:hlo_parser",
-        "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:env",
-        "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:subprocess",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/log",
