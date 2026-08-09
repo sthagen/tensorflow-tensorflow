@@ -23,7 +23,7 @@ load(
 )
 load("//xla:package_groups.bzl", "xla_test_friend_package_group")
 load("//xla:xla.default.bzl", "xla_cc_test", "xla_internal")
-load("//xla/tests:build_defs.bzl", "ALL_HARDWARE_BACKENDS", "generate_backend_suites", "xla_test")
+load("//xla/tests:build_defs.bzl", "generate_backend_suites", "xla_test")
 load("//xla/tsl:tsl.bzl", "if_google", "if_oss", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "filegroup")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
@@ -83,12 +83,12 @@ cc_library(
     ],
     deps = [
         ":constraint_state",
+        "//xla:comparison_util",
         "//xla:literal",
         "//xla:shape_util",
         "//xla:types",
         "//xla:util",
         "//xla/hlo/ir:hlo",
-        "//xla/tsl/platform:errors",
         "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
@@ -167,7 +167,6 @@ cc_library(
     srcs = ["pjrt_client_registry.cc"],
     hdrs = ["pjrt_client_registry.h"],
     deps = [
-        ":aot_interception_pjrt_client",
         "//xla/pjrt:pjrt_client",
         "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/status",
@@ -3341,7 +3340,7 @@ xla_test(
 xla_test(
     name = "triangular_solve_test",
     srcs = ["triangular_solve_test.cc"],
-    backends = ALL_HARDWARE_BACKENDS,
+    real_hardware_only = True,
     shard_count = 50,
     tags = ["optonly"],
     deps = [
@@ -3634,11 +3633,10 @@ xla_test(
     deps = [
         ":constraint_propagator",
         ":constraint_state",
-        ":hlo_pjrt_test_base",
+        ":hlo_test_base",
         ":xla_internal_test_main",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:test",
-        "//xla/tsl/platform:statusor",
     ],
 )
 

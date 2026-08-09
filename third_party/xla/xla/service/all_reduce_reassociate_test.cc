@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <gmock/gmock.h>
@@ -47,7 +48,7 @@ class AllReduceSimplifierTest : public HloHardwareIndependentTestBase {
   absl::StatusOr<std::unique_ptr<HloModule>> RunPass(
       absl::string_view hlo_module, bool expect_change,
       bool reassociate_converted_ar = false) {
-    ASSIGN_OR_RETURN(auto module, ParseAndReturnVerifiedModule(hlo_module));
+    ABSL_ASSIGN_OR_RETURN(auto module, ParseAndReturnVerifiedModule(hlo_module));
     auto changed =
         AllReduceReassociate(reassociate_converted_ar).Run(module.get());
     if (!changed.ok()) {
@@ -85,6 +86,8 @@ ENTRY main {
                           RunPass(hlo_string, /*expect_change=*/true));
   EXPECT_THAT(module->entry_computation()->root_instruction(),
               m::AllReduce(m::Add(m::Parameter(0), m::Parameter(1))));
+  EXPECT_EQ(module->entry_computation()->root_instruction()->channel_id(),
+            std::nullopt);
   EXPECT_EQ(AllReduceCount(module), 1);
 }
 
@@ -110,6 +113,7 @@ ENTRY main {
                           RunPass(hlo_string, /*expect_change=*/true));
   EXPECT_THAT(module->entry_computation()->root_instruction(),
               m::AllReduce(m::Add(m::Parameter(0), m::Parameter(1))));
+  EXPECT_EQ(module->entry_computation()->root_instruction()->channel_id(), 1);
   EXPECT_EQ(AllReduceCount(module), 1);
 }
 

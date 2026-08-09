@@ -58,7 +58,7 @@ class AllGatherPadDsSimplifierTest : public HloHardwareIndependentTestBase {
         /*replica_count=*/num_replicas,
         /*num_partitions=*/num_partitions);
     config.set_use_spmd_partitioning(num_partitions > 1);
-    ASSIGN_OR_RETURN(auto module,
+    ABSL_ASSIGN_OR_RETURN(auto module,
                      ParseAndReturnVerifiedModule(hlo_module, config));
     auto changed = AllGatherPadDsSimplifier().Run(module.get(), {});
     if (!changed.ok()) {
@@ -143,6 +143,7 @@ TEST_F(AllGatherPadDsSimplifierTest, MultiReplicaGenericCaseLowPad) {
     EXPECT_EQ(
         concate->operand(i)->get_frontend_attribute(kCollectiveGroupKeyAttr),
         "g0");
+    EXPECT_EQ(concate->operand(i)->channel_id(), 4);
   }
 }
 

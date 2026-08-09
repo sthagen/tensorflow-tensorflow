@@ -1,8 +1,16 @@
 # Description:
 #   Implementation of XLA’s HLO simplifier transformations.
 
-load("//xla:xla.default.bzl", "xla_cc_test")
+load(
+    "//xla:xla.default.bzl",
+    "xla_cc_test",
+    "xla_py_proto_library",
+)
 load("//xla/tsl:tsl.bzl", "internal_visibility", "tsl_copts")
+load(
+    "//xla/tsl/platform:build_config.bzl",
+    "tf_proto_library",
+)
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 load(
     "//xla/tsl/platform/default:cuda_build_defs.bzl",
@@ -359,16 +367,57 @@ xla_cc_test(
     ],
 )
 
+tf_proto_library(
+    name = "memory_scheduler_proto",
+    srcs = ["memory_scheduler.proto"],
+    make_default_target_header_only = True,
+)
+
+alias(
+    name = "memory_scheduler_cc_proto",
+    actual = ":memory_scheduler_proto_cc",
+)
+
+xla_py_proto_library(
+    name = "memory_scheduler_py_pb2",
+    visibility = internal_visibility([":friends"]),
+    deps = [":memory_scheduler_proto"],
+)
+
+tf_proto_library(
+    name = "memory_scheduler_metrics_proto",
+    srcs = ["memory_scheduler_metrics.proto"],
+    make_default_target_header_only = True,
+    deps = [
+        ":memory_scheduler_proto",
+        "@com_google_protobuf//:any_proto",
+    ],
+)
+
+alias(
+    name = "memory_scheduler_metrics_cc_proto",
+    actual = ":memory_scheduler_metrics_proto_cc",
+)
+
+xla_py_proto_library(
+    name = "memory_scheduler_metrics_py_pb2",
+    visibility = internal_visibility([":friends"]),
+    deps = [":memory_scheduler_metrics_proto"],
+)
+
 cc_library(
     name = "hlo_memory_scheduler",
     srcs = ["hlo_memory_scheduler.cc"],
     hdrs = ["hlo_memory_scheduler.h"],
     local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
+        ":memory_scheduler_metrics_proto_cc",
+        ":memory_scheduler_proto_cc",
         "//xla:shape_util",
         "//xla:util",
         "//xla/hlo/analysis:alias_info",
         "//xla/hlo/analysis:hlo_alias_analysis",
+        "//xla/hlo/analysis:hlo_dataflow_analysis",
         "//xla/hlo/analysis:tuple_points_to_analysis",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
@@ -400,6 +449,7 @@ xla_cc_test(
     srcs = ["hlo_memory_scheduler_test.cc"],
     deps = [
         ":hlo_memory_scheduler",
+        ":memory_scheduler_metrics_cc_proto",
         "//xla:literal_util",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
@@ -418,6 +468,7 @@ xla_cc_test(
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
@@ -981,6 +1032,7 @@ cc_library(
     hdrs = ["hlo_dce.h"],
     visibility = internal_visibility([":friends"]),
     deps = [
+        "//xla:frontend_attributes",
         "//xla:shape_layout",
         "//xla:shape_util",
         "//xla:util",
@@ -1894,7 +1946,6 @@ cc_library(
         "//xla/hlo/ir:collective_op_group_mode",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/pass:hlo_pass",
-        "//xla/hlo/utils:hlo_query",
         "//xla/service:collective_ops_utils",
         "//xla/service:collective_opt_utils",
         "//xla/service:hlo_module_config",
