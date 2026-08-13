@@ -36,11 +36,11 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/log/vlog_is_on.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"
 #include "xla/hlo/analysis/alias_info.h"
 #include "xla/hlo/analysis/hlo_alias_analysis.h"
 #include "xla/hlo/analysis/hlo_dataflow_analysis.h"
@@ -379,7 +379,7 @@ MemorySpaceAssignment::RunMemorySpaceAssignment(
   if (splitting_enabled) {
     CHECK_EQ(options_.sliced_prefetch_options.max_slices(), 0)
         << "TODO(b/167392593): Support sliced prefetches for split shapes.";
-    CHECK(!options_.enable_window_prefetch)
+    CHECK(!options_.IsOpSpanExposureEnabled())
         << "TODO(b/167392593): Support split shapes for window "
            "prefetches.";
   }

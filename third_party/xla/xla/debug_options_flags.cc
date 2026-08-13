@@ -293,8 +293,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   // Default to true for backwards compatibility (always flush denormals).
   opts.set_xla_cpu_ftz(true);
 
-  opts.set_xla_gpu_fused_attention_use_cudnn_rng(false);
-
   // By default, copy TF's Eigen style min_max behavior with nans.
   opts.set_xla_cpu_enable_fast_min_max(true);
 
@@ -522,6 +520,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_pjrt_allow_auto_layout_in_hlo(false);
   opts.set_xla_gpu_enable_scatter_determinism_expander(false);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
+  opts.set_xla_gpu_all_reduce_splitter_ignore_profitability_check(false);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(false);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_multi_host_decomposer(
       true);
@@ -550,7 +549,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_experimental_scaled_dot_with_triton(true);
   opts.set_xla_early_exit_with_layouts(false);
   opts.set_xla_gpu_experimental_all_fusions_with_triton(false);
-  opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier(true);
   opts.set_xla_gpu_experimental_ragged_all_to_all_use_barrier_with_nccl(true);
   opts.set_xla_gpu_ragged_all_to_all_mode(
       DebugOptions::COLLECTIVES_PRIVATE_MEMORY);
@@ -2024,6 +2022,15 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       debug_options->xla_gpu_all_reduce_combine_threshold_bytes(),
       "[Stable] Size threshold (in bytes) for the GPU all-reduce combiner."));
   flag_list->push_back(tsl::Flag(
+      "xla_gpu_all_reduce_splitter_ignore_profitability_check",
+      bool_setter_for(
+          &DebugOptions::
+              set_xla_gpu_all_reduce_splitter_ignore_profitability_check),
+      debug_options->xla_gpu_all_reduce_splitter_ignore_profitability_check(),
+      "If true, AllReduceSplitter rewrites AR+DS patterns even when the "
+      "profitability heuristic does not find an existing all-reduce that "
+      "shares either of the post-split replica group topologies."));
+  flag_list->push_back(tsl::Flag(
       "xla_gpu_all_gather_combine_threshold_bytes",
       int64_setter_for(
           &DebugOptions::set_xla_gpu_all_gather_combine_threshold_bytes),
@@ -2118,11 +2125,7 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
   flag_list->push_back(tsl::Flag("xla_gpu_enable_cudnn_fmha",
                                  noop_flag_setter<bool>, false,
                                  "[Deprecated, do not use]"));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_fused_attention_use_cudnn_rng",
-      bool_setter_for(&DebugOptions::set_xla_gpu_fused_attention_use_cudnn_rng),
-      debug_options->xla_gpu_fused_attention_use_cudnn_rng(),
-      "Use cudnn random number generator for fused attention kernel."));
+
   flag_list->push_back(tsl::Flag(
       "xla_gpu_enable_cudnn_layer_norm",
       bool_setter_for(&DebugOptions::set_xla_gpu_enable_cudnn_layer_norm),
@@ -3438,14 +3441,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "that checks for unstable reductions in HLO computations after "
       "optimizations. Acceptable values are: 'none', 'log', and "
       "'crash'. 'none' is the default."));
-  flag_list->push_back(tsl::Flag(
-      "xla_gpu_experimental_ragged_all_to_all_use_barrier",
-      bool_setter_for(
-          &DebugOptions::
-              set_xla_gpu_experimental_ragged_all_to_all_use_barrier),
-      debug_options->xla_gpu_experimental_ragged_all_to_all_use_barrier(),
-      "If true, use the MultiGpuBarrierKernel in one-shot RaggedAllToAll "
-      "thunk."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_ragged_all_to_all_use_barrier_with_nccl",
       bool_setter_for(

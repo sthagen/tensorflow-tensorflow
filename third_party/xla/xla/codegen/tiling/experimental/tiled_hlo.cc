@@ -34,11 +34,11 @@ limitations under the License.
 #include "absl/hash/hash.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
@@ -275,7 +275,8 @@ RegionSchema GetRegionSchema(const TiledHloInstruction& tiled_hlo,
   };
   switch (opcode) {
     case HloOpcode::kDot:
-    case HloOpcode::kScaledDot: {
+    case HloOpcode::kScaledDot:
+    case HloOpcode::kRaggedDot: {
       return RegionSchema{/*region_roots=*/{iota(0, num_operands)},
                           /*operand_ids=*/{}};
     }

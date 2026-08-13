@@ -282,6 +282,8 @@ class HloAsyncInstruction : public HloInstruction {
 
   // Returns async-start instruction of the async chain.
   HloAsyncInstruction* async_chain_start() const;
+  // Returns the next async instruction in the async chain.
+  HloAsyncInstruction* async_chain_next() const { return async_chain_next_; }
   // Returns async-done instruction of the async chain.
   HloAsyncInstruction* async_chain_done() const;
   // Returns the chain of async op referencing this computation,
@@ -301,13 +303,10 @@ class HloAsyncInstruction : public HloInstruction {
 
  protected:
   // Helper to constructs async-{start,update,done}.
-  HloAsyncInstruction(HloOpcode opcode, const Shape& shape,
-                      absl::Span<HloInstruction* const> operands,
-                      HloOpcode async_wrapped_opcode);
-
-  // Constructs async-{update,done}.
-  HloAsyncInstruction(HloOpcode opcode, const Shape& shape,
-                      HloInstruction* operand);
+  HloAsyncInstruction(
+      HloOpcode opcode, const Shape& shape,
+      absl::Span<HloInstruction* const> operands,
+      std::optional<HloOpcode> async_wrapped_opcode = std::nullopt);
 
  private:
   // async-{update,done} inherit all their attributes from async-start,
@@ -377,6 +376,39 @@ class HloAsyncStartInstruction : public HloAsyncInstruction,
       HloCloneContext* context) const override;
 
   std::string async_execution_thread_ = kMainExecutionThread;
+};
+
+// Creates async-update.
+class HloAsyncUpdateInstruction : public HloAsyncInstruction,
+                                  public HloAliasible {
+ public:
+  using HloAliasible::output_to_operand_aliasing;
+  using HloAliasible::set_output_to_operand_aliasing;
+  HloAsyncUpdateInstruction(
+      const Shape& shape, absl::Span<HloInstruction* const> operands,
+      std::optional<HloOpcode> async_wrapped_opcode = std::nullopt);
+
+  void ToProto(HloInstructionProto* proto) const override;
+
+  static bool ClassOf(const HloInstruction* hlo) {
+    switch (hlo->opcode()) {
+      case HloOpcode::kAsyncUpdate:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+ private:
+  void PrintExtraAttributesImpl(AttributePrinter& printer,
+                                const HloPrintOptions& options) const override;
+  bool IdenticalSlowPath(
+      const HloInstruction& other,
+      absl::FunctionRef<bool(const HloComputation*, const HloComputation*)>
+          eq_computations) const override;
+  std::unique_ptr<HloInstruction> CloneWithNewOperandsImpl(
+      const Shape& shape, absl::Span<HloInstruction* const> new_operands,
+      HloCloneContext* context) const override;
 };
 
 class HloCopyStartInstruction : public HloInstruction {
@@ -1510,13 +1542,13 @@ class HloCallableInstruction : public HloInstruction, public HloAliasible {
                          absl::Span<HloComputation* const> called_computations);
 
   HloCallableInstruction(HloOpcode opcode, const Shape& shape,
-                         absl::string_view name, absl::string_view attributes,
+                         const std::string& name, const std::string& attributes,
                          int64_t version);
 
   HloCallableInstruction(HloOpcode opcode, const Shape& shape,
                          absl::Span<HloInstruction* const> operands,
-                         HloComputation* decomposition, absl::string_view name,
-                         absl::string_view attributes, int64_t version);
+                         HloComputation* decomposition, const std::string& name,
+                         const std::string& attributes, int64_t version);
 
   ~HloCallableInstruction() override;
 
@@ -1561,12 +1593,11 @@ class HloCallableInstruction : public HloInstruction, public HloAliasible {
   }
 
   FrontendAttributes BuildFrontendAttributesForComposite(
-      absl::string_view name,
+      const std::string& name,
       std::optional<absl::string_view> attributes = std::nullopt,
       std::optional<int64_t> version = std::nullopt) {
     FrontendAttributes frontend_attributes;
-    frontend_attributes.mutable_map()->insert(
-        {"composite.name", std::string(name)});
+    frontend_attributes.mutable_map()->insert({"composite.name", name});
     frontend_attributes.mutable_map()->insert(
         {"composite.attributes",
          attributes.has_value() ? std::string(*attributes) : "{}"});
@@ -1735,13 +1766,13 @@ class HloCallInstruction : public HloCallableInstruction {
                      HloComputation* called_computation);
 
   HloCallInstruction(const Shape& shape, HloInstruction* decomposition_root,
-                     absl::string_view name, absl::string_view attributes,
+                     const std::string& name, const std::string& attributes,
                      int64_t version);
 
   HloCallInstruction(const Shape& shape,
                      absl::Span<HloInstruction* const> operands,
-                     HloComputation* decomposition, absl::string_view name,
-                     absl::string_view attributes, int64_t version);
+                     HloComputation* decomposition, const std::string& name,
+                     const std::string& attributes, int64_t version);
 
   static bool ClassOf(const HloInstruction* hlo) {
     return hlo->opcode() == HloOpcode::kCall;
@@ -1913,14 +1944,12 @@ class HloInfeedInstruction : public HloInstruction {
  public:
   explicit HloInfeedInstruction(const Shape& infeed_shape,
                                 HloInstruction* token_operand,
-                                absl::string_view config);
+                                const std::string& config);
   // Returns the infeed configuration string. The infeed configuration includes
   // any metadata needed for the backend compiler (e.g., infeed buffer address)
   // and is target-dependent.
   std::string infeed_config() const { return infeed_config_; }
-  void set_infeed_config(absl::string_view config) {
-    infeed_config_ = std::string(config);
-  }
+  void set_infeed_config(const std::string& config) { infeed_config_ = config; }
   // Returns the shape of the data received by the infeed. This is not the same
   // as the shape of the infeed instruction which produces a tuple containing
   // the infeed data shape and a TOKEN.
@@ -1962,8 +1991,8 @@ class HloOutfeedInstruction : public HloInstruction {
   Shape* mutable_outfeed_shape() { return &outfeed_shape_; }
   // Returns the config for the Outfeed instruction.
   const std::string& outfeed_config() const { return outfeed_config_; }
-  void set_outfeed_config(absl::string_view config) {
-    outfeed_config_ = std::string(config);
+  void set_outfeed_config(const std::string& config) {
+    outfeed_config_ = config;
   }
   void ToProto(HloInstructionProto* proto) const override;
 

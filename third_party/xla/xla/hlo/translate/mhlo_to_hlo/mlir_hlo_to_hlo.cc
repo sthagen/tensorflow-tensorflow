@@ -29,12 +29,12 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -2494,6 +2494,11 @@ LogicalResult ExportXlaOp(CollectiveBroadcastOp op, OpLoweringContext ctx) {
   value_map[op->getResult(0)] = result;
 
   return success();
+}
+
+LogicalResult ExportXlaOp(CollectiveReduceOp op, OpLoweringContext ctx) {
+  // TODO(cl/958226692): Map CollectiveReduceOp to the corresponding HLO op.
+  return failure();
 }
 
 // Specialize CompareOp export to set broadcast_dimensions argument.

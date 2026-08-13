@@ -94,6 +94,9 @@ class CommonPjRtClient : public PjRtClient {
   // TODO(parkers): Properly support error buffers on GPU and CPU.
   virtual bool include_raw_buffer_in_ready_event() const { return false; }
   virtual bool supports_predetermined_error() const { return true; }
+  virtual bool SupportsPredeterminedError(PjRtMemorySpace* memory_space) const {
+    return supports_predetermined_error();
+  }
   // TODO(parkers): The xla::Shape should know how to update itself when we go
   // from a static to the runtime shape. This should not be runtime dependent.
   virtual absl::StatusOr<xla::Shape> UpdateLayoutForDynamicShapes(
@@ -121,13 +124,10 @@ class CommonPjRtClient : public PjRtClient {
   }
 
   // Computes the memory requirements for storing shape on memory_space.
-  // TODO(parkers): make pure virtual and update all clients.
-  virtual absl::StatusOr<int64_t> GetOnDeviceBytesCount(
-      int memory_space_kind, const xla::Shape& shape) const {
-    return absl::UnimplementedError("GetOnDeviceBytesCount is not supported.");
-  }
-  virtual absl::StatusOr<int64_t> GetOnDeviceBytesCount(
-      PjRtMemorySpace* memory_space, const xla::Shape& shape) const {
+  absl::StatusOr<int64_t> GetOnDeviceBytesCount(int memory_space_kind,
+                                                const xla::Shape& shape) const;
+  absl::StatusOr<int64_t> GetOnDeviceBytesCount(PjRtMemorySpace* memory_space,
+                                                const xla::Shape& shape) const {
     return GetOnDeviceBytesCount(memory_space->kind_id(), shape);
   }
 
@@ -286,6 +286,9 @@ class CommonPjRtClient : public PjRtClient {
     return raw_client()->CreateDeviceEvent(memory_space, std::move(dependency));
   }
 
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateErrorBuffer(
+      absl::Status error, const Shape& shape, PjRtMemorySpace* memory) override;
+
   // Registers the necessary debug information for an allocation event.
   // TODO(parkers): Once everything is unified this should be controlled
   // by a non-device-specific config instead of delegating this control
@@ -320,6 +323,14 @@ class CommonPjRtClient : public PjRtClient {
       const LiteralSlice& literal, PjRtMemorySpace* memory_space,
       const Layout* device_layout) override;
 
+  absl::StatusOr<DeviceAssignment> GetDefaultDeviceAssignment(
+      int num_replicas, int num_partitions) const override;
+
+  absl::StatusOr<DeviceAssignment> GetDefaultDeviceAssignment(
+      int num_replicas, std::optional<int> num_replicas_per_slice,
+      int num_partitions,
+      const MultiSliceConfig* multi_slice_config) const override;
+
   absl::StatusOr<
       std::pair<std::unique_ptr<PjRtBuffer>, PjRtFulfillAliasBufferCallback>>
   CreateAliasBuffer(const Shape& shape, PjRtMemorySpace* memory_space) override;
@@ -349,9 +360,12 @@ class CommonPjRtClient : public PjRtClient {
   // Applies memory-space normalization logic on top of
   // GetTopologyDescription()->GetDefaultLayout() to select the default
   // device layout (if not provided).
-  virtual absl::StatusOr<xla::Shape> MakeDefaultShapeForMemorySpace(
+  absl::StatusOr<xla::Shape> MakeDefaultShapeForMemorySpace(
       PjRtMemorySpace* memory_space, xla::Shape shape,
       const xla::Layout* layout) const;
+
+  absl::StatusOr<Layout> GetDefaultLayout(
+      PrimitiveType element_type, absl::Span<const int64_t> dims) override;
 
   virtual bool BufferFromHostBufferSupportsZeroCopy(
       const void* data, PrimitiveType type, absl::Span<int64_t const> dims,
@@ -381,6 +395,12 @@ class CommonPjRtClient : public PjRtClient {
   MakeCrossHostReceiveBuffers(absl::Span<const Shape> shapes,
                               PjRtDevice* absl_nonnull device,
                               PjRtCrossHostRecvNotifier notifier) override;
+
+  virtual absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
+  MakeCrossHostReceiveBuffers(
+      absl::Span<const Shape> shapes, PjRtDevice* absl_nonnull device,
+      PjRtCrossHostRecvNotifier notifier,
+      std::optional<absl::Span<const PjRtRawBufferRef>> donated_buffer_refs);
 
   // Similar to PjRtClient::MakeCrossHostReceiveBuffers, but uses PjRtRawBuffer
   // instead of PjRtBuffer.
@@ -491,6 +511,12 @@ class CommonPjRtClient : public PjRtClient {
   absl::Status DelinearizeHostBuffer(absl::Span<const uint8_t> input_data,
                                      const Shape& shape,
                                      MutableLiteralBase* literal);
+
+  // Does the provided shape require runtime shape metadata when being
+  // linearized into the provided memory space?
+  bool RequiresRuntimeShapeMetadata(
+      const xla::Shape& shape,
+      const PjRtMemorySpace* absl_nonnull memory_space) const;
 
  private:
   mutable absl::Mutex gang_scheduler_mu_;
@@ -890,11 +916,15 @@ class CommonPjRtBufferImpl : public CommonPjRtBuffer {
       PjRtMemorySpace* dst_memory_space) override;
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToMemorySpace(
       PjRtBuffer* donated_dst) override;
+  absl::StatusOr<std::unique_ptr<PjRtBuffer>> CopyToMemorySpace(
+      PjRtMemorySpace* dst_memory_space,
+      std::optional<PjRtRawBufferRef> donated_dst);
 
   // This behaves like CopyToMemorySpace for memory space pairs which
   // require no layout changes.
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> DirectCopyToMemorySpace(
-      PjRtMemorySpace* dst_memory_space);
+      PjRtMemorySpace* dst_memory_space,
+      std::optional<PjRtRawBufferRef> donated_dst = std::nullopt);
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> DirectCopyToMemorySpace(
       PjRtBuffer* donated_dst);
 

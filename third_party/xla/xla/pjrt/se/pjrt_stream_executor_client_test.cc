@@ -28,6 +28,7 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
@@ -53,6 +54,7 @@ limitations under the License.
 #include "xla/pjrt/plugin/xla_cpu/cpu_topology.h"
 #include "xla/pjrt/plugin/xla_cpu/cpu_topology_description.h"
 #include "xla/pjrt/se/local_device_state.h"
+#include "xla/pjrt/se/stream_executor_platform_id_mapping.h"
 #include "xla/pjrt/thread_pool_async_work_runner.h"
 #include "xla/runtime/device_id.h"
 #include "xla/service/computation_placer.h"
@@ -60,7 +62,9 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
+#include "xla/stream_executor/host/host_platform_id.h"
 #include "xla/stream_executor/platform.h"
+#include "xla/stream_executor/platform/initialize.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/concurrency/async_value.h"
 #include "xla/tsl/lib/core/status_test_util.h"
@@ -71,6 +75,13 @@ limitations under the License.
 #include "tsl/platform/path.h"
 
 namespace xla {
+
+STREAM_EXECUTOR_REGISTER_MODULE_INITIALIZER(
+    pjrt_register_se_cpu_platform_id_mapping, {
+      CHECK_OK(StreamExecutorPlatformIdMapping::Global().AddMapping(
+          stream_executor::host::kHostPlatformId, CpuPlatformId()));
+    });
+
 namespace {
 
 using ::testing::HasSubstr;
@@ -116,7 +127,7 @@ MakeTestPjRtStreamExecutorClient(
                                    {/*stack_size=*/512 * 1024}),
       first_executor, std::move(gpu_run_options));
   return std::make_unique<PjRtStreamExecutorClient>(
-      std::move(platform_name), client, std::move(devices), process_index,
+      std::move(platform_name), std::move(devices), process_index,
       std::move(memory_spaces), std::move(topology), std::move(raw_client),
       std::move(kv_store));
 }

@@ -22,9 +22,9 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "xla/tsl/platform/status_macros.h"
 #include "xla/hlo/analysis/hlo_replication_analysis.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -66,7 +66,7 @@ absl::StatusOr<bool> AllReduceSimplifier::RunImpl(
     int64_t num_devices = config.num_partitions();
     int64_t num_replicas = config.replica_count();
     ABSL_ASSIGN_OR_RETURN(std::vector<int64_t> participant_counts,
-                     GetPariticipantCountsForReplicaGroups(
+                     GetParticipantCountsForReplicaGroups(
                          num_replicas, num_devices,
                          all_reduce->replica_groups(), group_mode));
     if (participant_counts.empty()) {
