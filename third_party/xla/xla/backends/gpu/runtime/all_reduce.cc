@@ -42,7 +42,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/primitive_util.h"
 #include "xla/service/collective_ops_utils.h"
-#include "xla/service/computation_placer.h"
+#include "xla/service/device_assignment.h"
 #include "xla/service/gpu/gpu_constants.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/launch_dimensions.h"
@@ -449,6 +449,13 @@ absl::StatusOr<CollectiveKernelSpec> CreateAllReduceKernelSpec(
   const int64_t remote_size =
       xla::RoundUpTo<uint64_t>(input_size_bytes, kXlaAllocatedBufferAlignBytes);
 
+  const DebugOptions& debug_options =
+      instr->GetModule()->config().debug_options();
+  const SymmetricMemoryType sym_mem_type =
+      IsCrossHostOneShotKernelEnabled(debug_options, DebugOptions::ALLREDUCE)
+          ? SymmetricMemoryType::kLoadStoreAccessible
+          : SymmetricMemoryType::kXlaRendezvous;
+
   CollectiveKernelSpec kernel_spec = {
       /* .input_buffer_specs= */ {
           {/*requires_multimem=*/false, SymmetricMemoryType::kNone}},
@@ -456,11 +463,11 @@ absl::StatusOr<CollectiveKernelSpec> CreateAllReduceKernelSpec(
       {{/*requires_multimem=*/false, SymmetricMemoryType::kNone}},
       /* .scratch_buffers= */
       {{signal_size, /*requires_multimem=*/false,  // Signal buffers
-        SymmetricMemoryType::kXlaRendezvous,
+        sym_mem_type,
         /*should_memzero=*/true,
         /*should_double_buffer=*/true},
        {remote_size, /*requires_multimem=*/false,  // Remote buffers
-        SymmetricMemoryType::kXlaRendezvous,
+        sym_mem_type,
         /*should_memzero=*/false,
         /*should_double_buffer=*/true}},
       /* .argument_descriptors= */

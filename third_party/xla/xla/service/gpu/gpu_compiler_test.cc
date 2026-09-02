@@ -43,8 +43,8 @@ limitations under the License.
 #include "absl/strings/substitute.h"
 #include "absl/types/span.h"
 #include "google/protobuf/text_format.h"
+#include "xla/autotune_cache.pb.h"
 #include "xla/autotune_results.pb.h"
-#include "xla/backends/autotuner/autotuning.pb.h"
 #include "xla/backends/autotuner/backends.pb.h"
 #include "xla/backends/autotuner/in_memory_store.h"
 #include "xla/backends/gpu/ffi.h"
@@ -71,7 +71,7 @@ limitations under the License.
 #include "xla/primitive_util.h"
 #include "xla/service/compiled_module.h"
 #include "xla/service/compiler.h"
-#include "xla/service/computation_placer.h"
+#include "xla/service/device_assignment.h"
 #include "xla/service/executable.h"
 #include "xla/service/gpu/autotuning/autotuner_cache.h"
 #include "xla/service/gpu/backend_configs.pb.h"
@@ -224,47 +224,10 @@ ENTRY test_computation {
 )";
   AssertionResult run_result =
       Run(std::move(ValueOrDie(ParseAndReturnVerifiedModule(kHloText))),
-          /*run_hlo_passes=*/true);
+          /*run_hlo_passes=*/false);
   EXPECT_THAT(run_result.failure_message(),
               HasSubstr("Expected send and recv instructions to have "
                         "non-cyclical source-target pairs"));
-}
-
-TEST_F(GpuCompilerTest, RecordsStreamzStackTrace) {
-  if (tsl::kIsOpenSource) {
-    GTEST_SKIP() << "Streamz is not supported in OSS.";
-  }
-
-  const char* hlo_text = R"(
-HloModule test
-
-ENTRY main {
-  p = f32[10]{0} parameter(0)
-  ROOT neg = f32[10]{0} negate(p)
-}
-)";
-
-  ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> module,
-                       ParseAndReturnVerifiedModule(hlo_text));
-
-  ASSERT_OK_AND_ASSIGN(
-      std::unique_ptr<OpaqueExecutable> executable,
-      CreateExecutable(std::move(module), /*run_hlo_passes=*/false));
-
-  const std::string kGpuCompilerStacktraceMetricName =
-      "/xla/service/gpu/compiler_stacktrace_count";
-  tsl::monitoring::CollectionRegistry::CollectMetricsOptions options;
-  std::unique_ptr<tsl::monitoring::CollectedMetrics> metrics =
-      tsl::monitoring::CollectionRegistry::Default()->CollectMetrics(options);
-
-  EXPECT_TRUE(metrics->point_set_map.find(kGpuCompilerStacktraceMetricName) !=
-              metrics->point_set_map.end());
-
-  // Since Streamz is recorded every call, we expect at least one point.
-  // All other callers may increment the counter as well.
-  EXPECT_GT(
-      metrics->point_set_map[kGpuCompilerStacktraceMetricName]->points.size(),
-      0);
 }
 
 TEST_F(GpuCompilerTest, GenerateDebugInfoForNonAutotuningCompilations) {
@@ -380,6 +343,8 @@ class PersistedAutotuningTest : public HloTestBase,
     InMemoryStore::Clear();
   }
 
+  bool use_new_format() const { return GetParam(); }
+
   static constexpr absl::string_view kHloText = R"(
 HloModule t
 
@@ -405,7 +370,7 @@ ENTRY e {
         xla_gpu_dump_autotune_results_to_);
     options.set_xla_gpu_load_autotune_results_from(
         xla_gpu_load_autotune_results_from_);
-    options.set_xla_gpu_use_new_autotune_cache_format(GetParam());
+    options.set_xla_gpu_use_new_autotune_cache_format(use_new_format());
     return options;
   }
 
@@ -437,7 +402,7 @@ TEST_P(PersistedAutotuningTest, WriteResultsOnEachCompilation) {
   {
     ASSERT_OK_AND_ASSIGN(std::string autotune_results_str,
                          ReadNonEmptyFile(xla_gpu_dump_autotune_results_to_));
-    ExpectValidAutotuneResults(autotune_results_str, GetParam());
+    ExpectValidAutotuneResults(autotune_results_str, use_new_format());
   }
 
   // Overwrite results with an invalid textproto.
@@ -450,22 +415,59 @@ TEST_P(PersistedAutotuningTest, WriteResultsOnEachCompilation) {
   {
     ASSERT_OK_AND_ASSIGN(std::string autotune_results_str,
                          ReadNonEmptyFile(xla_gpu_dump_autotune_results_to_));
-    ExpectValidAutotuneResults(autotune_results_str, GetParam());
+    ExpectValidAutotuneResults(autotune_results_str, use_new_format());
   }
 }
 
 TEST_P(PersistedAutotuningTest, SingleOperationGetsAutotuned) {
-  TF_EXPECT_OK(GetOptimizedModuleForExecutable(R"(
+  EXPECT_OK(GetOptimizedModuleForExecutable(R"(
 e {
   a = f32[64,128] parameter(0)
   t = f32[128,64] transpose(a), dimensions={1,0}
 })",
-                                               GetModuleConfigForTest())
-                   .status());
+                                            GetModuleConfigForTest())
+                .status());
 
   ASSERT_OK_AND_ASSIGN(std::string autotune_results_str,
                        ReadNonEmptyFile(xla_gpu_dump_autotune_results_to_));
-  ExpectValidAutotuneResults(autotune_results_str, GetParam());
+  ExpectValidAutotuneResults(autotune_results_str, use_new_format());
+}
+
+TEST_P(PersistedAutotuningTest, LoadMismatchedFormatResultsFallback) {
+  tsl::Env* env = tsl::Env::Default();
+  std::string autotune_file = GetUniqueTempFilePath(".txt");
+
+  if (use_new_format()) {
+    AutotuneResults legacy_results;
+    legacy_results.set_version(3);
+    auto* entry = legacy_results.add_results();
+    entry->set_device("test_device");
+    entry->set_hlo("test_hlo");
+    entry->set_version(3);
+    entry->mutable_result()->mutable_gemm()->set_algorithm(1);
+
+    std::string serialized;
+    ASSERT_TRUE(
+        tsl::protobuf::TextFormat::PrintToString(legacy_results, &serialized));
+    ASSERT_OK(tsl::WriteStringToFile(env, autotune_file, serialized));
+  } else {
+    autotuner::AutotuneCache new_cache;
+    auto* entry = new_cache.add_entries();
+    entry->mutable_key()->mutable_target()->set_device("test_device");
+    entry->mutable_key()->mutable_target()->set_hlo_fingerprint("test_hlo");
+    entry->mutable_value()->mutable_optimal_config()->set_backend(
+        autotuner::CUBLASLT_FISSION);
+
+    std::string serialized;
+    ASSERT_TRUE(
+        tsl::protobuf::TextFormat::PrintToString(new_cache, &serialized));
+    ASSERT_OK(tsl::WriteStringToFile(env, autotune_file, serialized));
+  }
+
+  xla_gpu_load_autotune_results_from_ = autotune_file;
+
+  EXPECT_OK(GetOptimizedModuleForExecutable(kHloText, GetModuleConfigForTest())
+                .status());
 }
 
 INSTANTIATE_TEST_SUITE_P(PersistedAutotuningTestInstantiation,
@@ -540,32 +542,28 @@ TEST_F(GpuCompilerTest, CollectivePipeliningModes) {
     absl::string_view name;
     DebugOptions::CollectivePipeliningMode mode;
     ExecutionOptions::EffortLevel optimization_level;
-    float exec_time_optimization_effort;
     absl::string_view frontend_attributes;
     bool expect_pipelined;
   };
 
   const std::vector<TestCase> test_cases = {
       {"default_at_o0", DebugOptions::COLLECTIVE_PIPELINING_MODE_DEFAULT,
-       ExecutionOptions::EFFORT_O0, 0.0f, "", false},
-      {"default_at_o0_with_execution_effort",
-       DebugOptions::COLLECTIVE_PIPELINING_MODE_DEFAULT,
-       ExecutionOptions::EFFORT_O0, 0.2f, "", true},
+       ExecutionOptions::EFFORT_O0, "", false},
       {"default_at_o1", DebugOptions::COLLECTIVE_PIPELINING_MODE_DEFAULT,
-       ExecutionOptions::EFFORT_O1, 0.0f, "", true},
+       ExecutionOptions::EFFORT_O1, "", true},
       {"on_at_o0", DebugOptions::COLLECTIVE_PIPELINING_MODE_ON,
-       ExecutionOptions::EFFORT_O0, 0.0f, "", true},
+       ExecutionOptions::EFFORT_O0, "", true},
       {"explicit_marked_at_o0",
        DebugOptions::COLLECTIVE_PIPELINING_MODE_EXPLICIT,
-       ExecutionOptions::EFFORT_O0, 0.0f, R"(is_pipelineable="1")", true},
+       ExecutionOptions::EFFORT_O0, R"(is_pipelineable="1")", true},
       {"explicit_unmarked_at_o0",
        DebugOptions::COLLECTIVE_PIPELINING_MODE_EXPLICIT,
-       ExecutionOptions::EFFORT_O0, 0.0f, "", false},
+       ExecutionOptions::EFFORT_O0, "", false},
       {"explicit_unmarked_at_o1",
        DebugOptions::COLLECTIVE_PIPELINING_MODE_EXPLICIT,
-       ExecutionOptions::EFFORT_O1, 0.0f, "", false},
+       ExecutionOptions::EFFORT_O1, "", false},
       {"explicit_off_at_o1", DebugOptions::COLLECTIVE_PIPELINING_MODE_OFF,
-       ExecutionOptions::EFFORT_O1, 0.0f, R"(is_pipelineable="1")", false},
+       ExecutionOptions::EFFORT_O1, R"(is_pipelineable="1")", false},
   };
 
   for (const TestCase& test_case : test_cases) {
@@ -575,9 +573,6 @@ TEST_F(GpuCompilerTest, CollectivePipeliningModes) {
 
     HloModuleConfig config = GetModuleConfigForTest();
     config.set_optimization_level(test_case.optimization_level);
-    config.set_exec_time_optimization_effort(
-        test_case.exec_time_optimization_effort);
-
     DebugOptions& debug_options = config.mutable_debug_options();
     debug_options.set_xla_gpu_pipeline_all_reduce(test_case.mode);
     debug_options.set_xla_gpu_all_reduce_combine_threshold_bytes(0);
@@ -1191,12 +1186,6 @@ class PassOrderTest : public GpuCompilerTest {
     CompileModule(config);
   }
 
-  void SetAndCompileEfficiencyEffort(float exec_effort) {
-    HloModuleConfig config = GetModuleConfigForTest();
-    config.set_exec_time_optimization_effort(exec_effort);
-    CompileModule(config);
-  }
-
   // Fails if any of the passes matching `other_pass_regex` runs before
   // the first occurrence of the pass matching `first_pass_regex`.
   void VerifyPassRunsAtLeastOnceBefore(absl::string_view first_pass_regex,
@@ -1378,7 +1367,7 @@ MATCHER_P(HasExpectedPasses, expected_pass_names, "") {
   return Matches(IsSupersetOf(expected_pass_names))(run_pass_names);
 }
 
-TEST_F(PassOrderTest, ExecEffortAt0point2RunsSpecifiedPasses) {
+TEST_F(PassOrderTest, OptimizationLevelO2RunsSpecifiedPasses) {
   HloModuleConfig config = GetModuleConfigForTest();
   CompileModule(config);
 
@@ -1393,7 +1382,7 @@ TEST_F(PassOrderTest, ExecEffortAt0point2RunsSpecifiedPasses) {
 
   // Make sure only after setting the correct optimization effort they are
   // enabled.
-  config.set_exec_time_optimization_effort(0.2);
+  config.set_optimization_level(ExecutionOptions::EFFORT_O2);
   CompileModule(config);
   EXPECT_THAT(optimized_module_, HasExpectedPasses(kExpectedPasses));
 }
@@ -1445,15 +1434,16 @@ TEST_F(PassOrderTest, HoistFusedBitcastsRunsAfterGemmFusion) {
                                   "hoist-fused-bitcasts");
 }
 
-TEST_F(PassOrderTest, AutotunerRunsAfterHoistFusedBitcasts) {
+TEST_F(PassOrderTest, ConfigAssignerRunsAfterHoistFusedBitcasts) {
   if (!get_cuda_cc().IsAtLeastAmpere()) {
     GTEST_SKIP() << "GemmFusion requires Ampere+ to run.";
   }
-  VerifyPassRunsAtLeastOnceBefore("hoist-fused-bitcasts", "autotuner");
+  VerifyPassRunsAtLeastOnceBefore("hoist-fused-bitcasts", "config-assigner");
 }
 
-TEST_F(PassOrderTest, ConvertTritonGemmConfigRunsAfterAutotuner) {
-  VerifyPassRunsAtLeastOnceBefore("autotuner", "convert_triton_gemm_config");
+TEST_F(PassOrderTest, ConvertTritonGemmConfigRunsAfterConfigAssigner) {
+  VerifyPassRunsAtLeastOnceBefore("config-assigner",
+                                  "convert_triton_gemm_config");
 }
 
 TEST_F(PassOrderTest,
@@ -1644,9 +1634,46 @@ ENTRY main {
   EXPECT_EQ(thunks[0]->kind(), Thunk::Kind::kCommandBuffer);
 }
 
+// A collective permute with no source-target pairs delivers no data to any
+// participant, so every participant's output is zeroed. The emitter must
+// produce a memzero rather than a collective thunk, which would pointlessly
+// acquire a communicator (and fail outright on builds without collectives
+// support).
+TEST_F(GpuCompilerTest, CollectivePermuteWithNoSourceTargetPairsEmitsMemzero) {
+  const char* hlo_text = R"(
+HloModule test
+
+ENTRY main {
+  p = u32[2] parameter(0)
+  ROOT permute = u32[2] collective-permute(p), source_target_pairs={}
+}
+)";
+
+  auto hlo_module = ParseAndReturnVerifiedModule(hlo_text).value();
+
+  Compiler::CompileOptions compile_options;
+  compile_options.gpu_topology =
+      GetSingleDeviceGpuTopology(/*platform_version=*/"", gpu_target_config());
+  compile_options.early_exit_with_layouts = false;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<Executable> executable,
+      compiler()->RunBackend(std::move(hlo_module), /*executor=*/nullptr,
+                             compile_options));
+  GpuExecutable* gpu_exec = absl::down_cast<GpuExecutable*>(executable.get());
+  ASSERT_NE(gpu_exec, nullptr);
+
+  std::vector<Thunk::Kind> kinds;
+  kinds.reserve(gpu_exec->thunk_executor().thunks().size());
+  for (const auto& thunk : gpu_exec->thunk_executor().thunks()) {
+    kinds.push_back(thunk->kind());
+  }
+  using ::testing::ElementsAre;
+  EXPECT_THAT(kinds, ElementsAre(Thunk::Kind::kMemzero));
+}
+
 TEST_F(GpuCompilerTest, NoCudnnVectorizationOnHopperAndBeyond) {
-  if (gpu_target_config().dnn_version_info <
-          stream_executor::dnn::VersionInfo(9, 12, 0) &&
+  if (gpu_target_config().device_description.dnn_version() <
+          stream_executor::SemanticVersion(9, 12, 0) &&
       absl::StrContains(device_description().name(), "GB200")) {
     GTEST_SKIP()
         << "Skipping test as it requires cuDNN >= 9.12. on GB200. Otherwise, "
@@ -1855,7 +1882,7 @@ TEST_F(GpuCompilerTest, MosaicMultimemRequiresSymmetricMemoryCopies) {
       p_multimem = s32[1] parameter(0)
       p_non_coll = s32[1] parameter(1)
 
-      cc_multimem = (s32[1]{0}) custom-call(p_multimem), custom_call_target="mosaic_gpu_v2", backend_config={xla_multimem_parameters = "0"}, api_version=API_VERSION_TYPED_FFI
+      cc_multimem = (s32[1]{0}) custom-call(p_multimem), custom_call_target="mosaic_gpu_v2", backend_config={xla_symmetric_memory_parameters = "0"}, api_version=API_VERSION_TYPED_FFI
       res_multimem = s32[1] get-tuple-element(cc_multimem), index=0
 
       cc_non_coll = (s32[1]{0}) custom-call(p_non_coll), custom_call_target="mosaic_gpu_v2", api_version=API_VERSION_TYPED_FFI
@@ -1879,7 +1906,7 @@ TEST_F(GpuCompilerTest, MosaicMultimemRequiresSymmetricMemoryCopies) {
     // Multimem input parameters are copied to S1
     // CHECK-DAG: [[COPY_MULTI_IN:%copy[^ ]*]] = s32[1]{0:S(1)} copy([[P_MULTI]])
 
-    // CHECK-DAG: [[CC_MULTI:%[^ ]+]] = (s32[1]{0:S(1)}) custom-call([[COPY_MULTI_IN]]){{.*}}backend_config={xla_multimem_parameters = "0"}
+    // CHECK-DAG: [[CC_MULTI:%[^ ]+]] = (s32[1]{0:S(1)}) custom-call([[COPY_MULTI_IN]]){{.*}}backend_config={xla_symmetric_memory_parameters = "0"}
     // CHECK-DAG: [[CC_NON:%[^ ]+]] = (s32[1]{0}) custom-call([[P_NON]])
 
     // Extracting from the 1-element tuples returned by custom calls (all index=0)

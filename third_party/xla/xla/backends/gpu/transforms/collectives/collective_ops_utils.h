@@ -24,7 +24,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
-#include "xla/service/computation_placer.h"
+#include "xla/service/device_assignment.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/stream_executor/device_description.h"
@@ -87,6 +87,12 @@ bool IsGPUSyncCollective(const HloInstruction& instr);
 
 // Returns true if all devices are within the same NVLink domain (slice).
 bool IsIntraNVLinkDomain(const HloModuleConfig& config, int64_t slice_size);
+
+// Returns true if xla_gpu_unsupported_use_cross_host_one_shot_kernel is enabled
+// for the given collective op type.
+bool IsCrossHostOneShotKernelEnabled(
+    const DebugOptions& debug_options,
+    std::optional<DebugOptions::CollectiveOpType> op_type);
 
 // Returns true if all replicas in every replica group of the collective
 // are located on the same host (node).

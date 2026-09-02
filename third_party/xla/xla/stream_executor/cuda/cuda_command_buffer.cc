@@ -202,7 +202,7 @@ absl::StatusOr<GraphNodeHandle> CudaCommandBuffer::CreateSetWhileConditionNode(
                                     ToCudaGraphHandle(conditional), predicate);
   return CreateKernelNode(dependencies, StreamPriority::Default, ThreadDim(),
                           BlockDim(), /*cluster_dims=*/std::nullopt,
-                          *set_while_condition_kernel_, kernel_args);
+                          *set_while_condition_kernel_, *kernel_args);
 }
 
 absl::Status CudaCommandBuffer::UpdateSetWhileConditionNode(
@@ -212,11 +212,11 @@ absl::Status CudaCommandBuffer::UpdateSetWhileConditionNode(
                                     ToCudaGraphHandle(conditional), predicate);
   return UpdateKernelNode(handle, ThreadDim(), BlockDim(),
                           /*cluster_dims=*/std::nullopt,
-                          *set_while_condition_kernel_, kernel_args);
+                          *set_while_condition_kernel_, *kernel_args);
 }
 
 template <typename... Params>
-static auto PackCaseConditionKernelArgs(
+static std::unique_ptr<KernelArgsPackedArrayBase> PackCaseConditionKernelArgs(
     const TypedKernel<Params...>& kernel,
     absl::Span<const GraphConditionalHandle> conditionals,
     DeviceAddress<uint8_t> index, bool index_is_bool, int32_t batch_offset,
@@ -260,7 +260,7 @@ absl::StatusOr<GraphNodeHandle> CudaCommandBuffer::CreateSetCaseConditionNode(
       batch_offset, enable_conditional_default);
   return CreateKernelNode(dependencies, StreamPriority::Default, ThreadDim(),
                           BlockDim(), /*cluster_dims=*/std::nullopt,
-                          *set_case_condition_kernel_, kernel_args);
+                          *set_case_condition_kernel_, *kernel_args);
 }
 
 absl::Status CudaCommandBuffer::UpdateSetCaseConditionNode(
@@ -273,7 +273,7 @@ absl::Status CudaCommandBuffer::UpdateSetCaseConditionNode(
       batch_offset, enable_conditional_default);
   return UpdateKernelNode(handle, ThreadDim(), BlockDim(),
                           /*cluster_dims=*/std::nullopt,
-                          *set_case_condition_kernel_, kernel_args);
+                          *set_case_condition_kernel_, *kernel_args);
 }
 
 //===----------------------------------------------------------------------===//
@@ -444,6 +444,107 @@ absl::Status CudaCommandBuffer::UpdateMemcpyD2DNode(
                             graph_exec(), ToCudaGraphHandle(node_handle),
                             &params, cuda_context_->context()),
                         "Failed to set memcpy d2d node params");
+}
+
+absl::StatusOr<GraphNodeHandle> CudaCommandBuffer::CreateMemcpyD2HNode(
+    absl::Span<const GraphNodeHandle> dependencies, void* destination,
+    DeviceAddressBase source, uint64_t size) {
+  VLOG(2) << "Add memcpy d2h node to a graph " << graph_
+          << "; dst: " << destination << "; src: " << source.opaque()
+          << "; size: " << size << "; context: " << cuda_context_->context()
+          << "; deps(" << dependencies.size()
+          << "): " << FormatGraphNodeHandles(dependencies);
+
+  CUDA_MEMCPY3D params{};
+  params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+  params.srcDevice = AsDevicePtr(source);
+  params.dstMemoryType = CU_MEMORYTYPE_HOST;
+  params.dstHost = destination;
+  params.WidthInBytes = size;
+  params.Height = 1;
+  params.Depth = 1;
+
+  std::vector<CUgraphNode> deps = ToCudaGraphHandles(dependencies);
+
+  CUgraphNode node_handle = nullptr;
+  ABSL_RETURN_IF_ERROR(cuda::ToStatus(
+      cuGraphAddMemcpyNode(&node_handle, graph_, deps.data(), deps.size(),
+                           &params, cuda_context_->context()),
+      "Failed to add memcpy d2h node to a CUDA graph"));
+  return FromCudaGraphHandle(node_handle);
+}
+
+absl::Status CudaCommandBuffer::UpdateMemcpyD2HNode(GraphNodeHandle node_handle,
+                                                    void* destination,
+                                                    DeviceAddressBase source,
+                                                    uint64_t size) {
+  VLOG(2) << "Set memcpy d2h node params " << node_handle
+          << " in graph executable " << graph_exec() << "; dst: " << destination
+          << "; src: " << source.opaque() << "; size: " << size
+          << "; context: " << cuda_context_->context();
+
+  CUDA_MEMCPY3D params{};
+  params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+  params.srcDevice = AsDevicePtr(source);
+  params.dstMemoryType = CU_MEMORYTYPE_HOST;
+  params.dstHost = destination;
+  params.WidthInBytes = size;
+  params.Height = 1;
+  params.Depth = 1;
+  return cuda::ToStatus(cuGraphExecMemcpyNodeSetParams(
+                            graph_exec(), ToCudaGraphHandle(node_handle),
+                            &params, cuda_context_->context()),
+                        "Failed to set memcpy d2h node params");
+}
+
+absl::StatusOr<GraphNodeHandle> CudaCommandBuffer::CreateMemcpyH2DNode(
+    absl::Span<const GraphNodeHandle> dependencies,
+    DeviceAddressBase destination, const void* source, uint64_t size) {
+  VLOG(2) << "Add memcpy h2d node to a graph " << graph_
+          << "; dst: " << destination.opaque() << "; src: " << source
+          << "; size: " << size << "; context: " << cuda_context_->context()
+          << "; deps(" << dependencies.size()
+          << "): " << FormatGraphNodeHandles(dependencies);
+
+  CUDA_MEMCPY3D params{};
+  params.srcMemoryType = CU_MEMORYTYPE_HOST;
+  params.srcHost = source;
+  params.dstMemoryType = CU_MEMORYTYPE_DEVICE;
+  params.dstDevice = AsDevicePtr(destination);
+  params.WidthInBytes = size;
+  params.Height = 1;
+  params.Depth = 1;
+
+  std::vector<CUgraphNode> deps = ToCudaGraphHandles(dependencies);
+
+  CUgraphNode node_handle = nullptr;
+  ABSL_RETURN_IF_ERROR(cuda::ToStatus(
+      cuGraphAddMemcpyNode(&node_handle, graph_, deps.data(), deps.size(),
+                           &params, cuda_context_->context()),
+      "Failed to add memcpy h2d node to a CUDA graph"));
+  return FromCudaGraphHandle(node_handle);
+}
+
+absl::Status CudaCommandBuffer::UpdateMemcpyH2DNode(
+    GraphNodeHandle node_handle, DeviceAddressBase destination,
+    const void* source, uint64_t size) {
+  VLOG(2) << "Set memcpy h2d node params " << node_handle
+          << " in graph executable " << graph_exec()
+          << "; dst: " << destination.opaque() << "; src: " << source
+          << "; size: " << size << "; context: " << cuda_context_->context();
+
+  CUDA_MEMCPY3D params{};
+  params.srcMemoryType = CU_MEMORYTYPE_HOST;
+  params.srcHost = source;
+  params.dstMemoryType = CU_MEMORYTYPE_DEVICE;
+  params.dstDevice = AsDevicePtr(destination);
+  params.WidthInBytes = size;
+  params.Height = 1;
+  params.Depth = 1;
+  return cuda::ToStatus(cuGraphExecMemcpyNodeSetParams(
+                            graph_exec(), ToCudaGraphHandle(node_handle),
+                            &params, cuda_context_->context()),
+                        "Failed to set memcpy h2d node params");
 }
 
 absl::Status CudaCommandBuffer::PopulateDnnGraphNode(

@@ -18,12 +18,14 @@ limitations under the License.
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "xla/backends/autotuner/codegen_backend.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/executable.h"
@@ -42,9 +44,6 @@ class CodegenOrchestrator {
     std::function<bool(const HloInstruction&, autotuner::Backend)>
         allow_reg_spills_fn =
             [](const HloInstruction&, autotuner::Backend) { return false; };
-    // TODO(b/519059655): Generalize and move to tuner.
-    // If true, do not allow compilation of cublas or rocblas configs.
-    bool exclude_cublas_config = false;
   };
 
   // TODO(b/444398084): Unify Cache::Config and CodegenOrchestrator::Config
@@ -53,6 +52,11 @@ class CodegenOrchestrator {
     std::unique_ptr<BackendConfig> backend_config;
 
     std::string ToString() const;
+  };
+
+  struct EstimatedConfig {
+    Config config;
+    std::optional<absl::Duration> estimated_runtime;
   };
 
   struct MaybeExecutableCandidate {
@@ -66,6 +70,11 @@ class CodegenOrchestrator {
 
   // Returns all supported configs across all registered backends.
   absl::StatusOr<std::vector<Config>> GetSupportedConfigs(
+      const HloInstruction& instr) const;
+
+  // Returns all supported configs with runtime estimates across all registered
+  // backends.
+  absl::StatusOr<std::vector<EstimatedConfig>> GetSupportedConfigsWithEstimates(
       const HloInstruction& instr) const;
 
   // Returns the default config from the first backend that supports it.

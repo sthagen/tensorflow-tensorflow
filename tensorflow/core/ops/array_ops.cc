@@ -507,6 +507,29 @@ REGISTER_OP("BroadcastTo")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle shape_in = c->input(1);
       TF_RETURN_IF_ERROR(c->WithRank(shape_in, 1, &shape_in));
+      // Unlike Reshape, BroadcastTo does not treat -1 as an inferred dimension.
+      // A known negative value is invalid. Mapping it to "unknown" would merge
+      // with the input shape, and Grappler would then drop the op as a no-op.
+      const Tensor* shape_t = c->input_tensor(1);
+      if (shape_t != nullptr) {
+        if (shape_t->dtype() == DT_INT32) {
+          auto flat = shape_t->flat<int32_t>();
+          for (int i = 0; i < shape_t->NumElements(); ++i) {
+            if (flat(i) < 0) {
+              return absl::InvalidArgumentError(
+                  absl::StrCat("Dimension ", flat(i), " must be >= 0"));
+            }
+          }
+        } else if (shape_t->dtype() == DT_INT64) {
+          auto flat = shape_t->flat<int64_t>();
+          for (int i = 0; i < shape_t->NumElements(); ++i) {
+            if (flat(i) < 0) {
+              return absl::InvalidArgumentError(
+                  absl::StrCat("Dimension ", flat(i), " must be >= 0"));
+            }
+          }
+        }
+      }
       ShapeHandle out;
       TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(1, &out));
       if (!c->RankKnown(out)) {
@@ -2657,24 +2680,26 @@ REGISTER_OP("ExtractImagePatches")
             rates.size()));
       }
 
-      int32_t ksize_rows = ksizes[1];
-      int32_t ksize_cols = ksizes[2];
+      int64_t ksize_rows = ksizes[1];
+      int64_t ksize_cols = ksizes[2];
 
-      int32_t stride_rows = strides[1];
-      int32_t stride_cols = strides[2];
+      int64_t stride_rows = strides[1];
+      int64_t stride_cols = strides[2];
 
-      int32_t rate_rows = rates[1];
-      int32_t rate_cols = rates[2];
+      int64_t rate_rows = rates[1];
+      int64_t rate_cols = rates[2];
 
-      int32_t ksize_rows_eff = ksize_rows + (ksize_rows - 1) * (rate_rows - 1);
-      int32_t ksize_cols_eff = ksize_cols + (ksize_cols - 1) * (rate_cols - 1);
+      int64_t ksize_rows_eff = ksize_rows + (ksize_rows - 1) * (rate_rows - 1);
+      int64_t ksize_cols_eff = ksize_cols + (ksize_cols - 1) * (rate_cols - 1);
 
       DimensionHandle batch_size_dim = c->Dim(input_shape, 0);
       DimensionHandle in_rows_dim = c->Dim(input_shape, 1);
       DimensionHandle in_cols_dim = c->Dim(input_shape, 2);
-      DimensionHandle output_depth_dim;
-      TF_RETURN_IF_ERROR(c->Multiply(
-          c->Dim(input_shape, 3), ksize_rows * ksize_cols, &output_depth_dim));
+      DimensionHandle output_depth_dim = c->Dim(input_shape, 3);
+      TF_RETURN_IF_ERROR(
+          c->Multiply(output_depth_dim, ksize_rows, &output_depth_dim));
+      TF_RETURN_IF_ERROR(
+          c->Multiply(output_depth_dim, ksize_cols, &output_depth_dim));
 
       if (!c->ValueKnown(in_rows_dim) || !c->ValueKnown(in_cols_dim)) {
         ShapeHandle output_shape =
@@ -2752,33 +2777,36 @@ REGISTER_OP("ExtractVolumePatches")
       }
       */
 
-      int32_t ksize_planes = ksizes[1];
-      int32_t ksize_rows = ksizes[2];
-      int32_t ksize_cols = ksizes[3];
+      int64_t ksize_planes = ksizes[1];
+      int64_t ksize_rows = ksizes[2];
+      int64_t ksize_cols = ksizes[3];
 
-      int32_t stride_planes = strides[1];
-      int32_t stride_rows = strides[2];
-      int32_t stride_cols = strides[3];
+      int64_t stride_planes = strides[1];
+      int64_t stride_rows = strides[2];
+      int64_t stride_cols = strides[3];
 
       /*
-      int32 rate_planes = rates[1];
-      int32 rate_rows = rates[2];
-      int32 rate_cols = rates[3];
+      int64_t rate_planes = rates[1];
+      int64_t rate_rows = rates[2];
+      int64_t rate_cols = rates[3];
 
-      int32 ksize_planes_eff = ksize_planes +
+      int64_t ksize_planes_eff = ksize_planes +
                                (ksize_planes - 1) * (rate_planes - 1);
-      int32 ksize_rows_eff = ksize_rows + (ksize_rows - 1) * (rate_rows - 1);
-      int32 ksize_cols_eff = ksize_cols + (ksize_cols - 1) * (rate_cols - 1);
+      int64_t ksize_rows_eff = ksize_rows + (ksize_rows - 1) * (rate_rows - 1);
+      int64_t ksize_cols_eff = ksize_cols + (ksize_cols - 1) * (rate_cols - 1);
       */
 
       DimensionHandle batch_size_dim = c->Dim(input_shape, 0);
       DimensionHandle in_planes_dim = c->Dim(input_shape, 1);
       DimensionHandle in_rows_dim = c->Dim(input_shape, 2);
       DimensionHandle in_cols_dim = c->Dim(input_shape, 3);
-      DimensionHandle output_depth_dim;
-      TF_RETURN_IF_ERROR(c->Multiply(c->Dim(input_shape, 4),
-                                     ksize_planes * ksize_rows * ksize_cols,
-                                     &output_depth_dim));
+      DimensionHandle output_depth_dim = c->Dim(input_shape, 4);
+      TF_RETURN_IF_ERROR(
+          c->Multiply(output_depth_dim, ksize_planes, &output_depth_dim));
+      TF_RETURN_IF_ERROR(
+          c->Multiply(output_depth_dim, ksize_rows, &output_depth_dim));
+      TF_RETURN_IF_ERROR(
+          c->Multiply(output_depth_dim, ksize_cols, &output_depth_dim));
 
       if (!c->ValueKnown(in_planes_dim) || !c->ValueKnown(in_rows_dim) ||
           !c->ValueKnown(in_cols_dim)) {

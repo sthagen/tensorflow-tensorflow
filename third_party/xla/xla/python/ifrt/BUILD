@@ -117,7 +117,7 @@ cc_library(
         "//xla/pjrt:pjrt_device_description",
         "//xla/pjrt:pjrt_layout",
         "//xla/python/ifrt/ir:sharding_param",
-        "//xla/service:computation_placer_hdr",
+        "//xla/service:device_assignment",
         "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
         "//xla/tsl/lib/core:bitmap",
@@ -127,6 +127,7 @@ cc_library(
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -148,7 +149,6 @@ cc_library(
         "@highwayhash",
         "@highwayhash//:arch_specific",
         "@highwayhash//:hh_types",
-        "@llvm-project//llvm:Support",
     ],
 )
 
@@ -263,7 +263,10 @@ cc_library(
         ":rtti",
         ":value_util",
         "//xla/python/pjrt_ifrt:pjrt_layout",
+        "//xla/tsl/concurrency:future",
         "//xla/tsl/concurrency:ref_count",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_macros",
         "@com_google_absl//absl/status:statusor",
@@ -414,6 +417,7 @@ xla_cc_test(
     srcs = ["memory_test.cc"],
     deps = [
         ":ifrt",
+        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
