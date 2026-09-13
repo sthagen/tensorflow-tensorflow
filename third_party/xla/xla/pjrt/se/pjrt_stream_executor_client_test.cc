@@ -169,10 +169,9 @@ MakeTestPjRtStreamExecutorClient(
     std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options = nullptr,
     std::shared_ptr<KeyValueStoreInterface> kv_store = nullptr) {
   se::StreamExecutor* first_executor = nullptr;
-  for (const auto& dev : devices) {
-    if (dev->IsAddressable() && dev->local_device_state() != nullptr &&
-        dev->local_device_state()->compute_stream() != nullptr) {
-      first_executor = dev->local_device_state()->compute_stream()->parent();
+  for (const auto& state : local_device_states) {
+    if (state != nullptr && state->compute_stream() != nullptr) {
+      first_executor = state->compute_stream()->parent();
       break;
     }
   }
@@ -183,9 +182,18 @@ MakeTestPjRtStreamExecutorClient(
                                    {/*stack_size=*/512 * 1024}),
       first_executor, std::move(gpu_run_options));
   auto platform_id = tsl::Fingerprint64(platform_name);
+  PjRtPluginAttributes attrs;
+  attrs.pjrt_c_api_major_version = 0;
+  attrs.pjrt_c_api_minor_version = 0;
+  attrs.attributes["serialize_with_sdy"] = true;
+  attrs.attributes["allows_recursion"] = false;
+  attrs.attributes["allows_execute_recursion"] = true;
+  attrs.attributes["use_stream_based_compaction"] = true;
+  attrs.attributes["dump_on_deserialize"] = true;
   auto result = std::make_unique<PjRtStreamExecutorClient>(
       platform_id, std::move(platform_name), "<unknown>", process_index,
-      std::move(topology), std::move(raw_client), std::move(kv_store));
+      std::move(topology), std::move(raw_client), std::move(kv_store),
+      std::move(attrs));
   std::vector<std::unique_ptr<PjRtDevice>> devices_copy;
   devices_copy.reserve(devices.size());
   for (auto& device : devices) {
@@ -209,7 +217,7 @@ absl::StatusOr<std::unique_ptr<PjRtStreamExecutorClient>> GetClient() {
   int local_device_id = local_device_states.back()->local_device_id().value();
   std::vector<std::unique_ptr<PjRtStreamExecutorDevice>> devices;
   devices.emplace_back(std::make_unique<PjRtStreamExecutorDevice>(
-      0, local_device_states.back().get(), local_device_id, /*process_index=*/0,
+      0, /*is_addressable=*/true, local_device_id, /*process_index=*/0,
       /*process_index_in_partition=*/0, /*partition_index=*/0, "cpu"));
   std::vector<std::unique_ptr<PjRtMemorySpace>> memory_spaces;
   memory_spaces.emplace_back(std::make_unique<PjRtStreamExecutorMemorySpace>(
@@ -261,7 +269,7 @@ absl::StatusOr<std::unique_ptr<PjRtStreamExecutorClient>> GetClientWithDevices(
         /*allow_event_reuse=*/false, /*use_callback_stream=*/false));
     int local_device_id = local_device_states.back()->local_device_id().value();
     devices.emplace_back(std::make_unique<PjRtStreamExecutorDevice>(
-        i, local_device_states.back().get(), local_device_id,
+        i, /*is_addressable=*/true, local_device_id,
         /*process_index=*/0,
         /*process_index_in_partition=*/0, /*partition_index=*/0, "cpu"));
     memory_spaces.emplace_back(std::make_unique<PjRtStreamExecutorMemorySpace>(
@@ -271,7 +279,7 @@ absl::StatusOr<std::unique_ptr<PjRtStreamExecutorClient>> GetClientWithDevices(
   }
   for (int i = num_addressable_devices; i < total_devices; ++i) {
     devices.emplace_back(std::make_unique<PjRtStreamExecutorDevice>(
-        i, /*local_device_state=*/nullptr, /*local_device_id=*/-1,
+        i, /*is_addressable=*/false, /*local_device_id=*/-1,
         /*process_index=*/1, /*process_index_in_partition=*/0,
         /*partition_index=*/0, "cpu"));
   }
@@ -485,7 +493,7 @@ TEST(PjRtStreamExecutorClientTest, ExecutePortableRemoteDevice) {
           *client, shape, [](XlaBuilder& builder) {}, compile_options));
 
   auto remote_device = std::make_unique<PjRtStreamExecutorDevice>(
-      1, /*local_device_state=*/nullptr, /*local_device_id=*/-1,
+      1, /*is_addressable=*/false, /*local_device_id=*/-1,
       /*process_index=*/1, /*process_index_in_partition=*/1,
       /*partition_index=*/0, "cpu");
   remote_device->SetClient(client.get());
@@ -511,8 +519,8 @@ TEST(PjRtStreamExecutorClientTest, MakeAllocationReadyEventAsync) {
       auto buffer, client->BufferFromHostBuffer(
                        data.data(), S32, {1024}, /*byte_strides=*/std::nullopt,
                        PjRtClient::HostBufferSemantics::kImmutableZeroCopy,
-                       nullptr, memory_space, /*device_layout=*/nullptr));
-
+                       []() {}, memory_space, /*device_layout=*/nullptr));
+  TF_ASSERT_OK(buffer->GetReadyFuture().Await());
   Shape shape = buffer->on_device_shape();
   TF_ASSERT_OK_AND_ASSIGN(auto result,
                           client->CreateAliasBuffer(shape, memory_space));
@@ -670,6 +678,9 @@ TEST(PjRtStreamExecutorClientTest, CrossHostSendBuffersCleanupAfterFailure) {
           PjRtClient::HostBufferSemantics::kImmutableOnlyDuringCall, nullptr,
           /*memory_space=*/memory_space,
           /*device_layout=*/nullptr));
+
+  TF_ASSERT_OK(buffer0->GetReadyFuture().Await());
+  TF_ASSERT_OK(buffer1->GetReadyFuture().Await());
 
   // Delete buffer1 so that AcquireScopedRawBuffer fails on it mid-loop in
   // CrossHostSendBuffers.
