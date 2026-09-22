@@ -343,6 +343,17 @@ class MathTest(test.TestCase, parameterized.TestCase):
         self.match(
             np_math_ops.argmin(arr, axis=axis), np.argmin(arr, axis=axis))
 
+  def testArgMaxArgMinOutOfBoundsAxis(self):
+    a = np_array_ops.array([[1, 2, 3], [4, 5, 6]])
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.argmax(a, axis=2)
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.argmax(a, axis=-3)
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.argmin(a, axis=2)
+    with self.assertRaisesRegex(ValueError, 'out of bounds'):
+      np_math_ops.argmin(a, axis=-3)
+
   @parameterized.parameters([False, True])
   def testIsCloseEqualNan(self, equal_nan):
     a = np.asarray([1, 1, np.nan, 1, np.nan], np.float32)
@@ -596,6 +607,15 @@ class MathTest(test.TestCase, parameterized.TestCase):
     run_test([0, 20, -5, 4], [-5, 0, -5, 0], [0, 5, 0, 5], check_dtype=False)
     run_test([[1, 2, 3], [4, 5, 6]], [2, 0, 2], 5, check_dtype=False)
     run_test([[1, 2, 3], [4, 5, 6]], 0, [5, 3, 1], check_dtype=False)
+
+  def testClipBothBoundsNone(self):
+    # NumPy (>= 2.0) returns the input unchanged when both bounds are None.
+    # Compare against a static expected value rather than calling
+    # np.clip(..., None, None), which raises on NumPy < 2.0.
+    a = np_array_ops.array([1, -2, 3])
+    self.match(
+        np_math_ops.clip(a, None, None), np.array([1, -2, 3]), check_dtype=False
+    )
 
   def testPtp(self):
 
